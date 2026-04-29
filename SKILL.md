@@ -32,7 +32,7 @@ When a downstream record is derived from a TCIA DOI but is not itself listed in 
 
 | Data need | Route |
 | --- | --- |
-| Public DICOM radiology or DICOM pathology | Use IDC and `idc-index`. If an IDC skill is available, use it for IDC-specific querying, visualization, and downloading. Keep the TCIA WordPress short title or DOI as the allowlist/provenance anchor. |
+| Public DICOM radiology, DICOM pathology, or DICOM annotations/results | Use IDC and `idc-index` first. If an IDC skill is available, use it for IDC-specific querying, visualization, and downloading. Keep the TCIA WordPress short title, DOI, or Series Instance UIDs as the allowlist/provenance anchor. Use NBIA v1 only as a fallback when the requested DICOM data cannot be found in IDC/idc-index. |
 | Controlled-access face datasets | If license metadata indicates controlled/restricted access, alert that the dataset is controlled access and point to `https://www.cancerimagingarchive.net/nih-controlled-data-access-policy/`. Use General Commons metadata and access guidance. Scope GC queries to `phs004225` and match `study_acronym` to the WordPress short title. Do not promise file download without proper authorization. |
 | Controlled-access NCTN trials or Biobank data | If license metadata indicates controlled/restricted access, alert that the dataset is controlled access and point to the TCIA NIH Controlled Data Access Policy. Use WordPress for current metadata and access statements. CTDC support is expected later; do not invent CTDC routing until TCIA data are available there. |
 | Non-DICOM pathology | Use PathDB. Prefer the stable cohort-builder CSV for rich slide-level metadata, and match its `collection` field to the WordPress short title. The PathDB API collection list may use `collectionName`. |
@@ -66,9 +66,13 @@ analyses = analyses[analyses["hide_from_browse_table"].astype(str) != "1"]
 
 For long-text evidence, use Collection Manager API v2 verbose mode (`v=1`). The bundled WordPress helper uses v2 by default and supports `--verbose`; use this when a user asks about abstracts, descriptions, methods, usage notes, acknowledgements, download notes, or other narrative fields. Do not rely on terse/default API output for these questions.
 
+For broad WordPress searches, keep requests efficient. The bundled helper parallelizes independent Collection and Analysis Result endpoint calls plus v2 pagination with `--workers 4` by default; use `--workers 1` only when troubleshooting or when a sequential trace is needed. For manual API work, parallelize independent collection, analysis-result, or page requests modestly rather than fetching large result sets one page at a time.
+
 For controlled-access evidence, inspect WordPress download/license metadata. Do not use `collection_page_accessibility` or `result_page_accessibility` to decide controlled access; those fields are being phased out. Creative Commons licenses mean open access. Creative Commons NonCommercial licenses are open access with a noncommercial-use restriction. The bundled WordPress helper emits `license_status`, `licenses`, `controlled_access`, `noncommercial_license`, and `controlled_access_policy` fields. When `controlled_access` is true, link users to `https://www.cancerimagingarchive.net/nih-controlled-data-access-policy/`, which contains current access-request, JSON API key, and TCIA Data Retriever configuration guidance.
 
 Use `idc-index` for public DICOM only after confirming that the dataset is TCIA-published through WordPress or is clearly an external derived dataset through DataCite relationships.
+
+For public DICOM downloads, prefer IDC/idc-index over NBIA. TCIA is phasing out NBIA, so do not use the NBIA v1 API as the first route for DICOM files. WordPress `.tcia` manifest files are still useful because they usually contain a few configuration lines followed by one DICOM Series Instance UID per row; extract those Series Instance UIDs and use them with idc-index. Use NBIA/Data Retriever only as a fallback when IDC/idc-index cannot find the requested public DICOM series, or when access/license guidance requires a TCIA-controlled route.
 
 ## WordPress Download Labels
 
@@ -91,6 +95,7 @@ Run scripts from the skill root.
 | Script | Purpose |
 | --- | --- |
 | `scripts/tcia_wordpress_search.py` | Search live TCIA WordPress Collection and Analysis Result metadata, with text or JSON output. |
+| `scripts/tcia_manifest_series_uids.py` | Extract DICOM Series Instance UIDs from a TCIA `.tcia` manifest path or URL for IDC/idc-index lookup. |
 | `scripts/general_commons_studies.py` | Query General Commons GraphQL for TCIA face dataset study acronyms under `phs004225` and optional node counts. |
 | `scripts/datacite_related.py` | Find DataCite records that declare DOI relationships, such as Zenodo records derived from TCIA DOIs. |
 | `scripts/pathdb_metadata.py` | Search or summarize PathDB non-DICOM histopathology slide metadata from the stable cohort-builder CSV. |
@@ -101,7 +106,9 @@ Examples:
 python scripts/tcia_wordpress_search.py --query breast --limit 10
 python scripts/tcia_wordpress_search.py --short-title TCGA-BRCA --verbose --json
 python scripts/tcia_wordpress_search.py --short-title TCGA-BRCA --json
+python scripts/tcia_wordpress_search.py --query lung --workers 6 --limit 10
 python scripts/tcia_wordpress_search.py --query retired --include-hidden
+python scripts/tcia_manifest_series_uids.py ./manifest.tcia --out series_uids.txt
 python scripts/general_commons_studies.py --study-acronym TCGA-GBM --counts
 python scripts/datacite_related.py 10.7937/TCIA.HMQ8-J677
 python scripts/pathdb_metadata.py --collection CPTAC-STAD --summary
@@ -116,6 +123,10 @@ Load `references/general-commons-graphql.md` when querying General Commons.
 ## Controlled Access
 
 Load `references/controlled-access.md` when a user asks about controlled-access datasets, face data with controlled/restricted licenses, NCTN trials, Biobank data, API-key access, or configuring TCIA Data Retriever for restricted downloads. Always point users to the TCIA NIH Controlled Data Access Policy page for current instructions: `https://www.cancerimagingarchive.net/nih-controlled-data-access-policy/`.
+
+## IDC DICOM Downloads
+
+Load `references/idc-dicom-downloads.md` when a user asks to download public TCIA DICOM data, including radiology images, DICOM pathology, RTSTRUCT, SEG, SR, radiotherapy objects, or other DICOM annotation/result files. Use IDC/idc-index first. Use NBIA v1 only as a fallback when the requested DICOM series cannot be found in IDC/idc-index, or when the user explicitly asks for NBIA after being told IDC is preferred.
 
 ## DataCite Relationships
 
@@ -145,6 +156,7 @@ Include the TCIA page link, WordPress short title, and any caveats about control
 - Never present a dataset as TCIA-published unless it appears in WordPress Collections or Analysis Results.
 - Ignore WordPress `hide_from_browse_table = "1"` records unless the user explicitly identifies as TCIA staff and asks to include hidden/staged/retired/internal-review datasets.
 - Use license metadata, not WordPress collection/page accessibility fields, to decide controlled access. Creative Commons means open access; Creative Commons NonCommercial is open with a noncommercial-use restriction; controlled/restricted license text requires the controlled-access alert and policy link.
+- Do not use NBIA v1 as the first route for public DICOM downloads. Prefer IDC/idc-index, using WordPress `.tcia` manifests as Series Instance UID allowlists when helpful.
 - Do not broaden IDC, GC, or PathDB searches beyond WordPress short titles, TCIA DOIs, or explicit user-approved exploratory scope.
 - Distinguish open Creative Commons, open Creative Commons NonCommercial, mixed open/controlled, and controlled/restricted license statuses clearly.
 - Do not provide medical, regulatory, or legal conclusions about data suitability. Report metadata, access terms, and citations.

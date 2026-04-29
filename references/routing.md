@@ -29,7 +29,7 @@ Downstream field mappings:
 | PathDB cohort-builder CSV | `collection` |
 | PathDB API collection list | `collectionName` |
 | DataCite | TCIA DOI and related identifiers |
-| IDC | Prefer DOI and collection/analysis metadata from IDC, but keep WordPress as the provenance anchor |
+| IDC | Prefer DOI, collection/analysis metadata, and Series Instance UIDs from IDC, but keep WordPress as the provenance anchor |
 
 ## Discovery Process
 
@@ -42,13 +42,27 @@ Downstream field mappings:
 7. Enrich only the filtered candidate set through IDC, General Commons, PathDB, or DataCite.
 8. If a candidate does not appear in WordPress, exclude it from TCIA-published results. If useful, mention it separately as related or derived.
 
+## WordPress API Performance
+
+Prefer the bundled `scripts/tcia_wordpress_search.py` helper for broad Collection and Analysis Result searches. It uses WordPress API v2 and parallelizes independent endpoint calls plus paginated requests with a bounded worker pool.
+
+- Default: `--workers 4`.
+- Increase modestly, for example `--workers 6`, only for broad metadata scans.
+- Use `--workers 1` for sequential troubleshooting or if the API is rate-limited or unstable.
+- Avoid verbose mode for broad discovery; use terse results first, then re-query a small candidate set with `--verbose`.
+- When writing custom API code, fetch independent pages/endpoints concurrently with a small worker count and preserve the WordPress allowlist/hidden-record rules.
+
 ## Access Route Details
 
 Public DICOM radiology or DICOM pathology:
 
-- Route to IDC and `idc-index`.
+- Route to IDC and `idc-index` first. This also applies to public DICOM annotation/result objects such as RTSTRUCT, SEG, SR, RTDOSE, RTPLAN, and other DICOM files.
 - Use IDC-specific tooling for series selection, visualization, licenses, citations, and downloads.
 - Avoid duplicating the IDC skill. If available, use it after TCIA provenance is established.
+- TCIA is phasing out NBIA. Do not use the NBIA v1 API as the first route for public DICOM downloads.
+- Use WordPress `.tcia` manifest files as Series Instance UID allowlists for IDC/idc-index lookups when helpful.
+- Use NBIA v1 or TCIA Data Retriever only as a fallback when requested public DICOM series cannot be found in IDC/idc-index, or when the user explicitly asks for NBIA after being warned that IDC is preferred.
+- Load `idc-dicom-downloads.md` for the TCIA-specific IDC download workflow.
 
 Controlled-access face datasets:
 
@@ -131,6 +145,7 @@ For exact dataset questions, give a short prose summary first, then a table of a
 - WordPress `hide_from_browse_table = "1"` means hidden. Treat hidden records as out of scope for public user-facing discovery unless the explicit TCIA staff exception applies.
 - WordPress API v2 terse mode can truncate long fields. Use `v=1` or `scripts/tcia_wordpress_search.py --verbose` for full abstracts/descriptions before making content-based claims.
 - Controlled-access metadata can be visible even when file downloads require approval. Determine controlled status from license metadata, then link to the TCIA NIH Controlled Data Access Policy for current request, JSON API key, and TCIA Data Retriever configuration steps.
+- For public DICOM downloads, prefer IDC/idc-index. TCIA `.tcia` manifests can be parsed for Series Instance UID allowlists, but TCIA Data Retriever/NBIA should be fallback-only for public DICOM.
 - WordPress download metadata may contain nested objects or media IDs. Prefer the `tcia_utils.wordpress.getDownloads()` helper if package installation is allowed.
 - DataCite relationships are about DOI provenance. They do not automatically make an external Zenodo or IDC record a TCIA-published dataset.
 - Controlled-access metadata can be public even when file access is restricted.

@@ -30,6 +30,7 @@ This skill tells an agent how to:
 - Use verbose WordPress metadata for abstracts and descriptions.
 - Classify open versus controlled access from license metadata.
 - Identify Creative Commons NonCommercial datasets without mistaking them for controlled access.
+- Prefer IDC/idc-index over NBIA for public DICOM downloads.
 - Route users to IDC, General Commons, PathDB, DataCite, WordPress downloads, or Aspera.
 - Point controlled-access users to TCIA's current access policy.
 
@@ -47,12 +48,14 @@ tcia-query-skill/
 |   +-- controlled-access.md
 |   +-- datacite-relationships.md
 |   +-- general-commons-graphql.md
+|   +-- idc-dicom-downloads.md
 |   +-- pathdb.md
 |   +-- routing.md
 +-- scripts/
     +-- datacite_related.py
     +-- general_commons_studies.py
     +-- pathdb_metadata.py
+    +-- tcia_manifest_series_uids.py
     +-- tcia_wordpress_search.py
 ```
 
@@ -61,6 +64,7 @@ tcia-query-skill/
 Ask an agent using this skill questions like:
 
 - "Find TCIA datasets with breast MRI and tell me how to access them."
+- "Download the DICOM series from this TCIA manifest using IDC."
 - "Is this dataset open access or controlled access?"
 - "Which TCIA datasets have non-DICOM pathology data in PathDB?"
 - "Show me datasets related to this TCIA DOI, including derived Zenodo records."
@@ -88,12 +92,18 @@ The helper scripts use Python's standard library and query public metadata endpo
 python scripts/tcia_wordpress_search.py --query breast --limit 10
 python scripts/tcia_wordpress_search.py --short-title EAY131 --json
 python scripts/tcia_wordpress_search.py --short-title 4D-Lung --verbose --json
+python scripts/tcia_wordpress_search.py --query lung --workers 6 --limit 10
+python scripts/tcia_manifest_series_uids.py ./manifest.tcia --out series_uids.txt
 python scripts/general_commons_studies.py --study-acronym TCGA-GBM --counts
 python scripts/datacite_related.py 10.7937/TCIA.HMQ8-J677
 python scripts/pathdb_metadata.py --collection CPTAC-STAD --summary
 ```
 
+The WordPress search helper parallelizes v2 pagination with `--workers 4` by default. Use a modest higher value for broad metadata scans, or `--workers 1` for sequential troubleshooting.
+
 Some workflows may benefit from optional packages such as `tcia_utils` and `idc-index`, but they are not required to read the skill or run the bundled helpers.
+
+For public DICOM downloads, use IDC/idc-index first. TCIA `.tcia` manifests can be parsed into Series Instance UID allowlists with `scripts/tcia_manifest_series_uids.py`, then looked up and downloaded through IDC. NBIA v1 should be fallback-only for DICOM data that cannot be found in IDC/idc-index.
 
 ## Controlled Access
 

@@ -11,6 +11,7 @@ import sys
 import textwrap
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from html.parser import HTMLParser
 from typing import Any, Optional
 
@@ -136,6 +137,7 @@ def fetch_all(
     per_page: int = 100,
     verbose: bool = False,
     search: Optional[str] = None,
+    workers: int = 4,
 ) -> list[dict[str, Any]]:
     field_param = "fields" if api_version == "v2" else "_fields"
     params = {"per_page": str(per_page), field_param: ",".join(fields)}
@@ -146,32 +148,50 @@ def fetch_all(
     url = f"{BASE_URL}{api_version}/{endpoint}/?{urllib.parse.urlencode(params)}"
     records: list[dict[str, Any]] = []
 
-    while url:
-        request = urllib.request.Request(url, headers={"User-Agent": "tcia-query-skill/1.0"})
-        with urllib.request.urlopen(request, timeout=60) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-            link = response.headers.get("Link", "")
-        if isinstance(payload, dict) and "results" in payload:
-            records.extend(payload["results"])
-            url = next_v2_url(api_version, endpoint, params, payload)
-            continue
+    payload, link = fetch_json(url)
+    if isinstance(payload, dict) and "results" in payload:
+        records.extend(payload["results"])
+        total_pages = int(payload.get("total_pages") or 1)
+        page_urls = [
+            v2_page_url(api_version, endpoint, params, page)
+            for page in range(2, total_pages + 1)
+        ]
+        if page_urls:
+            if workers <= 1:
+                for page_url in page_urls:
+                    page_payload, _ = fetch_json(page_url)
+                    records.extend(page_payload.get("results", []))
+            else:
+                with ThreadPoolExecutor(max_workers=min(workers, len(page_urls))) as executor:
+                    for page_payload, _ in executor.map(fetch_json, page_urls):
+                        records.extend(page_payload.get("results", []))
+        return records
+
+    while True:
         records.extend(payload)
         url = next_link(link)
+        if not url:
+            break
+        payload, link = fetch_json(url)
     return records
 
 
-def next_v2_url(
+def fetch_json(url: str) -> tuple[Any, str]:
+    request = urllib.request.Request(url, headers={"User-Agent": "tcia-query-skill/1.0"})
+    with urllib.request.urlopen(request, timeout=60) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+        link = response.headers.get("Link", "")
+    return payload, link
+
+
+def v2_page_url(
     api_version: str,
     endpoint: str,
     params: dict[str, str],
-    payload: dict[str, Any],
-) -> Optional[str]:
-    page = int(payload.get("page") or 1)
-    total_pages = int(payload.get("total_pages") or 1)
-    if page >= total_pages:
-        return None
+    page: int,
+) -> str:
     next_params = dict(params)
-    next_params["page"] = str(page + 1)
+    next_params["page"] = str(page)
     return f"{BASE_URL}{api_version}/{endpoint}/?{urllib.parse.urlencode(next_params)}"
 
 
@@ -388,6 +408,12 @@ def main(argv: Optional[list[str]] = None) -> int:
         action="store_true",
         help="Use v2 verbose mode (v=1) to retrieve full long-text fields.",
     )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=4,
+        help="Parallel fetch worker budget for v2 endpoint and page requests. Use 1 for sequential requests.",
+    )
     parser.add_argument("--limit", type=int, default=25, help="Maximum records to display.")
     parser.add_argument(
         "--include-hidden",
@@ -400,32 +426,39 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--json", action="store_true", help="Emit JSON instead of a table.")
     args = parser.parse_args(argv)
 
-    raw_records: list[dict[str, Any]] = []
     api_search = args.query
     if not api_search and len(args.short_title) == 1:
         api_search = args.short_title[0]
+    jobs: list[tuple[str, str, list[str]]] = []
     if args.type in {"both", "collections"}:
-        raw_records.extend(
-            normalize(item, "collection")
-            for item in fetch_all(
-                "collections",
-                COLLECTION_FIELDS,
-                api_version=args.api_version,
-                verbose=args.verbose,
-                search=api_search,
-            )
-        )
+        jobs.append(("collection", "collections", COLLECTION_FIELDS))
     if args.type in {"both", "analysis-results"}:
-        raw_records.extend(
-            normalize(item, "analysis")
+        jobs.append(("analysis", "analysis-results", ANALYSIS_FIELDS))
+
+    page_workers = max(1, args.workers // max(1, len(jobs))) if len(jobs) > 1 else max(1, args.workers)
+
+    def load_job(job: tuple[str, str, list[str]]) -> list[dict[str, Any]]:
+        kind, endpoint, fields = job
+        return [
+            normalize(item, kind)
             for item in fetch_all(
-                "analysis-results",
-                ANALYSIS_FIELDS,
+                endpoint,
+                fields,
                 api_version=args.api_version,
                 verbose=args.verbose,
                 search=api_search,
+                workers=page_workers,
             )
-        )
+        ]
+
+    raw_records: list[dict[str, Any]] = []
+    if len(jobs) > 1 and args.workers > 1:
+        with ThreadPoolExecutor(max_workers=len(jobs)) as executor:
+            for records in executor.map(load_job, jobs):
+                raw_records.extend(records)
+    else:
+        for job in jobs:
+            raw_records.extend(load_job(job))
 
     short_titles = {title.lower() for title in args.short_title}
     if not args.include_hidden:
