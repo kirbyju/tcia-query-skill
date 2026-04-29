@@ -15,18 +15,33 @@ from html.parser import HTMLParser
 from typing import Any, Optional
 
 
-BASE_URL = "https://cancerimagingarchive.net/api/v1/"
+BASE_URL = "https://cancerimagingarchive.net/api/"
+CONTROLLED_ACCESS_POLICY_URL = (
+    "https://www.cancerimagingarchive.net/nih-controlled-data-access-policy/"
+)
+CONTROLLED_LICENSE_TERMS = [
+    "controlled access",
+    "nih controlled",
+    "tcia restricted",
+    "restricted",
+    "data usage agreement",
+    "dbgap",
+]
+CREATIVE_COMMONS_TERMS = ["creative commons", "cc by", "cc-by"]
+NONCOMMERCIAL_TERMS = ["noncommercial", "non-commercial", "cc by-nc", "cc-by-nc"]
 
 COLLECTION_FIELDS = [
     "id",
+    "slug",
+    "url",
     "link",
     "title",
     "collection_title",
     "collection_short_title",
     "collection_doi",
     "collection_status",
-    "collection_page_accessibility",
     "collection_summary",
+    "collection_abstract",
     "detailed_description",
     "cancer_types",
     "cancer_locations",
@@ -38,17 +53,20 @@ COLLECTION_FIELDS = [
     "supporting_data",
     "collection_download_info",
     "collection_downloads",
+    "external_resources",
     "additional_resources",
+    "hide_from_browse_table",
 ]
 
 ANALYSIS_FIELDS = [
     "id",
+    "slug",
+    "url",
     "link",
     "title",
     "result_title",
     "result_short_title",
     "result_doi",
-    "result_page_accessibility",
     "result_summary",
     "detailed_description",
     "collections",
@@ -62,7 +80,9 @@ ANALYSIS_FIELDS = [
     "supporting_data",
     "result_download_info",
     "result_downloads",
+    "external_resources",
     "additional_resources",
+    "hide_from_browse_table",
 ]
 
 
@@ -109,18 +129,50 @@ def stringify(value: Any) -> str:
     return str(value)
 
 
-def fetch_all(endpoint: str, fields: list[str], per_page: int = 100) -> list[dict[str, Any]]:
-    params = {"per_page": str(per_page), "_fields": ",".join(fields)}
-    url = f"{BASE_URL}{endpoint}/?{urllib.parse.urlencode(params)}"
+def fetch_all(
+    endpoint: str,
+    fields: list[str],
+    api_version: str = "v2",
+    per_page: int = 100,
+    verbose: bool = False,
+    search: Optional[str] = None,
+) -> list[dict[str, Any]]:
+    field_param = "fields" if api_version == "v2" else "_fields"
+    params = {"per_page": str(per_page), field_param: ",".join(fields)}
+    if search:
+        params["search"] = search
+    if api_version == "v2" and verbose:
+        params["v"] = "1"
+    url = f"{BASE_URL}{api_version}/{endpoint}/?{urllib.parse.urlencode(params)}"
     records: list[dict[str, Any]] = []
 
     while url:
         request = urllib.request.Request(url, headers={"User-Agent": "tcia-query-skill/1.0"})
         with urllib.request.urlopen(request, timeout=60) as response:
-            records.extend(json.loads(response.read().decode("utf-8")))
+            payload = json.loads(response.read().decode("utf-8"))
             link = response.headers.get("Link", "")
+        if isinstance(payload, dict) and "results" in payload:
+            records.extend(payload["results"])
+            url = next_v2_url(api_version, endpoint, params, payload)
+            continue
+        records.extend(payload)
         url = next_link(link)
     return records
+
+
+def next_v2_url(
+    api_version: str,
+    endpoint: str,
+    params: dict[str, str],
+    payload: dict[str, Any],
+) -> Optional[str]:
+    page = int(payload.get("page") or 1)
+    total_pages = int(payload.get("total_pages") or 1)
+    if page >= total_pages:
+        return None
+    next_params = dict(params)
+    next_params["page"] = str(page + 1)
+    return f"{BASE_URL}{api_version}/{endpoint}/?{urllib.parse.urlencode(next_params)}"
 
 
 def next_link(link_header: str) -> Optional[str]:
@@ -139,24 +191,32 @@ def normalize(item: dict[str, Any], kind: str) -> dict[str, Any]:
     title_key = "collection_title" if is_collection else "result_title"
     short_key = "collection_short_title" if is_collection else "result_short_title"
     doi_key = "collection_doi" if is_collection else "result_doi"
-    access_key = "collection_page_accessibility" if is_collection else "result_page_accessibility"
     summary_key = "collection_summary" if is_collection else "result_summary"
+    abstract_key = "collection_abstract" if is_collection else "result_abstract"
     downloads_key = "collection_downloads" if is_collection else "result_downloads"
     download_info_key = "collection_download_info" if is_collection else "result_download_info"
 
     title = strip_html(item.get(title_key)) or strip_html(item.get("title"))
     short_title = strip_html(item.get(short_key))
     doi = strip_html(item.get(doi_key))
-    access = strip_html(item.get(access_key)) or strip_html(item.get("collection_status"))
     summary = strip_html(item.get(summary_key))
+    abstract = strip_html(item.get(abstract_key))
+    description = strip_html(item.get("detailed_description"))
+    hidden_raw = strip_html(item.get("hide_from_browse_table"))
+    hidden = hidden_raw.lower() not in {"", "0", "false", "no", "none"}
+    licenses = collect_license_texts(item.get(download_info_key), item.get(downloads_key))
+    controlled_access = is_controlled_access_from_licenses(licenses)
+    noncommercial_license = has_noncommercial_license(licenses)
+    license_status = classify_license_status(licenses, controlled_access, noncommercial_license)
 
     record = {
         "type": "Collection" if is_collection else "Analysis Result",
         "short_title": short_title,
         "title": title,
         "doi": doi,
-        "link": item.get("link", ""),
-        "access": access,
+        "link": item.get("link", "") or item.get("url", ""),
+        "license_status": license_status,
+        "licenses": "; ".join(licenses),
         "subjects": strip_html(item.get("subjects")),
         "data_types": strip_html(item.get("data_types")),
         "cancer_types": strip_html(item.get("cancer_types")),
@@ -165,12 +225,99 @@ def normalize(item: dict[str, Any], kind: str) -> dict[str, Any]:
         "program": strip_html(item.get("program")),
         "date_updated": strip_html(item.get("date_updated")),
         "supporting_data": strip_html(item.get("supporting_data")),
+        "source_collections": "" if is_collection else strip_html(item.get("collections")),
         "download_info": strip_html(item.get(download_info_key)),
         "downloads": strip_html(item.get(downloads_key)),
+        "external_resources": strip_html(item.get("external_resources") or item.get("additional_resources")),
         "summary": summary,
+        "abstract": abstract,
+        "detailed_description": description,
+        "hidden": hidden,
+        "hide_from_browse_table": hidden_raw,
+        "controlled_access": controlled_access,
+        "noncommercial_license": noncommercial_license,
+        "controlled_access_policy": CONTROLLED_ACCESS_POLICY_URL if controlled_access else "",
     }
     record["_search_text"] = " ".join(strip_html(value) for value in item.values()).lower()
     return record
+
+
+def collect_license_texts(*values: Any) -> list[str]:
+    licenses: list[str] = []
+
+    def walk(value: Any, key: str = "") -> None:
+        if value is None:
+            return
+        if "license" in key.lower():
+            keyed_text = strip_html(value)
+            if keyed_text and keyed_text.lower() not in {"false", "none", "null"}:
+                licenses.append(keyed_text)
+        if isinstance(value, dict):
+            for sub_key, sub_value in value.items():
+                walk(sub_value, str(sub_key))
+            return
+        if isinstance(value, list):
+            for item in value:
+                walk(item, key)
+            return
+        text_value = strip_html(value)
+        licenses.extend(extract_flattened_licenses(text_value))
+
+    for value in values:
+        walk(value)
+
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for license_text in licenses:
+        marker = license_text.lower()
+        if marker not in seen:
+            seen.add(marker)
+            deduped.append(license_text)
+    return deduped
+
+
+def extract_flattened_licenses(text: str) -> list[str]:
+    if "license" not in text.lower():
+        return []
+    matches = re.findall(r"(?:^|[;\n]\s*)(?:data[_ ]?)?license:\s*([^;\n]+)", text, flags=re.IGNORECASE)
+    return [match.strip() for match in matches if match.strip().lower() not in {"false", "none", "null"}]
+
+
+def is_creative_commons_license(license_text: str) -> bool:
+    lower = license_text.lower()
+    return any(term in lower for term in CREATIVE_COMMONS_TERMS)
+
+
+def is_controlled_access_from_licenses(licenses: list[str]) -> bool:
+    for license_text in licenses:
+        lower = license_text.lower()
+        if is_creative_commons_license(license_text):
+            continue
+        if any(term in lower for term in CONTROLLED_LICENSE_TERMS):
+            return True
+    return False
+
+
+def has_noncommercial_license(licenses: list[str]) -> bool:
+    return any(term in license_text.lower() for license_text in licenses for term in NONCOMMERCIAL_TERMS)
+
+
+def classify_license_status(
+    licenses: list[str],
+    controlled_access: bool,
+    noncommercial_license: bool,
+) -> str:
+    if controlled_access and any(is_creative_commons_license(license_text) for license_text in licenses):
+        return "Mixed open/controlled"
+    if controlled_access:
+        return "Controlled"
+    if noncommercial_license:
+        return "Open (Creative Commons NonCommercial)"
+    if licenses and all(is_creative_commons_license(license_text) for license_text in licenses):
+        return "Open (Creative Commons)"
+    if licenses:
+        return "License review needed"
+    return "Unknown"
 
 
 def matches(record: dict[str, Any], query: Optional[str], short_titles: set[str]) -> bool:
@@ -188,14 +335,20 @@ def print_table(records: list[dict[str, Any]]) -> None:
         print("No TCIA WordPress Collections or Analysis Results matched.")
         return
 
-    headers = ["type", "short_title", "title", "access", "doi", "link"]
+    headers = ["type", "short_title", "title", "license_status", "doi", "link"]
+    if any(record.get("controlled_access") for record in records):
+        headers.append("controlled_access")
+    if any(record.get("hidden") for record in records):
+        headers.append("hidden")
     widths = {
         "type": 15,
         "short_title": 22,
         "title": 44,
-        "access": 18,
+        "license_status": 32,
         "doi": 26,
         "link": 45,
+        "controlled_access": 17,
+        "hidden": 8,
     }
 
     print(" | ".join(label.replace("_", " ").title().ljust(widths[label]) for label in headers))
@@ -224,19 +377,59 @@ def main(argv: Optional[list[str]] = None) -> int:
         default="both",
         help="Metadata type to search.",
     )
+    parser.add_argument(
+        "--api-version",
+        choices=["v1", "v2"],
+        default="v2",
+        help="Collection Manager API version. v2 supports verbose mode.",
+    )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Use v2 verbose mode (v=1) to retrieve full long-text fields.",
+    )
     parser.add_argument("--limit", type=int, default=25, help="Maximum records to display.")
+    parser.add_argument(
+        "--include-hidden",
+        action="store_true",
+        help=(
+            "Include WordPress records where hide_from_browse_table is 1. "
+            "Use only for explicit TCIA staff requests involving hidden, staged, or retired datasets."
+        ),
+    )
     parser.add_argument("--json", action="store_true", help="Emit JSON instead of a table.")
     args = parser.parse_args(argv)
 
     raw_records: list[dict[str, Any]] = []
+    api_search = args.query
+    if not api_search and len(args.short_title) == 1:
+        api_search = args.short_title[0]
     if args.type in {"both", "collections"}:
-        raw_records.extend(normalize(item, "collection") for item in fetch_all("collections", COLLECTION_FIELDS))
+        raw_records.extend(
+            normalize(item, "collection")
+            for item in fetch_all(
+                "collections",
+                COLLECTION_FIELDS,
+                api_version=args.api_version,
+                verbose=args.verbose,
+                search=api_search,
+            )
+        )
     if args.type in {"both", "analysis-results"}:
         raw_records.extend(
-            normalize(item, "analysis") for item in fetch_all("analysis-results", ANALYSIS_FIELDS)
+            normalize(item, "analysis")
+            for item in fetch_all(
+                "analysis-results",
+                ANALYSIS_FIELDS,
+                api_version=args.api_version,
+                verbose=args.verbose,
+                search=api_search,
+            )
         )
 
     short_titles = {title.lower() for title in args.short_title}
+    if not args.include_hidden:
+        raw_records = [record for record in raw_records if not record.get("hidden")]
     records = [record for record in raw_records if matches(record, args.query, short_titles)]
     records = records[: args.limit]
 

@@ -9,25 +9,32 @@ description: Find, verify, cite, and route TCIA-published datasets across TCIA W
 
 Use the TCIA WordPress Collection Manager as the authority for whether a dataset is TCIA-published. A dataset is in scope only if it appears as a WordPress Collection or Analysis Result. Downstream systems such as IDC, General Commons, PathDB, Zenodo, and DataCite can enrich or route access, but they do not decide TCIA provenance.
 
+Ignore WordPress records where `hide_from_browse_table = "1"` by default. TCIA uses this flag for pre-release staging/review and for retired/outdated datasets that should not be casually rediscovered. Include hidden records only when the user explicitly says they are a TCIA staff member and explicitly asks to include hidden, staged, retired, or internal-review datasets.
+
 When a downstream record is derived from a TCIA DOI but is not itself listed in WordPress, describe it as an external derived or related dataset, not as a TCIA-published dataset.
 
 ## Quick Workflow
 
 1. Search WordPress first for Collections and Analysis Results.
    - Prefer `scripts/tcia_wordpress_search.py` for lightweight searches.
+   - Use terse v2 results for broad discovery, then re-query candidates with `--verbose` when answering from abstracts, detailed descriptions, acknowledgements, methods, download notes, publications, or other long text.
+   - Use `--include-hidden` only for explicit TCIA staff requests that ask for hidden/staged/retired records.
    - Or use `tcia_utils.wordpress.getCollections()` and `getAnalyses()` if packages are available.
-2. Filter candidates by the user's criteria: cancer type, body site, modality, species, data type, access/license, DOI, program, supporting data, segmentations/annotations, or download need.
-3. Use `collection_short_title` or `result_short_title` as the cross-system key whenever possible.
-4. Route access with the matrix below.
-5. Include citations and access caveats before recommending downloads or downstream analysis.
+2. Filter out `hide_from_browse_table = "1"` records unless the explicit TCIA staff exception applies.
+3. Filter candidates by the user's criteria: cancer type, body site, modality, species, data type, access/license, DOI, program, supporting data, segmentations/annotations, or download need.
+4. Use `collection_short_title` or `result_short_title` as the cross-system key whenever possible.
+5. For download questions, inspect WordPress `download_type`, `data_type`, and `file_type` together. These are multi-select labels, not a strict one-parent tree.
+6. Route access with the matrix below.
+7. Decide open versus controlled access from WordPress license metadata, not from collection/page accessibility fields. Creative Commons licenses mean open access; Creative Commons NonCommercial licenses are open access with a noncommercial-use restriction. If license text indicates NIH Controlled Data Access, TCIA Restricted, or another controlled/restricted license, alert the user that the dataset is not open access and link to the TCIA NIH Controlled Data Access Policy before giving download/API-key/Data Retriever guidance.
+8. Include citations and access caveats before recommending downloads or downstream analysis.
 
 ## Access Routing
 
 | Data need | Route |
 | --- | --- |
 | Public DICOM radiology or DICOM pathology | Use IDC and `idc-index`. If an IDC skill is available, use it for IDC-specific querying, visualization, and downloading. Keep the TCIA WordPress short title or DOI as the allowlist/provenance anchor. |
-| Limited-access face datasets | Use General Commons metadata and access guidance. Scope GC queries to `phs004225` and match `study_acronym` to the WordPress short title. Do not promise file download without proper dbGaP/DAC authorization. |
-| Limited-access NCTN trials or Biobank data | Use WordPress for current metadata and access statements. CTDC support is expected later; do not invent CTDC routing until TCIA data are available there. |
+| Controlled-access face datasets | If license metadata indicates controlled/restricted access, alert that the dataset is controlled access and point to `https://www.cancerimagingarchive.net/nih-controlled-data-access-policy/`. Use General Commons metadata and access guidance. Scope GC queries to `phs004225` and match `study_acronym` to the WordPress short title. Do not promise file download without proper authorization. |
+| Controlled-access NCTN trials or Biobank data | If license metadata indicates controlled/restricted access, alert that the dataset is controlled access and point to the TCIA NIH Controlled Data Access Policy. Use WordPress for current metadata and access statements. CTDC support is expected later; do not invent CTDC routing until TCIA data are available there. |
 | Non-DICOM pathology | Use PathDB. Prefer the stable cohort-builder CSV for rich slide-level metadata, and match its `collection` field to the WordPress short title. The PathDB API collection list may use `collectionName`. |
 | Spreadsheets, ZIP files, supporting files, manifests, and ancillary downloads | Use WordPress download metadata. If a download is an IBM Aspera Faspex package, see `references/aspera.md`. |
 | DOI, citation, version, or derived-result relationships | Use WordPress citation fields and DataCite metadata. See `references/datacite-relationships.md`. |
@@ -51,9 +58,31 @@ collections = wordpress.getCollections(format="df", removeHtml="yes")
 analyses = wordpress.getAnalyses(format="df", removeHtml="yes")
 downloads = wordpress.getDownloads(format="df", removeHtml="yes")
 doi_records = datacite.getDoi()
+
+# Default public-facing filter:
+collections = collections[collections["hide_from_browse_table"].astype(str) != "1"]
+analyses = analyses[analyses["hide_from_browse_table"].astype(str) != "1"]
 ```
 
+For long-text evidence, use Collection Manager API v2 verbose mode (`v=1`). The bundled WordPress helper uses v2 by default and supports `--verbose`; use this when a user asks about abstracts, descriptions, methods, usage notes, acknowledgements, download notes, or other narrative fields. Do not rely on terse/default API output for these questions.
+
+For controlled-access evidence, inspect WordPress download/license metadata. Do not use `collection_page_accessibility` or `result_page_accessibility` to decide controlled access; those fields are being phased out. Creative Commons licenses mean open access. Creative Commons NonCommercial licenses are open access with a noncommercial-use restriction. The bundled WordPress helper emits `license_status`, `licenses`, `controlled_access`, `noncommercial_license`, and `controlled_access_policy` fields. When `controlled_access` is true, link users to `https://www.cancerimagingarchive.net/nih-controlled-data-access-policy/`, which contains current access-request, JSON API key, and TCIA Data Retriever configuration guidance.
+
 Use `idc-index` for public DICOM only after confirming that the dataset is TCIA-published through WordPress or is clearly an external derived dataset through DataCite relationships.
+
+## WordPress Download Labels
+
+WordPress download metadata uses three related multi-select fields:
+
+- `download_type`: broad category, such as Radiology Images, Image Annotations, Clinical Data, Pathology Images, or Other.
+- `data_type`: modality, annotation, clinical, pathology, or content label, such as CT, MR, RTSTRUCT, SEG, Segmentation, Demographic, Protocol, or Whole Slide Image.
+- `file_type`: file format, such as DICOM, CSV, TSV, XLSX, ZIP, NIfTI, SVS, JSON, or PDF.
+
+Treat `download_type` as the broad parent category, but do not require each download to have exactly one parent. TCIA often publishes one download record for a Data Retriever manifest that contains mixed content, such as CT or MR images plus RTSTRUCT or SEG annotations. TCIA may also publish one ZIP or supporting package that legitimately combines categories, such as image annotations plus protocol/acquisition details labeled as Other.
+
+When routing downloads, preserve all labels and explain mixed labels plainly. Do not infer the route from a single `data_type`; use the combined `download_type`, `data_type`, `file_type`, title, description, license, requirements, and WordPress dataset context. Ignore blank or orphaned download rows in normal public discovery unless they are attached to a visible Collection or Analysis Result and contain a real title, URL, or file.
+
+For Collections, `collection_downloads` are the dataset's download records. For Analysis Results, `result_downloads` are the Analysis Result's actual downloadable files. Do not treat source collection download records as the Analysis Result files; source collections only explain what data were used to create the result. If `result_downloads` are missing or empty for an Analysis Result, say that the result file metadata is unavailable and verify with the current WordPress API or page before giving download instructions.
 
 ## Bundled Scripts
 
@@ -70,7 +99,9 @@ Examples:
 
 ```bash
 python scripts/tcia_wordpress_search.py --query breast --limit 10
+python scripts/tcia_wordpress_search.py --short-title TCGA-BRCA --verbose --json
 python scripts/tcia_wordpress_search.py --short-title TCGA-BRCA --json
+python scripts/tcia_wordpress_search.py --query retired --include-hidden
 python scripts/general_commons_studies.py --study-acronym TCGA-GBM --counts
 python scripts/datacite_related.py 10.7937/TCIA.HMQ8-J677
 python scripts/pathdb_metadata.py --collection CPTAC-STAD --summary
@@ -81,6 +112,10 @@ python scripts/pathdb_metadata.py --collection CPTAC-STAD --summary
 Use General Commons only for controlled-access TCIA face datasets unless the user explicitly asks for broader GC context. All TCIA data in General Commons are under `phs004225`; child `study_acronym` values should match WordPress `collection_short_title` or `result_short_title`.
 
 Load `references/general-commons-graphql.md` when querying General Commons.
+
+## Controlled Access
+
+Load `references/controlled-access.md` when a user asks about controlled-access datasets, face data with controlled/restricted licenses, NCTN trials, Biobank data, API-key access, or configuring TCIA Data Retriever for restricted downloads. Always point users to the TCIA NIH Controlled Data Access Policy page for current instructions: `https://www.cancerimagingarchive.net/nih-controlled-data-access-policy/`.
 
 ## DataCite Relationships
 
@@ -108,7 +143,9 @@ Include the TCIA page link, WordPress short title, and any caveats about control
 ## Guardrails
 
 - Never present a dataset as TCIA-published unless it appears in WordPress Collections or Analysis Results.
+- Ignore WordPress `hide_from_browse_table = "1"` records unless the user explicitly identifies as TCIA staff and asks to include hidden/staged/retired/internal-review datasets.
+- Use license metadata, not WordPress collection/page accessibility fields, to decide controlled access. Creative Commons means open access; Creative Commons NonCommercial is open with a noncommercial-use restriction; controlled/restricted license text requires the controlled-access alert and policy link.
 - Do not broaden IDC, GC, or PathDB searches beyond WordPress short titles, TCIA DOIs, or explicit user-approved exploratory scope.
-- Distinguish public, limited-access, and controlled-access data clearly.
+- Distinguish open Creative Commons, open Creative Commons NonCommercial, mixed open/controlled, and controlled/restricted license statuses clearly.
 - Do not provide medical, regulatory, or legal conclusions about data suitability. Report metadata, access terms, and citations.
 - Verify current package/API behavior when the user asks for latest status, current availability, or exact download commands.
