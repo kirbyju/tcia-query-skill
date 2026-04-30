@@ -32,6 +32,8 @@ This skill tells an agent how to:
 - Identify Creative Commons NonCommercial datasets without mistaking them for controlled access.
 - Prefer IDC/idc-index over NBIA for public DICOM downloads.
 - Build browser visualization guidance for open-access DICOM through IDC viewers and public non-DICOM PathDB slides through caMicroscope.
+- Return viewer URLs as links instead of trying to launch browser automation.
+- Ask users whether they want direct agent downloads or portable TCIA Data Retriever CSV manifests.
 - Route users to IDC, General Commons, PathDB, DataCite, WordPress downloads, or Aspera.
 - Point controlled-access users to TCIA's current access policy.
 
@@ -58,6 +60,7 @@ tcia-query-skill/
     +-- general_commons_studies.py
     +-- idc_viewer_urls.py
     +-- pathdb_metadata.py
+    +-- tcia_create_data_retriever_csv.py
     +-- tcia_manifest_series_uids.py
     +-- tcia_wordpress_search.py
 ```
@@ -67,7 +70,8 @@ tcia-query-skill/
 Ask an agent using this skill questions like:
 
 - "Find TCIA datasets with breast MRI and tell me how to access them."
-- "Download the DICOM series from this TCIA manifest using IDC."
+- "Download the DICOM series from this legacy TCIA `.tcia` manifest using IDC."
+- "Create a TCIA Data Retriever CSV manifest for these Series Instance UIDs."
 - "Create an OHIF v3 viewer link for this public TCIA DICOM series."
 - "Open this public PathDB slide in caMicroscope."
 - "Can I preview this controlled-access dataset in a browser?"
@@ -99,7 +103,8 @@ python scripts/tcia_wordpress_search.py --query breast --limit 10
 python scripts/tcia_wordpress_search.py --short-title EAY131 --json
 python scripts/tcia_wordpress_search.py --short-title 4D-Lung --verbose --json
 python scripts/tcia_wordpress_search.py --query lung --workers 6 --limit 10
-python scripts/tcia_manifest_series_uids.py ./manifest.tcia --out series_uids.txt
+python scripts/tcia_manifest_series_uids.py ./legacy_manifest.tcia --out series_uids.txt
+python scripts/tcia_create_data_retriever_csv.py --uids-file series_uids.txt --out manifest.csv
 python scripts/idc_viewer_urls.py ohif-v3 --study-uid <StudyInstanceUID> --series-uid <SeriesInstanceUID>
 python scripts/idc_viewer_urls.py slim --study-uid <StudyInstanceUID> --series-uid <SeriesInstanceUID>
 python scripts/idc_viewer_urls.py volview --crdc-series-uuid <crdc_series_uuid>
@@ -125,9 +130,11 @@ Agents should check whether these packages are available before writing custom c
 - `idc-index` for IDC lookup, public DICOM downloads, viewer URLs, cloud-storage URLs, and Series Instance UID workflows.
 - `pydicom` for local DICOM header/metadata inspection.
 
-For public DICOM downloads, use IDC/idc-index first. TCIA `.tcia` manifests can be parsed into Series Instance UID allowlists with `scripts/tcia_manifest_series_uids.py`, then looked up and downloaded through IDC. NBIA should be fallback-only for DICOM data that cannot be found in IDC/idc-index. If NBIA fallback is needed, use the NBIA v4 API documented by `https://cbiit.github.io/NBIA-TCIA/nbia-api.yaml`.
+For public DICOM downloads, use IDC/idc-index first. Existing TCIA `.tcia` manifests can be parsed into Series Instance UID allowlists with `scripts/tcia_manifest_series_uids.py`, then looked up and downloaded through IDC. Before downloading, agents should ask whether the user wants files downloaded directly in the active environment or a portable CSV manifest created for TCIA Data Retriever. New manifests should be CSV/TSV/XLSX-compatible, not legacy `.tcia`, unless the user explicitly asks for the legacy NBIA-era format. NBIA should be fallback-only for DICOM data that cannot be found in IDC/idc-index. If NBIA fallback is needed, use the NBIA v4 API documented by `https://cbiit.github.io/NBIA-TCIA/nbia-api.yaml`.
 
-For public DICOM visualization before download, use IDC viewer capabilities. OHIF v3 is preferred for radiology, SliM is used for DICOM slide microscopy (`SM`), and VolView can be used when IDC metadata provides a public S3 series folder or CRDC series UUID. Controlled-access data cannot be previewed in a public browser viewer before download, regardless of file format.
+For new TCIA Data Retriever CSV manifests, the route is selected by column header. Use one preferred route header only: `SeriesInstanceUID` for public DICOM through IDC first/NBIA fallback, `imageUrl` for PathDB/direct public files, or `drs_uri` for General Commons controlled-access files.
+
+For public DICOM visualization before download, use IDC viewer capabilities. OHIF v3 is preferred for radiology, SliM is used for DICOM slide microscopy (`SM`), and VolView can be used when IDC metadata provides a public S3 series folder or CRDC series UUID. Agents should provide viewer URLs for users to open in their regular browser, not install browser automation just to display examples. Controlled-access data cannot be previewed in a public browser viewer before download, regardless of file format.
 
 For public non-DICOM histopathology slides in PathDB, use caMicroscope viewer URLs built from the PathDB cohort-builder CSV `slide_id`, for example `https://pathdb.cancerimagingarchive.net/caMicroscope/apps/mini/viewer.html?mode=pathdb&slideId=314525`. The PathDB helper adds a `camicroscope_url` field to slide-level rows.
 

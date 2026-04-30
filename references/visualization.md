@@ -2,6 +2,8 @@
 
 Use this reference when a user asks to preview, visualize, open, view, inspect, or launch a viewer for TCIA-published data before downloading.
 
+Return viewer URLs as clickable links for the user to open in their regular browser. Do not install Playwright, browser drivers, or other browser automation just to show example data. Only launch or automate a browser if the user explicitly asks for that and the local agent environment supports it.
+
 ## Access Rule
 
 Controlled-access data cannot be visualized in a browser before download, regardless of file format. If WordPress license metadata indicates controlled/restricted access, do not construct OHIF, VolView, SliM, caMicroscope, IDC, NBIA, PathDB, or other public viewer links. Explain that metadata can be inspected, but visualization requires authorized access and local/authorized-platform download. Point users to the TCIA controlled-access policy page: `https://www.cancerimagingarchive.net/nih-controlled-data-access-policy/`.

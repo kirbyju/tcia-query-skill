@@ -59,9 +59,11 @@ Public DICOM radiology or DICOM pathology:
 - Route open-access/public DICOM to IDC and `idc-index` first. This also applies to public DICOM annotation/result objects such as RTSTRUCT, SEG, SR, RTDOSE, RTPLAN, and other DICOM files.
 - Use IDC-specific tooling for series selection, visualization, licenses, citations, and downloads.
 - Avoid duplicating the IDC skill. If available, use it after TCIA provenance is established.
-- For browser visualization, load `visualization.md`. Use OHIF v3 for open radiology DICOM, SliM for open DICOM slide microscopy (`SM`), and VolView only after mapping the requested series to a public S3 folder or `crdc_series_uuid`.
+- For browser visualization, load `visualization.md`. Use OHIF v3 for open radiology DICOM, SliM for open DICOM slide microscopy (`SM`), and VolView only after mapping the requested series to a public S3 folder or `crdc_series_uuid`. Return clickable links; do not install browser automation just to preview examples.
+- Before downloading DICOM data, ask whether the user wants direct agent download in the current environment or a portable TCIA Data Retriever CSV manifest created from Series Instance UIDs.
 - TCIA is phasing out NBIA. Do not use NBIA as the first route for public DICOM downloads.
-- Use WordPress `.tcia` manifest files as Series Instance UID allowlists for IDC/idc-index lookups when helpful.
+- For new Data Retriever CSV manifests, `SeriesInstanceUID` means public DICOM: IDC/S3 first, then TCIA/NBIA v4 fallback only when needed.
+- Use existing WordPress `.tcia` manifest files as Series Instance UID allowlists for IDC/idc-index lookups when helpful, but treat `.tcia` as a legacy input format.
 - Use NBIA only as a fallback when requested public DICOM series cannot be found in IDC/idc-index, or when the user explicitly asks for NBIA after being warned that IDC is preferred.
 - If NBIA fallback is needed, tell users to use the NBIA v4 API documented by `https://cbiit.github.io/NBIA-TCIA/nbia-api.yaml`.
 - Load `idc-dicom-downloads.md` for the TCIA-specific IDC download workflow.
@@ -117,7 +119,7 @@ For Collections, use `collection_downloads` as the actual dataset download recor
 
 `download_type` is intended as the parent category, but all three fields are multi-select. Mixed parent categories are normal when one download record represents a combined TCIA Data Retriever manifest or package. Examples:
 
-- A single `.tcia` manifest may include source radiology images plus annotation DICOM objects, such as CT/MR with RTSTRUCT or SEG.
+- A single Data Retriever manifest may include source radiology images plus annotation DICOM objects, such as CT/MR with RTSTRUCT or SEG.
 - A single ZIP/supporting package may include image annotations plus files that are best categorized as Other, such as acquisition protocol details.
 
 Do not collapse mixed labels into one category. Report the mixed content and choose routes based on the files the user wants:
@@ -139,6 +141,7 @@ For search/discovery:
 | Match reason | Cite the matching cancer type, modality, data type, body site, DOI, etc. |
 | Access route | IDC, General Commons, PathDB, WordPress downloads, Aspera, or DataCite |
 | Visualization route | None for controlled access; OHIF v3, SliM, or VolView for open/public DICOM in IDC; caMicroscope for open/public PathDB slides |
+| Download delivery | Direct agent download or portable Data Retriever CSV manifest when DICOM Series Instance UIDs are available |
 | Access/license | Open Creative Commons, Open Creative Commons NonCommercial, controlled/restricted, or license-review-needed |
 | DOI/citation | Link DOI when present |
 | Notes | Include caveats, related external results, size/counts, or next step |
@@ -152,7 +155,9 @@ For exact dataset questions, give a short prose summary first, then a table of a
 - WordPress API v2 terse mode can truncate long fields. Use `v=1` or `scripts/tcia_wordpress_search.py --verbose` for full abstracts/descriptions before making content-based claims.
 - Controlled-access metadata can be visible even when file downloads require approval. Determine controlled status from license metadata, then link to the TCIA NIH Controlled Data Access Policy for current request, JSON API key, and TCIA Data Retriever configuration steps.
 - Controlled-access data cannot be previewed through public browser viewers before download. Report metadata and access guidance instead of constructing OHIF, SliM, VolView, IDC, NBIA, PathDB, or other public viewer URLs.
-- For open-access/public DICOM downloads, prefer IDC/idc-index. TCIA `.tcia` manifests can be parsed for Series Instance UID allowlists, but NBIA should be fallback-only for public DICOM. If NBIA fallback is needed, use the NBIA v4 API documented by `https://cbiit.github.io/NBIA-TCIA/nbia-api.yaml`. For controlled-access DICOM, use WordPress license metadata and General Commons under `phs004225`; do not imply public IDC/NBIA download.
+- Visualization answers should provide links for users to open in their own browser. Do not install Playwright or other browser automation just to demonstrate viewer links.
+- For open-access/public DICOM downloads, prefer IDC/idc-index. Existing TCIA `.tcia` manifests can be parsed for Series Instance UID allowlists, but NBIA should be fallback-only for public DICOM. New portable Data Retriever manifests should be CSV/TSV/XLSX-compatible, not `.tcia`, unless the user explicitly asks for the legacy NBIA-era format. If NBIA fallback is needed, use the NBIA v4 API documented by `https://cbiit.github.io/NBIA-TCIA/nbia-api.yaml`. For controlled-access DICOM, use WordPress license metadata and General Commons under `phs004225`; do not imply public IDC/NBIA download.
+- For new Data Retriever CSV manifests, route by one preferred header only: `SeriesInstanceUID` for public DICOM, `imageUrl` for PathDB/direct public files, or `drs_uri` for General Commons controlled-access files. Avoid mixed-route manifests because Data Retriever applies header precedence.
 - WordPress download metadata may contain nested objects or media IDs. Prefer the `tcia_utils.wordpress.getDownloads()` helper if package installation is allowed.
 - DataCite relationships are about DOI provenance. They do not automatically make an external Zenodo or IDC record a TCIA-published dataset.
 - Controlled-access metadata can be public even when file access is restricted.

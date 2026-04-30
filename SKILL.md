@@ -26,8 +26,9 @@ When a downstream record is derived from a TCIA DOI but is not itself listed in 
 5. For download questions, inspect WordPress `download_type`, `data_type`, and `file_type` together. These are multi-select labels, not a strict one-parent tree.
 6. Route access with the matrix below.
 7. Decide open versus controlled access from WordPress license metadata, not from collection/page accessibility fields. Creative Commons licenses mean open access; Creative Commons NonCommercial licenses are open access with a noncommercial-use restriction. If license text indicates NIH Controlled Data Access, TCIA Restricted, or another controlled/restricted license, alert the user that the dataset is not open access and link to the TCIA NIH Controlled Data Access Policy before giving download/API-key/Data Retriever guidance.
-8. For visualization questions, decide open versus controlled access first. Controlled-access data cannot be previewed in a browser before download; open-access DICOM should use IDC viewer capabilities.
-9. Include citations and access caveats before recommending downloads or downstream analysis.
+8. For visualization questions, decide open versus controlled access first. Controlled-access data cannot be previewed in a browser before download; open-access data should be returned as clickable viewer links, not opened by the agent.
+9. For download requests, ask whether the user wants the agent to download files directly in the current environment or create a portable TCIA Data Retriever CSV manifest when the requested data can be represented by DICOM Series Instance UIDs, direct `imageUrl` values, or `drs_uri` values.
+10. Include citations and access caveats before recommending downloads or downstream analysis.
 
 ## Access Routing
 
@@ -88,9 +89,24 @@ For controlled-access evidence, inspect WordPress download/license metadata. Do 
 
 Use `idc-index` for public DICOM only after confirming that the dataset is TCIA-published through WordPress or is clearly an external derived dataset through DataCite relationships.
 
-For open-access/public DICOM downloads, prefer IDC/idc-index over NBIA. TCIA is phasing out NBIA, so do not use NBIA as the first route for public DICOM files. WordPress `.tcia` manifest files are still useful because they usually contain a few configuration lines followed by one DICOM Series Instance UID per row; extract those Series Instance UIDs and use them with idc-index. Use NBIA only as a fallback when IDC/idc-index cannot find the requested public DICOM series. If NBIA fallback is needed, tell users to use the NBIA v4 API documented by `https://cbiit.github.io/NBIA-TCIA/nbia-api.yaml`. For controlled-access DICOM, use WordPress license metadata plus General Commons under `phs004225`; do not imply IDC or NBIA public download.
+For open-access/public DICOM downloads, prefer IDC/idc-index over NBIA. TCIA is phasing out NBIA, so do not use NBIA as the first route for public DICOM files. Existing WordPress `.tcia` manifest files are still useful as legacy inputs because they usually contain a few configuration lines followed by one DICOM Series Instance UID per row; extract those Series Instance UIDs and use them with idc-index. For new portable manifests, write CSV files for TCIA Data Retriever instead of `.tcia` files. Use NBIA only as a fallback when IDC/idc-index cannot find the requested public DICOM series. If NBIA fallback is needed, tell users to use the NBIA v4 API documented by `https://cbiit.github.io/NBIA-TCIA/nbia-api.yaml`. For controlled-access DICOM, use WordPress license metadata plus General Commons under `phs004225`; do not imply IDC or NBIA public download.
 
-For visualization before download, load `references/visualization.md`. Controlled-access data cannot be visualized in a browser before download regardless of file format. For open-access/public DICOM in IDC, use IDC/idc-index viewer support: OHIF v3 for radiology, SliM for DICOM slide microscopy (`SM`), and VolView only after mapping the series to its public S3 folder or `crdc_series_uuid`. For open/public non-DICOM PathDB slides, use caMicroscope viewer URLs built from the PathDB CSV `slide_id`.
+For visualization before download, load `references/visualization.md`. Controlled-access data cannot be visualized in a browser before download regardless of file format. For open-access/public DICOM in IDC, use IDC/idc-index viewer support: OHIF v3 for radiology, SliM for DICOM slide microscopy (`SM`), and VolView only after mapping the series to its public S3 folder or `crdc_series_uuid`. For open/public non-DICOM PathDB slides, use caMicroscope viewer URLs built from the PathDB CSV `slide_id`. Return these as links for the user to open in their regular browser; do not install Playwright or browser automation just to preview example data.
+
+Before performing any data download, ask how the user wants to proceed:
+
+- Direct agent download: use Python tooling such as `idc-index` in the current environment when the user wants the agent to download files locally.
+- Portable manifest: create or return a CSV manifest for TCIA Data Retriever when the data can be represented by DICOM Series Instance UIDs, direct `imageUrl` values, or `drs_uri` values. This lets the user save the manifest, use it on another computer, or share it with a collaborator.
+
+If the user chooses a manifest and WordPress already provides a current CSV/TSV/XLSX manifest link, prefer the official WordPress manifest. Treat `.tcia` as a legacy NBIA-era format: read existing `.tcia` files when needed, but do not write new `.tcia` files unless the user explicitly asks for the legacy format. If the agent has validated Series Instance UIDs, image URLs, or DRS URIs and needs to create a manifest locally, use `scripts/tcia_create_data_retriever_csv.py`.
+
+TCIA Data Retriever routes spreadsheet manifests by column headers:
+
+- `SeriesInstanceUID` is the preferred header for public DICOM Series Instance UID manifests; `Series UID` is also recognized. Data Retriever treats this as DICOM and attempts IDC/S3 lookup first, with TCIA/NBIA v4 as backup for public data that is not found in IDC. Do not use this route for controlled-access DICOM; use General Commons guidance instead.
+- `imageUrl` is the preferred header for direct public file URLs; `wsiimage_url` is also recognized. In TCIA workflows, use this for public PathDB/non-DICOM pathology files.
+- `drs_uri` is the preferred header for General Commons controlled-access files; `File ID`/`file_id` are also recognized and bare IDs are interpreted as `drs://nci-crdc.datacommons.io/<file-id>`. Always warn that authorization and TCIA Data Retriever API-key configuration may be required.
+
+For new CSV manifests, create a single-route file with exactly one of the preferred route headers: `SeriesInstanceUID`, `imageUrl`, or `drs_uri`. Do not mix route headers in one manifest. Data Retriever checks for Series UID columns first, and in direct-file spreadsheets `drs_uri`/`File ID` takes precedence over `imageUrl`, so mixed-route CSVs can be ambiguous. For DICOM UID manifests, prefer a simple one-column CSV headed `SeriesInstanceUID`.
 
 ## WordPress Download Labels
 
@@ -113,7 +129,8 @@ Run scripts from the skill root.
 | Script | Purpose |
 | --- | --- |
 | `scripts/tcia_wordpress_search.py` | Search live TCIA WordPress Collection and Analysis Result metadata, with text or JSON output. |
-| `scripts/tcia_manifest_series_uids.py` | Extract DICOM Series Instance UIDs from a TCIA `.tcia` manifest path or URL for IDC/idc-index lookup. |
+| `scripts/tcia_manifest_series_uids.py` | Extract DICOM Series Instance UIDs from a legacy TCIA `.tcia` manifest path or URL for IDC/idc-index lookup. |
+| `scripts/tcia_create_data_retriever_csv.py` | Create a TCIA Data Retriever CSV manifest from validated DICOM Series Instance UIDs, direct `imageUrl` values, or `drs_uri` values. |
 | `scripts/idc_viewer_urls.py` | Construct OHIF v3, SliM, or VolView URLs after TCIA provenance, license, and IDC presence are already verified. |
 | `scripts/general_commons_studies.py` | Query General Commons GraphQL for TCIA face dataset study acronyms under `phs004225` and optional node counts. |
 | `scripts/datacite_related.py` | Find DataCite records that declare DOI relationships, such as Zenodo records derived from TCIA DOIs. |
@@ -127,7 +144,8 @@ python scripts/tcia_wordpress_search.py --short-title TCGA-BRCA --verbose --json
 python scripts/tcia_wordpress_search.py --short-title TCGA-BRCA --json
 python scripts/tcia_wordpress_search.py --query lung --workers 6 --limit 10
 python scripts/tcia_wordpress_search.py --query retired --include-hidden
-python scripts/tcia_manifest_series_uids.py ./manifest.tcia --out series_uids.txt
+python scripts/tcia_manifest_series_uids.py ./legacy_manifest.tcia --out series_uids.txt
+python scripts/tcia_create_data_retriever_csv.py --uids-file series_uids.txt --out manifest.csv
 python scripts/idc_viewer_urls.py ohif-v3 --study-uid <StudyInstanceUID> --series-uid <SeriesInstanceUID>
 python scripts/idc_viewer_urls.py slim --study-uid <StudyInstanceUID> --series-uid <SeriesInstanceUID>
 python scripts/idc_viewer_urls.py volview --crdc-series-uuid <crdc_series_uuid>
@@ -152,7 +170,7 @@ Load `references/idc-dicom-downloads.md` when a user asks to download public TCI
 
 ## Visualization
 
-Load `references/visualization.md` when a user asks to preview, visualize, open, inspect, or launch a browser viewer for TCIA data. Never generate public viewer links for controlled-access datasets. For open-access/public DICOM, use IDC/idc-index and the IDC skill when available; prefer OHIF v3 for radiology, SliM for `SM`, and VolView only when a public S3 series URL or CRDC series UUID has been identified.
+Load `references/visualization.md` when a user asks to preview, visualize, open, inspect, or get a browser viewer link for TCIA data. Never generate public viewer links for controlled-access datasets. For open-access/public DICOM, use IDC/idc-index and the IDC skill when available; prefer OHIF v3 for radiology, SliM for `SM`, and VolView only when a public S3 series URL or CRDC series UUID has been identified. Return viewer URLs as links for the user to open; do not install Playwright or browser automation just to display examples.
 
 ## DataCite Relationships
 
@@ -182,8 +200,11 @@ Include the TCIA page link, WordPress short title, and any caveats about control
 - Never present a dataset as TCIA-published unless it appears in WordPress Collections or Analysis Results.
 - Ignore WordPress `hide_from_browse_table = "1"` records unless the user explicitly identifies as TCIA staff and asks to include hidden/staged/retired/internal-review datasets.
 - Use license metadata, not WordPress collection/page accessibility fields, to decide controlled access. Creative Commons means open access; Creative Commons NonCommercial is open with a noncommercial-use restriction; controlled/restricted license text requires the controlled-access alert and policy link.
-- Do not use NBIA as the first route for open-access/public DICOM downloads. Prefer IDC/idc-index, using WordPress `.tcia` manifests as Series Instance UID allowlists when helpful. If NBIA fallback is needed, use the NBIA v4 API documented by `https://cbiit.github.io/NBIA-TCIA/nbia-api.yaml`. For controlled-access DICOM, use General Commons metadata and TCIA controlled-access guidance instead of public download routes.
+- Do not use NBIA as the first route for open-access/public DICOM downloads. Prefer IDC/idc-index, using existing WordPress `.tcia` manifests as Series Instance UID allowlists when helpful. If NBIA fallback is needed, use the NBIA v4 API documented by `https://cbiit.github.io/NBIA-TCIA/nbia-api.yaml`. For controlled-access DICOM, use General Commons metadata and TCIA controlled-access guidance instead of public download routes.
 - Do not construct browser viewer URLs for controlled-access data. There is no pre-download browser visualization route for controlled-access TCIA data regardless of file format.
+- Do not install Playwright or other browser automation just to show visualization examples. Provide viewer links for users to open in their own browser unless they explicitly ask for browser automation.
+- Before downloading data, ask whether the user wants direct agent download in the active environment or a portable manifest/file list when the requested data support that workflow. For new TCIA Data Retriever manifests, write CSV/TSV/XLSX-compatible files rather than legacy `.tcia` files.
+- For new TCIA Data Retriever CSV manifests, use one route header only: `SeriesInstanceUID` for public DICOM through IDC first/NBIA fallback, `imageUrl` for PathDB/direct public files, or `drs_uri` for General Commons controlled-access files.
 - Do not present VolView as UID-based. Map Study/Series UIDs through IDC/idc-index to a public S3 series folder or `crdc_series_uuid` before constructing a VolView URL.
 - Do not broaden IDC, GC, or PathDB searches beyond WordPress short titles, TCIA DOIs, or explicit user-approved exploratory scope.
 - Distinguish open Creative Commons, open Creative Commons NonCommercial, mixed open/controlled, and controlled/restricted license statuses clearly.

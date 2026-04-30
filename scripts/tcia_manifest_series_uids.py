@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Extract DICOM Series Instance UIDs from a TCIA Data Retriever manifest."""
+"""Extract DICOM Series Instance UIDs from a legacy TCIA .tcia manifest."""
 
 from __future__ import annotations
 
@@ -49,7 +49,7 @@ def extract_uids(text: str) -> list[str]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("manifest", help="Local .tcia manifest path or manifest URL.")
+    parser.add_argument("manifest", help="Local legacy .tcia manifest path or manifest URL.")
     parser.add_argument("--json", action="store_true", help="Print JSON instead of newline text.")
     parser.add_argument("--comma", action="store_true", help="Print comma-separated UIDs.")
     parser.add_argument("--out", help="Write newline-delimited UIDs to this file.")
