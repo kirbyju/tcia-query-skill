@@ -1,7 +1,7 @@
 interface:
   display_name: "TCIA Query Skill"
   short_description: "Query TCIA datasets across access systems"
-  default_prompt: "Use $tcia-query-skill to find TCIA-published datasets and explain the right access route, citations, and download options."
+  default_prompt: "Use $tcia-query-skill to find TCIA-published datasets and explain the right access route, viewer options, citations, and download options."
 
 policy:
   allow_implicit_invocation: true

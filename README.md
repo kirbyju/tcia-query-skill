@@ -31,6 +31,7 @@ This skill tells an agent how to:
 - Classify open versus controlled access from license metadata.
 - Identify Creative Commons NonCommercial datasets without mistaking them for controlled access.
 - Prefer IDC/idc-index over NBIA for public DICOM downloads.
+- Build browser visualization guidance for open-access DICOM through IDC viewers and public non-DICOM PathDB slides through caMicroscope.
 - Route users to IDC, General Commons, PathDB, DataCite, WordPress downloads, or Aspera.
 - Point controlled-access users to TCIA's current access policy.
 
@@ -51,9 +52,11 @@ tcia-query-skill/
 |   +-- idc-dicom-downloads.md
 |   +-- pathdb.md
 |   +-- routing.md
+|   +-- visualization.md
 +-- scripts/
     +-- datacite_related.py
     +-- general_commons_studies.py
+    +-- idc_viewer_urls.py
     +-- pathdb_metadata.py
     +-- tcia_manifest_series_uids.py
     +-- tcia_wordpress_search.py
@@ -65,6 +68,9 @@ Ask an agent using this skill questions like:
 
 - "Find TCIA datasets with breast MRI and tell me how to access them."
 - "Download the DICOM series from this TCIA manifest using IDC."
+- "Create an OHIF v3 viewer link for this public TCIA DICOM series."
+- "Open this public PathDB slide in caMicroscope."
+- "Can I preview this controlled-access dataset in a browser?"
 - "Is this dataset open access or controlled access?"
 - "Which TCIA datasets have non-DICOM pathology data in PathDB?"
 - "Show me datasets related to this TCIA DOI, including derived Zenodo records."
@@ -94,16 +100,24 @@ python scripts/tcia_wordpress_search.py --short-title EAY131 --json
 python scripts/tcia_wordpress_search.py --short-title 4D-Lung --verbose --json
 python scripts/tcia_wordpress_search.py --query lung --workers 6 --limit 10
 python scripts/tcia_manifest_series_uids.py ./manifest.tcia --out series_uids.txt
+python scripts/idc_viewer_urls.py ohif-v3 --study-uid <StudyInstanceUID> --series-uid <SeriesInstanceUID>
+python scripts/idc_viewer_urls.py slim --study-uid <StudyInstanceUID> --series-uid <SeriesInstanceUID>
+python scripts/idc_viewer_urls.py volview --crdc-series-uuid <crdc_series_uuid>
 python scripts/general_commons_studies.py --study-acronym TCGA-GBM --counts
 python scripts/datacite_related.py 10.7937/TCIA.HMQ8-J677
 python scripts/pathdb_metadata.py --collection CPTAC-STAD --summary
+python scripts/pathdb_metadata.py --collection CPTAC-STAD --limit 5
 ```
 
 The WordPress search helper parallelizes v2 pagination with `--workers 4` by default. Use a modest higher value for broad metadata scans, or `--workers 1` for sequential troubleshooting.
 
 Some workflows may benefit from optional packages such as `tcia_utils` and `idc-index`, but they are not required to read the skill or run the bundled helpers.
 
-For public DICOM downloads, use IDC/idc-index first. TCIA `.tcia` manifests can be parsed into Series Instance UID allowlists with `scripts/tcia_manifest_series_uids.py`, then looked up and downloaded through IDC. NBIA v1 should be fallback-only for DICOM data that cannot be found in IDC/idc-index.
+For public DICOM downloads, use IDC/idc-index first. TCIA `.tcia` manifests can be parsed into Series Instance UID allowlists with `scripts/tcia_manifest_series_uids.py`, then looked up and downloaded through IDC. NBIA should be fallback-only for DICOM data that cannot be found in IDC/idc-index. If NBIA fallback is needed, use the NBIA v4 API documented by `https://cbiit.github.io/NBIA-TCIA/nbia-api.yaml`.
+
+For public DICOM visualization before download, use IDC viewer capabilities. OHIF v3 is preferred for radiology, SliM is used for DICOM slide microscopy (`SM`), and VolView can be used when IDC metadata provides a public S3 series folder or CRDC series UUID. Controlled-access data cannot be previewed in a public browser viewer before download, regardless of file format.
+
+For public non-DICOM histopathology slides in PathDB, use caMicroscope viewer URLs built from the PathDB cohort-builder CSV `slide_id`, for example `https://pathdb.cancerimagingarchive.net/caMicroscope/apps/mini/viewer.html?mode=pathdb&slideId=314525`. The PathDB helper adds a `camicroscope_url` field to slide-level rows.
 
 ## Controlled Access
 

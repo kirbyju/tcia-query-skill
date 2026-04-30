@@ -53,6 +53,24 @@ python scripts/pathdb_metadata.py --query stomach --limit 10
 python scripts/pathdb_metadata.py --doi 10.7937/jw9a-8k71 --json
 ```
 
+The helper adds a derived `camicroscope_url` field for slide-level preview links when `slide_id` is present.
+
+## caMicroscope Viewer
+
+For public non-DICOM PathDB slide images, use caMicroscope for browser visualization before download. Build viewer URLs from the CSV `slide_id`:
+
+```text
+https://pathdb.cancerimagingarchive.net/caMicroscope/apps/mini/viewer.html?mode=pathdb&slideId=<slide_id>
+```
+
+Example:
+
+```text
+https://pathdb.cancerimagingarchive.net/caMicroscope/apps/mini/viewer.html?mode=pathdb&slideId=314525
+```
+
+Only use this route for open/public PathDB slides. If WordPress license metadata indicates controlled/restricted access, do not construct caMicroscope links; follow controlled-access guidance instead.
+
 ## Response Guidance
 
 For PathDB results, summarize:
@@ -63,5 +81,6 @@ For PathDB results, summarize:
 - Cancer type/location and species.
 - Whether related radiology, genomics, or proteomics flags are present.
 - Whether WSI URLs are available for slide-level access.
+- Whether caMicroscope viewer URLs are available for public slide preview.
 
 Keep WordPress as the provenance authority. If PathDB contains a collection that does not appear in WordPress, do not present it as TCIA-published without additional confirmation.

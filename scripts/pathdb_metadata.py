@@ -11,11 +11,15 @@ import sys
 import urllib.request
 from collections import defaultdict
 from typing import Any, Optional
+from urllib.parse import quote
 
 
 COHORT_BUILDER_CSV_URL = (
     "https://pathdb.cancerimagingarchive.net/system/files/collectionmetadata/202401/"
     "cohort_builder_v1_01-16-2024.csv"
+)
+CAMICROSCOPE_VIEWER_BASE = (
+    "https://pathdb.cancerimagingarchive.net/caMicroscope/apps/mini/viewer.html"
 )
 
 SUMMARY_COLUMNS = [
@@ -40,6 +44,22 @@ def fetch_rows(url: str) -> list[dict[str, str]]:
     with urllib.request.urlopen(request, timeout=60) as response:
         text = response.read().decode("utf-8-sig", errors="replace")
     return list(csv.DictReader(io.StringIO(text)))
+
+
+def camicroscope_url(slide_id: str) -> str:
+    slide_id = slide_id.strip()
+    if not slide_id:
+        return ""
+    return f"{CAMICROSCOPE_VIEWER_BASE}?mode=pathdb&slideId={quote(slide_id, safe='')}"
+
+
+def add_viewer_urls(rows: list[dict[str, str]]) -> list[dict[str, str]]:
+    output: list[dict[str, str]] = []
+    for row in rows:
+        enriched = dict(row)
+        enriched["camicroscope_url"] = camicroscope_url(enriched.get("slide_id", ""))
+        output.append(enriched)
+    return output
 
 
 def unique_join(values: set[str], max_items: int = 4) -> str:
@@ -126,7 +146,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--json", action="store_true", help="Emit JSON.")
     args = parser.parse_args(argv)
 
-    rows = fetch_rows(args.url)
+    rows = add_viewer_urls(fetch_rows(args.url))
     collections = {value.lower() for value in args.collection}
     dois = {value.lower() for value in args.doi}
     filtered = [row for row in rows if matches(row, args.query, collections, dois)]
@@ -146,6 +166,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             "cancer_type",
             "cancer_location",
             "wsiimage_url",
+            "camicroscope_url",
         ]
 
     records = records[: args.limit]

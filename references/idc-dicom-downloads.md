@@ -4,7 +4,9 @@ Use this reference when a user asks to download TCIA-published DICOM data, inclu
 
 ## Policy
 
-Prefer IDC and `idc-index` for DICOM downloads. TCIA is phasing out NBIA, so do not use the NBIA v1 API as the first download route for public DICOM data. Use NBIA only as a fallback when the requested DICOM series cannot be found in IDC/idc-index, or when the dataset is controlled access and WordPress/license guidance says IDC is not the access route.
+Prefer IDC and `idc-index` for open-access/public DICOM downloads. TCIA is phasing out NBIA, so do not use NBIA as the first download route for public DICOM data. Use NBIA only as a fallback when requested open-access/public DICOM series cannot be found in IDC/idc-index. If NBIA fallback is needed, use the NBIA v4 API documented by `https://cbiit.github.io/NBIA-TCIA/nbia-api.yaml`.
+
+Controlled-access DICOM is different: do not route it to IDC or NBIA fallback for public download. So far, controlled-access TCIA DICOM metadata lives in General Commons under `phs004225`, with WordPress license metadata as the access-status trigger and the TCIA controlled-access policy page as the user-facing access guidance.
 
 If an IDC skill is available, use it for IDC-specific query, visualization, license, citation, and download mechanics. The TCIA skill should establish TCIA provenance through WordPress, identify the relevant WordPress download records or manifest, and provide IDC allowlist inputs such as the TCIA short title, DOI, or Series Instance UIDs.
 
@@ -20,7 +22,7 @@ IDC skill reference: `https://github.com/ImagingDataCommons/idc-claude-skill/blo
    - For `.tcia` manifest records, extract Series Instance UIDs and use them as the most precise allowlist.
 5. Query IDC for those Series Instance UIDs. If all requested public DICOM series are present, download through `idc-index`.
 6. If only some series are present in IDC, clearly report the matched and missing counts, download the matched subset through IDC, and discuss fallback options for the missing series.
-7. Use NBIA v1 only after IDC/idc-index lookup fails or the user explicitly asks for NBIA despite the warning.
+7. For open-access/public DICOM only, use NBIA after IDC/idc-index lookup fails or the user explicitly asks for NBIA despite the warning. If NBIA fallback is needed, tell users to use the NBIA v4 API documented by `https://cbiit.github.io/NBIA-TCIA/nbia-api.yaml`.
 
 ## TCIA `.tcia` Manifests
 
@@ -54,11 +56,21 @@ client.download_from_selection(seriesInstanceUID=matched_uids, downloadDir="./id
 
 For large UID lists, prefer IDC skill/idc-index patterns that avoid building very long SQL strings if available.
 
+## NBIA Fallback
+
+Use NBIA only when IDC/idc-index cannot find the requested open-access/public DICOM series. Do not use NBIA as a public fallback for controlled-access DICOM. When NBIA is needed:
+
+- Tell users that IDC/idc-index remains the preferred public DICOM route.
+- Tell users to use the NBIA v4 API, not older NBIA examples.
+- Point users to the swagger YAML as the best API reference: `https://cbiit.github.io/NBIA-TCIA/nbia-api.yaml`.
+- Use the swagger-defined endpoint names, parameters, and response shapes rather than older wiki examples when there is a conflict.
+
 ## Answering Users
 
 When giving DICOM download guidance, say explicitly:
 
 - IDC/idc-index is the preferred route for public DICOM because TCIA is phasing out NBIA.
 - WordPress remains the TCIA provenance and license source.
-- `.tcia` manifests are useful as Series Instance UID allowlists, but downloading through TCIA Data Retriever/NBIA should be fallback-only for public DICOM.
-- Controlled-access datasets may not be downloadable through IDC; follow WordPress license metadata and TCIA controlled-access guidance.
+- `.tcia` manifests are useful as Series Instance UID allowlists, but downloading through NBIA should be fallback-only for public DICOM.
+- If NBIA fallback is required, use the NBIA v4 API documented by `https://cbiit.github.io/NBIA-TCIA/nbia-api.yaml`.
+- Controlled-access DICOM metadata should be handled through WordPress plus General Commons under `phs004225`; follow TCIA controlled-access guidance and do not imply public download.
