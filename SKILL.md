@@ -45,11 +45,25 @@ Read `references/routing.md` for detailed routing and answer-format guidance.
 
 ## Tool Setup
 
-Ask before installing packages. If the user allows package installation, use:
+Do not assume optional Python packages are installed. Before writing custom code for TCIA, IDC, or DICOM operations, check whether the appropriate package is available in the same Python environment that will run the task:
 
 ```bash
-python -m pip install --upgrade tcia_utils idc-index
+python -c "import importlib.util as u; print({p: u.find_spec(p) is not None for p in ['tcia_utils','idc_index','pydicom']})"
 ```
+
+Ask before installing packages. If the user allows package installation, install them in the active local agent environment:
+
+```bash
+python -m pip install --upgrade tcia_utils idc-index pydicom
+```
+
+Prefer these package APIs over custom implementations where possible:
+
+- `tcia_utils`: TCIA WordPress, DataCite, PathDB, and related helper APIs.
+- `idc-index`: IDC metadata lookup, public DICOM download, viewer URLs, cloud-storage URLs, and Series Instance UID workflows.
+- `pydicom`: local DICOM header/metadata inspection. Do not hand-parse DICOM files when `pydicom` can be installed or is already available.
+
+The bundled standard-library scripts are fallbacks and lightweight helpers. They do not replace `idc-index` for IDC workflows or `pydicom` for local DICOM parsing.
 
 Use `tcia_utils` for TCIA-specific metadata and helper APIs:
 

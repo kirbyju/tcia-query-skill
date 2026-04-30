@@ -12,6 +12,21 @@ If an IDC skill is available, use it for IDC-specific query, visualization, lice
 
 IDC skill reference: `https://github.com/ImagingDataCommons/idc-claude-skill/blob/main/SKILL.md`
 
+## Package Guidance
+
+For IDC and DICOM workflows, prefer established Python packages over custom code:
+
+- Use `idc-index` for IDC metadata lookup, download, viewer URLs, cloud-storage URLs, and Series Instance UID workflows.
+- Use `pydicom` for local DICOM header/metadata inspection.
+
+Before writing custom IDC or DICOM parsing code, check whether `idc_index` and `pydicom` are importable in the active Python environment. If they are missing and the user permits installation, install them with:
+
+```bash
+python -m pip install --upgrade idc-index pydicom
+```
+
+Do not silently install packages. If package installation is not allowed, explain the limitation and use bundled helpers only for the workflows they actually support, such as parsing `.tcia` manifests into Series Instance UIDs.
+
 ## Workflow
 
 1. Confirm the dataset is a visible TCIA WordPress Collection or Analysis Result.

@@ -111,7 +111,19 @@ python scripts/pathdb_metadata.py --collection CPTAC-STAD --limit 5
 
 The WordPress search helper parallelizes v2 pagination with `--workers 4` by default. Use a modest higher value for broad metadata scans, or `--workers 1` for sequential troubleshooting.
 
-Some workflows may benefit from optional packages such as `tcia_utils` and `idc-index`, but they are not required to read the skill or run the bundled helpers.
+## Recommended Python Packages
+
+The bundled helper scripts use Python's standard library, so the skill can still run basic metadata workflows without extra packages. For best results, install the domain packages in the same Python environment used by the local agent:
+
+```bash
+python -m pip install --upgrade tcia_utils idc-index pydicom
+```
+
+Agents should check whether these packages are available before writing custom code, ask before installing missing packages, and prefer:
+
+- `tcia_utils` for TCIA WordPress, DataCite, PathDB, and related helper APIs.
+- `idc-index` for IDC lookup, public DICOM downloads, viewer URLs, cloud-storage URLs, and Series Instance UID workflows.
+- `pydicom` for local DICOM header/metadata inspection.
 
 For public DICOM downloads, use IDC/idc-index first. TCIA `.tcia` manifests can be parsed into Series Instance UID allowlists with `scripts/tcia_manifest_series_uids.py`, then looked up and downloaded through IDC. NBIA should be fallback-only for DICOM data that cannot be found in IDC/idc-index. If NBIA fallback is needed, use the NBIA v4 API documented by `https://cbiit.github.io/NBIA-TCIA/nbia-api.yaml`.
 
