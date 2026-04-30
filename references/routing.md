@@ -91,7 +91,7 @@ Non-DICOM pathology:
 - Route to PathDB.
 - Prefer the stable PathDB cohort-builder CSV for rich slide-level metadata.
 - Match WordPress short title to CSV `collection`; the PathDB API collection list may use `collectionName`.
-- For open/public PathDB slides, construct caMicroscope browser viewer URLs from CSV `slide_id`: `https://pathdb.cancerimagingarchive.net/caMicroscope/apps/mini/viewer.html?mode=pathdb&slideId=<slide_id>`.
+- For open/public PathDB slides, construct caMicroscope browser viewer URLs from CSV `camic_id`: `https://pathdb.cancerimagingarchive.net/caMicroscope/apps/mini/viewer.html?mode=pathdb&slideId=<camic_id>`. The URL parameter is named `slideId`, but it must use numeric `camic_id`, not CSV `slide_id` or `patient_id`.
 - Use `tcia_utils.pathdb` if installed.
 - Load `pathdb.md` for the stable CSV URL, columns, and helper script.
 

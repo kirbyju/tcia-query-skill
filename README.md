@@ -136,7 +136,7 @@ For new TCIA Data Retriever CSV manifests, the route is selected by column heade
 
 For public DICOM visualization before download, use IDC viewer capabilities. OHIF v3 is preferred for radiology, SliM is used for DICOM slide microscopy (`SM`), and VolView can be used when IDC metadata provides a public S3 series folder or CRDC series UUID. Agents should provide viewer URLs for users to open in their regular browser, not install browser automation just to display examples. Controlled-access data cannot be previewed in a public browser viewer before download, regardless of file format.
 
-For public non-DICOM histopathology slides in PathDB, use caMicroscope viewer URLs built from the PathDB cohort-builder CSV `slide_id`, for example `https://pathdb.cancerimagingarchive.net/caMicroscope/apps/mini/viewer.html?mode=pathdb&slideId=314525`. The PathDB helper adds a `camicroscope_url` field to slide-level rows.
+For public non-DICOM histopathology slides in PathDB, use caMicroscope viewer URLs built from the PathDB cohort-builder CSV `camic_id`, for example `https://pathdb.cancerimagingarchive.net/caMicroscope/apps/mini/viewer.html?mode=pathdb&slideId=314525`. The URL parameter is named `slideId`, but it expects numeric `camic_id`, not CSV `slide_id`. The PathDB helper adds a `camicroscope_url` field to slide-level rows.
 
 ## Controlled Access
 

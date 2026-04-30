@@ -46,18 +46,18 @@ def fetch_rows(url: str) -> list[dict[str, str]]:
     return list(csv.DictReader(io.StringIO(text)))
 
 
-def camicroscope_url(slide_id: str) -> str:
-    slide_id = slide_id.strip()
-    if not slide_id:
+def camicroscope_url(camic_id: str) -> str:
+    camic_id = camic_id.strip()
+    if not camic_id:
         return ""
-    return f"{CAMICROSCOPE_VIEWER_BASE}?mode=pathdb&slideId={quote(slide_id, safe='')}"
+    return f"{CAMICROSCOPE_VIEWER_BASE}?mode=pathdb&slideId={quote(camic_id, safe='')}"
 
 
 def add_viewer_urls(rows: list[dict[str, str]]) -> list[dict[str, str]]:
     output: list[dict[str, str]] = []
     for row in rows:
         enriched = dict(row)
-        enriched["camicroscope_url"] = camicroscope_url(enriched.get("slide_id", ""))
+        enriched["camicroscope_url"] = camicroscope_url(enriched.get("camic_id", ""))
         output.append(enriched)
     return output
 
@@ -161,6 +161,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             "collection_doi",
             "patient_id",
             "slide_id",
+            "camic_id",
             "data_format",
             "modality",
             "cancer_type",

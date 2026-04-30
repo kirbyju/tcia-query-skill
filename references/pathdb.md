@@ -53,20 +53,28 @@ python scripts/pathdb_metadata.py --query stomach --limit 10
 python scripts/pathdb_metadata.py --doi 10.7937/jw9a-8k71 --json
 ```
 
-The helper adds a derived `camicroscope_url` field for slide-level preview links when `slide_id` is present.
+The helper adds a derived `camicroscope_url` field for slide-level preview links when `camic_id` is present.
 
 ## caMicroscope Viewer
 
-For public non-DICOM PathDB slide images, use caMicroscope for browser visualization before download. Build viewer URLs from the CSV `slide_id`:
+For public non-DICOM PathDB slide images, use caMicroscope for browser visualization before download. Build viewer URLs from the CSV `camic_id`, not `slide_id`.
+
+The URL parameter is named `slideId`, but PathDB expects the numeric `camic_id`. The CSV `slide_id` often contains a specimen or slide label such as `C3L-00017-22`; do not put that label in the `slideId` URL parameter.
 
 ```text
-https://pathdb.cancerimagingarchive.net/caMicroscope/apps/mini/viewer.html?mode=pathdb&slideId=<slide_id>
+https://pathdb.cancerimagingarchive.net/caMicroscope/apps/mini/viewer.html?mode=pathdb&slideId=<camic_id>
 ```
 
 Example:
 
 ```text
 https://pathdb.cancerimagingarchive.net/caMicroscope/apps/mini/viewer.html?mode=pathdb&slideId=314525
+```
+
+For example, if the CSV row has `slide_id = C3L-00017-22` and `camic_id = 217324`, the correct URL is:
+
+```text
+https://pathdb.cancerimagingarchive.net/caMicroscope/apps/mini/viewer.html?mode=pathdb&slideId=217324
 ```
 
 Only use this route for open/public PathDB slides. If WordPress license metadata indicates controlled/restricted access, do not construct caMicroscope links; follow controlled-access guidance instead.

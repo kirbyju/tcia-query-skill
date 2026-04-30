@@ -105,7 +105,7 @@ The helper does not verify that data are open access or present in IDC. Always d
 
 ## Open Non-DICOM PathDB Slides
 
-For open/public non-DICOM histopathology data in PathDB, use caMicroscope for browser visualization before download. Confirm TCIA provenance in WordPress first, check that license metadata is open, then use the stable PathDB cohort-builder CSV to map slide IDs to collection, patient, DOI, cancer type/location, species, data format, and related-data flags.
+For open/public non-DICOM histopathology data in PathDB, use caMicroscope for browser visualization before download. Confirm TCIA provenance in WordPress first, check that license metadata is open, then use the stable PathDB cohort-builder CSV to map slide records to collection, patient, DOI, cancer type/location, species, data format, and related-data flags.
 
 CSV:
 
@@ -116,8 +116,10 @@ https://pathdb.cancerimagingarchive.net/system/files/collectionmetadata/202401/c
 caMicroscope URL pattern:
 
 ```text
-https://pathdb.cancerimagingarchive.net/caMicroscope/apps/mini/viewer.html?mode=pathdb&slideId=<slide_id>
+https://pathdb.cancerimagingarchive.net/caMicroscope/apps/mini/viewer.html?mode=pathdb&slideId=<camic_id>
 ```
+
+Despite the URL parameter name `slideId`, use the numeric CSV `camic_id`. Do not use CSV `slide_id`, `patient_id`, a specimen label, or the filename stem. For example, `slide_id = C3L-00017-22` uses `camic_id = 217324`, so the viewer URL ends in `slideId=217324`.
 
 Example:
 
