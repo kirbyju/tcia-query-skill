@@ -9,13 +9,17 @@ description: Find, verify, cite, visualize, and route TCIA-published datasets ac
 
 Use the TCIA WordPress Collection Manager as the authority for whether a dataset is TCIA-published. A dataset is in scope only if it appears as a WordPress Collection or Analysis Result. Downstream systems such as IDC, General Commons, PathDB, Zenodo, and DataCite can enrich or route access, but they do not decide TCIA provenance.
 
+Exception for DOI-centered questions: start with DataCite for DOI metadata, citation metadata, versions, and DOI relationships, then use WordPress to confirm TCIA publication status, visibility, access/license, and user-facing dataset pages.
+
 Ignore WordPress records where `hide_from_browse_table = "1"` by default. TCIA uses this flag for pre-release staging/review and for retired/outdated datasets that should not be casually rediscovered. Include hidden records only when the user explicitly says they are a TCIA staff member and explicitly asks to include hidden, staged, retired, or internal-review datasets.
 
 When a downstream record is derived from a TCIA DOI but is not itself listed in WordPress, describe it as an external derived or related dataset, not as a TCIA-published dataset.
 
 ## Quick Workflow
 
-1. Search WordPress first for Collections and Analysis Results.
+1. Choose the starting source.
+   - For DOI, citation, version, or DOI relationship questions, start with DataCite. Prefer `tcia_utils.datacite` when installed; otherwise use `scripts/datacite_tcia_dois.py`, `scripts/datacite_related.py`, or the DataCite REST API.
+   - For all other discovery and access questions, search WordPress first for Collections and Analysis Results.
    - Prefer `scripts/tcia_wordpress_search.py` for lightweight searches.
    - Use terse v2 results for broad discovery, then re-query candidates with `--verbose` when answering from abstracts, detailed descriptions, acknowledgements, methods, download notes, publications, or other long text.
    - Use `--include-hidden` only for explicit TCIA staff requests that ask for hidden/staged/retired records.
@@ -40,7 +44,7 @@ When a downstream record is derived from a TCIA DOI but is not itself listed in 
 | Controlled-access NCTN trials or Biobank data | If license metadata indicates controlled/restricted access, alert that the dataset is controlled access and point to the TCIA NIH Controlled Data Access Policy. Use WordPress for current metadata and access statements. CTDC support is expected later; do not invent CTDC routing until TCIA data are available there. |
 | Non-DICOM pathology | Use PathDB. Prefer the stable cohort-builder CSV for rich slide-level metadata, and match its `collection` field to the WordPress short title. The PathDB API collection list may use `collectionName`. |
 | Spreadsheets, ZIP files, supporting files, manifests, and ancillary downloads | Use WordPress download metadata. If a download is an IBM Aspera Faspex package, see `references/aspera.md`. |
-| DOI, citation, version, or derived-result relationships | Use WordPress citation fields and DataCite metadata. See `references/datacite-relationships.md`. |
+| DOI, citation, version, or derived-result relationships | Start with DataCite metadata and relationships, then use WordPress for TCIA publication/visibility, access/license, and user-facing pages. See `references/datacite-relationships.md`. |
 
 Read `references/routing.md` for detailed routing and answer-format guidance.
 
@@ -75,11 +79,23 @@ collections = wordpress.getCollections(format="df", removeHtml="yes")
 analyses = wordpress.getAnalyses(format="df", removeHtml="yes")
 downloads = wordpress.getDownloads(format="df", removeHtml="yes")
 doi_records = datacite.getDoi()
+derived = datacite.getDerivedDois("10.7937/TCIA.HMQ8-J677", format="df")
 
-# Default public-facing filter:
+# Default public-facing WordPress filter:
 collections = collections[collections["hide_from_browse_table"].astype(str) != "1"]
 analyses = analyses[analyses["hide_from_browse_table"].astype(str) != "1"]
 ```
+
+For DOI-centered work, prefer DataCite before WordPress:
+
+```python
+from tcia_utils import datacite
+
+doi_records = datacite.getDoi()
+derived = datacite.getDerivedDois("10.7937/TCIA.HMQ8-J677", format="df")
+```
+
+If `tcia_utils` is unavailable, query the public DataCite REST API first. TCIA DOI records can be listed with `https://api.datacite.org/dois?prefix=10.7937`; exact DOI records use `https://api.datacite.org/dois/<DOI>`. Use WordPress afterward to confirm the DOI resolves to a visible TCIA Collection or Analysis Result unless the user explicitly asks for hidden/staged/retired records as TCIA staff.
 
 For long-text evidence, use Collection Manager API v2 verbose mode (`v=1`). The bundled WordPress helper uses v2 by default and supports `--verbose`; use this when a user asks about abstracts, descriptions, methods, usage notes, acknowledgements, download notes, or other narrative fields. Do not rely on terse/default API output for these questions.
 
@@ -133,6 +149,7 @@ Run scripts from the skill root.
 | `scripts/tcia_create_data_retriever_csv.py` | Create a TCIA Data Retriever CSV manifest from validated DICOM Series Instance UIDs, direct `imageUrl` values, or `drs_uri` values. |
 | `scripts/idc_viewer_urls.py` | Construct OHIF v3, SliM, or VolView URLs after TCIA provenance, license, and IDC presence are already verified. |
 | `scripts/general_commons_studies.py` | Query General Commons GraphQL for TCIA face dataset study acronyms under `phs004225` and optional node counts. |
+| `scripts/datacite_tcia_dois.py` | List TCIA DOI metadata from DataCite using prefix `10.7937`, or fetch one exact DOI. |
 | `scripts/datacite_related.py` | Find DataCite records that declare DOI relationships, such as Zenodo records derived from TCIA DOIs. |
 | `scripts/pathdb_metadata.py` | Search or summarize PathDB non-DICOM histopathology slide metadata and derived caMicroscope viewer URLs from the stable cohort-builder CSV. |
 
@@ -150,6 +167,8 @@ python scripts/idc_viewer_urls.py ohif-v3 --study-uid <StudyInstanceUID> --serie
 python scripts/idc_viewer_urls.py slim --study-uid <StudyInstanceUID> --series-uid <SeriesInstanceUID>
 python scripts/idc_viewer_urls.py volview --crdc-series-uuid <crdc_series_uuid>
 python scripts/general_commons_studies.py --study-acronym TCGA-GBM --counts
+python scripts/datacite_tcia_dois.py --query breast --limit 10
+python scripts/datacite_tcia_dois.py --doi 10.7937/4qad-4280 --json
 python scripts/datacite_related.py 10.7937/TCIA.HMQ8-J677
 python scripts/pathdb_metadata.py --collection CPTAC-STAD --summary
 ```
@@ -174,7 +193,7 @@ Load `references/visualization.md` when a user asks to preview, visualize, open,
 
 ## DataCite Relationships
 
-Use DataCite to explain DOI provenance and derived-data relationships. For example, an external Zenodo dataset may declare `IsDerivedFrom` a TCIA DOI. Such a record is relevant to the TCIA collection, but it remains an external derived record unless WordPress also lists it as a Collection or Analysis Result.
+Use DataCite first for DOI metadata, citations, versions, and DOI provenance/derived-data relationships. For example, an external Zenodo dataset may declare `IsDerivedFrom` a TCIA DOI. Such a record is relevant to the TCIA collection, but it remains an external derived record unless WordPress also lists it as a Collection or Analysis Result.
 
 Load `references/datacite-relationships.md` when answering DOI, citation, version, or derived-result questions.
 

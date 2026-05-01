@@ -36,6 +36,7 @@ This skill tells an agent how to:
 - Ask users whether they want direct agent downloads or portable TCIA Data Retriever CSV manifests.
 - Route users to IDC, General Commons, PathDB, DataCite, WordPress downloads, or Aspera.
 - Point controlled-access users to TCIA's current access policy.
+- Start DOI, citation, version, and related-work questions from DataCite, then confirm TCIA publication/visibility in WordPress.
 
 The `references/` directory contains focused guidance the agent can load when needed, while `scripts/` contains small standard-library Python helpers for live metadata checks.
 
@@ -57,6 +58,7 @@ tcia-query-skill/
 |   +-- visualization.md
 +-- scripts/
     +-- datacite_related.py
+    +-- datacite_tcia_dois.py
     +-- general_commons_studies.py
     +-- idc_viewer_urls.py
     +-- pathdb_metadata.py
@@ -109,6 +111,8 @@ python scripts/idc_viewer_urls.py ohif-v3 --study-uid <StudyInstanceUID> --serie
 python scripts/idc_viewer_urls.py slim --study-uid <StudyInstanceUID> --series-uid <SeriesInstanceUID>
 python scripts/idc_viewer_urls.py volview --crdc-series-uuid <crdc_series_uuid>
 python scripts/general_commons_studies.py --study-acronym TCGA-GBM --counts
+python scripts/datacite_tcia_dois.py --query breast --limit 10
+python scripts/datacite_tcia_dois.py --doi 10.7937/4qad-4280 --json
 python scripts/datacite_related.py 10.7937/TCIA.HMQ8-J677
 python scripts/pathdb_metadata.py --collection CPTAC-STAD --summary
 python scripts/pathdb_metadata.py --collection CPTAC-STAD --limit 5

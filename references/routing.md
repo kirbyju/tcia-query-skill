@@ -33,6 +33,10 @@ Downstream field mappings:
 
 ## Discovery Process
 
+For DOI, citation, version, or DOI relationship questions, start with DataCite, not WordPress. Use `tcia_utils.datacite` if installed; otherwise use `scripts/datacite_tcia_dois.py`, `scripts/datacite_related.py`, or the DataCite REST API (`https://api.datacite.org/dois?prefix=10.7937`). Then use WordPress to confirm TCIA publication, hidden/visible status, access/license, and dataset pages.
+
+For non-DOI discovery:
+
 1. Query both WordPress Collections and Analysis Results. Use terse v2 output for initial broad search.
 2. Normalize title, short title, DOI, data types, cancer types, body locations, species, license text/status, page URL, `hide_from_browse_table`, and summary text.
 3. Remove hidden records by default.
@@ -102,8 +106,8 @@ Supporting files:
 
 DOI/citation:
 
-- Use WordPress citation fields first.
-- Use DataCite to inspect DOI metadata, related identifiers, versions, and external derived records.
+- Start with DataCite to inspect DOI metadata, related identifiers, versions, and external derived records.
+- Use WordPress after DataCite to confirm visible TCIA Collection/Analysis Result status, access/license, and dataset page/download routing.
 
 ## Download Label Interpretation
 
@@ -159,5 +163,5 @@ For exact dataset questions, give a short prose summary first, then a table of a
 - For open-access/public DICOM downloads, prefer IDC/idc-index. Existing TCIA `.tcia` manifests can be parsed for Series Instance UID allowlists, but NBIA should be fallback-only for public DICOM. New portable Data Retriever manifests should be CSV/TSV/XLSX-compatible, not `.tcia`, unless the user explicitly asks for the legacy NBIA-era format. If NBIA fallback is needed, use the NBIA v4 API documented by `https://cbiit.github.io/NBIA-TCIA/nbia-api.yaml`. For controlled-access DICOM, use WordPress license metadata and General Commons under `phs004225`; do not imply public IDC/NBIA download.
 - For new Data Retriever CSV manifests, route by one preferred header only: `SeriesInstanceUID` for public DICOM, `imageUrl` for PathDB/direct public files, or `drs_uri` for General Commons controlled-access files. Avoid mixed-route manifests because Data Retriever applies header precedence.
 - WordPress download metadata may contain nested objects or media IDs. Prefer the `tcia_utils.wordpress.getDownloads()` helper if package installation is allowed.
-- DataCite relationships are about DOI provenance. They do not automatically make an external Zenodo or IDC record a TCIA-published dataset.
+- DataCite relationships are about DOI provenance. They do not automatically make an external Zenodo or IDC record a TCIA-published dataset. WordPress remains the publication/visibility authority after DataCite discovery.
 - Controlled-access metadata can be public even when file access is restricted.
