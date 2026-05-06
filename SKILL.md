@@ -1,13 +1,13 @@
 ---
 name: tcia-query-skill
-description: Find, verify, cite, visualize, and route TCIA-published datasets across TCIA WordPress Collection and Analysis Result metadata, IDC/idc-index, General Commons, PathDB, DataCite, and Aspera. Use when users ask to discover TCIA datasets by cancer type, modality, body site, species, data type, access/license, DOI, program, clinical/supporting data, segmentation/annotation availability, browser preview/viewer URL, or download path, including public DICOM, controlled-access face datasets, non-DICOM pathology, supporting files, and derived results.
+description: Find, verify, cite, visualize, and route TCIA-published datasets across TCIA WordPress Collection and Analysis Result metadata, IDC/idc-index, Cancer Data Aggregator, General Commons, PathDB, DataCite, and Aspera. Use when users ask to discover TCIA datasets by cancer type, modality, body site, species, data type, access/license, DOI, program, clinical/supporting data, demographic/diagnosis enrichment, segmentation/annotation availability, browser preview/viewer URL, or download path, including public DICOM, controlled-access face datasets, non-DICOM pathology, supporting files, and derived results.
 ---
 
 # TCIA Query Skill
 
 ## Core Rule
 
-Use the TCIA WordPress Collection Manager as the authority for whether a dataset is TCIA-published. A dataset is in scope only if it appears as a WordPress Collection or Analysis Result. Downstream systems such as IDC, General Commons, PathDB, Zenodo, and DataCite can enrich or route access, but they do not decide TCIA provenance.
+Use the TCIA WordPress Collection Manager as the authority for whether a dataset is TCIA-published. A dataset is in scope only if it appears as a WordPress Collection or Analysis Result. Downstream systems such as IDC, CDA, General Commons, PathDB, Zenodo, and DataCite can enrich or route access, but they do not decide TCIA provenance.
 
 Exception for DOI-centered questions: start with DataCite for DOI metadata, citation metadata, versions, and DOI relationships, then use WordPress to confirm TCIA publication status, visibility, access/license, and user-facing dataset pages.
 
@@ -19,6 +19,7 @@ When a downstream record is derived from a TCIA DOI but is not itself listed in 
 
 1. Choose the starting source.
    - For DOI, citation, version, or DOI relationship questions, start with DataCite. Prefer `tcia_utils.datacite` when installed; otherwise use `scripts/datacite_tcia_dois.py`, `scripts/datacite_related.py`, or the DataCite REST API.
+   - For subject-level clinical, demographic, diagnosis, treatment, or cross-commons data-availability enrichment, confirm the TCIA dataset in WordPress first, then use CDA from validated TCIA/IDC subject identifiers. Load `references/cda.md`.
    - For all other discovery and access questions, search WordPress first for Collections and Analysis Results.
    - Prefer `scripts/tcia_wordpress_search.py` for lightweight searches.
    - Use terse v2 results for broad discovery, then re-query candidates with `--verbose` when answering from abstracts, detailed descriptions, acknowledgements, methods, download notes, publications, or other long text.
@@ -42,6 +43,7 @@ When a downstream record is derived from a TCIA DOI but is not itself listed in 
 | Browser visualization before download | Controlled-access data cannot be previewed before download. For open/public DICOM in IDC, use OHIF v3 for radiology, VolView when a public S3 series folder/CRDC UUID is available, and SliM for SM slide microscopy. For open/public non-DICOM PathDB slides, use caMicroscope with the PathDB CSV `camic_id`. Load `references/visualization.md`. |
 | Controlled-access face datasets | If license metadata indicates controlled/restricted access, alert that the dataset is controlled access and point to `https://www.cancerimagingarchive.net/nih-controlled-data-access-policy/`. Use General Commons metadata and access guidance. Scope GC queries to `phs004225` and match `study_acronym` to the WordPress short title. Do not promise file download without proper authorization. |
 | Controlled-access NCTN trials or Biobank data | If license metadata indicates controlled/restricted access, alert that the dataset is controlled access and point to the TCIA NIH Controlled Data Access Policy. Use WordPress for current metadata and access statements. CTDC support is expected later; do not invent CTDC routing until TCIA data are available there. |
+| Subject-level clinical/demographic/diagnosis enrichment or cross-commons availability | Use CDA after WordPress provenance is established. Prefer `cdapython` for harmonized subject and file summaries across IDC, GDC, PDC, GC, ICDC, and related upstream identifiers. Use CDA to enrich TCIA/IDC cohorts, not to decide TCIA publication, replace official WordPress downloads, or authorize controlled data access. Load `references/cda.md`. |
 | Non-DICOM pathology | Use PathDB. Prefer the stable cohort-builder CSV for rich slide-level metadata, and match its `collection` field to the WordPress short title. The PathDB API collection list may use `collectionName`. |
 | Spreadsheets, ZIP files, supporting files, manifests, and ancillary downloads | Use WordPress download metadata. If a download is an IBM Aspera Faspex package, see `references/aspera.md`. |
 | DOI, citation, version, or derived-result relationships | Start with DataCite metadata and relationships, then use WordPress for TCIA publication/visibility, access/license, and user-facing pages. See `references/datacite-relationships.md`. |
@@ -50,16 +52,16 @@ Read `references/routing.md` for detailed routing and answer-format guidance.
 
 ## Tool Setup
 
-Do not assume optional Python packages are installed. Before writing custom code for TCIA, IDC, or DICOM operations, check whether the appropriate package is available in the same Python environment that will run the task:
+Do not assume optional Python packages are installed. Before writing custom code for TCIA, IDC, DICOM, or CDA operations, check whether the appropriate package is available in the same Python environment that will run the task:
 
 ```bash
-python -c "import importlib.util as u; print({p: u.find_spec(p) is not None for p in ['tcia_utils','idc_index','pydicom']})"
+python -c "import importlib.util as u; print({p: u.find_spec(p) is not None for p in ['tcia_utils','idc_index','pydicom','cdapython']})"
 ```
 
 Ask before installing packages. If the user allows package installation, install them in the active local agent environment:
 
 ```bash
-python -m pip install --upgrade tcia_utils idc-index pydicom
+python -m pip install --upgrade tcia_utils idc-index pydicom cdapython
 ```
 
 Prefer these package APIs over custom implementations where possible:
@@ -67,8 +69,9 @@ Prefer these package APIs over custom implementations where possible:
 - `tcia_utils`: TCIA WordPress, DataCite, PathDB, and related helper APIs.
 - `idc-index`: IDC metadata lookup, public DICOM download, viewer URLs, cloud-storage URLs, and Series Instance UID workflows.
 - `pydicom`: local DICOM header/metadata inspection. Do not hand-parse DICOM files when `pydicom` can be installed or is already available.
+- `cdapython`: CDA subject/file summaries and harmonized cross-CRDC enrichment. Prefer it over direct `cda-client` or handwritten CDA REST calls.
 
-The bundled standard-library scripts are fallbacks and lightweight helpers. They do not replace `idc-index` for IDC workflows or `pydicom` for local DICOM parsing.
+The bundled standard-library scripts are fallbacks and lightweight helpers. They do not replace `idc-index` for IDC workflows, `pydicom` for local DICOM parsing, or `cdapython` for CDA workflows.
 
 Use `tcia_utils` for TCIA-specific metadata and helper APIs:
 
@@ -175,9 +178,15 @@ python scripts/pathdb_metadata.py --collection CPTAC-STAD --summary
 
 ## General Commons
 
-Use General Commons only for controlled-access TCIA face datasets unless the user explicitly asks for broader GC context. All TCIA data in General Commons are under `phs004225`; child `study_acronym` values should match WordPress `collection_short_title` or `result_short_title`.
+Use direct General Commons GraphQL only for controlled-access TCIA face datasets unless the user explicitly asks for broader GC context. All TCIA data in General Commons are under `phs004225`; child `study_acronym` values should match WordPress `collection_short_title` or `result_short_title`.
 
 Load `references/general-commons-graphql.md` when querying General Commons.
+
+## Cancer Data Aggregator
+
+Use CDA when a user asks whether TCIA/IDC subjects have additional harmonized clinical, demographic, diagnosis, treatment, genomic, proteomic, General Commons, or cross-CRDC file metadata. Load `references/cda.md`.
+
+Use CDA after WordPress confirms TCIA publication and after subject identifiers are validated through TCIA/IDC metadata. CDA can enrich a cohort, summarize which subjects have IDC/GDC/PDC/GC/ICDC data, and expose upstream identifiers, but WordPress remains the TCIA publication/download authority and source systems remain the access authorities.
 
 ## Controlled Access
 
@@ -225,7 +234,8 @@ Include the TCIA page link, WordPress short title, and any caveats about control
 - Before downloading data, ask whether the user wants direct agent download in the active environment or a portable manifest/file list when the requested data support that workflow. For new TCIA Data Retriever manifests, write CSV/TSV/XLSX-compatible files rather than legacy `.tcia` files.
 - For new TCIA Data Retriever CSV manifests, use one route header only: `SeriesInstanceUID` for public DICOM through IDC first/NBIA fallback, `imageUrl` for PathDB/direct public files, or `drs_uri` for General Commons controlled-access files.
 - Do not present VolView as UID-based. Map Study/Series UIDs through IDC/idc-index to a public S3 series folder or `crdc_series_uuid` before constructing a VolView URL.
-- Do not broaden IDC, GC, or PathDB searches beyond WordPress short titles, TCIA DOIs, or explicit user-approved exploratory scope.
+- Do not broaden IDC, CDA, GC, or PathDB searches beyond WordPress short titles, TCIA DOIs, subject identifiers from validated TCIA/IDC cohorts, or explicit user-approved exploratory scope.
+- Do not use CDA to claim TCIA publication, official TCIA clinical spreadsheet completeness, or controlled-data access rights. Use CDA as harmonized discovery/enrichment metadata and route users back to TCIA, IDC, GDC, PDC, GC, or other source systems for authoritative files and access controls.
 - Distinguish open Creative Commons, open Creative Commons NonCommercial, mixed open/controlled, and controlled/restricted license statuses clearly.
 - Do not provide medical, regulatory, or legal conclusions about data suitability. Report metadata, access terms, and citations.
 - Verify current package/API behavior when the user asks for latest status, current availability, or exact download commands.

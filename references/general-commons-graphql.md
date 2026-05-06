@@ -1,6 +1,6 @@
 # General Commons GraphQL
 
-Use this reference for controlled-access TCIA DICOM/face datasets in General Commons.
+Use this reference for direct General Commons GraphQL work on controlled-access TCIA DICOM/face datasets. For broader cross-CRDC subject enrichment that includes General Commons alongside IDC, GDC, and PDC, use `cda.md` instead.
 
 ## Constants
 

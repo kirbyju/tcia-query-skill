@@ -26,6 +26,7 @@ Downstream field mappings:
 | System | Matching field |
 | --- | --- |
 | General Commons | `study_acronym`, scoped to `phs004225` |
+| Cancer Data Aggregator | `subject_id` or source-specific IDs exposed through `upstream_identifiers.*`; validate identifiers from TCIA/IDC before matching |
 | PathDB cohort-builder CSV | `collection` |
 | PathDB API collection list | `collectionName` |
 | DataCite | TCIA DOI and related identifiers |
@@ -43,7 +44,7 @@ For non-DOI discovery:
 4. Filter locally when possible so criteria can match custom fields, not just WordPress full-text search.
 5. Re-query matching WordPress candidates with verbose mode before answering from abstracts/descriptions or quoting/paraphrasing narrative fields.
 6. Flag controlled access from license metadata only. Creative Commons means open; Creative Commons NonCommercial means open with noncommercial restriction; controlled/restricted license text means controlled access.
-7. Enrich only the filtered candidate set through IDC, General Commons, PathDB, or DataCite.
+7. Enrich only the filtered candidate set through IDC, CDA, General Commons, PathDB, or DataCite.
 8. If a candidate does not appear in WordPress, exclude it from TCIA-published results. If useful, mention it separately as related or derived.
 
 ## WordPress API Performance
@@ -89,6 +90,16 @@ Controlled-access NCTN trials or Biobank data:
 - Do not construct public browser viewer links. Controlled-access data cannot be visualized in a browser before download regardless of file format.
 - Use WordPress license metadata and dataset pages for now.
 - CTDC is planned but should not be used until TCIA data and matching fields are confirmed there.
+
+CDA subject enrichment:
+
+- Use CDA after WordPress provenance is established and after TCIA/IDC subject identifiers have been validated.
+- Prefer `cdapython` over direct `cda-client` or handwritten CDA REST calls. Load `cda.md`.
+- Good CDA questions include: which subjects in this TCIA/IDC cohort have GDC/PDC/GC/IDC data, what harmonized demographics/diagnoses/treatments are available, what file categories/formats/access levels exist, and what upstream identifiers can route users into source commons.
+- For a known subject list, use `match_from_file` against `subject_id` when identifiers are already in CDA subject-id form. If raw DICOM `PatientID` or WordPress spreadsheet IDs do not match, inspect CDA `columns(table="upstream_identifiers")` and use upstream identifier columns instead of broad wildcard matching.
+- For cohort summaries, use `summarize_subjects()` for demographics/diagnosis-style counts and `summarize_files()` for file categories, formats, data sources, and open/controlled file counts.
+- For row-level enrichment, use `get_subject_data(add_columns="upstream_identifiers.*", include_external_refs=True)` and add targeted tables such as `observation.*` or `treatment.*` only when the user needs those details.
+- CDA file `access` values help triage open versus controlled source files, but they do not authorize downloads. Route file access to the source commons and keep TCIA license metadata for TCIA download guidance.
 
 Non-DICOM pathology:
 
