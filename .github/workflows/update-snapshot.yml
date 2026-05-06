@@ -1,0 +1,79 @@
+name: Update TCIA metadata snapshot
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 7,19 * * *"
+      timezone: "America/New_York"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: tcia-metadata-snapshot
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build snapshot
+        run: |
+          mkdir -p dist
+          python scripts/tcia_snapshot.py build \
+            --out dist/tcia_snapshot.sqlite \
+            --gzip-out dist/tcia_snapshot.sqlite.gz \
+            --manifest-out dist/tcia_snapshot_manifest.json
+
+      - name: Compare with published snapshot
+        id: compare
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="tcia-snapshot-latest"
+          new_hash="$(python -c 'import json; print(json.load(open("dist/tcia_snapshot_manifest.json"))["content_sha256"])')"
+          echo "new_hash=${new_hash}" >> "$GITHUB_OUTPUT"
+
+          mkdir -p previous
+          if gh release download "$tag" --pattern tcia_snapshot_manifest.json --dir previous >/dev/null 2>&1; then
+            old_hash="$(python -c 'import json; print(json.load(open("previous/tcia_snapshot_manifest.json")).get("content_sha256", ""))')"
+          else
+            old_hash=""
+          fi
+
+          echo "old_hash=${old_hash}" >> "$GITHUB_OUTPUT"
+          if [ "$new_hash" = "$old_hash" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish changed snapshot
+        if: steps.compare.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="tcia-snapshot-latest"
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" \
+              --title "Latest TCIA metadata snapshot" \
+              --notes "Automatically updated SQLite metadata snapshot for the TCIA query skill."
+          fi
+          gh release upload "$tag" \
+            dist/tcia_snapshot.sqlite.gz \
+            dist/tcia_snapshot_manifest.json \
+            --clobber
+
+      - name: Report unchanged snapshot
+        if: steps.compare.outputs.changed == 'false'
+        run: echo "Snapshot content hash is unchanged; release assets were not updated."

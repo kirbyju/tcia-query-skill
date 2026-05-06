@@ -13,6 +13,8 @@ from collections import defaultdict
 from typing import Any, Optional
 from urllib.parse import quote
 
+import tcia_snapshot
+
 
 COHORT_BUILDER_CSV_URL = (
     "https://pathdb.cancerimagingarchive.net/system/files/collectionmetadata/202401/"
@@ -24,7 +26,6 @@ CAMICROSCOPE_VIEWER_BASE = (
 
 SUMMARY_COLUMNS = [
     "collection",
-    "collection_doi",
     "patients",
     "slides",
     "data_format",
@@ -32,9 +33,6 @@ SUMMARY_COLUMNS = [
     "cancer_type",
     "cancer_location",
     "species",
-    "has_radiology",
-    "has_genomics",
-    "has_proteomics",
     "last_update",
 ]
 
@@ -143,22 +141,44 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--query", help="Text search across all CSV fields.")
     parser.add_argument("--summary", action="store_true", help="Summarize by collection.")
     parser.add_argument("--limit", type=int, default=25, help="Maximum records to print.")
+    parser.add_argument(
+        "--snapshot-db",
+        help="Optional SQLite snapshot path. Defaults to TCIA_SNAPSHOT_DB or cache/tcia_snapshot.sqlite.",
+    )
+    parser.add_argument(
+        "--live",
+        action="store_true",
+        help="Bypass any local SQLite snapshot and query the live PathDB CSV.",
+    )
     parser.add_argument("--json", action="store_true", help="Emit JSON.")
     args = parser.parse_args(argv)
 
-    rows = add_viewer_urls(fetch_rows(args.url))
     collections = {value.lower() for value in args.collection}
     dois = {value.lower() for value in args.doi}
-    filtered = [row for row in rows if matches(row, args.query, collections, dois)]
+    use_snapshot = (
+        not args.live
+        and args.url == COHORT_BUILDER_CSV_URL
+        and tcia_snapshot.snapshot_available(args.snapshot_db)
+    )
+
+    if use_snapshot:
+        filtered = tcia_snapshot.pathdb_rows_from_snapshot(
+            query=args.query,
+            collections=collections,
+            dois=dois,
+            path=args.snapshot_db,
+        )
+    else:
+        rows = add_viewer_urls(fetch_rows(args.url))
+        filtered = [row for row in rows if matches(row, args.query, collections, dois)]
 
     if args.summary:
-        records = summarize(filtered)
+        records = tcia_snapshot.summarize_pathdb_rows(filtered) if use_snapshot else summarize(filtered)
         columns = SUMMARY_COLUMNS
     else:
         records = filtered
         columns = [
             "collection",
-            "collection_doi",
             "patient_id",
             "slide_id",
             "camic_id",

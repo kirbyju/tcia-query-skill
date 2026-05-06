@@ -15,6 +15,8 @@ from concurrent.futures import ThreadPoolExecutor
 from html.parser import HTMLParser
 from typing import Any, Optional
 
+import tcia_snapshot
+
 
 BASE_URL = "https://cancerimagingarchive.net/api/"
 CONTROLLED_ACCESS_POLICY_URL = (
@@ -416,6 +418,15 @@ def main(argv: Optional[list[str]] = None) -> int:
     )
     parser.add_argument("--limit", type=int, default=25, help="Maximum records to display.")
     parser.add_argument(
+        "--snapshot-db",
+        help="Optional SQLite snapshot path. Defaults to TCIA_SNAPSHOT_DB or cache/tcia_snapshot.sqlite.",
+    )
+    parser.add_argument(
+        "--live",
+        action="store_true",
+        help="Bypass any local SQLite snapshot and query the live WordPress API.",
+    )
+    parser.add_argument(
         "--include-hidden",
         action="store_true",
         help=(
@@ -425,6 +436,22 @@ def main(argv: Optional[list[str]] = None) -> int:
     )
     parser.add_argument("--json", action="store_true", help="Emit JSON instead of a table.")
     args = parser.parse_args(argv)
+
+    if not args.live and tcia_snapshot.snapshot_available(args.snapshot_db):
+        short_titles = {title.lower() for title in args.short_title}
+        records = tcia_snapshot.search_wordpress_records(
+            query=args.query,
+            short_titles=short_titles,
+            type_filter=args.type,
+            include_hidden=args.include_hidden,
+            path=args.snapshot_db,
+        )
+        records = records[: args.limit]
+        if args.json:
+            print(json.dumps(records, indent=2, sort_keys=True))
+        else:
+            print_table(records)
+        return 0
 
     api_search = args.query
     if not api_search and len(args.short_title) == 1:

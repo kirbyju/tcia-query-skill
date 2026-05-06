@@ -10,6 +10,8 @@ import urllib.parse
 import urllib.request
 from typing import Any, Optional
 
+import tcia_snapshot
+
 
 DATACITE_DOIS_URL = "https://api.datacite.org/dois"
 DEFAULT_TCIA_PREFIX = "10.7937"
@@ -121,10 +123,34 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--max-records", type=int, default=1000, help="Maximum DataCite records to fetch; 0 means all.")
     parser.add_argument("--page-size", type=int, default=100, help="DataCite page size.")
     parser.add_argument("--limit", type=int, default=50, help="Maximum records to print; 0 means all matched records.")
+    parser.add_argument(
+        "--snapshot-db",
+        help="Optional SQLite snapshot path. Defaults to TCIA_SNAPSHOT_DB or cache/tcia_snapshot.sqlite.",
+    )
+    parser.add_argument(
+        "--live",
+        action="store_true",
+        help="Bypass any local SQLite snapshot and query the live DataCite API.",
+    )
     parser.add_argument("--json", action="store_true", help="Emit JSON.")
     args = parser.parse_args(argv)
 
-    if args.doi:
+    records: list[dict[str, Any]]
+    use_snapshot = (
+        not args.live
+        and args.prefix == DEFAULT_TCIA_PREFIX
+        and tcia_snapshot.snapshot_available(args.snapshot_db)
+    )
+    if use_snapshot:
+        records = tcia_snapshot.datacite_records_from_snapshot(
+            doi=args.doi,
+            prefix=args.prefix,
+            query=args.query,
+            path=args.snapshot_db,
+        )
+        if args.doi and not records:
+            records = [normalize(fetch_doi(args.doi))]
+    elif args.doi:
         records = [normalize(fetch_doi(args.doi))]
     else:
         records = [normalize(work) for work in fetch_prefix(args.prefix, args.max_records, args.page_size)]

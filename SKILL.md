@@ -17,12 +17,13 @@ When a downstream record is derived from a TCIA DOI but is not itself listed in 
 
 ## Quick Workflow
 
+0. Prefer the local SQLite metadata snapshot for routine discovery and access/license metadata when `cache/tcia_snapshot.sqlite` or `TCIA_SNAPSHOT_DB` is available. Use live APIs only when the snapshot is missing, the user asks for live verification, or the user suspects something is stale or absent from the snapshot. Load `references/snapshots.md` for snapshot build, update, and troubleshooting details.
 1. Choose the starting source.
-   - For DOI, citation, version, or DOI relationship questions, start with DataCite. Prefer `tcia_utils.datacite` when installed; otherwise use `scripts/datacite_tcia_dois.py`, `scripts/datacite_related.py`, or the DataCite REST API.
+   - For DOI, citation, version, or DOI relationship questions, start with DataCite metadata from the snapshot when available. Prefer `scripts/datacite_tcia_dois.py` for TCIA DOI prefix records. Use `scripts/datacite_related.py`, `tcia_utils.datacite`, or the live DataCite REST API for DOI relationships or troubleshooting.
    - For subject-level clinical, demographic, diagnosis, treatment, or cross-commons data-availability enrichment, confirm the TCIA dataset in WordPress first, then use CDA from validated TCIA/IDC subject identifiers. Load `references/cda.md`.
-   - For all other discovery and access questions, search WordPress first for Collections and Analysis Results.
+   - For all other discovery and access questions, search WordPress snapshot records first for Collections and Analysis Results.
    - Prefer `scripts/tcia_wordpress_search.py` for lightweight searches.
-   - Use terse v2 results for broad discovery, then re-query candidates with `--verbose` when answering from abstracts, detailed descriptions, acknowledgements, methods, download notes, publications, or other long text.
+   - When the snapshot is unavailable and live APIs are needed, use terse v2 results for broad discovery, then re-query candidates with `--verbose` when answering from abstracts, detailed descriptions, acknowledgements, methods, download notes, publications, or other long text.
    - Use `--include-hidden` only for explicit TCIA staff requests that ask for hidden/staged/retired records.
    - Or use `tcia_utils.wordpress.getCollections()` and `getAnalyses()` if packages are available.
 2. Filter out `hide_from_browse_table = "1"` records unless the explicit TCIA staff exception applies.
@@ -148,6 +149,7 @@ Run scripts from the skill root.
 | Script | Purpose |
 | --- | --- |
 | `scripts/tcia_wordpress_search.py` | Search live TCIA WordPress Collection and Analysis Result metadata, with text or JSON output. |
+| `scripts/tcia_snapshot.py` | Build, inspect, or download the local SQLite metadata snapshot. |
 | `scripts/tcia_manifest_series_uids.py` | Extract DICOM Series Instance UIDs from a legacy TCIA `.tcia` manifest path or URL for IDC/idc-index lookup. |
 | `scripts/tcia_create_data_retriever_csv.py` | Create a TCIA Data Retriever CSV manifest from validated DICOM Series Instance UIDs, direct `imageUrl` values, or `drs_uri` values. |
 | `scripts/idc_viewer_urls.py` | Construct OHIF v3, SliM, or VolView URLs after TCIA provenance, license, and IDC presence are already verified. |
@@ -159,10 +161,13 @@ Run scripts from the skill root.
 Examples:
 
 ```bash
+python scripts/tcia_snapshot.py info
+python scripts/tcia_snapshot.py build --out cache/tcia_snapshot.sqlite --gzip-out dist/tcia_snapshot.sqlite.gz --manifest-out dist/tcia_snapshot_manifest.json
 python scripts/tcia_wordpress_search.py --query breast --limit 10
 python scripts/tcia_wordpress_search.py --short-title TCGA-BRCA --verbose --json
 python scripts/tcia_wordpress_search.py --short-title TCGA-BRCA --json
 python scripts/tcia_wordpress_search.py --query lung --workers 6 --limit 10
+python scripts/tcia_wordpress_search.py --query lung --live --limit 10
 python scripts/tcia_wordpress_search.py --query retired --include-hidden
 python scripts/tcia_manifest_series_uids.py ./legacy_manifest.tcia --out series_uids.txt
 python scripts/tcia_create_data_retriever_csv.py --uids-file series_uids.txt --out manifest.csv
