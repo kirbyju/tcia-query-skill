@@ -1,18 +1,20 @@
 # SQLite Metadata Snapshots
 
-The skill can use a local SQLite snapshot for routine TCIA discovery instead of querying every source live. The snapshot contains:
+The skill uses a local SQLite snapshot for routine TCIA discovery instead of querying public APIs during end-user tasks. The snapshot contains:
 
 - TCIA WordPress Collections, Analysis Results, and Downloads.
 - Normalized current WordPress download records and their multi-select labels.
 - PathDB cohort-builder slide metadata, trimmed to TCIA query fields.
 - DataCite records under the TCIA DOI prefix `10.7937`.
 
-Generated snapshot files are intentionally not committed to the repository. GitHub Actions builds them twice daily and publishes changed content as release assets:
+Generated snapshot files are intentionally not committed to the repository. GitHub Actions builds them twice daily at 7:17 AM and 7:17 PM America/New_York and publishes changed content as release assets:
 
 - `tcia_snapshot.sqlite.gz`
 - `tcia_snapshot_manifest.json`
 
-The workflow compares source-content hashes and skips release uploads when the source content has not changed.
+The workflow compares source-content hashes and the snapshot schema version. It skips release uploads only when both are unchanged.
+
+GitHub scheduled workflows can start late. If a user asks about a dataset that appears to be missing, say the published snapshot may not include the newest TCIA metadata yet and ask them to try again after the next scheduled snapshot run has had time to finish.
 
 ## Local Cache
 
@@ -29,9 +31,24 @@ Users or agents can override the SQLite path with:
 export TCIA_SNAPSHOT_DB=/path/to/tcia_snapshot.sqlite
 ```
 
-The helper scripts prefer the local snapshot when it exists. Use `--live` to bypass the snapshot when a user suspects stale or missing metadata.
+The helper scripts use the local snapshot. They do not fall back to live public APIs for normal end-user discovery.
+
+## Refresh Local Metadata
+
+End users do not need to reinstall the skill just to receive newer TCIA metadata. Skill code/instructions and snapshot data are separate.
+
+- Reinstall or update the skill only when the skill instructions or scripts changed.
+- Refresh metadata by updating the local SQLite snapshot:
+
+```bash
+python scripts/tcia_snapshot.py ensure
+```
+
+By default, `ensure` downloads release assets from `kirbyju/tcia-query-skill`. Use `--repo owner/name` only when testing a fork or alternate release source. The helper compares content hashes and schema versions, then replaces `cache/tcia_snapshot.sqlite` only when the published snapshot data or schema changed.
 
 ## Build A Snapshot
+
+This section is for maintainers and developers improving the skill. End users trying to find or download TCIA data should use the published release snapshot through `ensure`, not live API queries.
 
 From the skill root:
 
@@ -44,31 +61,23 @@ python scripts/tcia_snapshot.py build \
 
 The generated SQLite database is suitable for local use. The gzipped artifact is suitable for GitHub Release distribution.
 
-## Install Or Update From A Release
-
-From the skill root, when release assets are available:
-
-```bash
-python scripts/tcia_snapshot.py ensure --repo <owner>/<repo>
-```
-
-The helper checks the release manifest content hash and downloads the snapshot only when the local cache is missing or changed.
-
 ## Query Behavior
 
-These scripts prefer the SQLite snapshot when available:
+These scripts query the SQLite snapshot:
 
 - `scripts/tcia_wordpress_search.py`
 - `scripts/pathdb_metadata.py`
 - `scripts/datacite_tcia_dois.py`
 
-Troubleshooting examples:
+Examples:
 
 ```bash
-python scripts/tcia_wordpress_search.py --query breast --live
-python scripts/pathdb_metadata.py --collection CPTAC-STAD --summary --live
-python scripts/datacite_tcia_dois.py --query lung --live
+python scripts/tcia_wordpress_search.py --query breast
+python scripts/pathdb_metadata.py --collection CPTAC-STAD --summary
+python scripts/datacite_tcia_dois.py --query lung
 ```
+
+For direct SQL, prefer the views documented in `references/schema.md`: `agent_datasets`, `agent_current_downloads`, `agent_dataset_access_summary`, `agent_pathdb_slides`, and `agent_datacite_dois`.
 
 ## WordPress Download Tables
 

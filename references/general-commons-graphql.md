@@ -81,7 +81,7 @@ Variables:
 }
 ```
 
-Use these metadata rows to report controlled status, modality, file type, file IDs, DRS URIs from `filesInList`, and approximate sizes. Do not imply that controlled files can be downloaded without authorization.
+Use these metadata rows to report controlled status, modality, file type, file IDs, DRS URIs from `filesInList`, and approximate sizes. Do not imply that controlled files can be downloaded without authorization, and do not directly download controlled data for the user. Provide DRS/manifest guidance for later authorized use when useful.
 
 ## Count Queries
 
@@ -146,4 +146,4 @@ Most require `phs_accession: "phs004225"`. Some support additional filters, such
 
 ## Access Guidance
 
-General Commons hosts both open and controlled-access data. For TCIA controlled-access DICOM/face datasets, focus on metadata discovery and direct users to dbGaP/DAC authorization and SB-CGC access where controlled access applies. Do not claim that controlled files can be downloaded without authorization.
+General Commons hosts both open and controlled-access data. For TCIA controlled-access DICOM/face datasets, focus on metadata discovery and direct users to dbGaP/DAC authorization and SB-CGC access where controlled access applies. Do not claim that controlled files can be downloaded without authorization, and do not directly download controlled data.

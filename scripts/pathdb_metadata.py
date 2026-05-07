@@ -1,28 +1,15 @@
 #!/usr/bin/env python3
-"""Search or summarize PathDB non-DICOM histopathology metadata."""
+"""Search or summarize PathDB non-DICOM histopathology snapshot metadata."""
 
 from __future__ import annotations
 
 import argparse
-import csv
-import io
 import json
 import sys
-import urllib.request
-from collections import defaultdict
 from typing import Any, Optional
-from urllib.parse import quote
 
 import tcia_snapshot
 
-
-COHORT_BUILDER_CSV_URL = (
-    "https://pathdb.cancerimagingarchive.net/system/files/collectionmetadata/202401/"
-    "cohort_builder_v1_01-16-2024.csv"
-)
-CAMICROSCOPE_VIEWER_BASE = (
-    "https://pathdb.cancerimagingarchive.net/caMicroscope/apps/mini/viewer.html"
-)
 
 SUMMARY_COLUMNS = [
     "collection",
@@ -37,79 +24,6 @@ SUMMARY_COLUMNS = [
 ]
 
 
-def fetch_rows(url: str) -> list[dict[str, str]]:
-    request = urllib.request.Request(url, headers={"User-Agent": "tcia-query-skill/1.0"})
-    with urllib.request.urlopen(request, timeout=60) as response:
-        text = response.read().decode("utf-8-sig", errors="replace")
-    return list(csv.DictReader(io.StringIO(text)))
-
-
-def camicroscope_url(camic_id: str) -> str:
-    camic_id = camic_id.strip()
-    if not camic_id:
-        return ""
-    return f"{CAMICROSCOPE_VIEWER_BASE}?mode=pathdb&slideId={quote(camic_id, safe='')}"
-
-
-def add_viewer_urls(rows: list[dict[str, str]]) -> list[dict[str, str]]:
-    output: list[dict[str, str]] = []
-    for row in rows:
-        enriched = dict(row)
-        enriched["camicroscope_url"] = camicroscope_url(enriched.get("camic_id", ""))
-        output.append(enriched)
-    return output
-
-
-def unique_join(values: set[str], max_items: int = 4) -> str:
-    clean = sorted(value for value in values if value)
-    if len(clean) > max_items:
-        return "; ".join(clean[:max_items]) + f"; +{len(clean) - max_items} more"
-    return "; ".join(clean)
-
-
-def summarize(rows: list[dict[str, str]]) -> list[dict[str, Any]]:
-    grouped: dict[str, list[dict[str, str]]] = defaultdict(list)
-    for row in rows:
-        grouped[row.get("collection", "")].append(row)
-
-    summaries: list[dict[str, Any]] = []
-    for collection, group in sorted(grouped.items()):
-        summaries.append(
-            {
-                "collection": collection,
-                "collection_doi": unique_join({row.get("collection_doi", "") for row in group}, 2),
-                "patients": len({row.get("patient_id", "") for row in group if row.get("patient_id")}),
-                "slides": len({row.get("slide_id", "") for row in group if row.get("slide_id")}),
-                "data_format": unique_join({row.get("data_format", "") for row in group}),
-                "modality": unique_join({row.get("modality", "") for row in group}),
-                "cancer_type": unique_join({row.get("cancer_type", "") for row in group}),
-                "cancer_location": unique_join({row.get("cancer_location", "") for row in group}),
-                "species": unique_join({row.get("species", "") for row in group}),
-                "has_radiology": unique_join({row.get("has_radiology", "") for row in group}, 2),
-                "has_genomics": unique_join({row.get("has_genomics", "") for row in group}, 2),
-                "has_proteomics": unique_join({row.get("has_proteomics", "") for row in group}, 2),
-                "last_update": max((row.get("update", "") for row in group), default=""),
-            }
-        )
-    return summaries
-
-
-def matches(
-    row: dict[str, str],
-    query: Optional[str],
-    collections: set[str],
-    dois: set[str],
-) -> bool:
-    if collections and row.get("collection", "").lower() not in collections:
-        return False
-    if dois and row.get("collection_doi", "").lower() not in dois:
-        return False
-    if query:
-        haystack = " ".join(str(value).lower() for value in row.values())
-        return all(term in haystack for term in query.lower().split())
-    return True
-
-
 def shorten(value: Any, width: int) -> str:
     text = str(value or "").replace("\n", " ").strip()
     if len(text) <= width:
@@ -119,7 +33,11 @@ def shorten(value: Any, width: int) -> str:
 
 def print_table(records: list[dict[str, Any]], columns: list[str]) -> None:
     if not records:
-        print("No PathDB metadata rows matched.")
+        print(
+            "No PathDB metadata rows matched. If you expected very recent metadata, "
+            "try again after the next 7:17 AM or 7:17 PM America/New_York snapshot "
+            "run has finished, then rerun `python scripts/tcia_snapshot.py ensure`."
+        )
         return
 
     widths = {column: min(max(len(column), 10), 32) for column in columns}
@@ -135,7 +53,6 @@ def print_table(records: list[dict[str, Any]], columns: list[str]) -> None:
 
 def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--url", default=COHORT_BUILDER_CSV_URL, help="PathDB cohort-builder CSV URL.")
     parser.add_argument("--collection", action="append", default=[], help="Exact PathDB collection/TCIA short title.")
     parser.add_argument("--doi", action="append", default=[], help="Exact collection DOI.")
     parser.add_argument("--query", help="Text search across all CSV fields.")
@@ -145,35 +62,28 @@ def main(argv: Optional[list[str]] = None) -> int:
         "--snapshot-db",
         help="Optional SQLite snapshot path. Defaults to TCIA_SNAPSHOT_DB or cache/tcia_snapshot.sqlite.",
     )
-    parser.add_argument(
-        "--live",
-        action="store_true",
-        help="Bypass any local SQLite snapshot and query the live PathDB CSV.",
-    )
     parser.add_argument("--json", action="store_true", help="Emit JSON.")
     args = parser.parse_args(argv)
 
     collections = {value.lower() for value in args.collection}
     dois = {value.lower() for value in args.doi}
-    use_snapshot = (
-        not args.live
-        and args.url == COHORT_BUILDER_CSV_URL
-        and tcia_snapshot.snapshot_available(args.snapshot_db)
+    if not tcia_snapshot.snapshot_available(args.snapshot_db):
+        print(
+            f"No local TCIA snapshot found at {tcia_snapshot.snapshot_path(args.snapshot_db)}. "
+            "Run `python scripts/tcia_snapshot.py ensure` from the skill root, then try again.",
+            file=sys.stderr,
+        )
+        return 1
+
+    filtered = tcia_snapshot.pathdb_rows_from_snapshot(
+        query=args.query,
+        collections=collections,
+        dois=dois,
+        path=args.snapshot_db,
     )
 
-    if use_snapshot:
-        filtered = tcia_snapshot.pathdb_rows_from_snapshot(
-            query=args.query,
-            collections=collections,
-            dois=dois,
-            path=args.snapshot_db,
-        )
-    else:
-        rows = add_viewer_urls(fetch_rows(args.url))
-        filtered = [row for row in rows if matches(row, args.query, collections, dois)]
-
     if args.summary:
-        records = tcia_snapshot.summarize_pathdb_rows(filtered) if use_snapshot else summarize(filtered)
+        records = tcia_snapshot.summarize_pathdb_rows(filtered)
         columns = SUMMARY_COLUMNS
     else:
         records = filtered

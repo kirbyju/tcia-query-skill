@@ -6,7 +6,7 @@ Use this reference when a user asks to download TCIA-published DICOM data, inclu
 
 Prefer IDC and `idc-index` for open-access/public DICOM downloads. TCIA is phasing out NBIA, so do not use NBIA as the first download route for public DICOM data. Use NBIA only as a fallback when requested open-access/public DICOM series cannot be found in IDC/idc-index. If NBIA fallback is needed, use the NBIA v4 API documented by `https://cbiit.github.io/NBIA-TCIA/nbia-api.yaml`.
 
-Controlled-access DICOM is different: do not route it to IDC or NBIA fallback for public download. So far, controlled-access TCIA DICOM metadata lives in General Commons under `phs004225`, with WordPress license metadata as the access-status trigger and the TCIA controlled-access policy page as the user-facing access guidance.
+Controlled-access DICOM is different: do not route it to IDC or NBIA fallback for public download, and do not directly download controlled data. So far, controlled-access TCIA DICOM metadata lives in General Commons under `phs004225`, with WordPress license metadata as the access-status trigger and the TCIA controlled-access policy page as the user-facing access guidance. For controlled data, provide policy guidance and portable TCIA Data Retriever manifests for later authorized use when appropriate.
 
 If an IDC skill is available, use it for IDC-specific query, visualization, license, citation, and download mechanics. The TCIA skill should establish TCIA provenance through WordPress, identify the relevant WordPress download records or manifest, and provide IDC allowlist inputs such as the TCIA short title, DOI, or Series Instance UIDs.
 
@@ -32,7 +32,7 @@ Do not silently install packages. If package installation is not allowed, explai
 1. Confirm the dataset is a visible TCIA WordPress Collection or Analysis Result.
 2. Check WordPress license metadata before giving download commands.
 3. Identify DICOM downloads from WordPress `file_type = DICOM`, existing `.tcia` manifest URLs, CSV/TSV/XLSX manifest URLs, or DICOM-specific `data_type` values such as CT, MR, PT, RTSTRUCT, SEG, SR, DX, MG, CR, NM, RTDOSE, RTPLAN, RTIMAGE, REG, KO, PR, RWV, OT, US, XA, RF, and SC.
-4. Before downloading, ask the user whether they want direct agent download in the current environment or a portable TCIA Data Retriever CSV manifest.
+4. For open/public data only, before downloading, ask the user whether they want direct agent download in the current environment or a portable TCIA Data Retriever CSV manifest.
 5. Prefer IDC/idc-index for direct agent downloads:
    - Match by TCIA DOI, short title, IDC `collection_id`, IDC `analysis_result_id`, or Series Instance UID.
    - For existing `.tcia` manifest records, extract Series Instance UIDs and use them as the most precise allowlist.
@@ -85,7 +85,7 @@ TCIA Data Retriever accepts spreadsheets (`.csv`, `.tsv`, `.xlsx`) as manifests.
 - For PathDB/direct public file workflows, use an `imageUrl` column.
 - For General Commons DRS/controlled-access workflows, use a `drs_uri` column and remind users that authorization may be required.
 - Explain that a CSV manifest can be saved, opened with TCIA Data Retriever on another computer, or shared with a collaborator.
-- For controlled-access datasets, remind users that authorization and TCIA Data Retriever API-key configuration are still required.
+- For controlled-access datasets, do not directly download files. Remind users that authorization and TCIA Data Retriever API-key configuration are required before they use a controlled manifest.
 
 Example:
 
@@ -127,7 +127,7 @@ When giving DICOM download guidance, say explicitly:
 
 - IDC/idc-index is the preferred route for public DICOM because TCIA is phasing out NBIA.
 - WordPress remains the TCIA provenance and license source.
-- Ask whether the user wants direct agent download or a portable TCIA Data Retriever CSV manifest.
+- For open/public data, ask whether the user wants direct agent download or a portable TCIA Data Retriever CSV manifest. For controlled data, provide manifest guidance only.
 - CSV manifests are useful as Series Instance UID allowlists and as portable Data Retriever inputs, while `.tcia` is legacy. Downloading through NBIA APIs should be fallback-only for public DICOM.
 - If NBIA fallback is required, use the NBIA v4 API documented by `https://cbiit.github.io/NBIA-TCIA/nbia-api.yaml`.
 - Controlled-access DICOM metadata should be handled through WordPress plus General Commons under `phs004225`; follow TCIA controlled-access guidance and do not imply public download.

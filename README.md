@@ -2,7 +2,7 @@
 
 `tcia-query-skill` is an agent skill for helping users find, verify, cite, and access datasets published by [The Cancer Imaging Archive (TCIA)](https://www.cancerimagingarchive.net/about-the-cancer-imaging-archive-tcia/).
 
-The skill is designed to hide the complexity of TCIA's multi-system data ecosystem. It starts with TCIA's WordPress Collection Manager as the source of truth, then routes users to the right downstream system for the data they need.
+The skill is designed to hide the complexity of TCIA's multi-system data ecosystem. It treats TCIA's WordPress Collection Manager as the publication source of truth, uses a local SQLite snapshot as the normal agent-friendly query layer, then routes users to the right downstream system for the data they need.
 
 ## What Is TCIA?
 
@@ -10,6 +10,7 @@ The Cancer Imaging Archive is an NCI-supported service that de-identifies and ho
 
 TCIA data can live across several access systems, including:
 
+- The local SQLite metadata snapshot published by this repository
 - TCIA WordPress Collection and Analysis Result pages
 - IDC / `idc-index` for many public DICOM datasets
 - General Commons for controlled-access TCIA face datasets
@@ -26,8 +27,9 @@ An agent skill is a portable bundle of instructions, references, and helper scri
 This skill tells an agent how to:
 
 - Confirm whether a dataset is TCIA-published.
+- Query the local SQLite snapshot for routine discovery, access/license metadata, PathDB slide metadata, and TCIA DOI records.
 - Ignore hidden WordPress records unless TCIA staff explicitly request them.
-- Use verbose WordPress metadata for abstracts and descriptions.
+- Use snapshot text fields for abstracts and descriptions.
 - Classify open versus controlled access from license metadata.
 - Identify Creative Commons NonCommercial datasets without mistaking them for controlled access.
 - Prefer IDC/idc-index over NBIA for public DICOM downloads.
@@ -38,23 +40,29 @@ This skill tells an agent how to:
 - Point controlled-access users to TCIA's current access policy.
 - Start DOI, citation, version, and related-work questions from DataCite, then confirm TCIA publication/visibility in WordPress.
 
-The `references/` directory contains focused guidance the agent can load when needed, while `scripts/` contains small standard-library Python helpers for live metadata checks.
+The `references/` directory contains focused guidance the agent can load when needed, while `scripts/` contains small standard-library Python helpers for snapshot refresh, snapshot querying, manifests, and viewer URL construction.
 
 ## Repository Layout
 
 ```text
 tcia-query-skill/
 +-- SKILL.md
++-- .github/
+|   +-- workflows/
+|       +-- update-snapshot.yml
 +-- agents/
 |   +-- openai.yaml
 +-- references/
 |   +-- aspera.md
+|   +-- cda.md
 |   +-- controlled-access.md
 |   +-- datacite-relationships.md
 |   +-- general-commons-graphql.md
 |   +-- idc-dicom-downloads.md
 |   +-- pathdb.md
 |   +-- routing.md
+|   +-- schema.md
+|   +-- snapshots.md
 |   +-- visualization.md
 +-- scripts/
     +-- datacite_related.py
@@ -62,6 +70,7 @@ tcia-query-skill/
     +-- general_commons_studies.py
     +-- idc_viewer_urls.py
     +-- pathdb_metadata.py
+    +-- tcia_snapshot.py
     +-- tcia_create_data_retriever_csv.py
     +-- tcia_manifest_series_uids.py
     +-- tcia_wordpress_search.py
@@ -92,19 +101,38 @@ Examples:
 - **OpenAI Codex**: Install the GitHub repository as a Codex skill, or clone it into a local Codex skills directory so Codex can discover `SKILL.md`.
 - **Claude Code / Claude Desktop**: Add this repository as a project knowledge/source folder or adapt `SKILL.md` into a Claude skill-style instruction file.
 - **Cursor, Cline, Roo Code, Continue, OpenHands, or similar coding agents**: Clone the repo and tell the agent to use `SKILL.md` as the task guide. These tools can usually read the references and run the Python helper scripts.
-- **Custom agents**: Load `SKILL.md` as the primary system/domain instruction, then load files from `references/` on demand. Permit script execution if the agent is allowed to query live public metadata.
+- **Custom agents**: Load `SKILL.md` as the primary system/domain instruction, then load files from `references/` on demand. Permit script execution so the agent can refresh/query the SQLite snapshot and create manifests.
+- **SQLite-aware agents**: Mount `cache/tcia_snapshot.sqlite` directly and prefer the views documented in [references/schema.md](./references/schema.md).
 
 For non-Codex tools, this repository may not be "installed" automatically as a native skill. It can still be used as structured agent guidance.
 
-## Helper Scripts
+## SQLite Snapshot
 
-The helper scripts use Python's standard library and query public metadata endpoints.
+Routine discovery should use the local SQLite snapshot, not live public API calls. The published snapshot is built twice daily by GitHub Actions at **7:17 AM and 7:17 PM America/New_York** and released as:
+
+- `tcia_snapshot.sqlite.gz`
+- `tcia_snapshot_manifest.json`
+
+After installing or cloning the skill, refresh local metadata from the latest release:
 
 ```bash
+python scripts/tcia_snapshot.py ensure
+```
+
+This updates `cache/tcia_snapshot.sqlite` only when the published snapshot data or schema changed. End users do **not** need to reinstall the skill just to get newer metadata; reinstall or update the skill only when the instructions or scripts changed.
+
+If a dataset appears to be missing, the snapshot may not include the newest TCIA metadata yet. Try again after the next scheduled snapshot run has had time to finish, then rerun `python scripts/tcia_snapshot.py ensure`.
+
+## Helper Scripts
+
+The helper scripts use Python's standard library. Discovery scripts query the local SQLite snapshot and ask you to run `scripts/tcia_snapshot.py ensure` if the snapshot is missing.
+
+```bash
+python scripts/tcia_snapshot.py ensure
+python scripts/tcia_snapshot.py info
 python scripts/tcia_wordpress_search.py --query breast --limit 10
 python scripts/tcia_wordpress_search.py --short-title EAY131 --json
-python scripts/tcia_wordpress_search.py --short-title 4D-Lung --verbose --json
-python scripts/tcia_wordpress_search.py --query lung --workers 6 --limit 10
+python scripts/tcia_wordpress_search.py --short-title 4D-Lung --json
 python scripts/tcia_manifest_series_uids.py ./legacy_manifest.tcia --out series_uids.txt
 python scripts/tcia_create_data_retriever_csv.py --uids-file series_uids.txt --out manifest.csv
 python scripts/idc_viewer_urls.py ohif-v3 --study-uid <StudyInstanceUID> --series-uid <SeriesInstanceUID>
@@ -113,26 +141,26 @@ python scripts/idc_viewer_urls.py volview --crdc-series-uuid <crdc_series_uuid>
 python scripts/general_commons_studies.py --study-acronym TCGA-GBM --counts
 python scripts/datacite_tcia_dois.py --query breast --limit 10
 python scripts/datacite_tcia_dois.py --doi 10.7937/4qad-4280 --json
-python scripts/datacite_related.py 10.7937/TCIA.HMQ8-J677
 python scripts/pathdb_metadata.py --collection CPTAC-STAD --summary
 python scripts/pathdb_metadata.py --collection CPTAC-STAD --limit 5
 ```
 
-The WordPress search helper parallelizes v2 pagination with `--workers 4` by default. Use a modest higher value for broad metadata scans, or `--workers 1` for sequential troubleshooting.
+Developers improving the snapshot builder can use `python scripts/tcia_snapshot.py build` to query the source APIs and create release assets. End-user discovery should use the release snapshot.
 
 ## Recommended Python Packages
 
-The bundled helper scripts use Python's standard library, so the skill can still run basic metadata workflows without extra packages. For best results, install the domain packages in the same Python environment used by the local agent:
+The bundled helper scripts use Python's standard library, so the skill can run basic snapshot and manifest workflows without extra packages. For best results on download, viewer, DICOM, and CDA enrichment tasks, install the domain packages in the same Python environment used by the local agent:
 
 ```bash
-python -m pip install --upgrade tcia_utils idc-index pydicom
+python -m pip install --upgrade tcia_utils idc-index pydicom cdapython
 ```
 
 Agents should check whether these packages are available before writing custom code, ask before installing missing packages, and prefer:
 
-- `tcia_utils` for TCIA WordPress, DataCite, PathDB, and related helper APIs.
+- `tcia_utils` for TCIA-specific helper APIs when maintaining the snapshot or doing explicit source-system checks.
 - `idc-index` for IDC lookup, public DICOM downloads, viewer URLs, cloud-storage URLs, and Series Instance UID workflows.
 - `pydicom` for local DICOM header/metadata inspection.
+- `cdapython` for CDA subject/file summaries and cross-commons enrichment.
 
 For public DICOM downloads, use IDC/idc-index first. Existing TCIA `.tcia` manifests can be parsed into Series Instance UID allowlists with `scripts/tcia_manifest_series_uids.py`, then looked up and downloaded through IDC. Before downloading, agents should ask whether the user wants files downloaded directly in the active environment or a portable CSV manifest created for TCIA Data Retriever. New manifests should be CSV/TSV/XLSX-compatible, not legacy `.tcia`, unless the user explicitly asks for the legacy NBIA-era format. NBIA should be fallback-only for DICOM data that cannot be found in IDC/idc-index. If NBIA fallback is needed, use the NBIA v4 API documented by `https://cbiit.github.io/NBIA-TCIA/nbia-api.yaml`.
 
@@ -155,6 +183,8 @@ For controlled-access datasets, users should consult TCIA's current policy page:
 https://www.cancerimagingarchive.net/nih-controlled-data-access-policy/
 
 That page explains how to request access, create a JSON API key after approval, and configure TCIA Data Retriever to use that key.
+
+Agents should not directly download controlled data. For controlled data, provide the policy link and, when useful, portable TCIA Data Retriever manifest guidance for later authorized use.
 
 ## Notes
 

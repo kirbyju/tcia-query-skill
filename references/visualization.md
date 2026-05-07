@@ -6,7 +6,7 @@ Return viewer URLs as clickable links for the user to open in their regular brow
 
 ## Access Rule
 
-Controlled-access data cannot be visualized in a browser before download, regardless of file format. If WordPress license metadata indicates controlled/restricted access, do not construct OHIF, VolView, SliM, caMicroscope, IDC, NBIA, PathDB, or other public viewer links. Explain that metadata can be inspected, but visualization requires authorized access and local/authorized-platform download. Point users to the TCIA controlled-access policy page: `https://www.cancerimagingarchive.net/nih-controlled-data-access-policy/`.
+Controlled-access data cannot be visualized in a browser before download, regardless of file format. If WordPress license metadata indicates controlled/restricted access, do not construct OHIF, VolView, SliM, caMicroscope, IDC, NBIA, PathDB, or other public viewer links. Explain that metadata can be inspected, but visualization requires authorized access and local/authorized-platform download. Do not directly download controlled data for the user. Point users to the TCIA controlled-access policy page: `https://www.cancerimagingarchive.net/nih-controlled-data-access-policy/`.
 
 Open-access data can sometimes be visualized before download. Choose the viewer based on format and modality.
 

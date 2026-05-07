@@ -26,7 +26,8 @@ from pathlib import Path
 from typing import Any, Optional
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
+DEFAULT_REPO = "kirbyju/tcia-query-skill"
 DEFAULT_RELEASE_TAG = "tcia-snapshot-latest"
 SNAPSHOT_ASSET = "tcia_snapshot.sqlite.gz"
 MANIFEST_ASSET = "tcia_snapshot_manifest.json"
@@ -630,6 +631,8 @@ def canonical_content_hash(
 
 def create_schema(conn: sqlite3.Connection) -> None:
     quoted_pathdb = ",\n            ".join(f"{quote_identifier(column)} TEXT" for column in PATHDB_COLUMNS)
+    camicroscope_base = CAMICROSCOPE_VIEWER_BASE.replace("'", "''")
+    policy_url = CONTROLLED_ACCESS_POLICY_URL.replace("'", "''")
     conn.executescript(
         f"""
         CREATE TABLE snapshot_meta (
@@ -729,6 +732,202 @@ def create_schema(conn: sqlite3.Connection) -> None:
             raw_json TEXT NOT NULL,
             search_text TEXT NOT NULL
         );
+
+        CREATE VIEW agent_datasets AS
+        SELECT
+            source,
+            CASE
+                WHEN source = 'collections' THEN 'Collection'
+                WHEN source = 'analysis-results' THEN 'Analysis Result'
+                ELSE source
+            END AS dataset_type,
+            id,
+            slug,
+            short_title,
+            title,
+            doi,
+            link,
+            date_updated,
+            hidden,
+            json_extract(normalized_json, '$.license_status') AS license_status,
+            json_extract(normalized_json, '$.licenses') AS licenses,
+            CAST(COALESCE(json_extract(normalized_json, '$.controlled_access'), 0) AS INTEGER) AS controlled_access,
+            CAST(COALESCE(json_extract(normalized_json, '$.noncommercial_license'), 0) AS INTEGER) AS noncommercial_license,
+            CASE
+                WHEN json_extract(normalized_json, '$.license_status') = 'Mixed open/controlled' THEN 'mixed'
+                WHEN COALESCE(json_extract(normalized_json, '$.controlled_access'), 0) THEN 'controlled'
+                WHEN COALESCE(json_extract(normalized_json, '$.noncommercial_license'), 0) THEN 'open_noncommercial'
+                WHEN json_extract(normalized_json, '$.license_status') = 'Open (Creative Commons)' THEN 'open'
+                WHEN json_extract(normalized_json, '$.license_status') = 'Unknown' THEN 'unknown'
+                ELSE 'review_needed'
+            END AS access_level,
+            CASE
+                WHEN COALESCE(json_extract(normalized_json, '$.controlled_access'), 0) THEN '{policy_url}'
+                ELSE ''
+            END AS controlled_access_policy_url,
+            json_extract(normalized_json, '$.subjects') AS subjects,
+            json_extract(normalized_json, '$.data_types') AS data_types,
+            json_extract(normalized_json, '$.download_types') AS download_types,
+            json_extract(normalized_json, '$.download_data_types') AS download_data_types,
+            json_extract(normalized_json, '$.download_file_types') AS download_file_types,
+            json_extract(normalized_json, '$.cancer_types') AS cancer_types,
+            json_extract(normalized_json, '$.cancer_locations') AS cancer_locations,
+            json_extract(normalized_json, '$.species') AS species,
+            json_extract(normalized_json, '$.program') AS program,
+            json_extract(normalized_json, '$.has_tcia_clinical_download') AS has_tcia_clinical_download,
+            json_extract(normalized_json, '$.has_external_clinical_resource') AS has_external_clinical_resource,
+            json_extract(normalized_json, '$.source_collections') AS source_collections,
+            json_extract(normalized_json, '$.summary') AS summary,
+            json_extract(normalized_json, '$.abstract') AS abstract,
+            json_extract(normalized_json, '$.detailed_description') AS detailed_description,
+            normalized_json,
+            raw_json
+        FROM wordpress_records
+        WHERE source IN ('collections', 'analysis-results')
+          AND normalized_json IS NOT NULL;
+
+        CREATE VIEW agent_current_downloads AS
+        SELECT
+            d.download_row_id,
+            d.parent_source,
+            CASE
+                WHEN d.parent_source = 'collections' THEN 'Collection'
+                WHEN d.parent_source = 'analysis-results' THEN 'Analysis Result'
+                ELSE d.parent_source
+            END AS dataset_type,
+            d.parent_id,
+            d.parent_slug,
+            d.parent_short_title AS short_title,
+            d.parent_title AS title,
+            d.parent_hidden AS hidden,
+            d.download_id,
+            d.download_slug,
+            d.download_title,
+            d.download_url,
+            d.download_metadata,
+            d.search_url,
+            d.date_updated,
+            d.collection_status,
+            d.description,
+            d.license_label,
+            d.license_url,
+            d.requirements_label,
+            d.requirements_url,
+            d.requirements_text,
+            d.download_size,
+            d.download_size_unit,
+            d.subjects,
+            d.studies,
+            d.series,
+            d.images,
+            d.download_types_json AS download_types,
+            d.data_types_json AS data_types,
+            d.file_types_json AS file_types,
+            d.external_resources_json AS external_resources,
+            d.controlled_access,
+            d.noncommercial_license,
+            CASE
+                WHEN d.controlled_access THEN 'controlled'
+                WHEN d.noncommercial_license THEN 'open_noncommercial'
+                WHEN lower(d.license_label) LIKE '%creative commons%'
+                  OR lower(d.license_label) LIKE '%cc by%'
+                  OR lower(d.license_label) LIKE '%cc-by%' THEN 'open'
+                WHEN trim(COALESCE(d.license_label, '')) = '' THEN 'unknown'
+                ELSE 'review_needed'
+            END AS access_level,
+            CASE WHEN d.controlled_access THEN '{policy_url}' ELSE '' END AS controlled_access_policy_url,
+            d.raw_json
+        FROM wordpress_downloads d
+        WHERE d.is_current_version = 1
+          AND d.parent_source IN ('collections', 'analysis-results');
+
+        CREATE VIEW agent_dataset_access_summary AS
+        WITH download_summary AS (
+            SELECT
+                parent_source,
+                parent_short_title,
+                COUNT(*) AS current_download_count,
+                SUM(CASE WHEN controlled_access THEN 1 ELSE 0 END) AS controlled_download_count,
+                SUM(CASE WHEN NOT controlled_access THEN 1 ELSE 0 END) AS noncontrolled_download_count,
+                SUM(CASE WHEN NOT controlled_access AND noncommercial_license THEN 1 ELSE 0 END) AS open_noncommercial_download_count,
+                group_concat(CASE WHEN controlled_access THEN NULLIF(download_title, '') END, '; ') AS controlled_download_titles,
+                group_concat(CASE WHEN controlled_access THEN NULLIF(license_label, '') END, '; ') AS controlled_license_labels,
+                group_concat(CASE WHEN controlled_access THEN NULLIF(download_id, '') END, '; ') AS controlled_download_ids,
+                group_concat(CASE WHEN controlled_access THEN NULLIF(download_url, '') END, '; ') AS controlled_download_urls
+            FROM wordpress_downloads
+            WHERE is_current_version = 1
+              AND parent_source IN ('collections', 'analysis-results')
+            GROUP BY parent_source, parent_short_title
+        ),
+        summary AS (
+            SELECT
+                d.*,
+                COALESCE(s.current_download_count, 0) AS current_download_count,
+                COALESCE(s.controlled_download_count, 0) AS controlled_download_count,
+                COALESCE(s.noncontrolled_download_count, 0) AS noncontrolled_download_count,
+                COALESCE(s.open_noncommercial_download_count, 0) AS open_noncommercial_download_count,
+                COALESCE(s.controlled_download_titles, '') AS controlled_download_titles,
+                COALESCE(s.controlled_license_labels, '') AS controlled_license_labels,
+                COALESCE(s.controlled_download_ids, '') AS controlled_download_ids,
+                COALESCE(s.controlled_download_urls, '') AS controlled_download_urls
+            FROM agent_datasets d
+            LEFT JOIN download_summary s
+              ON s.parent_source = d.source
+             AND s.parent_short_title = d.short_title
+        )
+        SELECT
+            *,
+            CASE
+                WHEN controlled_download_count > 0 AND noncontrolled_download_count > 0 THEN 'mixed'
+                WHEN controlled_download_count > 0 OR controlled_access THEN 'controlled'
+                WHEN noncommercial_license OR open_noncommercial_download_count > 0 THEN 'open_noncommercial'
+                WHEN license_status = 'Open (Creative Commons)' THEN 'open'
+                WHEN license_status = 'Unknown' THEN 'unknown'
+                ELSE 'review_needed'
+            END AS resolved_access_level,
+            CASE
+                WHEN controlled_download_count > 0 OR controlled_access THEN '{policy_url}'
+                ELSE ''
+            END AS resolved_controlled_access_policy_url
+        FROM summary;
+
+        CREATE VIEW agent_pathdb_slides AS
+        SELECT
+            collection,
+            patient_id,
+            slide_id,
+            camic_id,
+            CASE
+                WHEN trim(COALESCE(camic_id, '')) = '' THEN ''
+                ELSE '{camicroscope_base}?mode=pathdb&slideId=' || trim(camic_id)
+            END AS camicroscope_url,
+            wsiimage_url,
+            species,
+            cancer_type,
+            cancer_location,
+            data_format,
+            modality,
+            protocol,
+            par,
+            magnification,
+            "update"
+        FROM pathdb_rows;
+
+        CREATE VIEW agent_datacite_dois AS
+        SELECT
+            doi,
+            tcia_short_name,
+            title,
+            publisher,
+            publication_year,
+            version,
+            state,
+            created,
+            updated,
+            url,
+            normalized_json,
+            raw_json
+        FROM datacite_dois;
         """
     )
 
@@ -1356,11 +1555,11 @@ def summarize_pathdb_rows(rows: list[dict[str, str]]) -> list[dict[str, Any]]:
     ]
 
 
-def github_repo_from_env_or_git() -> str:
+def github_repo_from_env_or_default() -> str:
     env_repo = os.environ.get("GITHUB_REPOSITORY") or os.environ.get("TCIA_SNAPSHOT_REPOSITORY")
     if env_repo:
         return env_repo
-    raise RuntimeError("Set --repo owner/name or TCIA_SNAPSHOT_REPOSITORY to download snapshots.")
+    return DEFAULT_REPO
 
 
 def github_api_json(url: str) -> Any:
@@ -1391,7 +1590,11 @@ def download_release_snapshot(
     manifest_body, _ = fetch_bytes(assets[MANIFEST_ASSET]["browser_download_url"])
     manifest = json.loads(manifest_body.decode("utf-8"))
     current = get_snapshot_meta(db_path)
-    if current.get("content_sha256") == manifest.get("content_sha256") and db_path.exists():
+    if (
+        current.get("content_sha256") == manifest.get("content_sha256")
+        and current.get("schema_version") == manifest.get("schema_version")
+        and db_path.exists()
+    ):
         manifest_out.parent.mkdir(parents=True, exist_ok=True)
         manifest_out.write_bytes(manifest_body)
         return {"status": "unchanged", "manifest": manifest}
@@ -1432,7 +1635,11 @@ def main(argv: Optional[list[str]] = None) -> int:
     info.add_argument("--db", default=str(DEFAULT_DB_PATH), help="SQLite snapshot path.")
 
     ensure = subparsers.add_parser("ensure", help="Download the latest release snapshot if missing or changed.")
-    ensure.add_argument("--repo", help="GitHub repository in owner/name form.")
+    ensure.add_argument(
+        "--repo",
+        default=None,
+        help=f"GitHub repository in owner/name form. Defaults to {DEFAULT_REPO}.",
+    )
     ensure.add_argument("--tag", default=DEFAULT_RELEASE_TAG, help="Snapshot release tag.")
     ensure.add_argument("--db", default=str(DEFAULT_DB_PATH), help="SQLite snapshot path.")
     ensure.add_argument("--manifest-out", default=str(DEFAULT_MANIFEST_PATH), help="Manifest output path.")
@@ -1455,7 +1662,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         print(json.dumps(meta, indent=2, sort_keys=True))
         return 0
     if args.command == "ensure":
-        repo = args.repo or github_repo_from_env_or_git()
+        repo = args.repo or github_repo_from_env_or_default()
         result = download_release_snapshot(repo, args.tag, Path(args.db), Path(args.manifest_out))
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0

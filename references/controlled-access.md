@@ -28,6 +28,7 @@ Before download/API instructions, say clearly that:
 - The decision came from license metadata, not the deprecated collection/page accessibility field.
 - Metadata may be visible even when files cannot be downloaded without authorization.
 - The user should review the TCIA NIH Controlled Data Access Policy page for current request, approval, API key, and TCIA Data Retriever configuration instructions.
+- The agent should not directly download controlled data. Provide policy guidance and, when useful, a portable manifest for later authorized use with TCIA Data Retriever.
 
 Do not invent approval requirements, timelines, or eligibility rules. Link to the policy page and summarize only what has been verified from current TCIA pages or WordPress metadata.
 
@@ -35,4 +36,4 @@ Do not invent approval requirements, timelines, or eligibility rules. Link to th
 
 - Controlled-access face datasets: route access questions to the policy page and, where applicable, General Commons metadata for `phs004225`.
 - NCTN trials or Biobank data: use WordPress license metadata and current TCIA access statements; CTDC support is planned but should not be assumed until confirmed.
-- Public subsets of a mixed collection can be described separately from controlled/restricted subsets.
+- Public subsets of a mixed collection can be described separately from controlled/restricted subsets. For mixed datasets, use `agent_dataset_access_summary` to identify controlled download titles, licenses, IDs, and URLs before answering.

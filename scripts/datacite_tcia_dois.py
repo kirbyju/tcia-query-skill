@@ -1,85 +1,17 @@
 #!/usr/bin/env python3
-"""List TCIA DOI metadata from the DataCite public API."""
+"""List TCIA DOI metadata from the local SQLite snapshot."""
 
 from __future__ import annotations
 
 import argparse
 import json
 import sys
-import urllib.parse
-import urllib.request
 from typing import Any, Optional
 
 import tcia_snapshot
 
 
-DATACITE_DOIS_URL = "https://api.datacite.org/dois"
 DEFAULT_TCIA_PREFIX = "10.7937"
-USER_AGENT = "tcia-query-skill/1.0 (https://github.com/kirbyju/tcia-query-skill)"
-
-
-def fetch_json(url: str) -> dict[str, Any]:
-    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    with urllib.request.urlopen(request, timeout=60) as response:
-        return json.loads(response.read().decode("utf-8"))
-
-
-def doi_url(params: dict[str, str]) -> str:
-    return f"{DATACITE_DOIS_URL}?{urllib.parse.urlencode(params)}"
-
-
-def fetch_doi(doi: str) -> dict[str, Any]:
-    encoded = urllib.parse.quote(doi.strip(), safe="")
-    payload = fetch_json(f"{DATACITE_DOIS_URL}/{encoded}")
-    return payload.get("data") or {}
-
-
-def fetch_prefix(prefix: str, max_records: int, page_size: int) -> list[dict[str, Any]]:
-    url = doi_url({"prefix": prefix, "page[size]": str(page_size)})
-    records: list[dict[str, Any]] = []
-
-    while url:
-        payload = fetch_json(url)
-        records.extend(payload.get("data") or [])
-        if max_records > 0 and len(records) >= max_records:
-            return records[:max_records]
-        url = (payload.get("links") or {}).get("next")
-
-    return records
-
-
-def first_title(attrs: dict[str, Any], title_type: str | None = None) -> str:
-    for title in attrs.get("titles") or []:
-        if title_type is None and not title.get("titleType"):
-            return title.get("title", "")
-        if title_type is not None and title.get("titleType") == title_type:
-            return title.get("title", "")
-    return ""
-
-
-def tcia_short_name(attrs: dict[str, Any]) -> str:
-    for identifier in attrs.get("identifiers") or []:
-        if str(identifier.get("identifierType", "")).lower() == "tcia short name":
-            return identifier.get("identifier", "")
-    return first_title(attrs, "AlternativeTitle")
-
-
-def normalize(work: dict[str, Any]) -> dict[str, Any]:
-    attrs = work.get("attributes") or {}
-    return {
-        "doi": attrs.get("doi") or work.get("id", ""),
-        "tcia_short_name": tcia_short_name(attrs),
-        "title": first_title(attrs) or attrs.get("title") or first_title(attrs, "AlternativeTitle"),
-        "publisher": attrs.get("publisher", ""),
-        "publication_year": attrs.get("publicationYear", ""),
-        "version": attrs.get("version", ""),
-        "url": attrs.get("url", ""),
-        "state": attrs.get("state", ""),
-        "created": attrs.get("created", ""),
-        "updated": attrs.get("updated", ""),
-        "rights": attrs.get("rightsList") or [],
-        "related_identifiers": attrs.get("relatedIdentifiers") or [],
-    }
 
 
 def matches(record: dict[str, Any], query: str | None) -> bool:
@@ -101,7 +33,11 @@ def clean_cell(value: Any, width: int = 72) -> str:
 
 def print_table(records: list[dict[str, Any]]) -> None:
     if not records:
-        print("No DataCite DOI records matched.")
+        print(
+            "No DataCite DOI records matched. If you expected very recent metadata, "
+            "try again after the next 7:17 AM or 7:17 PM America/New_York snapshot "
+            "run has finished, then rerun `python scripts/tcia_snapshot.py ensure`."
+        )
         return
     print("TCIA Short Name | DOI | Year | Title | URL")
     print("--- | --- | --- | --- | ---")
@@ -120,40 +56,31 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--doi", help="Fetch one exact DOI record.")
     parser.add_argument("--prefix", default=DEFAULT_TCIA_PREFIX, help="DOI prefix for TCIA DOI listing.")
     parser.add_argument("--query", help="Local text filter over DOI, TCIA short name, title, publisher, URL, and year.")
-    parser.add_argument("--max-records", type=int, default=1000, help="Maximum DataCite records to fetch; 0 means all.")
-    parser.add_argument("--page-size", type=int, default=100, help="DataCite page size.")
     parser.add_argument("--limit", type=int, default=50, help="Maximum records to print; 0 means all matched records.")
     parser.add_argument(
         "--snapshot-db",
         help="Optional SQLite snapshot path. Defaults to TCIA_SNAPSHOT_DB or cache/tcia_snapshot.sqlite.",
     )
-    parser.add_argument(
-        "--live",
-        action="store_true",
-        help="Bypass any local SQLite snapshot and query the live DataCite API.",
-    )
     parser.add_argument("--json", action="store_true", help="Emit JSON.")
     args = parser.parse_args(argv)
 
-    records: list[dict[str, Any]]
-    use_snapshot = (
-        not args.live
-        and args.prefix == DEFAULT_TCIA_PREFIX
-        and tcia_snapshot.snapshot_available(args.snapshot_db)
-    )
-    if use_snapshot:
-        records = tcia_snapshot.datacite_records_from_snapshot(
-            doi=args.doi,
-            prefix=args.prefix,
-            query=args.query,
-            path=args.snapshot_db,
+    if args.prefix != DEFAULT_TCIA_PREFIX:
+        print("Only the TCIA DOI prefix 10.7937 is available from the local snapshot.", file=sys.stderr)
+        return 1
+    if not tcia_snapshot.snapshot_available(args.snapshot_db):
+        print(
+            f"No local TCIA snapshot found at {tcia_snapshot.snapshot_path(args.snapshot_db)}. "
+            "Run `python scripts/tcia_snapshot.py ensure` from the skill root, then try again.",
+            file=sys.stderr,
         )
-        if args.doi and not records:
-            records = [normalize(fetch_doi(args.doi))]
-    elif args.doi:
-        records = [normalize(fetch_doi(args.doi))]
-    else:
-        records = [normalize(work) for work in fetch_prefix(args.prefix, args.max_records, args.page_size)]
+        return 1
+
+    records = tcia_snapshot.datacite_records_from_snapshot(
+        doi=args.doi,
+        prefix=args.prefix,
+        query=args.query,
+        path=args.snapshot_db,
+    )
 
     records = [record for record in records if matches(record, args.query)]
     if args.limit > 0:

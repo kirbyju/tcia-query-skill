@@ -41,17 +41,22 @@ jobs:
           set -euo pipefail
           tag="tcia-snapshot-latest"
           new_hash="$(python -c 'import json; print(json.load(open("dist/tcia_snapshot_manifest.json"))["content_sha256"])')"
+          new_schema="$(python -c 'import json; print(json.load(open("dist/tcia_snapshot_manifest.json"))["schema_version"])')"
           echo "new_hash=${new_hash}" >> "$GITHUB_OUTPUT"
+          echo "new_schema=${new_schema}" >> "$GITHUB_OUTPUT"
 
           mkdir -p previous
           if gh release download "$tag" --pattern tcia_snapshot_manifest.json --dir previous >/dev/null 2>&1; then
             old_hash="$(python -c 'import json; print(json.load(open("previous/tcia_snapshot_manifest.json")).get("content_sha256", ""))')"
+            old_schema="$(python -c 'import json; print(json.load(open("previous/tcia_snapshot_manifest.json")).get("schema_version", ""))')"
           else
             old_hash=""
+            old_schema=""
           fi
 
           echo "old_hash=${old_hash}" >> "$GITHUB_OUTPUT"
-          if [ "$new_hash" = "$old_hash" ]; then
+          echo "old_schema=${old_schema}" >> "$GITHUB_OUTPUT"
+          if [ "$new_hash" = "$old_hash" ] && [ "$new_schema" = "$old_schema" ]; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"

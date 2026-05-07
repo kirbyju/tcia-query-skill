@@ -1,7 +1,7 @@
 interface:
   display_name: "TCIA Query Skill"
-  short_description: "Query TCIA datasets across CRDC systems"
-  default_prompt: "Use $tcia-query-skill to find TCIA-published datasets and explain the right access route, CDA/CRDC enrichment options, viewer options, citations, and download options."
+  short_description: "Query TCIA snapshot metadata across CRDC systems"
+  default_prompt: "Use $tcia-query-skill to find TCIA-published datasets from the SQLite snapshot and explain access routes, CDA/CRDC enrichment options, viewer links, citations, and download or manifest options."
 
 policy:
   allow_implicit_invocation: true

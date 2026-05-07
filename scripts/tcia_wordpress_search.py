@@ -1,310 +1,25 @@
 #!/usr/bin/env python3
-"""Search TCIA WordPress Collection and Analysis Result metadata."""
+"""Search local TCIA WordPress Collection and Analysis Result snapshot metadata."""
 
 from __future__ import annotations
 
 import argparse
-import html
 import json
-import re
 import sys
 import textwrap
-import urllib.parse
-import urllib.request
-from concurrent.futures import ThreadPoolExecutor
-from html.parser import HTMLParser
 from typing import Any, Optional
 
 import tcia_snapshot
 
 
-BASE_URL = "https://cancerimagingarchive.net/api/"
-CONTROLLED_ACCESS_POLICY_URL = (
-    "https://www.cancerimagingarchive.net/nih-controlled-data-access-policy/"
-)
-CONTROLLED_LICENSE_TERMS = [
-    "controlled access",
-    "nih controlled",
-    "tcia restricted",
-    "restricted",
-    "data usage agreement",
-    "dbgap",
-]
-CREATIVE_COMMONS_TERMS = ["creative commons", "cc by", "cc-by"]
-NONCOMMERCIAL_TERMS = ["noncommercial", "non-commercial", "cc by-nc", "cc-by-nc"]
-
-COLLECTION_FIELDS = [
-    "id",
-    "slug",
-    "url",
-    "link",
-    "title",
-    "collection_title",
-    "collection_short_title",
-    "collection_doi",
-    "collection_status",
-    "collection_summary",
-    "collection_abstract",
-    "detailed_description",
-    "cancer_types",
-    "cancer_locations",
-    "data_types",
-    "species",
-    "subjects",
-    "program",
-    "date_updated",
-    "supporting_data",
-    "collection_download_info",
-    "collection_downloads",
-    "external_resources",
-    "additional_resources",
-    "hide_from_browse_table",
-]
-
-ANALYSIS_FIELDS = [
-    "id",
-    "slug",
-    "url",
-    "link",
-    "title",
-    "result_title",
-    "result_short_title",
-    "result_doi",
-    "result_summary",
-    "detailed_description",
-    "collections",
-    "cancer_types",
-    "cancer_locations",
-    "data_types",
-    "species",
-    "subjects",
-    "program",
-    "date_updated",
-    "supporting_data",
-    "result_download_info",
-    "result_downloads",
-    "external_resources",
-    "additional_resources",
-    "hide_from_browse_table",
-]
-
-
-class _Stripper(HTMLParser):
-    def __init__(self) -> None:
-        super().__init__()
-        self.parts: list[str] = []
-
-    def handle_data(self, data: str) -> None:
-        self.parts.append(data)
-
-    def get_data(self) -> str:
-        return " ".join(self.parts)
-
-
-def strip_html(value: Any) -> str:
-    text = stringify(value)
-    parser = _Stripper()
-    parser.feed(text)
-    return re.sub(r"\s+", " ", html.unescape(parser.get_data() or text)).strip()
-
-
-def stringify(value: Any) -> str:
-    if value is None:
-        return ""
-    if isinstance(value, str):
-        return value
-    if isinstance(value, (int, float, bool)):
-        return str(value)
-    if isinstance(value, list):
-        return "; ".join(stringify(item) for item in value if stringify(item))
-    if isinstance(value, dict):
-        if "rendered" in value:
-            return stringify(value["rendered"])
-        if "title" in value:
-            return stringify(value["title"])
-        if "name" in value:
-            return stringify(value["name"])
-        if "label" in value:
-            return stringify(value["label"])
-        return "; ".join(
-            f"{key}: {stringify(item)}" for key, item in value.items() if stringify(item)
-        )
-    return str(value)
-
-
-def fetch_all(
-    endpoint: str,
-    fields: list[str],
-    api_version: str = "v2",
-    per_page: int = 100,
-    verbose: bool = False,
-    search: Optional[str] = None,
-    workers: int = 4,
-) -> list[dict[str, Any]]:
-    field_param = "fields" if api_version == "v2" else "_fields"
-    params = {"per_page": str(per_page), field_param: ",".join(fields)}
-    if search:
-        params["search"] = search
-    if api_version == "v2" and verbose:
-        params["v"] = "1"
-    url = f"{BASE_URL}{api_version}/{endpoint}/?{urllib.parse.urlencode(params)}"
-    records: list[dict[str, Any]] = []
-
-    payload, link = fetch_json(url)
-    if isinstance(payload, dict) and "results" in payload:
-        records.extend(payload["results"])
-        total_pages = int(payload.get("total_pages") or 1)
-        page_urls = [
-            v2_page_url(api_version, endpoint, params, page)
-            for page in range(2, total_pages + 1)
-        ]
-        if page_urls:
-            if workers <= 1:
-                for page_url in page_urls:
-                    page_payload, _ = fetch_json(page_url)
-                    records.extend(page_payload.get("results", []))
-            else:
-                with ThreadPoolExecutor(max_workers=min(workers, len(page_urls))) as executor:
-                    for page_payload, _ in executor.map(fetch_json, page_urls):
-                        records.extend(page_payload.get("results", []))
-        return records
-
-    while True:
-        records.extend(payload)
-        url = next_link(link)
-        if not url:
-            break
-        payload, link = fetch_json(url)
-    return records
-
-
-def fetch_json(url: str) -> tuple[Any, str]:
-    request = urllib.request.Request(url, headers={"User-Agent": "tcia-query-skill/1.0"})
-    with urllib.request.urlopen(request, timeout=60) as response:
-        payload = json.loads(response.read().decode("utf-8"))
-        link = response.headers.get("Link", "")
-    return payload, link
-
-
-def v2_page_url(
-    api_version: str,
-    endpoint: str,
-    params: dict[str, str],
-    page: int,
-) -> str:
-    next_params = dict(params)
-    next_params["page"] = str(page)
-    return f"{BASE_URL}{api_version}/{endpoint}/?{urllib.parse.urlencode(next_params)}"
-
-
-def next_link(link_header: str) -> Optional[str]:
-    for part in link_header.split(","):
-        section = part.strip()
-        if 'rel="next"' not in section:
-            continue
-        match = re.search(r"<([^>]+)>", section)
-        if match:
-            return match.group(1)
-    return None
-
-
-def normalize(item: dict[str, Any], kind: str) -> dict[str, Any]:
-    record = tcia_snapshot.normalize_wordpress_record(item, kind)
-    record["_search_text"] = " ".join(strip_html(value) for value in item.values()).lower()
-    return record
-
-
-def collect_license_texts(*values: Any) -> list[str]:
-    licenses: list[str] = []
-
-    def walk(value: Any, key: str = "") -> None:
-        if value is None:
-            return
-        if "license" in key.lower():
-            keyed_text = strip_html(value)
-            if keyed_text and keyed_text.lower() not in {"false", "none", "null"}:
-                licenses.append(keyed_text)
-        if isinstance(value, dict):
-            for sub_key, sub_value in value.items():
-                walk(sub_value, str(sub_key))
-            return
-        if isinstance(value, list):
-            for item in value:
-                walk(item, key)
-            return
-        text_value = strip_html(value)
-        licenses.extend(extract_flattened_licenses(text_value))
-
-    for value in values:
-        walk(value)
-
-    deduped: list[str] = []
-    seen: set[str] = set()
-    for license_text in licenses:
-        marker = license_text.lower()
-        if marker not in seen:
-            seen.add(marker)
-            deduped.append(license_text)
-    return deduped
-
-
-def extract_flattened_licenses(text: str) -> list[str]:
-    if "license" not in text.lower():
-        return []
-    matches = re.findall(r"(?:^|[;\n]\s*)(?:data[_ ]?)?license:\s*([^;\n]+)", text, flags=re.IGNORECASE)
-    return [match.strip() for match in matches if match.strip().lower() not in {"false", "none", "null"}]
-
-
-def is_creative_commons_license(license_text: str) -> bool:
-    lower = license_text.lower()
-    return any(term in lower for term in CREATIVE_COMMONS_TERMS)
-
-
-def is_controlled_access_from_licenses(licenses: list[str]) -> bool:
-    for license_text in licenses:
-        lower = license_text.lower()
-        if is_creative_commons_license(license_text):
-            continue
-        if any(term in lower for term in CONTROLLED_LICENSE_TERMS):
-            return True
-    return False
-
-
-def has_noncommercial_license(licenses: list[str]) -> bool:
-    return any(term in license_text.lower() for license_text in licenses for term in NONCOMMERCIAL_TERMS)
-
-
-def classify_license_status(
-    licenses: list[str],
-    controlled_access: bool,
-    noncommercial_license: bool,
-) -> str:
-    if controlled_access and any(is_creative_commons_license(license_text) for license_text in licenses):
-        return "Mixed open/controlled"
-    if controlled_access:
-        return "Controlled"
-    if noncommercial_license:
-        return "Open (Creative Commons NonCommercial)"
-    if licenses and all(is_creative_commons_license(license_text) for license_text in licenses):
-        return "Open (Creative Commons)"
-    if licenses:
-        return "License review needed"
-    return "Unknown"
-
-
-def matches(record: dict[str, Any], query: Optional[str], short_titles: set[str]) -> bool:
-    if short_titles and record["short_title"].lower() not in short_titles:
-        return False
-    if query:
-        terms = [term.lower() for term in query.split() if term.strip()]
-        haystack = " ".join(str(value).lower() for value in record.values())
-        return all(term in haystack for term in terms)
-    return True
-
-
 def print_table(records: list[dict[str, Any]]) -> None:
     if not records:
-        print("No TCIA WordPress Collections or Analysis Results matched.")
+        print(
+            "No TCIA WordPress Collections or Analysis Results matched. "
+            "If you expected a very recent dataset, try again after the next "
+            "7:17 AM or 7:17 PM America/New_York snapshot run has finished, "
+            "then rerun `python scripts/tcia_snapshot.py ensure`."
+        )
         return
 
     headers = ["type", "short_title", "title", "license_status", "doi", "link"]
@@ -349,32 +64,10 @@ def main(argv: Optional[list[str]] = None) -> int:
         default="both",
         help="Metadata type to search.",
     )
-    parser.add_argument(
-        "--api-version",
-        choices=["v1", "v2"],
-        default="v2",
-        help="Collection Manager API version. v2 supports verbose mode.",
-    )
-    parser.add_argument(
-        "--verbose",
-        action="store_true",
-        help="Use v2 verbose mode (v=1) to retrieve full long-text fields.",
-    )
-    parser.add_argument(
-        "--workers",
-        type=int,
-        default=4,
-        help="Parallel fetch worker budget for v2 endpoint and page requests. Use 1 for sequential requests.",
-    )
     parser.add_argument("--limit", type=int, default=25, help="Maximum records to display.")
     parser.add_argument(
         "--snapshot-db",
         help="Optional SQLite snapshot path. Defaults to TCIA_SNAPSHOT_DB or cache/tcia_snapshot.sqlite.",
-    )
-    parser.add_argument(
-        "--live",
-        action="store_true",
-        help="Bypass any local SQLite snapshot and query the live WordPress API.",
     )
     parser.add_argument(
         "--include-hidden",
@@ -387,64 +80,22 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--json", action="store_true", help="Emit JSON instead of a table.")
     args = parser.parse_args(argv)
 
-    if not args.live and tcia_snapshot.snapshot_available(args.snapshot_db):
-        short_titles = {title.lower() for title in args.short_title}
-        records = tcia_snapshot.search_wordpress_records(
-            query=args.query,
-            short_titles=short_titles,
-            type_filter=args.type,
-            include_hidden=args.include_hidden,
-            path=args.snapshot_db,
+    if not tcia_snapshot.snapshot_available(args.snapshot_db):
+        print(
+            f"No local TCIA snapshot found at {tcia_snapshot.snapshot_path(args.snapshot_db)}. "
+            "Run `python scripts/tcia_snapshot.py ensure` from the skill root, then try again.",
+            file=sys.stderr,
         )
-        records = records[: args.limit]
-        if args.json:
-            print(json.dumps(records, indent=2, sort_keys=True))
-        else:
-            print_table(records)
-        return 0
-
-    api_search = args.query
-    if not api_search and len(args.short_title) == 1:
-        api_search = args.short_title[0]
-    jobs: list[tuple[str, str, list[str]]] = []
-    if args.type in {"both", "collections"}:
-        jobs.append(("collection", "collections", COLLECTION_FIELDS))
-    if args.type in {"both", "analysis-results"}:
-        jobs.append(("analysis", "analysis-results", ANALYSIS_FIELDS))
-
-    page_workers = max(1, args.workers // max(1, len(jobs))) if len(jobs) > 1 else max(1, args.workers)
-
-    def load_job(job: tuple[str, str, list[str]]) -> list[dict[str, Any]]:
-        kind, endpoint, fields = job
-        return [
-            normalize(item, kind)
-            for item in fetch_all(
-                endpoint,
-                fields,
-                api_version=args.api_version,
-                verbose=args.verbose,
-                search=api_search,
-                workers=page_workers,
-            )
-        ]
-
-    raw_records: list[dict[str, Any]] = []
-    if len(jobs) > 1 and args.workers > 1:
-        with ThreadPoolExecutor(max_workers=len(jobs)) as executor:
-            for records in executor.map(load_job, jobs):
-                raw_records.extend(records)
-    else:
-        for job in jobs:
-            raw_records.extend(load_job(job))
-
+        return 1
     short_titles = {title.lower() for title in args.short_title}
-    if not args.include_hidden:
-        raw_records = [record for record in raw_records if not record.get("hidden")]
-    records = [record for record in raw_records if matches(record, args.query, short_titles)]
+    records = tcia_snapshot.search_wordpress_records(
+        query=args.query,
+        short_titles=short_titles,
+        type_filter=args.type,
+        include_hidden=args.include_hidden,
+        path=args.snapshot_db,
+    )
     records = records[: args.limit]
-
-    for record in records:
-        record.pop("_search_text", None)
 
     if args.json:
         print(json.dumps(records, indent=2, sort_keys=True))
@@ -456,6 +107,6 @@ def main(argv: Optional[list[str]] = None) -> int:
 if __name__ == "__main__":
     try:
         raise SystemExit(main())
-    except urllib.error.URLError as exc:
-        print(f"Network or API error: {exc}", file=sys.stderr)
+    except Exception as exc:
+        print(f"TCIA WordPress snapshot search failed: {exc}", file=sys.stderr)
         raise SystemExit(2)

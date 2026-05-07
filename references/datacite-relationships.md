@@ -1,34 +1,12 @@
 # DataCite Relationships
 
-Use DataCite first for DOI metadata, citations, versions, and relationships between TCIA datasets and derived records. Use WordPress afterward to confirm TCIA publication status, hidden/visible status, access/license, and user-facing dataset pages.
+Use DataCite snapshot records first for DOI metadata, citations, and versions. Use WordPress snapshot records afterward to confirm TCIA publication status, hidden/visible status, access/license, and user-facing dataset pages.
 
 ## TCIA DOI Metadata
 
-TCIA mints dataset DOIs through DataCite. The `tcia_utils.datacite` helper can retrieve TCIA DOI records:
+TCIA mints dataset DOIs through DataCite. The SQLite snapshot stores DataCite records under the TCIA DOI prefix `10.7937` in `agent_datacite_dois`.
 
-```python
-from tcia_utils import datacite
-
-doi_records = datacite.getDoi()
-```
-
-If `tcia_utils` is installed, use `tcia_utils.datacite` before custom code:
-
-```python
-from tcia_utils import datacite
-
-doi_records = datacite.getDoi()
-derived = datacite.getDerivedDois("10.7937/TCIA.HMQ8-J677", format="df")
-```
-
-If `tcia_utils` is unavailable, call the DataCite REST API as the starting point:
-
-```text
-https://api.datacite.org/dois?prefix=10.7937
-https://api.datacite.org/dois/<DOI>
-```
-
-DataCite records include DOI, title, publisher, publication year, URL, version, rights, identifiers such as `TCIA Short Name`, and related identifiers. Use WordPress after DataCite when the answer needs TCIA page visibility, hidden-record filtering, access/license status, or download routing.
+DataCite records include DOI, title, publisher, publication year, URL, version, rights, identifiers such as `TCIA Short Name`, and related identifiers. Use WordPress snapshot records after DataCite when the answer needs TCIA page visibility, hidden-record filtering, access/license status, or download routing.
 
 Bundled helper:
 
@@ -40,7 +18,7 @@ python scripts/datacite_tcia_dois.py --doi 10.7937/4qad-4280 --json
 
 ## Derived Records
 
-External records may declare that they are derived from a TCIA DOI. For example, a Zenodo DOI can include `Related Works` metadata with a relation such as `IsDerivedFrom` pointing to a TCIA DOI.
+External records may declare that they are derived from a TCIA DOI. For example, a Zenodo DOI can include `Related Works` metadata with a relation such as `IsDerivedFrom` pointing to a TCIA DOI. Treat live relationship searches as explicit DOI-provenance research, not as routine end-user dataset discovery or download routing.
 
 Interpretation:
 
@@ -50,20 +28,12 @@ Interpretation:
 
 ## Query Pattern
 
-DataCite supports querying works by related identifier. Use `tcia_utils.datacite.getDerivedDois()` when installed, or `scripts/datacite_related.py <doi>` as a standard-library fallback.
+DataCite supports querying works by related identifier. For normal DOI/citation questions, use the snapshot. Use `scripts/datacite_related.py <doi>` only when the user explicitly asks for current external related DOI records beyond the snapshot.
 
 ```text
 relatedIdentifiers.relatedIdentifierType:DOI AND
 relatedIdentifiers.relatedIdentifier:<TCIA_DOI> AND
 relatedIdentifiers.relationType:IsDerivedFrom
-```
-
-Example `tcia_utils` call:
-
-```python
-from tcia_utils import datacite
-
-derived = datacite.getDerivedDois("10.7937/TCIA.HMQ8-J677", format="df")
 ```
 
 ## Response Guidance
