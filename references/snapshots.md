@@ -3,6 +3,7 @@
 The skill can use a local SQLite snapshot for routine TCIA discovery instead of querying every source live. The snapshot contains:
 
 - TCIA WordPress Collections, Analysis Results, and Downloads.
+- Normalized current WordPress download records and their multi-select labels.
 - PathDB cohort-builder slide metadata, trimmed to TCIA query fields.
 - DataCite records under the TCIA DOI prefix `10.7937`.
 
@@ -67,6 +68,27 @@ Troubleshooting examples:
 python scripts/tcia_wordpress_search.py --query breast --live
 python scripts/pathdb_metadata.py --collection CPTAC-STAD --summary --live
 python scripts/datacite_tcia_dois.py --query lung --live
+```
+
+## WordPress Download Tables
+
+The snapshot keeps the original WordPress JSON in `wordpress_records.raw_json`, but download labels are also relational:
+
+- `wordpress_downloads`: one row per nested current-version `collection_downloads` or `result_downloads` record, plus one row per global downloads endpoint record.
+- `wordpress_download_labels`: one row per multi-select label from `download_type`, `data_type`, `file_type`, and `external_resources`.
+
+Use the boolean `wordpress_downloads.is_current_version` column for normal user-facing discovery, for example `is_current_version IS TRUE`. Rows from the global downloads endpoint have `is_current_version = FALSE`; they are useful for troubleshooting but may include older release rows that are no longer part of the current Collection or Analysis Result version.
+
+Do not rely only on a Collection or Analysis Result top-level `data_types` value for modality questions. Mixed datasets can expose labels such as `MR`, `CT`, `PT`, or `DICOM` only on the download records. For example:
+
+```sql
+SELECT DISTINCT d.parent_short_title, d.download_id, d.download_url
+FROM wordpress_downloads d
+JOIN wordpress_download_labels l
+  ON l.download_row_id = d.download_row_id
+WHERE d.is_current_version IS TRUE
+  AND l.label_kind = 'data_type'
+  AND l.label = 'MR';
 ```
 
 ## PathDB Columns

@@ -209,57 +209,7 @@ def next_link(link_header: str) -> Optional[str]:
 
 
 def normalize(item: dict[str, Any], kind: str) -> dict[str, Any]:
-    is_collection = kind == "collection"
-    title_key = "collection_title" if is_collection else "result_title"
-    short_key = "collection_short_title" if is_collection else "result_short_title"
-    doi_key = "collection_doi" if is_collection else "result_doi"
-    summary_key = "collection_summary" if is_collection else "result_summary"
-    abstract_key = "collection_abstract" if is_collection else "result_abstract"
-    downloads_key = "collection_downloads" if is_collection else "result_downloads"
-    download_info_key = "collection_download_info" if is_collection else "result_download_info"
-
-    title = strip_html(item.get(title_key)) or strip_html(item.get("title"))
-    short_title = strip_html(item.get(short_key))
-    doi = strip_html(item.get(doi_key))
-    summary = strip_html(item.get(summary_key))
-    abstract = strip_html(item.get(abstract_key))
-    description = strip_html(item.get("detailed_description"))
-    hidden_raw = strip_html(item.get("hide_from_browse_table"))
-    hidden = hidden_raw.lower() not in {"", "0", "false", "no", "none"}
-    licenses = collect_license_texts(item.get(download_info_key), item.get(downloads_key))
-    controlled_access = is_controlled_access_from_licenses(licenses)
-    noncommercial_license = has_noncommercial_license(licenses)
-    license_status = classify_license_status(licenses, controlled_access, noncommercial_license)
-
-    record = {
-        "type": "Collection" if is_collection else "Analysis Result",
-        "short_title": short_title,
-        "title": title,
-        "doi": doi,
-        "link": item.get("link", "") or item.get("url", ""),
-        "license_status": license_status,
-        "licenses": "; ".join(licenses),
-        "subjects": strip_html(item.get("subjects")),
-        "data_types": strip_html(item.get("data_types")),
-        "cancer_types": strip_html(item.get("cancer_types")),
-        "cancer_locations": strip_html(item.get("cancer_locations")),
-        "species": strip_html(item.get("species")),
-        "program": strip_html(item.get("program")),
-        "date_updated": strip_html(item.get("date_updated")),
-        "supporting_data": strip_html(item.get("supporting_data")),
-        "source_collections": "" if is_collection else strip_html(item.get("collections")),
-        "download_info": strip_html(item.get(download_info_key)),
-        "downloads": strip_html(item.get(downloads_key)),
-        "external_resources": strip_html(item.get("external_resources") or item.get("additional_resources")),
-        "summary": summary,
-        "abstract": abstract,
-        "detailed_description": description,
-        "hidden": hidden,
-        "hide_from_browse_table": hidden_raw,
-        "controlled_access": controlled_access,
-        "noncommercial_license": noncommercial_license,
-        "controlled_access_policy": CONTROLLED_ACCESS_POLICY_URL if controlled_access else "",
-    }
+    record = tcia_snapshot.normalize_wordpress_record(item, kind)
     record["_search_text"] = " ".join(strip_html(value) for value in item.values()).lower()
     return record
 

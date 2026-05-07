@@ -27,7 +27,7 @@ When a downstream record is derived from a TCIA DOI but is not itself listed in 
    - Use `--include-hidden` only for explicit TCIA staff requests that ask for hidden/staged/retired records.
    - Or use `tcia_utils.wordpress.getCollections()` and `getAnalyses()` if packages are available.
 2. Filter out `hide_from_browse_table = "1"` records unless the explicit TCIA staff exception applies.
-3. Filter candidates by the user's criteria: cancer type, body site, modality, species, data type, access/license, DOI, program, supporting data, segmentations/annotations, or download need.
+3. Filter candidates by the user's criteria: cancer type, body site, modality, species, data type, access/license, DOI, program, supporting data, segmentations/annotations, or download need. For modality, file format, download-route, and access/license questions, prefer download-level metadata over top-level Collection or Analysis Result `data_types`; mixed datasets can have modality labels such as MR only on individual download records.
 4. Use `collection_short_title` or `result_short_title` as the cross-system key whenever possible.
 5. For download questions, inspect WordPress `download_type`, `data_type`, and `file_type` together. These are multi-select labels, not a strict one-parent tree.
 6. Route access with the matrix below.
@@ -141,6 +141,8 @@ Treat `download_type` as the broad parent category, but do not require each down
 When routing downloads, preserve all labels and explain mixed labels plainly. Do not infer the route from a single `data_type`; use the combined `download_type`, `data_type`, `file_type`, title, description, license, requirements, and WordPress dataset context. Ignore blank or orphaned download rows in normal public discovery unless they are attached to a visible Collection or Analysis Result and contain a real title, URL, or file.
 
 For Collections, `collection_downloads` are the dataset's download records. For Analysis Results, `result_downloads` are the Analysis Result's actual downloadable files. Do not treat source collection download records as the Analysis Result files; source collections only explain what data were used to create the result. If `result_downloads` are missing or empty for an Analysis Result, say that the result file metadata is unavailable and verify with the current WordPress API or page before giving download instructions.
+
+In local SQLite snapshots, current-version nested `collection_downloads` and `result_downloads` are normalized into `wordpress_downloads` and `wordpress_download_labels`. Use the boolean `is_current_version` column for user-facing dataset downloads, for example `is_current_version IS TRUE`. The global WordPress downloads endpoint is also stored there with `is_current_version = FALSE`; use those rows for troubleshooting, not routine discovery, because they can include historical or orphaned endpoint records.
 
 ## Bundled Scripts
 

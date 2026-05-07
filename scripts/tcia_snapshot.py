@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 DEFAULT_RELEASE_TAG = "tcia-snapshot-latest"
 SNAPSHOT_ASSET = "tcia_snapshot.sqlite.gz"
 MANIFEST_ASSET = "tcia_snapshot_manifest.json"
@@ -59,6 +59,7 @@ CONTROLLED_LICENSE_TERMS = [
 ]
 CREATIVE_COMMONS_TERMS = ["creative commons", "cc by", "cc-by"]
 NONCOMMERCIAL_TERMS = ["noncommercial", "non-commercial", "cc by-nc", "cc-by-nc"]
+FALSEY_TEXT = {"", "false", "none", "null"}
 
 PATHDB_COLUMNS = [
     "collection",
@@ -122,9 +123,11 @@ def connect_snapshot(path: str | os.PathLike[str] | None = None) -> sqlite3.Conn
 def stringify(value: Any) -> str:
     if value is None:
         return ""
+    if isinstance(value, bool):
+        return "" if value is False else "True"
     if isinstance(value, str):
         return value
-    if isinstance(value, (int, float, bool)):
+    if isinstance(value, (int, float)):
         return str(value)
     if isinstance(value, list):
         return "; ".join(stringify(item) for item in value if stringify(item))
@@ -152,6 +155,87 @@ def strip_html(value: Any) -> str:
 
 def json_dumps(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def quote_identifier(identifier: str) -> str:
+    return '"' + identifier.replace('"', '""') + '"'
+
+
+def clean_text(value: Any) -> str:
+    text = strip_html(value)
+    return "" if text.lower() in FALSEY_TEXT else text
+
+
+def scalar_field(item: dict[str, Any], *keys: str) -> str:
+    for key in keys:
+        if key in item:
+            text = clean_text(item.get(key))
+            if text:
+                return text
+    return ""
+
+
+def label_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, bool):
+        return []
+    if isinstance(value, list):
+        labels: list[str] = []
+        for item in value:
+            labels.extend(label_list(item))
+        return unique_list(labels)
+    if isinstance(value, dict):
+        for key in ("label", "title", "name"):
+            if key in value:
+                return label_list(value.get(key))
+        return []
+    text = clean_text(value)
+    if not text:
+        return []
+    return [text]
+
+
+def labels_field(item: dict[str, Any], *keys: str) -> list[str]:
+    labels: list[str] = []
+    for key in keys:
+        if key in item:
+            labels.extend(label_list(item.get(key)))
+    return unique_list(labels)
+
+
+def license_field(item: dict[str, Any]) -> tuple[str, str]:
+    value = item.get("license")
+    if value is None:
+        value = item.get("data_license")
+    if isinstance(value, dict):
+        return clean_text(value.get("label")), clean_text(value.get("url"))
+    return clean_text(value), ""
+
+
+def requirements_field(item: dict[str, Any]) -> tuple[str, str, str]:
+    value = item.get("download requirements")
+    if value is None:
+        value = item.get("download_requirements")
+    if not isinstance(value, dict):
+        return clean_text(value), "", ""
+    return (
+        clean_text(value.get("label")),
+        clean_text(value.get("url")),
+        clean_text(value.get("text")),
+    )
+
+
+def unique_list(values: list[str]) -> list[str]:
+    output: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        clean = clean_text(value)
+        marker = clean.lower()
+        if clean and marker not in seen:
+            seen.add(marker)
+            output.append(clean)
+    return output
 
 
 def fetch_bytes(url: str, timeout: int = 90) -> tuple[bytes, dict[str, str]]:
@@ -307,6 +391,98 @@ def classify_license_status(
     return "Unknown"
 
 
+def normalize_wordpress_download(
+    item: dict[str, Any],
+    parent_source: str,
+    parent_id: str = "",
+    parent_slug: str = "",
+    parent_short_title: str = "",
+    parent_title: str = "",
+    parent_hidden: int = 0,
+    is_current_version: bool = False,
+) -> dict[str, Any]:
+    download_types = labels_field(item, "download type", "download_type")
+    data_types = labels_field(item, "data type", "data_type")
+    file_types = labels_field(item, "file type", "file_type")
+    external_resources = labels_field(item, "external_resources")
+    license_label, license_url = license_field(item)
+    requirements_label, requirements_url, requirements_text = requirements_field(item)
+    controlled_access = is_controlled_access_from_licenses([license_label] if license_label else [])
+    noncommercial_license = has_noncommercial_license([license_label] if license_label else [])
+
+    return {
+        "parent_source": parent_source,
+        "parent_id": parent_id,
+        "parent_slug": parent_slug,
+        "parent_short_title": parent_short_title,
+        "parent_title": parent_title,
+        "parent_hidden": int(parent_hidden),
+        "is_current_version": bool(is_current_version),
+        "download_id": str(item.get("id") or ""),
+        "download_slug": scalar_field(item, "slug"),
+        "download_title": scalar_field(item, "download_title", "download title", "title"),
+        "download_url": scalar_field(item, "download url", "download_url", "download_file"),
+        "download_metadata": scalar_field(item, "download metadata", "download_metadata"),
+        "search_url": scalar_field(item, "search url", "search_url"),
+        "date_updated": scalar_field(item, "date updated", "date_updated"),
+        "collection_status": scalar_field(item, "collection status", "collection_status"),
+        "description": strip_html(item.get("description")),
+        "license_label": license_label,
+        "license_url": license_url,
+        "requirements_label": requirements_label,
+        "requirements_url": requirements_url,
+        "requirements_text": requirements_text,
+        "download_size": scalar_field(item, "download size", "download_size"),
+        "download_size_unit": scalar_field(item, "download size unit", "download_size_unit"),
+        "subjects": scalar_field(item, "subjects"),
+        "studies": scalar_field(item, "studies", "study_count"),
+        "series": scalar_field(item, "series", "series_count"),
+        "images": scalar_field(item, "images", "image_count"),
+        "download_types": download_types,
+        "data_types": data_types,
+        "file_types": file_types,
+        "external_resources": external_resources,
+        "controlled_access": controlled_access,
+        "noncommercial_license": noncommercial_license,
+    }
+
+
+def compact_download(download: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": download.get("download_id", ""),
+        "title": download.get("download_title", ""),
+        "download_types": download.get("download_types", []),
+        "data_types": download.get("data_types", []),
+        "file_types": download.get("file_types", []),
+        "url": download.get("download_url", ""),
+        "license": download.get("license_label", ""),
+        "controlled_access": download.get("controlled_access", False),
+        "subjects": download.get("subjects", ""),
+        "studies": download.get("studies", ""),
+        "series": download.get("series", ""),
+        "images": download.get("images", ""),
+    }
+
+
+def aggregate_download_labels(downloads: list[dict[str, Any]], key: str) -> str:
+    labels: list[str] = []
+    for download in downloads:
+        labels.extend(download.get(key, []))
+    return "; ".join(unique_list(labels))
+
+
+def has_clinical_download(downloads: list[dict[str, Any]]) -> bool:
+    clinical_labels = {"clinical data", "demographic", "diagnosis", "treatment", "follow-up"}
+    for download in downloads:
+        labels = [
+            *(download.get("download_types", []) or []),
+            *(download.get("data_types", []) or []),
+        ]
+        if any(label.lower() in clinical_labels for label in labels):
+            return True
+    return False
+
+
 def normalize_wordpress_record(item: dict[str, Any], kind: str) -> dict[str, Any]:
     is_collection = kind == "collection"
     title_key = "collection_title" if is_collection else "result_title"
@@ -326,6 +502,21 @@ def normalize_wordpress_record(item: dict[str, Any], kind: str) -> dict[str, Any
     controlled_access = is_controlled_access_from_licenses(licenses)
     noncommercial_license = has_noncommercial_license(licenses)
     license_status = classify_license_status(licenses, controlled_access, noncommercial_license)
+    current_downloads = [
+        normalize_wordpress_download(
+            download,
+            parent_source="collections" if is_collection else "analysis-results",
+            parent_id=str(item.get("id") or ""),
+            parent_slug=strip_html(item.get("slug")),
+            parent_short_title=short_title,
+            parent_title=title,
+            parent_hidden=hidden,
+            is_current_version=True,
+        )
+        for download in item.get(downloads_key) or []
+        if isinstance(download, dict)
+    ]
+    external_resources = strip_html(item.get("external_resources") or item.get("additional_resources"))
 
     return {
         "type": "Collection" if is_collection else "Analysis Result",
@@ -346,7 +537,13 @@ def normalize_wordpress_record(item: dict[str, Any], kind: str) -> dict[str, Any
         "source_collections": "" if is_collection else strip_html(item.get("collections")),
         "download_info": strip_html(item.get(download_info_key)),
         "downloads": strip_html(item.get(downloads_key)),
-        "external_resources": strip_html(item.get("external_resources") or item.get("additional_resources")),
+        "download_types": aggregate_download_labels(current_downloads, "download_types"),
+        "download_data_types": aggregate_download_labels(current_downloads, "data_types"),
+        "download_file_types": aggregate_download_labels(current_downloads, "file_types"),
+        "has_tcia_clinical_download": has_clinical_download(current_downloads),
+        "has_external_clinical_resource": "clinical" in external_resources.lower(),
+        "current_downloads": [compact_download(download) for download in current_downloads],
+        "external_resources": external_resources,
         "summary": strip_html(item.get(summary_key)),
         "abstract": strip_html(item.get(abstract_key)),
         "detailed_description": strip_html(item.get("detailed_description")),
@@ -432,7 +629,7 @@ def canonical_content_hash(
 
 
 def create_schema(conn: sqlite3.Connection) -> None:
-    quoted_pathdb = ",\n            ".join(f'"{column}" TEXT' for column in PATHDB_COLUMNS)
+    quoted_pathdb = ",\n            ".join(f"{quote_identifier(column)} TEXT" for column in PATHDB_COLUMNS)
     conn.executescript(
         f"""
         CREATE TABLE snapshot_meta (
@@ -453,6 +650,52 @@ def create_schema(conn: sqlite3.Connection) -> None:
             normalized_json TEXT,
             raw_json TEXT NOT NULL,
             search_text TEXT NOT NULL
+        );
+
+        CREATE TABLE wordpress_downloads (
+            download_row_id INTEGER PRIMARY KEY,
+            parent_source TEXT NOT NULL,
+            parent_id TEXT,
+            parent_slug TEXT,
+            parent_short_title TEXT,
+            parent_title TEXT,
+            parent_hidden INTEGER NOT NULL DEFAULT 0,
+            is_current_version INTEGER NOT NULL DEFAULT 0,
+            download_id TEXT,
+            download_slug TEXT,
+            download_title TEXT,
+            download_url TEXT,
+            download_metadata TEXT,
+            search_url TEXT,
+            date_updated TEXT,
+            collection_status TEXT,
+            description TEXT,
+            license_label TEXT,
+            license_url TEXT,
+            requirements_label TEXT,
+            requirements_url TEXT,
+            requirements_text TEXT,
+            download_size TEXT,
+            download_size_unit TEXT,
+            subjects TEXT,
+            studies TEXT,
+            series TEXT,
+            images TEXT,
+            download_types_json TEXT NOT NULL,
+            data_types_json TEXT NOT NULL,
+            file_types_json TEXT NOT NULL,
+            external_resources_json TEXT NOT NULL,
+            controlled_access INTEGER NOT NULL DEFAULT 0,
+            noncommercial_license INTEGER NOT NULL DEFAULT 0,
+            raw_json TEXT NOT NULL,
+            search_text TEXT NOT NULL
+        );
+
+        CREATE TABLE wordpress_download_labels (
+            download_row_id INTEGER NOT NULL,
+            label_kind TEXT NOT NULL,
+            label TEXT NOT NULL,
+            FOREIGN KEY(download_row_id) REFERENCES wordpress_downloads(download_row_id)
         );
 
         CREATE TABLE pathdb_rows (
@@ -552,9 +795,142 @@ def insert_wordpress(
     )
 
 
+def insert_download_row(
+    conn: sqlite3.Connection,
+    download: dict[str, Any],
+    raw_record: dict[str, Any],
+) -> None:
+    search_values = [
+        download.get("parent_source", ""),
+        download.get("parent_short_title", ""),
+        download.get("parent_title", ""),
+        download.get("download_id", ""),
+        download.get("download_slug", ""),
+        download.get("download_title", ""),
+        download.get("download_url", ""),
+        download.get("license_label", ""),
+        download.get("requirements_label", ""),
+        download.get("description", ""),
+        *(download.get("download_types", []) or []),
+        *(download.get("data_types", []) or []),
+        *(download.get("file_types", []) or []),
+        *(download.get("external_resources", []) or []),
+    ]
+    cursor = conn.execute(
+        """
+        INSERT INTO wordpress_downloads
+        (parent_source, parent_id, parent_slug, parent_short_title, parent_title,
+         parent_hidden, is_current_version, download_id, download_slug,
+         download_title, download_url, download_metadata, search_url, date_updated,
+         collection_status, description, license_label, license_url,
+         requirements_label, requirements_url, requirements_text, download_size,
+         download_size_unit, subjects, studies, series, images, download_types_json,
+         data_types_json, file_types_json, external_resources_json, controlled_access,
+         noncommercial_license, raw_json, search_text)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            download.get("parent_source", ""),
+            download.get("parent_id", ""),
+            download.get("parent_slug", ""),
+            download.get("parent_short_title", ""),
+            download.get("parent_title", ""),
+            int(download.get("parent_hidden") or 0),
+            1 if download.get("is_current_version") else 0,
+            download.get("download_id", ""),
+            download.get("download_slug", ""),
+            download.get("download_title", ""),
+            download.get("download_url", ""),
+            download.get("download_metadata", ""),
+            download.get("search_url", ""),
+            download.get("date_updated", ""),
+            download.get("collection_status", ""),
+            download.get("description", ""),
+            download.get("license_label", ""),
+            download.get("license_url", ""),
+            download.get("requirements_label", ""),
+            download.get("requirements_url", ""),
+            download.get("requirements_text", ""),
+            download.get("download_size", ""),
+            download.get("download_size_unit", ""),
+            download.get("subjects", ""),
+            download.get("studies", ""),
+            download.get("series", ""),
+            download.get("images", ""),
+            json_dumps(download.get("download_types", [])),
+            json_dumps(download.get("data_types", [])),
+            json_dumps(download.get("file_types", [])),
+            json_dumps(download.get("external_resources", [])),
+            1 if download.get("controlled_access") else 0,
+            1 if download.get("noncommercial_license") else 0,
+            json_dumps(raw_record),
+            " ".join(str(value).lower() for value in search_values if value),
+        ),
+    )
+    row_id = int(cursor.lastrowid)
+    label_rows = []
+    for label_kind, labels_key in (
+        ("download_type", "download_types"),
+        ("data_type", "data_types"),
+        ("file_type", "file_types"),
+        ("external_resource", "external_resources"),
+    ):
+        for label in download.get(labels_key, []) or []:
+            label_rows.append((row_id, label_kind, label))
+    if label_rows:
+        conn.executemany(
+            """
+            INSERT INTO wordpress_download_labels
+            (download_row_id, label_kind, label)
+            VALUES (?, ?, ?)
+            """,
+            label_rows,
+        )
+
+
+def insert_wordpress_downloads(
+    conn: sqlite3.Connection,
+    collections: list[dict[str, Any]],
+    analysis_results: list[dict[str, Any]],
+    downloads: list[dict[str, Any]],
+) -> None:
+    for parent, parent_source, short_key, title_key, downloads_key in [
+        (collection, "collections", "collection_short_title", "collection_title", "collection_downloads")
+        for collection in collections
+    ] + [
+        (analysis, "analysis-results", "result_short_title", "result_title", "result_downloads")
+        for analysis in analysis_results
+    ]:
+        parent_short_title = strip_html(parent.get(short_key))
+        parent_title = strip_html(parent.get(title_key)) or strip_html(parent.get("title"))
+        parent_hidden = hidden_value(parent)
+        for raw_download in parent.get(downloads_key) or []:
+            if not isinstance(raw_download, dict):
+                continue
+            normalized = normalize_wordpress_download(
+                raw_download,
+                parent_source=parent_source,
+                parent_id=str(parent.get("id") or ""),
+                parent_slug=strip_html(parent.get("slug")),
+                parent_short_title=parent_short_title,
+                parent_title=parent_title,
+                parent_hidden=parent_hidden,
+                is_current_version=True,
+            )
+            insert_download_row(conn, normalized, raw_download)
+
+    for raw_download in downloads:
+        normalized = normalize_wordpress_download(
+            raw_download,
+            parent_source="downloads",
+            is_current_version=False,
+        )
+        insert_download_row(conn, normalized, raw_download)
+
+
 def insert_pathdb(conn: sqlite3.Connection, rows: list[dict[str, str]]) -> None:
     placeholders = ", ".join("?" for _ in PATHDB_COLUMNS)
-    columns = ", ".join(f'"{column}"' for column in PATHDB_COLUMNS)
+    columns = ", ".join(quote_identifier(column) for column in PATHDB_COLUMNS)
     conn.executemany(
         f"INSERT INTO pathdb_rows ({columns}) VALUES ({placeholders})",
         [tuple(row.get(column, "") for column in PATHDB_COLUMNS) for row in rows],
@@ -627,6 +1003,12 @@ def add_indexes(conn: sqlite3.Connection) -> None:
         CREATE INDEX idx_wordpress_doi ON wordpress_records(doi);
         CREATE INDEX idx_wordpress_hidden ON wordpress_records(hidden);
         CREATE INDEX idx_wordpress_search_source ON wordpress_records(source);
+        CREATE INDEX idx_wordpress_downloads_parent ON wordpress_downloads(parent_source, parent_short_title);
+        CREATE INDEX idx_wordpress_downloads_id ON wordpress_downloads(download_id);
+        CREATE INDEX idx_wordpress_downloads_current ON wordpress_downloads(is_current_version);
+        CREATE INDEX idx_wordpress_downloads_hidden ON wordpress_downloads(parent_hidden);
+        CREATE INDEX idx_wordpress_download_labels_kind_label ON wordpress_download_labels(label_kind, label COLLATE NOCASE);
+        CREATE INDEX idx_wordpress_download_labels_row ON wordpress_download_labels(download_row_id);
         CREATE INDEX idx_pathdb_collection ON pathdb_rows(collection);
         CREATE INDEX idx_pathdb_patient ON pathdb_rows(patient_id);
         CREATE INDEX idx_pathdb_slide ON pathdb_rows(slide_id);
@@ -680,10 +1062,21 @@ def build_snapshot(
         "downloads": downloads,
     }
     content_sha256 = canonical_content_hash(wordpress_sources, pathdb_rows, datacite_records)
+    current_collection_downloads = sum(
+        len(collection.get("collection_downloads") or []) for collection in collections
+    )
+    current_analysis_result_downloads = sum(
+        len(result.get("result_downloads") or []) for result in analysis_results
+    )
     counts = {
         "wordpress_collections": len(collections),
         "wordpress_analysis_results": len(analysis_results),
-        "wordpress_downloads": len(downloads),
+        "wordpress_download_endpoint_records": len(downloads),
+        "wordpress_current_collection_downloads": current_collection_downloads,
+        "wordpress_current_analysis_result_downloads": current_analysis_result_downloads,
+        "wordpress_downloads": (
+            len(downloads) + current_collection_downloads + current_analysis_result_downloads
+        ),
         "pathdb_rows": len(pathdb_rows),
         "datacite_dois": len(datacite_records),
     }
@@ -697,6 +1090,7 @@ def build_snapshot(
         insert_wordpress(conn, "collections", collections)
         insert_wordpress(conn, "analysis-results", analysis_results)
         insert_wordpress(conn, "downloads", downloads)
+        insert_wordpress_downloads(conn, collections, analysis_results, downloads)
         insert_pathdb(conn, pathdb_rows)
         insert_datacite(conn, datacite_records)
         add_indexes(conn)
@@ -816,6 +1210,64 @@ def search_wordpress_records(
     return sorted(records, key=lambda record: (record.get("type", ""), record.get("short_title", "")))
 
 
+def wordpress_downloads_from_snapshot(
+    parent_short_titles: set[str] | None = None,
+    label_filters: dict[str, set[str]] | None = None,
+    current_only: bool = True,
+    include_hidden: bool = False,
+    path: str | os.PathLike[str] | None = None,
+) -> list[dict[str, Any]]:
+    if not snapshot_available(path):
+        return []
+    requested = {value.lower() for value in (parent_short_titles or set())}
+    sql = "SELECT d.* FROM wordpress_downloads d WHERE 1 = 1"
+    params: list[Any] = []
+    if current_only:
+        sql += " AND d.is_current_version IS TRUE"
+    if not include_hidden:
+        sql += " AND d.parent_hidden = 0"
+    if requested:
+        sql += f" AND lower(d.parent_short_title) IN ({', '.join('?' for _ in requested)})"
+        params.extend(sorted(requested))
+    for label_kind, labels in sorted((label_filters or {}).items()):
+        clean_labels = {label.lower() for label in labels if label}
+        if not clean_labels:
+            continue
+        placeholders = ", ".join("?" for _ in clean_labels)
+        sql += (
+            " AND EXISTS ("
+            "SELECT 1 FROM wordpress_download_labels l "
+            "WHERE l.download_row_id = d.download_row_id "
+            f"AND l.label_kind = ? AND lower(l.label) IN ({placeholders})"
+            ")"
+        )
+        params.append(label_kind)
+        params.extend(sorted(clean_labels))
+    sql += " ORDER BY d.parent_source, d.parent_short_title, d.download_id, d.download_slug"
+
+    try:
+        with connect_snapshot(path) as conn:
+            rows = [dict(row) for row in conn.execute(sql, params).fetchall()]
+    except sqlite3.OperationalError:
+        return []
+
+    for row in rows:
+        row["is_current_version"] = bool(row.get("is_current_version"))
+        row["parent_hidden"] = bool(row.get("parent_hidden"))
+        row["controlled_access"] = bool(row.get("controlled_access"))
+        row["noncommercial_license"] = bool(row.get("noncommercial_license"))
+        for column in (
+            "download_types_json",
+            "data_types_json",
+            "file_types_json",
+            "external_resources_json",
+        ):
+            output_key = column.removesuffix("_json")
+            row[output_key] = json.loads(row.pop(column) or "[]")
+        row["raw_json"] = json.loads(row["raw_json"])
+    return rows
+
+
 def datacite_records_from_snapshot(
     doi: str | None = None,
     prefix: str = DEFAULT_TCIA_PREFIX,
@@ -863,7 +1315,8 @@ def pathdb_rows_from_snapshot(
     requested = {value.lower() for value in (collections or set())}
     requested.update(pathdb_collections_for_dois({value.lower() for value in (dois or set())}, path))
 
-    sql = f"SELECT {', '.join(f'\"{column}\"' for column in PATHDB_COLUMNS)} FROM pathdb_rows"
+    columns = ", ".join(quote_identifier(column) for column in PATHDB_COLUMNS)
+    sql = f"SELECT {columns} FROM pathdb_rows"
     params: list[Any] = []
     if requested:
         sql += f" WHERE lower(collection) IN ({', '.join('?' for _ in requested)})"

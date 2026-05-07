@@ -122,7 +122,7 @@ DOI/citation:
 
 ## Download Label Interpretation
 
-Use the WordPress downloads endpoint, nested `collection_downloads`, or nested `result_downloads` when answering file/download questions. Interpret these fields together:
+Use the WordPress downloads endpoint, nested `collection_downloads`, or nested `result_downloads` when answering file/download questions. In SQLite snapshots, prefer `wordpress_downloads` joined to `wordpress_download_labels` with `is_current_version IS TRUE` for current-version user-facing downloads. Interpret these fields together:
 
 | Field | Meaning |
 | --- | --- |
@@ -130,7 +130,7 @@ Use the WordPress downloads endpoint, nested `collection_downloads`, or nested `
 | `data_type` | More specific content/modality/metadata label, such as CT, MR, RTSTRUCT, SEG, Segmentation, Demographic, Protocol, Histopathology, or Whole Slide Image |
 | `file_type` | Physical or logical file format, such as DICOM, CSV, TSV, XLSX, ZIP, NIfTI, SVS, JSON, or PDF |
 
-For Collections, use `collection_downloads` as the actual dataset download records. For Analysis Results, use `result_downloads` as the actual result file records. Source collection metadata explains provenance only; do not present source collection downloads as if they are the Analysis Result files. If an Analysis Result lacks `result_downloads`, verify against the current WordPress API or page and state that result-file metadata is unavailable instead of substituting `collection_downloads`.
+For Collections, use `collection_downloads` as the actual dataset download records. For Analysis Results, use `result_downloads` as the actual result file records. Source collection metadata explains provenance only; do not present source collection downloads as if they are the Analysis Result files. If an Analysis Result lacks `result_downloads`, verify against the current WordPress API or page and state that result-file metadata is unavailable instead of substituting `collection_downloads`. Do not rely only on top-level `data_types` for modality filtering; mixed collections can have modality labels only on individual download records.
 
 `download_type` is intended as the parent category, but all three fields are multi-select. Mixed parent categories are normal when one download record represents a combined TCIA Data Retriever manifest or package. Examples:
 
