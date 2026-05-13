@@ -79,6 +79,8 @@ jobs:
           gh release upload "$tag" \
             dist/tcia_snapshot.sqlite.gz \
             dist/tcia_snapshot_manifest.json \
+            dist/agent_datasets.jsonl \
+            dist/agent_current_downloads.jsonl \
             dist/agent_datasets.jsonl.gz \
             dist/agent_current_downloads.jsonl.gz \
             --clobber

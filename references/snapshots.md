@@ -11,6 +11,8 @@ Generated snapshot files are intentionally not committed to the repository. GitH
 
 - `tcia_snapshot.sqlite.gz`
 - `tcia_snapshot_manifest.json`
+- `agent_datasets.jsonl`
+- `agent_current_downloads.jsonl`
 - `agent_datasets.jsonl.gz`
 - `agent_current_downloads.jsonl.gz`
 
@@ -90,6 +92,8 @@ These assets are generated from the same agent-facing views for hosted/web LLMs 
 
 | Asset | Use |
 | --- | --- |
+| `agent_datasets.jsonl` | Plain-text dataset/access export for web LLMs and browse tools that cannot decompress gzip. |
+| `agent_current_downloads.jsonl` | Plain-text current WordPress download export for web LLMs and browse tools that cannot decompress gzip. |
 | `agent_datasets.jsonl.gz` | General flattened dataset/access discovery from `agent_dataset_access_summary`. |
 | `agent_current_downloads.jsonl.gz` | Current WordPress download records from `agent_current_downloads`. |
 
@@ -97,10 +101,12 @@ Direct release URLs:
 
 - `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/tcia_snapshot.sqlite.gz`
 - `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/tcia_snapshot_manifest.json`
+- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/agent_datasets.jsonl`
+- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/agent_current_downloads.jsonl`
 - `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/agent_datasets.jsonl.gz`
 - `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/agent_current_downloads.jsonl.gz`
 
-When an environment has no SQLite execution path, prefer these generic release exports before considering any live API. They are intentionally table-shaped rather than prompt-specific precomputed answer files. For MCP guidance, see `references/mcp-and-web-llms.md`.
+When an environment has no SQLite execution path, prefer these generic release exports before considering any live API. Use plain `.jsonl` for web LLM browse tools that cannot decompress gzip, and `.jsonl.gz` for local or connector tools that can. They are intentionally table-shaped rather than prompt-specific precomputed answer files. For MCP guidance, see `references/mcp-and-web-llms.md`.
 
 ## WordPress Download Tables
 

@@ -2,7 +2,7 @@
 
 Use this reference when querying `cache/tcia_snapshot.sqlite` or a database selected by `TCIA_SNAPSHOT_DB`.
 
-The GitHub Release web exports mirror the two most useful agent-facing views for environments that cannot run SQLite. Use `agent_datasets.jsonl.gz` for `agent_dataset_access_summary` and `agent_current_downloads.jsonl.gz` for `agent_current_downloads`. Filter these generic JSONL tables for controlled/mixed access, modalities, DICOM annotation labels, and download routes instead of relying on prompt-specific precomputed exports.
+The GitHub Release web exports mirror the two most useful agent-facing views for environments that cannot run SQLite. Use `agent_datasets.jsonl` or `agent_datasets.jsonl.gz` for `agent_dataset_access_summary`, and `agent_current_downloads.jsonl` or `agent_current_downloads.jsonl.gz` for `agent_current_downloads`. Prefer plain `.jsonl` for web LLM browse tools that cannot decompress gzip. Filter these generic JSONL tables for controlled/mixed access, modalities, DICOM annotation labels, and download routes instead of relying on prompt-specific precomputed exports.
 
 ## Agent-Facing Views
 

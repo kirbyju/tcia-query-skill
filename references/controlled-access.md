@@ -37,4 +37,4 @@ Do not invent approval requirements, timelines, or eligibility rules. Link to th
 - Controlled-access face datasets: route access questions to the policy page and, where applicable, General Commons metadata for `phs004225`.
 - NCTN trials or Biobank data: use WordPress license metadata and current TCIA access statements; CTDC support is planned but should not be assumed until confirmed.
 - Public subsets of a mixed collection can be described separately from controlled/restricted subsets. For mixed datasets, use `agent_dataset_access_summary` to identify controlled download titles, licenses, IDs, and URLs before answering.
-- Web-only agents that cannot query SQLite should filter `agent_datasets.jsonl.gz` from the latest release for `resolved_access_level` values such as `controlled` and `mixed` before attempting any live API lookup.
+- Web-only agents that cannot query SQLite should filter `agent_datasets.jsonl` from the latest release for `resolved_access_level` values such as `controlled` and `mixed` before attempting any live API lookup. Use `agent_datasets.jsonl.gz` only when the host can decompress gzip.

@@ -31,11 +31,15 @@ DEFAULT_REPO = "kirbyju/tcia-query-skill"
 DEFAULT_RELEASE_TAG = "tcia-snapshot-latest"
 SNAPSHOT_ASSET = "tcia_snapshot.sqlite.gz"
 MANIFEST_ASSET = "tcia_snapshot_manifest.json"
-AGENT_DATASETS_EXPORT = "agent_datasets.jsonl.gz"
-AGENT_DOWNLOADS_EXPORT = "agent_current_downloads.jsonl.gz"
+AGENT_DATASETS_JSONL = "agent_datasets.jsonl"
+AGENT_DOWNLOADS_JSONL = "agent_current_downloads.jsonl"
+AGENT_DATASETS_JSONL_GZ = f"{AGENT_DATASETS_JSONL}.gz"
+AGENT_DOWNLOADS_JSONL_GZ = f"{AGENT_DOWNLOADS_JSONL}.gz"
 WEB_EXPORT_ASSETS = [
-    AGENT_DATASETS_EXPORT,
-    AGENT_DOWNLOADS_EXPORT,
+    AGENT_DATASETS_JSONL,
+    AGENT_DOWNLOADS_JSONL,
+    AGENT_DATASETS_JSONL_GZ,
+    AGENT_DOWNLOADS_JSONL_GZ,
 ]
 REQUIRED_AGENT_VIEWS = [
     "agent_datasets",
@@ -1396,6 +1400,15 @@ def write_jsonl_gz(path: Path, rows: list[dict[str, Any]]) -> dict[str, Any]:
     return {"bytes": path.stat().st_size, "sha256": file_sha256(path), "rows": len(rows)}
 
 
+def write_jsonl(path: Path, rows: list[dict[str, Any]]) -> dict[str, Any]:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as handle:
+        for row in rows:
+            handle.write(json.dumps(row, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+            handle.write("\n")
+    return {"bytes": path.stat().st_size, "sha256": file_sha256(path), "rows": len(rows)}
+
+
 def export_web_artifacts(db_path: Path, exports_dir: Path) -> dict[str, dict[str, Any]]:
     exports_dir.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(db_path) as conn:
@@ -1418,8 +1431,10 @@ def export_web_artifacts(db_path: Path, exports_dir: Path) -> dict[str, dict[str
         )
 
     return {
-        AGENT_DATASETS_EXPORT: write_jsonl_gz(exports_dir / AGENT_DATASETS_EXPORT, datasets),
-        AGENT_DOWNLOADS_EXPORT: write_jsonl_gz(exports_dir / AGENT_DOWNLOADS_EXPORT, downloads),
+        AGENT_DATASETS_JSONL: write_jsonl(exports_dir / AGENT_DATASETS_JSONL, datasets),
+        AGENT_DOWNLOADS_JSONL: write_jsonl(exports_dir / AGENT_DOWNLOADS_JSONL, downloads),
+        AGENT_DATASETS_JSONL_GZ: write_jsonl_gz(exports_dir / AGENT_DATASETS_JSONL_GZ, datasets),
+        AGENT_DOWNLOADS_JSONL_GZ: write_jsonl_gz(exports_dir / AGENT_DOWNLOADS_JSONL_GZ, downloads),
     }
 
 
