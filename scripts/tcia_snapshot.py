@@ -33,13 +33,9 @@ SNAPSHOT_ASSET = "tcia_snapshot.sqlite.gz"
 MANIFEST_ASSET = "tcia_snapshot_manifest.json"
 AGENT_DATASETS_EXPORT = "agent_datasets.jsonl.gz"
 AGENT_DOWNLOADS_EXPORT = "agent_current_downloads.jsonl.gz"
-CONTROLLED_ACCESS_EXPORT = "controlled_access_datasets.json"
-DICOM_ANNOTATION_EXPORT = "dicom_annotation_index.json"
 WEB_EXPORT_ASSETS = [
     AGENT_DATASETS_EXPORT,
     AGENT_DOWNLOADS_EXPORT,
-    CONTROLLED_ACCESS_EXPORT,
-    DICOM_ANNOTATION_EXPORT,
 ]
 REQUIRED_AGENT_VIEWS = [
     "agent_datasets",
@@ -1420,86 +1416,10 @@ def export_web_artifacts(db_path: Path, exports_dir: Path) -> dict[str, dict[str
             ORDER BY hidden, lower(short_title), download_id, download_slug
             """,
         )
-        controlled = rows_as_dicts(
-            conn,
-            """
-            SELECT
-                short_title,
-                title,
-                dataset_type,
-                doi,
-                link,
-                resolved_access_level AS access_level,
-                license_status,
-                licenses,
-                subjects,
-                cancer_types,
-                cancer_locations,
-                species,
-                download_types,
-                download_data_types,
-                download_file_types,
-                current_download_count,
-                controlled_download_count,
-                noncontrolled_download_count,
-                controlled_download_titles,
-                controlled_license_labels,
-                resolved_controlled_access_policy_url AS controlled_access_policy_url
-            FROM agent_dataset_access_summary
-            WHERE hidden = 0
-              AND resolved_access_level IN ('controlled', 'mixed')
-            ORDER BY lower(short_title), source
-            """,
-        )
-        dicom_annotations = rows_as_dicts(
-            conn,
-            """
-            SELECT
-                short_title,
-                title,
-                dataset_type,
-                download_id,
-                download_title,
-                download_url,
-                download_metadata,
-                search_url,
-                access_level,
-                license_label,
-                subjects,
-                studies,
-                series,
-                images,
-                download_types,
-                data_types,
-                file_types
-            FROM agent_current_downloads d
-            WHERE hidden = 0
-              AND EXISTS (
-                SELECT 1 FROM json_each(d.file_types)
-                WHERE lower(value) = 'dicom'
-              )
-              AND (
-                EXISTS (
-                  SELECT 1 FROM json_each(d.download_types)
-                  WHERE lower(value) LIKE '%annotation%'
-                )
-                OR EXISTS (
-                  SELECT 1 FROM json_each(d.data_types)
-                  WHERE lower(value) IN (
-                    'annotation', 'annotations', 'segmentation',
-                    'seg', 'rtstruct', 'sr', 'rtdose', 'rtplan', 'rtimage'
-                  )
-                )
-              )
-            ORDER BY lower(short_title), download_id, download_slug
-            """,
-        )
 
     return {
         AGENT_DATASETS_EXPORT: write_jsonl_gz(exports_dir / AGENT_DATASETS_EXPORT, datasets),
         AGENT_DOWNLOADS_EXPORT: write_jsonl_gz(exports_dir / AGENT_DOWNLOADS_EXPORT, downloads),
-        CONTROLLED_ACCESS_EXPORT: write_json(exports_dir / CONTROLLED_ACCESS_EXPORT, controlled),
-        DICOM_ANNOTATION_EXPORT: write_json(exports_dir / DICOM_ANNOTATION_EXPORT, dicom_annotations),
     }
 
 

@@ -12,7 +12,7 @@ Use these sources in order:
 
 1. A hosted read-only MCP server backed by the latest TCIA SQLite snapshot.
 2. The GitHub Release SQLite snapshot, if the environment can download and query SQLite.
-3. The GitHub Release web exports, if the environment can fetch and inspect JSON/JSONL but cannot run SQLite.
+3. The GitHub Release compressed JSONL exports, if the environment can fetch, decompress, and inspect JSONL but cannot run SQLite.
 4. Live source APIs only for maintainers building or debugging the snapshot, not for normal dataset discovery.
 
 The release assets are:
@@ -21,8 +21,24 @@ The release assets are:
 - `tcia_snapshot_manifest.json`: schema version, hashes, counts, and export metadata.
 - `agent_datasets.jsonl.gz`: flattened dataset/access rows from `agent_dataset_access_summary`.
 - `agent_current_downloads.jsonl.gz`: current WordPress download rows from `agent_current_downloads`.
-- `controlled_access_datasets.json`: visible controlled or mixed-access datasets.
-- `dicom_annotation_index.json`: visible DICOM annotation/result download records.
+
+Direct release URLs:
+
+- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/tcia_snapshot.sqlite.gz`
+- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/tcia_snapshot_manifest.json`
+- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/agent_datasets.jsonl.gz`
+- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/agent_current_downloads.jsonl.gz`
+
+The JSONL exports are generic table exports, not prompt-specific precomputed answer files. Filter `agent_datasets.jsonl.gz` for dataset/access fields and `agent_current_downloads.jsonl.gz` for modality, file type, download type, and annotation labels.
+
+JSONL usage pattern:
+
+1. Fetch the direct URLs rather than browsing the GitHub release HTML page.
+2. Decompress gzip and parse one JSON object per line.
+3. Treat `short_title` as the join key between dataset rows and current download rows.
+4. Exclude rows where `hidden` is true unless the user explicitly asks for TCIA staff hidden/staged/retired records.
+5. Filter dataset rows by `access_level` or `resolved_access_level`, and filter download rows by `download_types`, `data_types`, and `file_types`.
+6. For mixed-access datasets, split controlled and noncontrolled downloads in the answer.
 
 ## Remote MCP Shape
 
@@ -61,7 +77,7 @@ For controlled-access DICOM, do not generate public IDC/NBIA download or viewer 
 If MCP is unavailable, web LLM prompts should point to the release exports explicitly. Suggested user prompt wording:
 
 ```text
-Use the latest release assets from https://github.com/kirbyju/tcia-query-skill/releases/tag/tcia-snapshot-latest. Prefer controlled_access_datasets.json and dicom_annotation_index.json for this question. Do not query the live TCIA WordPress API.
+Use the latest release assets from https://github.com/kirbyju/tcia-query-skill/releases/tag/tcia-snapshot-latest. Prefer tcia_snapshot.sqlite.gz if you can query SQLite. Otherwise fetch and decompress agent_datasets.jsonl.gz and agent_current_downloads.jsonl.gz from the direct release URLs documented in references/mcp-and-web-llms.md. Do not query the live TCIA WordPress API.
 ```
 
-The static exports are intentionally redundant with SQLite views. They exist so web-only LLMs have a compact data plane even when they cannot install the skill or execute local code.
+The static exports are intentionally redundant with SQLite views. They exist so web-only LLMs have a compact data plane even when they cannot install the skill or execute local code. If the host cannot fetch/decompress gzip or parse JSONL, it needs a remote MCP/data connector or user-supplied downloaded files; it should not fall back to broad web search or live WordPress scraping.

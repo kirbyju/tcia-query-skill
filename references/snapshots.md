@@ -13,8 +13,6 @@ Generated snapshot files are intentionally not committed to the repository. GitH
 - `tcia_snapshot_manifest.json`
 - `agent_datasets.jsonl.gz`
 - `agent_current_downloads.jsonl.gz`
-- `controlled_access_datasets.json`
-- `dicom_annotation_index.json`
 
 The workflow validates that the SQLite file contains the documented `agent_*` views, writes web-friendly exports from those views, and compares a release fingerprint built from the source-content hash, schema version, SQLite hash, and export hashes. It skips release uploads only when the release fingerprint is unchanged.
 
@@ -94,10 +92,15 @@ These assets are generated from the same agent-facing views for hosted/web LLMs 
 | --- | --- |
 | `agent_datasets.jsonl.gz` | General flattened dataset/access discovery from `agent_dataset_access_summary`. |
 | `agent_current_downloads.jsonl.gz` | Current WordPress download records from `agent_current_downloads`. |
-| `controlled_access_datasets.json` | Visible controlled or mixed-access datasets with controlled-download summary fields. |
-| `dicom_annotation_index.json` | Visible DICOM annotation/result download records. |
 
-When an environment has no SQLite execution path, prefer these release exports before considering any live API. For MCP guidance, see `references/mcp-and-web-llms.md`.
+Direct release URLs:
+
+- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/tcia_snapshot.sqlite.gz`
+- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/tcia_snapshot_manifest.json`
+- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/agent_datasets.jsonl.gz`
+- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/agent_current_downloads.jsonl.gz`
+
+When an environment has no SQLite execution path, prefer these generic release exports before considering any live API. They are intentionally table-shaped rather than prompt-specific precomputed answer files. For MCP guidance, see `references/mcp-and-web-llms.md`.
 
 ## WordPress Download Tables
 

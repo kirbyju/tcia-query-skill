@@ -104,7 +104,7 @@ Examples:
 - **Cursor, Cline, Roo Code, Continue, OpenHands, or similar coding agents**: Clone the repo and tell the agent to use `SKILL.md` as the task guide. These tools can usually read the references and run the Python helper scripts.
 - **Custom agents**: Load `SKILL.md` as the primary system/domain instruction, then load files from `references/` on demand. Permit script execution so the agent can refresh/query the SQLite snapshot and create manifests.
 - **SQLite-aware agents**: Mount `cache/tcia_snapshot.sqlite` directly and prefer the views documented in [references/schema.md](./references/schema.md).
-- **Web-based LLMs without local execution**: Use the latest GitHub Release web exports, especially `controlled_access_datasets.json`, `dicom_annotation_index.json`, `agent_datasets.jsonl.gz`, and `agent_current_downloads.jsonl.gz`. See [references/mcp-and-web-llms.md](./references/mcp-and-web-llms.md).
+- **Web-based LLMs without local execution**: Use the latest GitHub Release SQLite snapshot when possible, or the generic compressed JSONL exports `agent_datasets.jsonl.gz` and `agent_current_downloads.jsonl.gz`. See [references/mcp-and-web-llms.md](./references/mcp-and-web-llms.md).
 - **MCP-capable hosted agents**: Connect to a read-only MCP server backed by the published SQLite snapshot or release exports. The MCP server should expose typed search/download-summary tools, not live WordPress scraping.
 
 For non-Codex tools, this repository may not be "installed" automatically as a native skill. It can still be used as structured agent guidance.
@@ -117,8 +117,13 @@ Routine discovery should use the local SQLite snapshot, not live public API call
 - `tcia_snapshot_manifest.json`
 - `agent_datasets.jsonl.gz`
 - `agent_current_downloads.jsonl.gz`
-- `controlled_access_datasets.json`
-- `dicom_annotation_index.json`
+
+Direct release URLs:
+
+- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/tcia_snapshot.sqlite.gz`
+- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/tcia_snapshot_manifest.json`
+- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/agent_datasets.jsonl.gz`
+- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/agent_current_downloads.jsonl.gz`
 
 After installing or cloning the skill, refresh local metadata from the latest release:
 

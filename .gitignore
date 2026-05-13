@@ -7,4 +7,3 @@ dist/
 *.sqlite
 *.sqlite.gz
 *_manifest.json
-/scripts/__pycache__

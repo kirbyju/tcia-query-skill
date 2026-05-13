@@ -81,9 +81,11 @@ jobs:
             dist/tcia_snapshot_manifest.json \
             dist/agent_datasets.jsonl.gz \
             dist/agent_current_downloads.jsonl.gz \
-            dist/controlled_access_datasets.json \
-            dist/dicom_annotation_index.json \
             --clobber
+
+          for asset in controlled_access_datasets.json dicom_annotation_index.json; do
+            gh release delete-asset "$tag" "$asset" --yes >/dev/null 2>&1 || true
+          done
 
       - name: Report unchanged snapshot
         if: steps.compare.outputs.changed == 'false'
