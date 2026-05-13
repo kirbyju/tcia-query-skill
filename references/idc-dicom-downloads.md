@@ -6,6 +6,8 @@ Use this reference when a user asks to download TCIA-published DICOM data, inclu
 
 Prefer IDC and `idc-index` for open-access/public DICOM downloads. TCIA is phasing out NBIA, so do not use NBIA as the first download route for public DICOM data. Use NBIA only as a fallback when requested open-access/public DICOM series cannot be found in IDC/idc-index. If NBIA fallback is needed, use the NBIA v4 API documented by `https://cbiit.github.io/NBIA-TCIA/nbia-api.yaml`.
 
+For public DICOM series/file details, use IDC/idc-index after TCIA provenance and access/license status have been confirmed from the SQLite snapshot or release exports. Do not query live WordPress APIs to discover DICOM series, modality, annotation, or file details during normal end-user tasks.
+
 Controlled-access DICOM is different: do not route it to IDC or NBIA fallback for public download, and do not directly download controlled data. So far, controlled-access TCIA DICOM metadata lives in General Commons under `phs004225`, with WordPress license metadata as the access-status trigger and the TCIA controlled-access policy page as the user-facing access guidance. For controlled data, provide policy guidance and portable TCIA Data Retriever manifests for later authorized use when appropriate.
 
 If an IDC skill is available, use it for IDC-specific query, visualization, license, citation, and download mechanics. The TCIA skill should establish TCIA provenance through WordPress, identify the relevant WordPress download records or manifest, and provide IDC allowlist inputs such as the TCIA short title, DOI, or Series Instance UIDs.
@@ -31,7 +33,7 @@ Do not silently install packages. If package installation is not allowed, explai
 
 1. Confirm the dataset is a visible TCIA WordPress Collection or Analysis Result.
 2. Check WordPress license metadata before giving download commands.
-3. Identify DICOM downloads from WordPress `file_type = DICOM`, existing `.tcia` manifest URLs, CSV/TSV/XLSX manifest URLs, or DICOM-specific `data_type` values such as CT, MR, PT, RTSTRUCT, SEG, SR, DX, MG, CR, NM, RTDOSE, RTPLAN, RTIMAGE, REG, KO, PR, RWV, OT, US, XA, RF, and SC.
+3. Identify DICOM download candidates from snapshot `file_type = DICOM`, existing `.tcia` manifest URLs, CSV/TSV/XLSX manifest URLs, or DICOM-specific `data_type` values such as CT, MR, PT, RTSTRUCT, SEG, SR, DX, MG, CR, NM, RTDOSE, RTPLAN, RTIMAGE, REG, KO, PR, RWV, OT, US, XA, RF, and SC.
 4. For open/public data only, before downloading, ask the user whether they want direct agent download in the current environment or a portable TCIA Data Retriever CSV manifest.
 5. Prefer IDC/idc-index for direct agent downloads:
    - Match by TCIA DOI, short title, IDC `collection_id`, IDC `analysis_result_id`, or Series Instance UID.

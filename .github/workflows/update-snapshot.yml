@@ -31,7 +31,14 @@ jobs:
           python scripts/tcia_snapshot.py build \
             --out dist/tcia_snapshot.sqlite \
             --gzip-out dist/tcia_snapshot.sqlite.gz \
-            --manifest-out dist/tcia_snapshot_manifest.json
+            --manifest-out dist/tcia_snapshot_manifest.json \
+            --exports-dir dist
+
+      - name: Validate snapshot artifacts
+        run: |
+          python scripts/tcia_snapshot.py validate \
+            --db dist/tcia_snapshot.sqlite \
+            --exports-dir dist
 
       - name: Compare with published snapshot
         id: compare
@@ -40,23 +47,18 @@ jobs:
         run: |
           set -euo pipefail
           tag="tcia-snapshot-latest"
-          new_hash="$(python -c 'import json; print(json.load(open("dist/tcia_snapshot_manifest.json"))["content_sha256"])')"
-          new_schema="$(python -c 'import json; print(json.load(open("dist/tcia_snapshot_manifest.json"))["schema_version"])')"
-          echo "new_hash=${new_hash}" >> "$GITHUB_OUTPUT"
-          echo "new_schema=${new_schema}" >> "$GITHUB_OUTPUT"
+          new_fingerprint="$(python -c 'import json; print(json.load(open("dist/tcia_snapshot_manifest.json"))["release_fingerprint"])')"
+          echo "new_fingerprint=${new_fingerprint}" >> "$GITHUB_OUTPUT"
 
           mkdir -p previous
           if gh release download "$tag" --pattern tcia_snapshot_manifest.json --dir previous >/dev/null 2>&1; then
-            old_hash="$(python -c 'import json; print(json.load(open("previous/tcia_snapshot_manifest.json")).get("content_sha256", ""))')"
-            old_schema="$(python -c 'import json; print(json.load(open("previous/tcia_snapshot_manifest.json")).get("schema_version", ""))')"
+            old_fingerprint="$(python -c 'import json; m=json.load(open("previous/tcia_snapshot_manifest.json")); print(m.get("release_fingerprint") or (str(m.get("schema_version", "")) + ":" + m.get("content_sha256", "")))')"
           else
-            old_hash=""
-            old_schema=""
+            old_fingerprint=""
           fi
 
-          echo "old_hash=${old_hash}" >> "$GITHUB_OUTPUT"
-          echo "old_schema=${old_schema}" >> "$GITHUB_OUTPUT"
-          if [ "$new_hash" = "$old_hash" ] && [ "$new_schema" = "$old_schema" ]; then
+          echo "old_fingerprint=${old_fingerprint}" >> "$GITHUB_OUTPUT"
+          if [ "$new_fingerprint" = "$old_fingerprint" ]; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
@@ -77,8 +79,12 @@ jobs:
           gh release upload "$tag" \
             dist/tcia_snapshot.sqlite.gz \
             dist/tcia_snapshot_manifest.json \
+            dist/agent_datasets.jsonl.gz \
+            dist/agent_current_downloads.jsonl.gz \
+            dist/controlled_access_datasets.json \
+            dist/dicom_annotation_index.json \
             --clobber
 
       - name: Report unchanged snapshot
         if: steps.compare.outputs.changed == 'false'
-        run: echo "Snapshot content hash is unchanged; release assets were not updated."
+        run: echo "Snapshot release fingerprint is unchanged; release assets were not updated."

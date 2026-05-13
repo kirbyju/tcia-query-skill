@@ -11,8 +11,12 @@ Generated snapshot files are intentionally not committed to the repository. GitH
 
 - `tcia_snapshot.sqlite.gz`
 - `tcia_snapshot_manifest.json`
+- `agent_datasets.jsonl.gz`
+- `agent_current_downloads.jsonl.gz`
+- `controlled_access_datasets.json`
+- `dicom_annotation_index.json`
 
-The workflow compares source-content hashes and the snapshot schema version. It skips release uploads only when both are unchanged.
+The workflow validates that the SQLite file contains the documented `agent_*` views, writes web-friendly exports from those views, and compares a release fingerprint built from the source-content hash, schema version, SQLite hash, and export hashes. It skips release uploads only when the release fingerprint is unchanged.
 
 GitHub scheduled workflows can start late. If a user asks about a dataset that appears to be missing, say the published snapshot may not include the newest TCIA metadata yet and ask them to try again after the next scheduled snapshot run has had time to finish.
 
@@ -56,10 +60,13 @@ From the skill root:
 python scripts/tcia_snapshot.py build \
   --out cache/tcia_snapshot.sqlite \
   --gzip-out dist/tcia_snapshot.sqlite.gz \
-  --manifest-out dist/tcia_snapshot_manifest.json
+  --manifest-out dist/tcia_snapshot_manifest.json \
+  --exports-dir dist
+python scripts/tcia_snapshot.py validate --db cache/tcia_snapshot.sqlite
+python scripts/tcia_snapshot.py validate --db dist/tcia_snapshot.sqlite --exports-dir dist
 ```
 
-The generated SQLite database is suitable for local use. The gzipped artifact is suitable for GitHub Release distribution.
+The generated SQLite database is suitable for local use. The gzipped artifact and web exports are suitable for GitHub Release distribution. The validation command fails if required agent-facing views are absent, which prevents documentation/schema drift such as publishing a base-table-only SQLite file.
 
 ## Query Behavior
 
@@ -78,6 +85,19 @@ python scripts/datacite_tcia_dois.py --query lung
 ```
 
 For direct SQL, prefer the views documented in `references/schema.md`: `agent_datasets`, `agent_current_downloads`, `agent_dataset_access_summary`, `agent_pathdb_slides`, and `agent_datacite_dois`.
+
+## Web-Friendly Release Exports
+
+These assets are generated from the same agent-facing views for hosted/web LLMs that can fetch files from GitHub Releases but cannot install a skill or execute SQLite:
+
+| Asset | Use |
+| --- | --- |
+| `agent_datasets.jsonl.gz` | General flattened dataset/access discovery from `agent_dataset_access_summary`. |
+| `agent_current_downloads.jsonl.gz` | Current WordPress download records from `agent_current_downloads`. |
+| `controlled_access_datasets.json` | Visible controlled or mixed-access datasets with controlled-download summary fields. |
+| `dicom_annotation_index.json` | Visible DICOM annotation/result download records. |
+
+When an environment has no SQLite execution path, prefer these release exports before considering any live API. For MCP guidance, see `references/mcp-and-web-llms.md`.
 
 ## WordPress Download Tables
 

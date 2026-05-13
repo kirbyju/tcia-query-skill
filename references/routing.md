@@ -2,7 +2,7 @@
 
 ## Authority And Keys
 
-Use TCIA WordPress as the authoritative allowlist. For normal agent work, query the local SQLite snapshot and its agent-facing views first; the endpoints below are source inputs for the snapshot builder.
+Use TCIA WordPress as the authoritative allowlist. For normal agent work, query the local SQLite snapshot and its agent-facing views first. For web-only environments without SQLite execution, use the release JSON/JSONL exports before any live API. The endpoints below are source inputs for the snapshot builder.
 
 - Collections endpoint: `https://cancerimagingarchive.net/api/v1/collections/`
 - Analysis Results endpoint: `https://cancerimagingarchive.net/api/v1/analysis-results/`
@@ -52,14 +52,15 @@ Prefer direct SQL against the agent-facing views when the user asks for precise 
 
 If the local SQLite file is missing, run or ask the user to run `python scripts/tcia_snapshot.py ensure`. End users do not need to reinstall the skill to update metadata; `ensure` refreshes the SQLite cache from the latest release snapshot when the content hash changed.
 
-Live source API details are maintainer/developer context for `scripts/tcia_snapshot.py build`, not the normal end-user discovery path.
+Live source API details are maintainer/developer context for `scripts/tcia_snapshot.py build`, not the normal end-user discovery path. If an agent cannot query SQLite, it should use the release exports documented in `snapshots.md` and `mcp-and-web-llms.md`, not live WordPress API calls.
 
 ## Access Route Details
 
 Public DICOM radiology or DICOM pathology:
 
 - Route open-access/public DICOM to IDC and `idc-index` first. This also applies to public DICOM annotation/result objects such as RTSTRUCT, SEG, SR, RTDOSE, RTPLAN, and other DICOM files.
-- Use IDC-specific tooling for series selection, visualization, licenses, citations, and downloads.
+- Use IDC-specific tooling for series selection, series/file metadata, visualization, licenses, citations, and downloads after TCIA provenance and access/license checks are established from the snapshot.
+- Do not query live WordPress for DICOM series, modality, annotation, or file details during end-user tasks. The snapshot's WordPress fields identify TCIA publication/download/access metadata; IDC/idc-index is the preferred public DICOM detail source.
 - Avoid duplicating the IDC skill. If available, use it after TCIA provenance is established.
 - For browser visualization, load `visualization.md`. Use OHIF v3 for open radiology DICOM, SliM for open DICOM slide microscopy (`SM`), and VolView only after mapping the requested series to a public S3 folder or `crdc_series_uuid`. Return clickable links; do not install browser automation just to preview examples.
 - Before downloading DICOM data, ask whether the user wants direct agent download in the current environment or a portable TCIA Data Retriever CSV manifest created from Series Instance UIDs.

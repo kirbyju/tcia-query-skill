@@ -59,6 +59,7 @@ tcia-query-skill/
 |   +-- datacite-relationships.md
 |   +-- general-commons-graphql.md
 |   +-- idc-dicom-downloads.md
+|   +-- mcp-and-web-llms.md
 |   +-- pathdb.md
 |   +-- routing.md
 |   +-- schema.md
@@ -103,6 +104,8 @@ Examples:
 - **Cursor, Cline, Roo Code, Continue, OpenHands, or similar coding agents**: Clone the repo and tell the agent to use `SKILL.md` as the task guide. These tools can usually read the references and run the Python helper scripts.
 - **Custom agents**: Load `SKILL.md` as the primary system/domain instruction, then load files from `references/` on demand. Permit script execution so the agent can refresh/query the SQLite snapshot and create manifests.
 - **SQLite-aware agents**: Mount `cache/tcia_snapshot.sqlite` directly and prefer the views documented in [references/schema.md](./references/schema.md).
+- **Web-based LLMs without local execution**: Use the latest GitHub Release web exports, especially `controlled_access_datasets.json`, `dicom_annotation_index.json`, `agent_datasets.jsonl.gz`, and `agent_current_downloads.jsonl.gz`. See [references/mcp-and-web-llms.md](./references/mcp-and-web-llms.md).
+- **MCP-capable hosted agents**: Connect to a read-only MCP server backed by the published SQLite snapshot or release exports. The MCP server should expose typed search/download-summary tools, not live WordPress scraping.
 
 For non-Codex tools, this repository may not be "installed" automatically as a native skill. It can still be used as structured agent guidance.
 
@@ -112,6 +115,10 @@ Routine discovery should use the local SQLite snapshot, not live public API call
 
 - `tcia_snapshot.sqlite.gz`
 - `tcia_snapshot_manifest.json`
+- `agent_datasets.jsonl.gz`
+- `agent_current_downloads.jsonl.gz`
+- `controlled_access_datasets.json`
+- `dicom_annotation_index.json`
 
 After installing or cloning the skill, refresh local metadata from the latest release:
 
@@ -145,7 +152,18 @@ python scripts/pathdb_metadata.py --collection CPTAC-STAD --summary
 python scripts/pathdb_metadata.py --collection CPTAC-STAD --limit 5
 ```
 
-Developers improving the snapshot builder can use `python scripts/tcia_snapshot.py build` to query the source APIs and create release assets. End-user discovery should use the release snapshot.
+Developers improving the snapshot builder can use `python scripts/tcia_snapshot.py build` to query the source APIs and create release assets. End-user discovery should use the release snapshot or release exports.
+
+```bash
+python scripts/tcia_snapshot.py build \
+  --out dist/tcia_snapshot.sqlite \
+  --gzip-out dist/tcia_snapshot.sqlite.gz \
+  --manifest-out dist/tcia_snapshot_manifest.json \
+  --exports-dir dist
+python scripts/tcia_snapshot.py validate --db dist/tcia_snapshot.sqlite --exports-dir dist
+```
+
+The validation step checks that the SQLite file contains the documented agent-facing views and that the web export assets were generated.
 
 ## Recommended Python Packages
 
@@ -163,6 +181,8 @@ Agents should check whether these packages are available before writing custom c
 - `cdapython` for CDA subject/file summaries and cross-commons enrichment.
 
 For public DICOM downloads, use IDC/idc-index first. Existing TCIA `.tcia` manifests can be parsed into Series Instance UID allowlists with `scripts/tcia_manifest_series_uids.py`, then looked up and downloaded through IDC. Before downloading, agents should ask whether the user wants files downloaded directly in the active environment or a portable CSV manifest created for TCIA Data Retriever. New manifests should be CSV/TSV/XLSX-compatible, not legacy `.tcia`, unless the user explicitly asks for the legacy NBIA-era format. NBIA should be fallback-only for DICOM data that cannot be found in IDC/idc-index. If NBIA fallback is needed, use the NBIA v4 API documented by `https://cbiit.github.io/NBIA-TCIA/nbia-api.yaml`.
+
+For public DICOM series/file details, agents should use IDC/idc-index after TCIA provenance and access/license status have been confirmed from the snapshot. They should not query live WordPress APIs for DICOM details during normal end-user discovery.
 
 For new TCIA Data Retriever CSV manifests, the route is selected by column header. Use one preferred route header only: `SeriesInstanceUID` for public DICOM through IDC first/NBIA fallback, `imageUrl` for PathDB/direct public files, or `drs_uri` for General Commons controlled-access files.
 

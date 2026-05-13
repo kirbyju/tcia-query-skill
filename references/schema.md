@@ -2,6 +2,8 @@
 
 Use this reference when querying `cache/tcia_snapshot.sqlite` or a database selected by `TCIA_SNAPSHOT_DB`.
 
+The GitHub Release web exports mirror the most common agent-facing views for environments that cannot run SQLite. Use `agent_datasets.jsonl.gz` for `agent_dataset_access_summary`, `agent_current_downloads.jsonl.gz` for `agent_current_downloads`, `controlled_access_datasets.json` for controlled/mixed discovery, and `dicom_annotation_index.json` for DICOM annotation/result discovery.
+
 ## Agent-Facing Views
 
 Prefer these views for normal discovery. They flatten common JSON fields and keep the base tables available as lower-level provenance.
@@ -158,3 +160,35 @@ JOIN agent_pathdb_slides p
 WHERE d.hidden = 0;
 ```
 
+Find controlled or mixed-access datasets with CT, PET, and annotation/result labels:
+
+```sql
+SELECT DISTINCT s.short_title, s.title, s.dataset_type,
+       s.resolved_access_level, s.download_data_types, s.download_types, s.link
+FROM agent_dataset_access_summary s
+WHERE s.hidden = 0
+  AND s.resolved_access_level IN ('controlled', 'mixed')
+  AND EXISTS (
+    SELECT 1 FROM agent_current_downloads d, json_each(d.data_types) x
+    WHERE d.short_title = s.short_title AND d.hidden = 0
+      AND lower(x.value) IN ('ct', 'computed tomography')
+  )
+  AND EXISTS (
+    SELECT 1 FROM agent_current_downloads d, json_each(d.data_types) x
+    WHERE d.short_title = s.short_title AND d.hidden = 0
+      AND lower(x.value) IN ('pt', 'pet')
+  )
+  AND (
+    EXISTS (
+      SELECT 1 FROM agent_current_downloads d, json_each(d.data_types) x
+      WHERE d.short_title = s.short_title AND d.hidden = 0
+        AND lower(x.value) IN ('seg', 'segmentation', 'rtstruct', 'sr', 'annotation', 'annotations')
+    )
+    OR EXISTS (
+      SELECT 1 FROM agent_current_downloads d, json_each(d.download_types) x
+      WHERE d.short_title = s.short_title AND d.hidden = 0
+        AND lower(x.value) LIKE '%annotation%'
+    )
+  )
+ORDER BY s.short_title;
+```

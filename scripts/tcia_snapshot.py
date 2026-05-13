@@ -26,11 +26,28 @@ from pathlib import Path
 from typing import Any, Optional
 
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 DEFAULT_REPO = "kirbyju/tcia-query-skill"
 DEFAULT_RELEASE_TAG = "tcia-snapshot-latest"
 SNAPSHOT_ASSET = "tcia_snapshot.sqlite.gz"
 MANIFEST_ASSET = "tcia_snapshot_manifest.json"
+AGENT_DATASETS_EXPORT = "agent_datasets.jsonl.gz"
+AGENT_DOWNLOADS_EXPORT = "agent_current_downloads.jsonl.gz"
+CONTROLLED_ACCESS_EXPORT = "controlled_access_datasets.json"
+DICOM_ANNOTATION_EXPORT = "dicom_annotation_index.json"
+WEB_EXPORT_ASSETS = [
+    AGENT_DATASETS_EXPORT,
+    AGENT_DOWNLOADS_EXPORT,
+    CONTROLLED_ACCESS_EXPORT,
+    DICOM_ANNOTATION_EXPORT,
+]
+REQUIRED_AGENT_VIEWS = [
+    "agent_datasets",
+    "agent_current_downloads",
+    "agent_dataset_access_summary",
+    "agent_pathdb_slides",
+    "agent_datacite_dois",
+]
 SKILL_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DB_PATH = SKILL_ROOT / "cache" / "tcia_snapshot.sqlite"
 DEFAULT_MANIFEST_PATH = SKILL_ROOT / "cache" / MANIFEST_ASSET
@@ -1228,6 +1245,7 @@ def build_snapshot(
     out_path: Path,
     gzip_out: Path | None = None,
     manifest_out: Path | None = None,
+    exports_dir: Path | None = None,
     quiet: bool = False,
 ) -> dict[str, Any]:
     started = time.time()
@@ -1327,11 +1345,14 @@ def build_snapshot(
         "elapsed_seconds": round(time.time() - started, 3),
     }
 
+    if exports_dir:
+        manifest["web_exports"] = export_web_artifacts(out_path, exports_dir)
     if gzip_out:
         gzip_out.parent.mkdir(parents=True, exist_ok=True)
         gzip_deterministic(out_path, gzip_out)
         manifest["gzip_sha256"] = file_sha256(gzip_out)
         manifest["gzip_bytes"] = gzip_out.stat().st_size
+    manifest["release_fingerprint"] = snapshot_release_fingerprint(manifest)
     if manifest_out:
         manifest_out.parent.mkdir(parents=True, exist_ok=True)
         manifest_out.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -1350,6 +1371,194 @@ def file_sha256(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def rows_as_dicts(conn: sqlite3.Connection, sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
+    old_factory = conn.row_factory
+    conn.row_factory = sqlite3.Row
+    try:
+        return [dict(row) for row in conn.execute(sql, params).fetchall()]
+    finally:
+        conn.row_factory = old_factory
+
+
+def write_json(path: Path, payload: Any) -> dict[str, Any]:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    rows = len(payload) if isinstance(payload, list) else 1
+    return {"bytes": path.stat().st_size, "sha256": file_sha256(path), "rows": rows}
+
+
+def write_jsonl_gz(path: Path, rows: list[dict[str, Any]]) -> dict[str, Any]:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("wb") as raw:
+        with gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0) as gz:
+            for row in rows:
+                line = json.dumps(row, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+                gz.write(line.encode("utf-8"))
+                gz.write(b"\n")
+    return {"bytes": path.stat().st_size, "sha256": file_sha256(path), "rows": len(rows)}
+
+
+def export_web_artifacts(db_path: Path, exports_dir: Path) -> dict[str, dict[str, Any]]:
+    exports_dir.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(db_path) as conn:
+        validate_snapshot_schema(conn)
+        datasets = rows_as_dicts(
+            conn,
+            """
+            SELECT *
+            FROM agent_dataset_access_summary
+            ORDER BY hidden, lower(short_title), source
+            """,
+        )
+        downloads = rows_as_dicts(
+            conn,
+            """
+            SELECT *
+            FROM agent_current_downloads
+            ORDER BY hidden, lower(short_title), download_id, download_slug
+            """,
+        )
+        controlled = rows_as_dicts(
+            conn,
+            """
+            SELECT
+                short_title,
+                title,
+                dataset_type,
+                doi,
+                link,
+                resolved_access_level AS access_level,
+                license_status,
+                licenses,
+                subjects,
+                cancer_types,
+                cancer_locations,
+                species,
+                download_types,
+                download_data_types,
+                download_file_types,
+                current_download_count,
+                controlled_download_count,
+                noncontrolled_download_count,
+                controlled_download_titles,
+                controlled_license_labels,
+                resolved_controlled_access_policy_url AS controlled_access_policy_url
+            FROM agent_dataset_access_summary
+            WHERE hidden = 0
+              AND resolved_access_level IN ('controlled', 'mixed')
+            ORDER BY lower(short_title), source
+            """,
+        )
+        dicom_annotations = rows_as_dicts(
+            conn,
+            """
+            SELECT
+                short_title,
+                title,
+                dataset_type,
+                download_id,
+                download_title,
+                download_url,
+                download_metadata,
+                search_url,
+                access_level,
+                license_label,
+                subjects,
+                studies,
+                series,
+                images,
+                download_types,
+                data_types,
+                file_types
+            FROM agent_current_downloads d
+            WHERE hidden = 0
+              AND EXISTS (
+                SELECT 1 FROM json_each(d.file_types)
+                WHERE lower(value) = 'dicom'
+              )
+              AND (
+                EXISTS (
+                  SELECT 1 FROM json_each(d.download_types)
+                  WHERE lower(value) LIKE '%annotation%'
+                )
+                OR EXISTS (
+                  SELECT 1 FROM json_each(d.data_types)
+                  WHERE lower(value) IN (
+                    'annotation', 'annotations', 'segmentation',
+                    'seg', 'rtstruct', 'sr', 'rtdose', 'rtplan', 'rtimage'
+                  )
+                )
+              )
+            ORDER BY lower(short_title), download_id, download_slug
+            """,
+        )
+
+    return {
+        AGENT_DATASETS_EXPORT: write_jsonl_gz(exports_dir / AGENT_DATASETS_EXPORT, datasets),
+        AGENT_DOWNLOADS_EXPORT: write_jsonl_gz(exports_dir / AGENT_DOWNLOADS_EXPORT, downloads),
+        CONTROLLED_ACCESS_EXPORT: write_json(exports_dir / CONTROLLED_ACCESS_EXPORT, controlled),
+        DICOM_ANNOTATION_EXPORT: write_json(exports_dir / DICOM_ANNOTATION_EXPORT, dicom_annotations),
+    }
+
+
+def snapshot_release_fingerprint(manifest: dict[str, Any]) -> str:
+    payload = {
+        "schema_version": manifest.get("schema_version"),
+        "content_sha256": manifest.get("content_sha256"),
+        "sqlite_sha256": manifest.get("sqlite_sha256"),
+        "web_exports": {
+            name: details.get("sha256")
+            for name, details in sorted((manifest.get("web_exports") or {}).items())
+        },
+    }
+    return hashlib.sha256(json_dumps(payload).encode("utf-8")).hexdigest()
+
+
+def validate_snapshot_schema(conn: sqlite3.Connection) -> dict[str, Any]:
+    objects = {
+        row[0]: row[1]
+        for row in conn.execute(
+            "SELECT name, type FROM sqlite_master WHERE type IN ('table', 'view')"
+        ).fetchall()
+    }
+    missing_views = [view for view in REQUIRED_AGENT_VIEWS if objects.get(view) != "view"]
+    if missing_views:
+        raise RuntimeError(f"Snapshot is missing required agent views: {', '.join(missing_views)}")
+    for view in REQUIRED_AGENT_VIEWS:
+        conn.execute(f"SELECT * FROM {quote_identifier(view)} LIMIT 1").fetchall()
+    meta_rows = conn.execute("SELECT key, value FROM snapshot_meta").fetchall()
+    meta = {}
+    for key, value in meta_rows:
+        try:
+            meta[key] = json.loads(value)
+        except json.JSONDecodeError:
+            meta[key] = value
+    if meta.get("schema_version") != SCHEMA_VERSION:
+        raise RuntimeError(
+            f"Snapshot schema_version is {meta.get('schema_version')}; expected {SCHEMA_VERSION}."
+        )
+    return {
+        "schema_version": meta.get("schema_version"),
+        "views": REQUIRED_AGENT_VIEWS,
+    }
+
+
+def validate_snapshot_file(db_path: Path, exports_dir: Path | None = None) -> dict[str, Any]:
+    if not db_path.exists():
+        raise RuntimeError(f"Snapshot not found: {db_path}")
+    with sqlite3.connect(db_path) as conn:
+        result = validate_snapshot_schema(conn)
+    if exports_dir:
+        missing_exports = [name for name in WEB_EXPORT_ASSETS if not (exports_dir / name).exists()]
+        if missing_exports:
+            raise RuntimeError(f"Missing web export assets: {', '.join(missing_exports)}")
+        result["web_exports"] = {
+            name: {"bytes": (exports_dir / name).stat().st_size, "sha256": file_sha256(exports_dir / name)}
+            for name in WEB_EXPORT_ASSETS
+        }
+    return result
 
 
 def get_snapshot_meta(path: str | os.PathLike[str] | None = None) -> dict[str, Any]:
@@ -1629,10 +1838,15 @@ def main(argv: Optional[list[str]] = None) -> int:
     build.add_argument("--out", default=str(DEFAULT_DB_PATH), help="SQLite output path.")
     build.add_argument("--gzip-out", help="Optional deterministic gzip output path.")
     build.add_argument("--manifest-out", help="Optional manifest JSON output path.")
+    build.add_argument("--exports-dir", help="Optional directory for web-friendly JSON/JSONL release exports.")
     build.add_argument("--quiet", action="store_true", help="Suppress fetch progress messages.")
 
     info = subparsers.add_parser("info", help="Print local snapshot metadata.")
     info.add_argument("--db", default=str(DEFAULT_DB_PATH), help="SQLite snapshot path.")
+
+    validate = subparsers.add_parser("validate", help="Validate a built SQLite snapshot and optional exports.")
+    validate.add_argument("--db", default=str(DEFAULT_DB_PATH), help="SQLite snapshot path.")
+    validate.add_argument("--exports-dir", help="Optional directory containing web-friendly exports.")
 
     ensure = subparsers.add_parser("ensure", help="Download the latest release snapshot if missing or changed.")
     ensure.add_argument(
@@ -1650,6 +1864,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             Path(args.out),
             gzip_out=Path(args.gzip_out) if args.gzip_out else None,
             manifest_out=Path(args.manifest_out) if args.manifest_out else None,
+            exports_dir=Path(args.exports_dir) if args.exports_dir else None,
             quiet=args.quiet,
         )
         print(json.dumps(manifest, indent=2, sort_keys=True))
@@ -1660,6 +1875,13 @@ def main(argv: Optional[list[str]] = None) -> int:
             print(f"No snapshot found at {snapshot_path(args.db)}")
             return 1
         print(json.dumps(meta, indent=2, sort_keys=True))
+        return 0
+    if args.command == "validate":
+        result = validate_snapshot_file(
+            Path(args.db),
+            exports_dir=Path(args.exports_dir) if args.exports_dir else None,
+        )
+        print(json.dumps(result, indent=2, sort_keys=True))
         return 0
     if args.command == "ensure":
         repo = args.repo or github_repo_from_env_or_default()
