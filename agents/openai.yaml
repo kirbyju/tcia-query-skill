@@ -1,7 +1,7 @@
 interface:
   display_name: "TCIA Query Skill"
-  short_description: "Query TCIA snapshot metadata across CRDC systems"
-  default_prompt: "Use $tcia-query-skill to find TCIA-published datasets from the SQLite snapshot or release exports, prefer IDC/idc-index for public DICOM details, and explain access routes, citations, viewer links, and download or manifest options."
+  short_description: "Query TCIA datasets and verified TCIA-based publications"
+  default_prompt: "Use $tcia-query-skill to find TCIA-published datasets from the SQLite snapshot or release exports, use TCIA Publications EndNote XML for verified manuscripts about TCIA data, prefer IDC/idc-index for public DICOM details, and explain access routes, citations, viewer links, and download or manifest options."
 
 policy:
   allow_implicit_invocation: true

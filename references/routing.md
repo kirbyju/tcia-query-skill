@@ -34,6 +34,8 @@ Downstream field mappings:
 
 For DOI, citation, or version questions, start with DataCite records in the SQLite snapshot, not WordPress. Use `agent_datacite_dois` or `scripts/datacite_tcia_dois.py`, then use `agent_datasets` to confirm TCIA publication, hidden/visible status, access/license, and dataset pages.
 
+For peer-reviewed manuscripts written about TCIA data, start with TCIA's Publications EndNote XML export, not DataCite. Load `references/publications.md` and use `scripts/tcia_publications.py` to search title, abstract, keywords, journal, PMID, manuscript DOI, and linked TCIA dataset DOI values.
+
 For non-DOI discovery:
 
 1. Query `agent_datasets` for both WordPress Collections and Analysis Results.
@@ -118,6 +120,13 @@ DOI/citation:
 - Start with DataCite to inspect DOI metadata, related identifiers, versions, and external derived records.
 - Use WordPress after DataCite to confirm visible TCIA Collection/Analysis Result status, access/license, and dataset page/download routing.
 
+Peer-reviewed publications:
+
+- Start with TCIA Publications EndNote XML: `https://cancerimagingarchive.net/endnote/Pubs_basedon_TCIA.xml`.
+- Use `scripts/tcia_publications.py` for verified papers written about TCIA datasets.
+- Use linked TCIA dataset DOI values from `remote-database-name` to connect papers back to WordPress/DataCite dataset records when dataset metadata or access routes are needed.
+- Do not treat DataCite dataset DOI records as the bibliography of papers that used TCIA data.
+
 ## Download Label Interpretation
 
 Use `agent_current_downloads` when answering file/download questions. If you need lower-level detail, use `wordpress_downloads` joined to `wordpress_download_labels` with `is_current_version IS TRUE` for current-version user-facing downloads. Interpret these fields together:
@@ -173,4 +182,5 @@ For exact dataset questions, give a short prose summary first, then a table of a
 - For new Data Retriever CSV manifests, route by one preferred header only: `SeriesInstanceUID` for public DICOM, `imageUrl` for PathDB/direct public files, or `drs_uri` for General Commons controlled-access files. Avoid mixed-route manifests because Data Retriever applies header precedence.
 - WordPress download metadata may contain nested objects or media IDs. Prefer the snapshot views and `wordpress_downloads` tables for normal tasks; source API helper packages are maintainer/developer tools.
 - DataCite relationships are about DOI provenance. They do not automatically make an external Zenodo or IDC record a TCIA-published dataset. WordPress remains the publication/visibility authority after DataCite discovery.
+- TCIA Publications EndNote XML is the bibliography authority for manuscripts written about TCIA datasets. DataCite remains the dataset DOI authority.
 - Controlled-access metadata can be public even when file access is restricted.

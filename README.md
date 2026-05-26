@@ -2,7 +2,7 @@
 
 `tcia-query-skill` is an agent skill for helping users find, verify, cite, and access datasets published by [The Cancer Imaging Archive (TCIA)](https://www.cancerimagingarchive.net/about-the-cancer-imaging-archive-tcia/).
 
-The skill is designed to hide the complexity of TCIA's multi-system data ecosystem. It treats TCIA's WordPress Collection Manager as the publication source of truth, uses a local SQLite snapshot as the normal agent-friendly query layer, then routes users to the right downstream system for the data they need.
+The skill is designed to hide the complexity of TCIA's multi-system data ecosystem. It treats TCIA's WordPress Collection Manager as the dataset publication source of truth, treats TCIA's Publications EndNote XML as the verified bibliography of manuscripts written about TCIA data, uses a local SQLite snapshot as the normal agent-friendly query layer for datasets, then routes users to the right downstream system for the data they need.
 
 ## What Is TCIA?
 
@@ -16,6 +16,7 @@ TCIA data can live across several access systems, including:
 - General Commons for controlled-access TCIA face datasets
 - PathDB for non-DICOM histopathology metadata
 - DataCite for DOI, citation, version, and derived-data relationships
+- TCIA Publications EndNote XML for verified manuscripts written about TCIA data
 - IBM Aspera packages for some large non-DICOM downloads
 
 This skill helps an agent decide which system to use and how to explain the result clearly.
@@ -28,6 +29,7 @@ This skill tells an agent how to:
 
 - Confirm whether a dataset is TCIA-published.
 - Query the local SQLite snapshot for routine discovery, access/license metadata, PathDB slide metadata, and TCIA DOI records.
+- Use TCIA's Publications EndNote XML, not DataCite, for peer-reviewed manuscripts written about TCIA data.
 - Ignore hidden WordPress records unless TCIA staff explicitly request them.
 - Use snapshot text fields for abstracts and descriptions.
 - Classify open versus controlled access from license metadata.
@@ -39,6 +41,7 @@ This skill tells an agent how to:
 - Route users to IDC, General Commons, PathDB, DataCite, WordPress downloads, or Aspera.
 - Point controlled-access users to TCIA's current access policy.
 - Start DOI, citation, version, and related-work questions from DataCite, then confirm TCIA publication/visibility in WordPress.
+- Start publication-mining questions from `https://cancerimagingarchive.net/endnote/Pubs_basedon_TCIA.xml`.
 
 The `references/` directory contains focused guidance the agent can load when needed, while `scripts/` contains small standard-library Python helpers for snapshot refresh, snapshot querying, manifests, and viewer URL construction.
 
@@ -61,6 +64,7 @@ tcia-query-skill/
 |   +-- idc-dicom-downloads.md
 |   +-- mcp-and-web-llms.md
 |   +-- pathdb.md
+|   +-- publications.md
 |   +-- routing.md
 |   +-- schema.md
 |   +-- snapshots.md
@@ -74,6 +78,7 @@ tcia-query-skill/
     +-- tcia_snapshot.py
     +-- tcia_create_data_retriever_csv.py
     +-- tcia_manifest_series_uids.py
+    +-- tcia_publications.py
     +-- tcia_wordpress_search.py
 ```
 
@@ -89,6 +94,8 @@ Ask an agent using this skill questions like:
 - "Can I preview this controlled-access dataset in a browser?"
 - "Is this dataset open access or controlled access?"
 - "Which TCIA datasets have non-DICOM pathology data in PathDB?"
+- "Which peer-reviewed TCIA publications study radiology plus genomics, pathology, or proteomics?"
+- "Find papers using this TCIA dataset DOI."
 - "Show me datasets related to this TCIA DOI, including derived Zenodo records."
 - "I am TCIA staff; include hidden staged records in the output."
 - "How do I request access to a controlled-access TCIA dataset?"
@@ -157,6 +164,8 @@ python scripts/idc_viewer_urls.py volview --crdc-series-uuid <crdc_series_uuid>
 python scripts/general_commons_studies.py --study-acronym TCGA-GBM --counts
 python scripts/datacite_tcia_dois.py --query breast --limit 10
 python scripts/datacite_tcia_dois.py --doi 10.7937/4qad-4280 --json
+python scripts/tcia_publications.py --fetch --query radiogenomics --limit 10
+python scripts/tcia_publications.py --dataset-doi 10.7937/K9/TCIA.2016.RNYFUYE9 --json
 python scripts/pathdb_metadata.py --collection CPTAC-STAD --summary
 python scripts/pathdb_metadata.py --collection CPTAC-STAD --limit 5
 ```
@@ -173,6 +182,21 @@ python scripts/tcia_snapshot.py validate --db dist/tcia_snapshot.sqlite --export
 ```
 
 The validation step checks that the SQLite file contains the documented agent-facing views and that the web export assets were generated.
+
+## Publications About TCIA Data
+
+For peer-reviewed manuscripts written about TCIA datasets, use TCIA's verified publications source:
+
+https://cancerimagingarchive.net/endnote/Pubs_basedon_TCIA.xml
+
+The EndNote XML is the authority for publication-mining tasks such as finding papers about a dataset, summarizing methods or hypotheses studied using TCIA data, or counting papers by topic. DataCite records describe TCIA dataset DOIs and versions; they are not the verified bibliography of papers that used TCIA datasets.
+
+Use the helper script to fetch and search the library:
+
+```bash
+python scripts/tcia_publications.py --fetch --query "radiology genomics" --limit 20
+python scripts/tcia_publications.py --dataset-doi 10.7937/K9/TCIA.2016.RNYFUYE9 --json
+```
 
 ## Recommended Python Packages
 

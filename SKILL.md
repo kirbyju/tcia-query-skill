@@ -1,6 +1,6 @@
 ---
 name: tcia-query-skill
-description: Find, verify, cite, visualize, and route TCIA-published datasets across TCIA WordPress Collection and Analysis Result metadata, IDC/idc-index, Cancer Data Aggregator, General Commons, PathDB, DataCite, and Aspera. Use when users ask to discover TCIA datasets by cancer type, modality, body site, species, data type, access/license, DOI, program, clinical/supporting data, demographic/diagnosis enrichment, segmentation/annotation availability, browser preview/viewer URL, or download path, including public DICOM, controlled-access face datasets, non-DICOM pathology, supporting files, and derived results.
+description: Find, verify, cite, visualize, and route TCIA-published datasets and verified manuscripts about TCIA data across TCIA WordPress Collection and Analysis Result metadata, TCIA Publications EndNote XML, IDC/idc-index, Cancer Data Aggregator, General Commons, PathDB, DataCite, and Aspera. Use when users ask to discover TCIA datasets or publications by cancer type, modality, body site, species, data type, access/license, DOI, program, clinical/supporting data, demographic/diagnosis enrichment, segmentation/annotation availability, browser preview/viewer URL, or download path, including public DICOM, controlled-access face datasets, non-DICOM pathology, supporting files, and derived results.
 ---
 
 # TCIA Query Skill
@@ -8,6 +8,8 @@ description: Find, verify, cite, visualize, and route TCIA-published datasets ac
 ## Core Rule
 
 Use the TCIA WordPress Collection Manager as the authority for whether a dataset is TCIA-published. A dataset is in scope only if it appears as a WordPress Collection or Analysis Result. For normal agent work, query the local SQLite snapshot as the fast discovery surface over WordPress, PathDB, and DataCite metadata. Downstream systems such as IDC, CDA, General Commons, PathDB, Zenodo, and DataCite can enrich or route access, but they do not decide TCIA provenance.
+
+Use TCIA's Publications page and EndNote export as the authority for peer-reviewed manuscripts written about TCIA datasets: `https://www.cancerimagingarchive.net/publications/` and `https://cancerimagingarchive.net/endnote/Pubs_basedon_TCIA.xml`. DataCite records describe TCIA dataset DOI metadata; they are not the verified bibliography of papers that used TCIA data. For questions about papers, manuscripts, publication impact, hypotheses studied, methods, or citation lists, load `references/publications.md` and use `scripts/tcia_publications.py`.
 
 Exception for DOI-centered questions: start with DataCite for DOI metadata, citation metadata, versions, and DOI relationships, then use WordPress to confirm TCIA publication status, visibility, access/license, and user-facing dataset pages.
 
@@ -19,6 +21,7 @@ When a downstream record is derived from a TCIA DOI but is not itself listed in 
 
 0. Use the local SQLite metadata snapshot for routine discovery and access/license metadata. Prefer the agent-facing views in `references/schema.md`: `agent_datasets`, `agent_current_downloads`, `agent_dataset_access_summary`, `agent_pathdb_slides`, and `agent_datacite_dois`. Load `references/snapshots.md` for refresh behavior and `references/schema.md` for SQL details. If the environment cannot execute scripts or query SQLite, use the web-friendly release exports described in `references/mcp-and-web-llms.md`; do not switch to live WordPress API discovery.
 1. Choose the starting source.
+   - For peer-reviewed publications or manuscripts about TCIA data, use TCIA's EndNote XML export, not DataCite. Prefer `scripts/tcia_publications.py`, and load `references/publications.md`.
    - For DOI, citation, or version questions, start with DataCite metadata from the snapshot. Prefer `scripts/datacite_tcia_dois.py` for TCIA DOI prefix records.
    - For subject-level clinical, demographic, diagnosis, treatment, or cross-commons data-availability enrichment, confirm the TCIA dataset in WordPress first, then use CDA from validated TCIA/IDC subject identifiers. Load `references/cda.md`.
    - For all other discovery and access questions, search WordPress snapshot records first for Collections and Analysis Results.
@@ -48,6 +51,7 @@ When a downstream record is derived from a TCIA DOI but is not itself listed in 
 | Subject-level clinical/demographic/diagnosis enrichment or cross-commons availability | Use CDA after WordPress provenance is established. Prefer `cdapython` for harmonized subject and file summaries across IDC, GDC, PDC, GC, ICDC, and related upstream identifiers. Use CDA to enrich TCIA/IDC cohorts, not to decide TCIA publication, replace official WordPress downloads, or authorize controlled data access. Load `references/cda.md`. |
 | Non-DICOM pathology | Use PathDB. Prefer the stable cohort-builder CSV for rich slide-level metadata, and match its `collection` field to the WordPress short title. The PathDB API collection list may use `collectionName`. |
 | Spreadsheets, ZIP files, supporting files, manifests, and ancillary downloads | Use WordPress download metadata. If a download is an IBM Aspera Faspex package, see `references/aspera.md`. |
+| Peer-reviewed manuscripts about TCIA datasets | Use TCIA Publications and the EndNote XML export. Search title, abstract, keywords, journal, PMID, manuscript DOI, and linked TCIA dataset DOIs. Load `references/publications.md`. |
 | DOI, citation, version, or derived-result relationships | Start with DataCite metadata and relationships, then use WordPress for TCIA publication/visibility, access/license, and user-facing pages. See `references/datacite-relationships.md`. |
 
 Read `references/routing.md` for detailed routing and answer-format guidance.
@@ -130,6 +134,7 @@ Run scripts from the skill root.
 | `scripts/general_commons_studies.py` | Query General Commons GraphQL for TCIA face dataset study acronyms under `phs004225` and optional node counts. |
 | `scripts/datacite_tcia_dois.py` | List TCIA DOI metadata from DataCite using prefix `10.7937`, or fetch one exact DOI. |
 | `scripts/datacite_related.py` | Developer/explicit-current-check helper for external DataCite records that declare DOI relationships, such as Zenodo records derived from TCIA DOIs. |
+| `scripts/tcia_publications.py` | Fetch, parse, and search TCIA's verified EndNote publication library for papers written about TCIA datasets. |
 | `scripts/pathdb_metadata.py` | Search or summarize PathDB non-DICOM histopathology slide metadata and derived caMicroscope viewer URLs from the stable cohort-builder CSV. |
 
 Examples:
@@ -150,6 +155,8 @@ python scripts/idc_viewer_urls.py volview --crdc-series-uuid <crdc_series_uuid>
 python scripts/general_commons_studies.py --study-acronym TCGA-GBM --counts
 python scripts/datacite_tcia_dois.py --query breast --limit 10
 python scripts/datacite_tcia_dois.py --doi 10.7937/4qad-4280 --json
+python scripts/tcia_publications.py --query radiogenomics --limit 10
+python scripts/tcia_publications.py --dataset-doi 10.7937/K9/TCIA.2016.RNYFUYE9 --json
 python scripts/pathdb_metadata.py --collection CPTAC-STAD --summary
 ```
 
@@ -183,6 +190,10 @@ Use snapshot DataCite records first for DOI metadata, citations, and versions. F
 
 Load `references/datacite-relationships.md` when answering DOI, citation, version, or derived-result questions.
 
+## Publications About TCIA Data
+
+Load `references/publications.md` when a user asks for peer-reviewed manuscripts, papers, publication lists, citation counts, research hypotheses, methods, or downstream scientific uses of TCIA data. Use TCIA's verified Publications EndNote XML export at `https://cancerimagingarchive.net/endnote/Pubs_basedon_TCIA.xml` as the authority. Do not substitute DataCite dataset DOI records or WordPress dataset pages for the manuscript bibliography.
+
 ## Web LLMs And MCP
 
 Load `references/mcp-and-web-llms.md` when a user asks how to use this skill from web-based LLMs, remote MCP connectors, custom agents that cannot install skills, or environments that cannot run Python/SQLite locally. Prefer the published release snapshot and static JSON/JSONL exports over live public APIs. A remote MCP server should expose typed read-only TCIA search tools backed by the same snapshot, not arbitrary live WordPress scraping.
@@ -209,6 +220,7 @@ Include the TCIA page link, WordPress short title, and any caveats about control
 - Never present a dataset as TCIA-published unless it appears in WordPress Collections or Analysis Results.
 - Ignore WordPress `hide_from_browse_table = "1"` records unless the user explicitly identifies as TCIA staff and asks to include hidden/staged/retired/internal-review datasets.
 - Do not use live WordPress API calls for normal end-user discovery. Use the SQLite snapshot, its release exports, or a snapshot-backed MCP server. Live source APIs are for snapshot maintainers and explicit current-source troubleshooting.
+- Do not use DataCite DOI records as the authority for peer-reviewed manuscripts written about TCIA data. Use TCIA's Publications EndNote XML export for manuscript bibliography questions.
 - Use license metadata, not WordPress collection/page accessibility fields, to decide controlled access. Creative Commons means open access; Creative Commons NonCommercial is open with a noncommercial-use restriction; controlled/restricted license text requires the controlled-access alert and policy link.
 - Do not use NBIA as the first route for open-access/public DICOM downloads. Prefer IDC/idc-index, using existing WordPress `.tcia` manifests as Series Instance UID allowlists when helpful. If NBIA fallback is needed, use the NBIA v4 API documented by `https://cbiit.github.io/NBIA-TCIA/nbia-api.yaml`. For controlled-access DICOM, use General Commons metadata and TCIA controlled-access guidance instead of public download routes.
 - Do not construct browser viewer URLs for controlled-access data. There is no pre-download browser visualization route for controlled-access TCIA data regardless of file format.
