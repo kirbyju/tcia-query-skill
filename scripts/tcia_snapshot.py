@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 DEFAULT_REPO = "kirbyju/tcia-query-skill"
 DEFAULT_RELEASE_TAG = "tcia-snapshot-latest"
 SNAPSHOT_ASSET = "tcia_snapshot.sqlite.gz"
@@ -482,6 +482,27 @@ def compact_download(download: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def endpoint_download_title_lookup(downloads: list[dict[str, Any]]) -> dict[str, str]:
+    titles: dict[str, str] = {}
+    for download in downloads:
+        download_id = str(download.get("id") or "")
+        title = scalar_field(download, "download_title", "download title", "title")
+        if download_id and title:
+            titles[download_id] = title
+    return titles
+
+
+def apply_endpoint_download_title(
+    download: dict[str, Any],
+    title_by_id: dict[str, str] | None,
+) -> dict[str, Any]:
+    if not download.get("download_title"):
+        title = (title_by_id or {}).get(str(download.get("download_id") or ""))
+        if title:
+            download["download_title"] = title
+    return download
+
+
 def aggregate_download_labels(downloads: list[dict[str, Any]], key: str) -> str:
     labels: list[str] = []
     for download in downloads:
@@ -501,7 +522,11 @@ def has_clinical_download(downloads: list[dict[str, Any]]) -> bool:
     return False
 
 
-def normalize_wordpress_record(item: dict[str, Any], kind: str) -> dict[str, Any]:
+def normalize_wordpress_record(
+    item: dict[str, Any],
+    kind: str,
+    download_title_by_id: dict[str, str] | None = None,
+) -> dict[str, Any]:
     is_collection = kind == "collection"
     title_key = "collection_title" if is_collection else "result_title"
     short_key = "collection_short_title" if is_collection else "result_short_title"
@@ -520,20 +545,25 @@ def normalize_wordpress_record(item: dict[str, Any], kind: str) -> dict[str, Any
     controlled_access = is_controlled_access_from_licenses(licenses)
     noncommercial_license = has_noncommercial_license(licenses)
     license_status = classify_license_status(licenses, controlled_access, noncommercial_license)
-    current_downloads = [
-        normalize_wordpress_download(
-            download,
-            parent_source="collections" if is_collection else "analysis-results",
-            parent_id=str(item.get("id") or ""),
-            parent_slug=strip_html(item.get("slug")),
-            parent_short_title=short_title,
-            parent_title=title,
-            parent_hidden=hidden,
-            is_current_version=True,
+    current_downloads = []
+    for download in item.get(downloads_key) or []:
+        if not isinstance(download, dict):
+            continue
+        current_downloads.append(
+            apply_endpoint_download_title(
+                normalize_wordpress_download(
+                    download,
+                    parent_source="collections" if is_collection else "analysis-results",
+                    parent_id=str(item.get("id") or ""),
+                    parent_slug=strip_html(item.get("slug")),
+                    parent_short_title=short_title,
+                    parent_title=title,
+                    parent_hidden=hidden,
+                    is_current_version=True,
+                ),
+                download_title_by_id,
+            )
         )
-        for download in item.get(downloads_key) or []
-        if isinstance(download, dict)
-    ]
     external_resources = strip_html(item.get("external_resources") or item.get("additional_resources"))
 
     return {
@@ -960,14 +990,15 @@ def insert_wordpress(
     conn: sqlite3.Connection,
     source: str,
     records: list[dict[str, Any]],
+    download_title_by_id: dict[str, str] | None = None,
 ) -> None:
     rows = []
     for record in records:
         normalized: dict[str, Any] | None = None
         if source == "collections":
-            normalized = normalize_wordpress_record(record, "collection")
+            normalized = normalize_wordpress_record(record, "collection", download_title_by_id)
         elif source == "analysis-results":
-            normalized = normalize_wordpress_record(record, "analysis")
+            normalized = normalize_wordpress_record(record, "analysis", download_title_by_id)
 
         if normalized:
             short_title = normalized.get("short_title", "")
@@ -1109,6 +1140,7 @@ def insert_wordpress_downloads(
     collections: list[dict[str, Any]],
     analysis_results: list[dict[str, Any]],
     downloads: list[dict[str, Any]],
+    download_title_by_id: dict[str, str] | None = None,
 ) -> None:
     for parent, parent_source, short_key, title_key, downloads_key in [
         (collection, "collections", "collection_short_title", "collection_title", "collection_downloads")
@@ -1133,6 +1165,7 @@ def insert_wordpress_downloads(
                 parent_hidden=parent_hidden,
                 is_current_version=True,
             )
+            apply_endpoint_download_title(normalized, download_title_by_id)
             insert_download_row(conn, normalized, raw_download)
 
     for raw_download in downloads:
@@ -1278,6 +1311,7 @@ def build_snapshot(
         "analysis-results": analysis_results,
         "downloads": downloads,
     }
+    download_title_by_id = endpoint_download_title_lookup(downloads)
     content_sha256 = canonical_content_hash(wordpress_sources, pathdb_rows, datacite_records)
     current_collection_downloads = sum(
         len(collection.get("collection_downloads") or []) for collection in collections
@@ -1304,10 +1338,10 @@ def build_snapshot(
         conn.execute("PRAGMA synchronous = OFF")
         conn.execute("PRAGMA temp_store = MEMORY")
         create_schema(conn)
-        insert_wordpress(conn, "collections", collections)
-        insert_wordpress(conn, "analysis-results", analysis_results)
+        insert_wordpress(conn, "collections", collections, download_title_by_id)
+        insert_wordpress(conn, "analysis-results", analysis_results, download_title_by_id)
         insert_wordpress(conn, "downloads", downloads)
-        insert_wordpress_downloads(conn, collections, analysis_results, downloads)
+        insert_wordpress_downloads(conn, collections, analysis_results, downloads, download_title_by_id)
         insert_pathdb(conn, pathdb_rows)
         insert_datacite(conn, datacite_records)
         add_indexes(conn)
