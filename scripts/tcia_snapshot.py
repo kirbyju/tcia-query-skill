@@ -23,7 +23,7 @@ import urllib.parse
 import urllib.request
 from html.parser import HTMLParser
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 
 SCHEMA_VERSION = 5
@@ -66,6 +66,17 @@ CONTROLLED_ACCESS_POLICY_URL = (
     "https://www.cancerimagingarchive.net/nih-controlled-data-access-policy/"
 )
 USER_AGENT = "tcia-query-skill/1.0"
+FETCH_RETRY_ATTEMPTS = 4
+FETCH_RETRY_BASE_SECONDS = 2.0
+RETRYABLE_HTTP_STATUS = {408, 429, 500, 502, 503, 504}
+SOURCE_FALLBACK_ERRORS = (
+    urllib.error.URLError,
+    TimeoutError,
+    OSError,
+    json.JSONDecodeError,
+    UnicodeDecodeError,
+    RuntimeError,
+)
 
 CONTROLLED_LICENSE_TERMS = [
     "controlled access",
@@ -256,11 +267,58 @@ def unique_list(values: list[str]) -> list[str]:
     return output
 
 
-def fetch_bytes(url: str, timeout: int = 90) -> tuple[bytes, dict[str, str]]:
-    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    with urllib.request.urlopen(request, timeout=timeout) as response:
-        headers = {key.lower(): value for key, value in response.headers.items()}
-        return response.read(), headers
+def fetch_error_message(exc: BaseException) -> str:
+    if isinstance(exc, urllib.error.HTTPError):
+        return f"HTTP {exc.code}: {exc.reason}"
+    return str(exc)
+
+
+def github_actions_escape(message: str) -> str:
+    return message.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+
+
+def warning_log_line(title: str, message: str) -> str:
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        return f"::warning title={title}::{github_actions_escape(message)}"
+    return f"  WARNING: {message}"
+
+
+def should_retry_fetch(exc: BaseException) -> bool:
+    if isinstance(exc, urllib.error.HTTPError):
+        return exc.code in RETRYABLE_HTTP_STATUS
+    return isinstance(exc, (urllib.error.URLError, TimeoutError, OSError))
+
+
+def fetch_bytes(
+    url: str,
+    timeout: int = 90,
+    *,
+    headers: dict[str, str] | None = None,
+    attempts: int = FETCH_RETRY_ATTEMPTS,
+    retry_base_seconds: float = FETCH_RETRY_BASE_SECONDS,
+) -> tuple[bytes, dict[str, str]]:
+    request_headers = {"User-Agent": USER_AGENT}
+    request_headers.update(headers or {})
+    last_exc: BaseException | None = None
+    for attempt in range(1, max(1, attempts) + 1):
+        request = urllib.request.Request(url, headers=request_headers)
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                response_headers = {key.lower(): value for key, value in response.headers.items()}
+                return response.read(), response_headers
+        except Exception as exc:
+            last_exc = exc
+            if attempt >= attempts or not should_retry_fetch(exc):
+                raise
+            delay = min(retry_base_seconds * (2 ** (attempt - 1)), 30.0)
+            print(
+                f"Fetch failed for {url} ({fetch_error_message(exc)}); "
+                f"retrying in {delay:g}s [{attempt}/{attempts}]",
+                file=sys.stderr,
+            )
+            time.sleep(delay)
+    assert last_exc is not None
+    raise last_exc
 
 
 def fetch_json(url: str, timeout: int = 90) -> tuple[Any, dict[str, str]]:
@@ -273,6 +331,10 @@ def wordpress_url(endpoint: str, page: int) -> str:
     return f"{BASE_WORDPRESS_URL}/{endpoint}/?{urllib.parse.urlencode(params)}"
 
 
+def sort_wordpress_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return sorted(records, key=lambda record: (str(record.get("id") or ""), str(record.get("slug") or "")))
+
+
 def fetch_wordpress_endpoint(endpoint: str) -> list[dict[str, Any]]:
     payload, _ = fetch_json(wordpress_url(endpoint, 1))
     if not isinstance(payload, dict) or "results" not in payload:
@@ -283,7 +345,24 @@ def fetch_wordpress_endpoint(endpoint: str) -> list[dict[str, Any]]:
     for page in range(2, total_pages + 1):
         page_payload, _ = fetch_json(wordpress_url(endpoint, page))
         records.extend(page_payload.get("results") or [])
-    return sorted(records, key=lambda record: (str(record.get("id") or ""), str(record.get("slug") or "")))
+    return sort_wordpress_records(records)
+
+
+def load_wordpress_records_from_snapshot(path: Path, source: str) -> list[dict[str, Any]]:
+    if not path.exists() or path.stat().st_size == 0:
+        return []
+    try:
+        with sqlite3.connect(path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT raw_json FROM wordpress_records WHERE source = ?",
+                (source,),
+            ).fetchall()
+    except sqlite3.Error as exc:
+        raise RuntimeError(
+            f"Could not read WordPress {source} records from fallback snapshot {path}: {exc}"
+        ) from exc
+    return sort_wordpress_records([json.loads(row["raw_json"]) for row in rows])
 
 
 def datacite_url(page: int, page_size: int, prefix: str = DEFAULT_TCIA_PREFIX) -> str:
@@ -310,12 +389,28 @@ def fetch_datacite_prefix(prefix: str = DEFAULT_TCIA_PREFIX) -> list[dict[str, A
     return sorted(records, key=lambda record: datacite_doi(record).lower())
 
 
+def load_datacite_records_from_snapshot(path: Path) -> list[dict[str, Any]]:
+    if not path.exists() or path.stat().st_size == 0:
+        return []
+    try:
+        with sqlite3.connect(path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute("SELECT raw_json FROM datacite_dois").fetchall()
+    except sqlite3.Error as exc:
+        raise RuntimeError(f"Could not read DataCite records from fallback snapshot {path}: {exc}") from exc
+    return sorted((json.loads(row["raw_json"]) for row in rows), key=lambda record: datacite_doi(record).lower())
+
+
 def fetch_pathdb_rows(url: str = PATHDB_CSV_URL) -> list[dict[str, str]]:
     body, _ = fetch_bytes(url)
     text = body.decode("utf-8-sig", errors="replace")
     rows = []
     for row in csv.DictReader(io.StringIO(text)):
         rows.append({column: row.get(column, "") for column in PATHDB_COLUMNS})
+    return sort_pathdb_rows(rows)
+
+
+def sort_pathdb_rows(rows: list[dict[str, str]]) -> list[dict[str, str]]:
     return sorted(
         rows,
         key=lambda row: (
@@ -325,6 +420,31 @@ def fetch_pathdb_rows(url: str = PATHDB_CSV_URL) -> list[dict[str, str]]:
             row.get("camic_id", ""),
         ),
     )
+
+
+def load_pathdb_rows_from_snapshot(path: Path) -> list[dict[str, str]]:
+    if not path.exists() or path.stat().st_size == 0:
+        return []
+    columns = ", ".join(quote_identifier(column) for column in PATHDB_COLUMNS)
+    try:
+        with sqlite3.connect(path) as conn:
+            conn.row_factory = sqlite3.Row
+            available = {
+                row["name"]
+                for row in conn.execute("PRAGMA table_info(pathdb_rows)").fetchall()
+            }
+            missing = [column for column in PATHDB_COLUMNS if column not in available]
+            if missing:
+                raise RuntimeError(
+                    f"Fallback snapshot is missing PathDB columns: {', '.join(missing)}"
+                )
+            rows = [
+                {column: "" if row[column] is None else str(row[column]) for column in PATHDB_COLUMNS}
+                for row in conn.execute(f"SELECT {columns} FROM pathdb_rows").fetchall()
+            ]
+    except sqlite3.Error as exc:
+        raise RuntimeError(f"Could not read PathDB rows from fallback snapshot {path}: {exc}") from exc
+    return sort_pathdb_rows(rows)
 
 
 def collect_license_texts(*values: Any) -> list[str]:
@@ -1274,11 +1394,63 @@ def unique_join(values: set[str], max_items: int = 12) -> str:
     return "; ".join(clean)
 
 
+def fetch_rows_for_build(
+    source_key: str,
+    source_label: str,
+    row_label: str,
+    fetcher: Callable[[], list[Any]],
+    fallback_loader: Callable[[Path], list[Any]],
+    fallback_db: Path | None = None,
+    log: Any | None = None,
+) -> tuple[list[Any], str, list[dict[str, Any]]]:
+    try:
+        return fetcher(), "live", []
+    except SOURCE_FALLBACK_ERRORS as exc:
+        fallback_path = fallback_db if fallback_db and fallback_db.exists() else None
+        if not fallback_path:
+            raise
+        rows = fallback_loader(fallback_path)
+        if not rows:
+            raise RuntimeError(
+                f"{source_label} fetch failed and fallback snapshot has no {row_label}: {fallback_path}"
+            ) from exc
+        warning = {
+            "source": source_key,
+            "message": (
+                f"{source_label} could not be fetched; reused {row_label} from the "
+                "previous snapshot while refreshing other sources."
+            ),
+            "error": fetch_error_message(exc),
+            "fallback_db": str(fallback_path),
+            "rows": len(rows),
+        }
+        if log:
+            log(warning_log_line(f"{source_label} fallback", f"{warning['message']} ({warning['error']})"))
+        return rows, "fallback_snapshot", [warning]
+
+
+def fetch_pathdb_rows_for_build(
+    fallback_db: Path | None = None,
+    log: Any | None = None,
+) -> tuple[list[dict[str, str]], str, list[dict[str, Any]]]:
+    rows, status, warnings = fetch_rows_for_build(
+        "pathdb",
+        "PathDB cohort-builder CSV",
+        "PathDB rows",
+        fetch_pathdb_rows,
+        load_pathdb_rows_from_snapshot,
+        fallback_db,
+        log,
+    )
+    return rows, status, warnings
+
+
 def build_snapshot(
     out_path: Path,
     gzip_out: Path | None = None,
     manifest_out: Path | None = None,
     exports_dir: Path | None = None,
+    fallback_db: Path | None = None,
     quiet: bool = False,
 ) -> dict[str, Any]:
     started = time.time()
@@ -1290,20 +1462,64 @@ def build_snapshot(
         if not quiet:
             print(message, file=sys.stderr)
 
+    warnings: list[dict[str, Any]] = []
+    source_status: dict[str, str] = {}
+
     log("Fetching WordPress collections...")
-    collections = fetch_wordpress_endpoint("collections")
+    collections, source_status["wordpress_collections"], source_warnings = fetch_rows_for_build(
+        "wordpress_collections",
+        "WordPress collections",
+        "WordPress collection records",
+        lambda: fetch_wordpress_endpoint("collections"),
+        lambda path: load_wordpress_records_from_snapshot(path, "collections"),
+        fallback_db,
+        log,
+    )
+    warnings.extend(source_warnings)
     log(f"  {len(collections)} records")
+
     log("Fetching WordPress analysis-results...")
-    analysis_results = fetch_wordpress_endpoint("analysis-results")
+    analysis_results, source_status["wordpress_analysis_results"], source_warnings = fetch_rows_for_build(
+        "wordpress_analysis_results",
+        "WordPress analysis-results",
+        "WordPress analysis-result records",
+        lambda: fetch_wordpress_endpoint("analysis-results"),
+        lambda path: load_wordpress_records_from_snapshot(path, "analysis-results"),
+        fallback_db,
+        log,
+    )
+    warnings.extend(source_warnings)
     log(f"  {len(analysis_results)} records")
+
     log("Fetching WordPress downloads...")
-    downloads = fetch_wordpress_endpoint("downloads")
+    downloads, source_status["wordpress_downloads"], source_warnings = fetch_rows_for_build(
+        "wordpress_downloads",
+        "WordPress downloads",
+        "WordPress download endpoint records",
+        lambda: fetch_wordpress_endpoint("downloads"),
+        lambda path: load_wordpress_records_from_snapshot(path, "downloads"),
+        fallback_db,
+        log,
+    )
+    warnings.extend(source_warnings)
     log(f"  {len(downloads)} records")
+
     log("Fetching PathDB cohort-builder CSV...")
-    pathdb_rows = fetch_pathdb_rows()
+    pathdb_rows, source_status["pathdb"], source_warnings = fetch_pathdb_rows_for_build(fallback_db, log)
+    warnings.extend(source_warnings)
     log(f"  {len(pathdb_rows)} rows")
+
     log("Fetching DataCite DOI records...")
-    datacite_records = fetch_datacite_prefix()
+    datacite_records, source_status["datacite"], source_warnings = fetch_rows_for_build(
+        "datacite",
+        "DataCite DOI records",
+        "DataCite records",
+        fetch_datacite_prefix,
+        load_datacite_records_from_snapshot,
+        fallback_db,
+        log,
+    )
+    warnings.extend(source_warnings)
     log(f"  {len(datacite_records)} records")
 
     wordpress_sources = {
@@ -1376,8 +1592,11 @@ def build_snapshot(
             "pathdb_csv_url": PATHDB_CSV_URL,
             "datacite_prefix": DEFAULT_TCIA_PREFIX,
         },
+        "source_status": source_status,
         "elapsed_seconds": round(time.time() - started, 3),
     }
+    if warnings:
+        manifest["warnings"] = warnings
 
     if exports_dir:
         manifest["web_exports"] = export_web_artifacts(out_path, exports_dir)
@@ -1743,15 +1962,13 @@ def github_repo_from_env_or_default() -> str:
 def github_api_json(url: str) -> Any:
     token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
     headers = {
-        "User-Agent": USER_AGENT,
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
     }
     if token:
         headers["Authorization"] = f"Bearer {token}"
-    request = urllib.request.Request(url, headers=headers)
-    with urllib.request.urlopen(request, timeout=60) as response:
-        return json.loads(response.read().decode("utf-8"))
+    body, _ = fetch_bytes(url, timeout=60, headers=headers)
+    return json.loads(body.decode("utf-8"))
 
 
 def download_release_snapshot(
@@ -1808,6 +2025,13 @@ def main(argv: Optional[list[str]] = None) -> int:
     build.add_argument("--gzip-out", help="Optional deterministic gzip output path.")
     build.add_argument("--manifest-out", help="Optional manifest JSON output path.")
     build.add_argument("--exports-dir", help="Optional directory for web-friendly JSON/JSONL release exports.")
+    build.add_argument(
+        "--fallback-db",
+        help=(
+            "Optional previous SQLite snapshot to reuse PathDB rows from when the "
+            "PathDB cohort-builder CSV is temporarily unavailable."
+        ),
+    )
     build.add_argument("--quiet", action="store_true", help="Suppress fetch progress messages.")
 
     info = subparsers.add_parser("info", help="Print local snapshot metadata.")
@@ -1834,6 +2058,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             gzip_out=Path(args.gzip_out) if args.gzip_out else None,
             manifest_out=Path(args.manifest_out) if args.manifest_out else None,
             exports_dir=Path(args.exports_dir) if args.exports_dir else None,
+            fallback_db=Path(args.fallback_db) if args.fallback_db else None,
             quiet=args.quiet,
         )
         print(json.dumps(manifest, indent=2, sort_keys=True))

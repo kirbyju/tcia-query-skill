@@ -18,6 +18,8 @@ Generated snapshot files are intentionally not committed to the repository. GitH
 
 The workflow validates that the SQLite file contains the documented `agent_*` views, writes web-friendly exports from those views, and compares a release fingerprint built from the source-content hash, schema version, SQLite hash, and export hashes. It skips release uploads only when the release fingerprint is unchanged.
 
+Source fetches use bounded retry/backoff for transient network failures such as connection refusals, timeouts, rate limits, and 5xx responses. If any source is temporarily unavailable but a previous release snapshot exists, the workflow reuses that source's previous rows, emits a warning annotation in the build log and a warning entry in the manifest, and still refreshes the other sources. The build fails after retries only when a required source fails and no usable previous snapshot data is available for that source.
+
 GitHub scheduled workflows can start late. If a user asks about a dataset that appears to be missing, say the published snapshot may not include the newest TCIA metadata yet and ask them to try again after the next scheduled snapshot run has had time to finish.
 
 ## Local Cache
@@ -61,12 +63,13 @@ python scripts/tcia_snapshot.py build \
   --out cache/tcia_snapshot.sqlite \
   --gzip-out dist/tcia_snapshot.sqlite.gz \
   --manifest-out dist/tcia_snapshot_manifest.json \
-  --exports-dir dist
+  --exports-dir dist \
+  --fallback-db previous/tcia_snapshot.sqlite
 python scripts/tcia_snapshot.py validate --db cache/tcia_snapshot.sqlite
 python scripts/tcia_snapshot.py validate --db dist/tcia_snapshot.sqlite --exports-dir dist
 ```
 
-The generated SQLite database is suitable for local use. The gzipped artifact and web exports are suitable for GitHub Release distribution. The validation command fails if required agent-facing views are absent, which prevents documentation/schema drift such as publishing a base-table-only SQLite file.
+The generated SQLite database is suitable for local use. The gzipped artifact and web exports are suitable for GitHub Release distribution. The optional `--fallback-db` is only used for source-level fallback when a live source cannot be fetched; omit it for strict local rebuilds. The validation command fails if required agent-facing views are absent, which prevents documentation/schema drift such as publishing a base-table-only SQLite file.
 
 ## Query Behavior
 

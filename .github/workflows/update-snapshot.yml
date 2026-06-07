@@ -25,14 +25,37 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Prepare previous snapshot fallback
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="tcia-snapshot-latest"
+          mkdir -p previous
+          if gh release download "$tag" --pattern tcia_snapshot.sqlite.gz --dir previous >/dev/null 2>&1; then
+            if gzip -dc previous/tcia_snapshot.sqlite.gz > previous/tcia_snapshot.sqlite; then
+              echo "Previous snapshot is available for source fallback."
+            else
+              echo "::warning::Previous snapshot could not be decompressed; source fallback disabled."
+              rm -f previous/tcia_snapshot.sqlite previous/tcia_snapshot.sqlite.gz
+            fi
+          else
+            echo "No previous snapshot release found; source fallback disabled."
+          fi
+
       - name: Build snapshot
         run: |
           mkdir -p dist
+          fallback_args=()
+          if [ -s previous/tcia_snapshot.sqlite ]; then
+            fallback_args+=(--fallback-db previous/tcia_snapshot.sqlite)
+          fi
           python scripts/tcia_snapshot.py build \
             --out dist/tcia_snapshot.sqlite \
             --gzip-out dist/tcia_snapshot.sqlite.gz \
             --manifest-out dist/tcia_snapshot_manifest.json \
-            --exports-dir dist
+            --exports-dir dist \
+            "${fallback_args[@]}"
 
       - name: Validate snapshot artifacts
         run: |
