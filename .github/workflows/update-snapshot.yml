@@ -63,6 +63,23 @@ jobs:
             --db dist/tcia_snapshot.sqlite \
             --exports-dir dist
 
+      - name: Check optional NIfTI metadata drift
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="tcia-snapshot-latest"
+          mkdir -p previous
+          if gh release download "$tag" --pattern nifti_metadata_manifest.json --dir previous >/dev/null 2>&1; then
+            if ! python scripts/tcia_nifti_metadata.py drift-check \
+              --snapshot-db dist/tcia_snapshot.sqlite \
+              --manifest previous/nifti_metadata_manifest.json; then
+              echo "::warning title=NIfTI metadata drift::Current visible non-controlled NIfTI download records differ from the released NIfTI metadata manifest. Run a manual NIfTI metadata refresh and upload nifti_metadata.sqlite.gz plus nifti_metadata_manifest.json."
+            fi
+          else
+            echo "::warning title=NIfTI metadata missing::No nifti_metadata_manifest.json release asset found. Upload nifti_metadata.sqlite.gz and nifti_metadata_manifest.json to enable on-demand NIfTI metadata access."
+          fi
+
       - name: Compare with published snapshot
         id: compare
         env:

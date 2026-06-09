@@ -16,6 +16,13 @@ Generated snapshot files are intentionally not committed to the repository. GitH
 - `agent_datasets.jsonl.gz`
 - `agent_current_downloads.jsonl.gz`
 
+Large optional derived metadata assets may also be published on the same release tag. They are not part of `python scripts/tcia_snapshot.py ensure` and are not downloaded during skill install or normal snapshot refresh.
+
+Optional NIfTI assets:
+
+- `nifti_metadata.sqlite.gz`
+- `nifti_metadata_manifest.json`
+
 The workflow validates that the SQLite file contains the documented `agent_*` views, writes web-friendly exports from those views, and compares a release fingerprint built from the source-content hash, schema version, SQLite hash, and export hashes. It skips release uploads only when the release fingerprint is unchanged.
 
 Source fetches use bounded retry/backoff for transient network failures such as connection refusals, timeouts, rate limits, and 5xx responses. If any source is temporarily unavailable but a previous release snapshot exists, the workflow reuses that source's previous rows, emits a warning annotation in the build log and a warning entry in the manifest, and still refreshes the other sources. The build fails after retries only when a required source fails and no usable previous snapshot data is available for that source.
@@ -39,6 +46,19 @@ export TCIA_SNAPSHOT_DB=/path/to/tcia_snapshot.sqlite
 
 The helper scripts use the local snapshot. They do not fall back to live public APIs for normal end-user discovery.
 
+The optional NIfTI SQLite uses separate cache paths and is downloaded only on demand:
+
+```text
+cache/nifti_metadata.sqlite
+cache/nifti_metadata_manifest.json
+```
+
+Users or agents can override the NIfTI SQLite path with:
+
+```bash
+export TCIA_NIFTI_METADATA_DB=/path/to/nifti_metadata.sqlite
+```
+
 ## Refresh Local Metadata
 
 End users do not need to reinstall the skill just to receive newer TCIA metadata. Skill code/instructions and snapshot data are separate.
@@ -51,6 +71,14 @@ python scripts/tcia_snapshot.py ensure
 ```
 
 By default, `ensure` downloads release assets from `kirbyju/tcia-query-skill`. Use `--repo owner/name` only when testing a fork or alternate release source. The helper compares content hashes and schema versions, then replaces `cache/tcia_snapshot.sqlite` only when the published snapshot data or schema changed.
+
+For NIfTI file-grain metadata, use the separate on-demand helper:
+
+```bash
+python scripts/tcia_nifti_metadata.py ensure
+```
+
+This downloads and verifies only the optional NIfTI release assets. It is not run by the base snapshot refresh command.
 
 ## Build A Snapshot
 
@@ -109,7 +137,18 @@ Direct release URLs:
 - `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/agent_datasets.jsonl.gz`
 - `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/agent_current_downloads.jsonl.gz`
 
+Optional NIfTI release URLs:
+
+- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/nifti_metadata.sqlite.gz`
+- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/nifti_metadata_manifest.json`
+
 When an environment has no SQLite execution path, prefer these generic release exports before considering any live API. Use plain `.jsonl` for web LLM browse tools that cannot decompress gzip, and `.jsonl.gz` for local or connector tools that can. They are intentionally table-shaped rather than prompt-specific precomputed answer files. For MCP guidance, see `references/mcp-and-web-llms.md`.
+
+## Optional NIfTI SQLite
+
+The NIfTI SQLite is a file-grain metadata layer mined from visible, non-controlled current NIfTI download records, companion spreadsheets, root `.sums` files, and accepted Aspera listings. It is too large and too specialized to bundle with the normal snapshot refresh.
+
+Use `references/nifti.md` for table details and examples. The scheduled GitHub Action should not rebuild the NIfTI database by default. Instead, it compares the current snapshot's visible non-controlled NIfTI download signature against `nifti_metadata_manifest.json` and emits a warning if a manual NIfTI refresh is needed.
 
 ## WordPress Download Tables
 

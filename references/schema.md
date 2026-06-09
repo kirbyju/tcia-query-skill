@@ -4,6 +4,8 @@ Use this reference when querying `cache/tcia_snapshot.sqlite` or a database sele
 
 The GitHub Release web exports mirror the two most useful agent-facing views for environments that cannot run SQLite. Use `agent_datasets.jsonl` or `agent_datasets.jsonl.gz` for `agent_dataset_access_summary`, and `agent_current_downloads.jsonl` or `agent_current_downloads.jsonl.gz` for `agent_current_downloads`. Prefer plain `.jsonl` for web LLM browse tools that cannot decompress gzip. Filter these generic JSONL tables for controlled/mixed access, modalities, DICOM annotation labels, and download routes instead of relying on prompt-specific precomputed exports.
 
+The optional NIfTI file-grain SQLite is separate from `cache/tcia_snapshot.sqlite`. It is downloaded only when needed with `python scripts/tcia_nifti_metadata.py ensure`, defaults to `cache/nifti_metadata.sqlite`, and is documented in `references/nifti.md`.
+
 ## Agent-Facing Views
 
 Prefer these views for normal discovery. They flatten common JSON fields and keep the base tables available as lower-level provenance.

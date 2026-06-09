@@ -63,6 +63,7 @@ tcia-query-skill/
 |   +-- general-commons-graphql.md
 |   +-- idc-dicom-downloads.md
 |   +-- mcp-and-web-llms.md
+|   +-- nifti.md
 |   +-- pathdb.md
 |   +-- publications.md
 |   +-- routing.md
@@ -75,6 +76,7 @@ tcia-query-skill/
     +-- general_commons_studies.py
     +-- idc_viewer_urls.py
     +-- pathdb_metadata.py
+    +-- tcia_nifti_metadata.py
     +-- tcia_snapshot.py
     +-- tcia_create_data_retriever_csv.py
     +-- tcia_manifest_series_uids.py
@@ -136,6 +138,19 @@ Direct release URLs:
 - `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/agent_datasets.jsonl.gz`
 - `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/agent_current_downloads.jsonl.gz`
 
+Optional NIfTI file-grain metadata is published separately on the same release tag when available:
+
+- `nifti_metadata.sqlite.gz`
+- `nifti_metadata_manifest.json`
+
+This optional NIfTI SQLite is **not** downloaded during skill install and is **not** downloaded by `python scripts/tcia_snapshot.py ensure`. Users who need NIfTI file-level metadata can fetch it on demand:
+
+```bash
+python scripts/tcia_nifti_metadata.py ensure
+```
+
+See [references/nifti.md](./references/nifti.md) for the NIfTI table guide and examples.
+
 After installing or cloning the skill, refresh local metadata from the latest release:
 
 ```bash
@@ -153,6 +168,9 @@ The helper scripts use Python's standard library. Discovery scripts query the lo
 ```bash
 python scripts/tcia_snapshot.py ensure
 python scripts/tcia_snapshot.py info
+python scripts/tcia_nifti_metadata.py ensure
+python scripts/tcia_nifti_metadata.py datasets --limit 20
+python scripts/tcia_nifti_metadata.py derived --collection BCBM-RadioGenomics --with-sources
 python scripts/tcia_wordpress_search.py --query breast --limit 10
 python scripts/tcia_wordpress_search.py --short-title EAY131 --json
 python scripts/tcia_wordpress_search.py --short-title 4D-Lung --json
