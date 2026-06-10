@@ -2,6 +2,8 @@
 
 Use this reference for TCIA non-DICOM histopathology data after WordPress confirms the dataset is TCIA-published.
 
+For public pathology Aspera package/download scope, PathDB coverage disparities, and package-file reconciliation, use `references/pathology.md` and `scripts/tcia_pathology_metadata.py` after WordPress provenance/access is confirmed. PathDB enriches pathology rows but does not decide whether a Collection Manager package is in migration or download scope.
+
 ## Stable Cohort-Builder CSV
 
 PathDB publishes a stable CSV with rich per-slide metadata:

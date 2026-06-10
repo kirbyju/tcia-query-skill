@@ -25,6 +25,7 @@ When a downstream record is derived from a TCIA DOI but is not itself listed in 
    - For DOI, citation, or version questions, start with DataCite metadata from the snapshot. Prefer `scripts/datacite_tcia_dois.py` for TCIA DOI prefix records.
    - For subject-level clinical, demographic, diagnosis, treatment, or cross-commons data-availability enrichment, confirm the TCIA dataset in WordPress first, then use CDA from validated TCIA/IDC subject identifiers. Load `references/cda.md`.
    - For file-level public NIfTI questions, confirm TCIA provenance/access through the normal snapshot first, then load `references/nifti.md` and use the optional NIfTI SQLite release only if file-grain metadata are needed.
+   - For public pathology Aspera package scope, PathDB coverage gaps, or PathDB/package disparity questions, confirm TCIA provenance/access through the normal snapshot first, then load `references/pathology.md` and use the optional pathology SQLite release when package/download-grain reconciliation metadata are needed.
    - For all other discovery and access questions, search WordPress snapshot records first for Collections and Analysis Results.
    - Prefer `scripts/tcia_wordpress_search.py` for lightweight snapshot searches.
    - If the snapshot is missing, run or tell the user to run `python scripts/tcia_snapshot.py ensure` from the skill root.
@@ -47,11 +48,12 @@ When a downstream record is derived from a TCIA DOI but is not itself listed in 
 | --- | --- |
 | Public DICOM radiology, DICOM pathology, or DICOM annotations/results | Use IDC and `idc-index` first. If an IDC skill is available, use it for IDC-specific querying, visualization, and downloading. Keep the TCIA WordPress short title, DOI, or Series Instance UIDs as the allowlist/provenance anchor. Use NBIA only as a fallback when the requested DICOM data cannot be found in IDC/idc-index; if fallback is needed, tell users to use the NBIA v4 API documented by `https://cbiit.github.io/NBIA-TCIA/nbia-api.yaml`. |
 | Public non-DICOM NIfTI file-grain metadata | Use WordPress snapshot metadata first to confirm the dataset/download is visible and non-controlled, then use `references/nifti.md` and `scripts/tcia_nifti_metadata.py`. The NIfTI SQLite is optional and downloaded on demand with `python scripts/tcia_nifti_metadata.py ensure`; it is not installed or refreshed automatically with the base skill snapshot. |
+| Public non-DICOM pathology Aspera package metadata | Use WordPress snapshot metadata first to confirm the dataset/download is visible and non-controlled, then use `references/pathology.md` and `scripts/tcia_pathology_metadata.py` for pathology Aspera download scope, PathDB crosswalks, and disparity metadata. The pathology SQLite is optional and downloaded on demand with `python scripts/tcia_pathology_metadata.py ensure`; it is not installed or refreshed automatically with the base skill snapshot. |
 | Browser visualization before download | Controlled-access data cannot be previewed before download. For open/public DICOM in IDC, use OHIF v3 for radiology, VolView when a public S3 series folder/CRDC UUID is available, and SliM for SM slide microscopy. For open/public non-DICOM PathDB slides, use caMicroscope with the PathDB CSV `camic_id`. Load `references/visualization.md`. |
 | Controlled-access face datasets | If license metadata indicates controlled/restricted access, alert that the dataset is controlled access and point to `https://www.cancerimagingarchive.net/nih-controlled-data-access-policy/`. Use General Commons metadata and access guidance. Scope GC queries to `phs004225` and match `study_acronym` to the WordPress short title. Do not directly download controlled data; provide policy and TCIA Data Retriever manifest guidance for later authorized use. |
 | Controlled-access NCTN trials or Biobank data | If license metadata indicates controlled/restricted access, alert that the dataset is controlled access and point to the TCIA NIH Controlled Data Access Policy. Use WordPress for current metadata and access statements. CTDC support is expected later; do not invent CTDC routing until TCIA data are available there. |
 | Subject-level clinical/demographic/diagnosis enrichment or cross-commons availability | Use CDA after WordPress provenance is established. Prefer `cdapython` for harmonized subject and file summaries across IDC, GDC, PDC, GC, ICDC, and related upstream identifiers. Use CDA to enrich TCIA/IDC cohorts, not to decide TCIA publication, replace official WordPress downloads, or authorize controlled data access. Load `references/cda.md`. |
-| Non-DICOM pathology | Use PathDB. Prefer the stable cohort-builder CSV for rich slide-level metadata, and match its `collection` field to the WordPress short title. The PathDB API collection list may use `collectionName`. |
+| Non-DICOM pathology slide metadata | Use PathDB. Prefer the stable cohort-builder CSV for rich slide-level metadata, and match its `collection` field to the WordPress short title. The PathDB API collection list may use `collectionName`. For Aspera package/download scope and PathDB coverage disparities, use the optional pathology SQLite. |
 | Spreadsheets, ZIP files, supporting files, manifests, and ancillary downloads | Use WordPress download metadata. If a download is an IBM Aspera Faspex package, see `references/aspera.md`. |
 | Peer-reviewed manuscripts about TCIA datasets | Use TCIA Publications and the EndNote XML export. Search title, abstract, keywords, journal, PMID, manuscript DOI, and linked TCIA dataset DOIs. Load `references/publications.md`. |
 | DOI, citation, version, or derived-result relationships | Start with DataCite metadata and relationships, then use WordPress for TCIA publication/visibility, access/license, and user-facing pages. See `references/datacite-relationships.md`. |
@@ -131,6 +133,7 @@ Run scripts from the skill root.
 | `scripts/tcia_wordpress_search.py` | Search local SQLite TCIA WordPress Collection and Analysis Result snapshot metadata, with text or JSON output. |
 | `scripts/tcia_snapshot.py` | Build, inspect, validate, or download the local SQLite metadata snapshot, and export web-friendly release files. |
 | `scripts/tcia_nifti_metadata.py` | Download, validate, summarize, and query the optional release SQLite for visible non-controlled TCIA NIfTI file-grain metadata. |
+| `scripts/tcia_pathology_metadata.py` | Build/download, validate, summarize, and query the optional release SQLite for visible non-controlled TCIA pathology Aspera download metadata, PathDB crosswalks, and disparities. |
 | `scripts/tcia_manifest_series_uids.py` | Extract DICOM Series Instance UIDs from a legacy TCIA `.tcia` manifest path or URL for IDC/idc-index lookup. |
 | `scripts/tcia_create_data_retriever_csv.py` | Create a TCIA Data Retriever CSV manifest from validated DICOM Series Instance UIDs, direct `imageUrl` values, or `drs_uri` values. |
 | `scripts/idc_viewer_urls.py` | Construct OHIF v3, SliM, or VolView URLs after TCIA provenance, license, and IDC presence are already verified. |
@@ -150,6 +153,9 @@ python scripts/tcia_snapshot.py validate --db cache/tcia_snapshot.sqlite
 python scripts/tcia_nifti_metadata.py ensure
 python scripts/tcia_nifti_metadata.py datasets --limit 20
 python scripts/tcia_nifti_metadata.py derived --collection BCBM-RadioGenomics --with-sources
+python scripts/tcia_pathology_metadata.py ensure
+python scripts/tcia_pathology_metadata.py datasets --limit 20
+python scripts/tcia_pathology_metadata.py disparities
 python scripts/tcia_wordpress_search.py --query breast --limit 10
 python scripts/tcia_wordpress_search.py --short-title TCGA-BRCA --json
 python scripts/tcia_wordpress_search.py --query retired --include-hidden
@@ -213,6 +219,12 @@ Some non-DICOM data are distributed through IBM Aspera Faspex package links in W
 Load `references/nifti.md` when a user asks for TCIA NIfTI file counts, NIfTI filenames/package paths, NIfTI modality/acquisition metadata, or NIfTI segmentation/source-image relationships. Use the normal snapshot first for TCIA provenance, visibility, access/license, and user-facing download URLs. Use the optional NIfTI SQLite only for file-grain public non-controlled NIfTI metadata.
 
 Do not download the optional NIfTI SQLite unless the user needs NIfTI file-grain metadata or explicitly asks to refresh it. It is distributed as release assets `nifti_metadata.sqlite.gz` and `nifti_metadata_manifest.json`, and fetched on demand by `python scripts/tcia_nifti_metadata.py ensure`.
+
+## Pathology Aspera Metadata
+
+Load `references/pathology.md` when a user asks for public TCIA pathology Aspera package/download scope, PathDB coverage gaps, or PathDB/package disparity metadata. Use the normal snapshot first for TCIA provenance, visibility, access/license, and user-facing download URLs. Use the optional pathology SQLite only for public, non-controlled pathology Aspera download/package reconciliation metadata.
+
+Do not download the optional pathology SQLite unless the user needs pathology Aspera package/download reconciliation metadata or explicitly asks to refresh it. It is distributed as release assets `pathology_metadata.sqlite.gz` and `pathology_metadata_manifest.json`, and fetched on demand by `python scripts/tcia_pathology_metadata.py ensure`.
 
 ## PathDB Metadata
 

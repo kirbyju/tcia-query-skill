@@ -2,6 +2,8 @@
 
 Some TCIA non-DICOM data are distributed through IBM Aspera Faspex package links from WordPress dataset pages or download metadata. Use this page when a TCIA download record points to a Faspex package URL, especially for large NIfTI, annotation, pathology, or supporting-data packages.
 
+For public pathology Aspera package scope and PathDB/package disparity metadata, use `references/pathology.md` and `scripts/tcia_pathology_metadata.py` after WordPress provenance/access is confirmed.
+
 ## Core Rules
 
 - Do not reconstruct package URLs. Use the exact Faspex link exposed by the TCIA dataset page or WordPress download metadata.

@@ -65,6 +65,7 @@ tcia-query-skill/
 |   +-- mcp-and-web-llms.md
 |   +-- nifti.md
 |   +-- pathdb.md
+|   +-- pathology.md
 |   +-- publications.md
 |   +-- routing.md
 |   +-- schema.md
@@ -77,6 +78,7 @@ tcia-query-skill/
     +-- idc_viewer_urls.py
     +-- pathdb_metadata.py
     +-- tcia_nifti_metadata.py
+    +-- tcia_pathology_metadata.py
     +-- tcia_snapshot.py
     +-- tcia_create_data_retriever_csv.py
     +-- tcia_manifest_series_uids.py
@@ -143,13 +145,25 @@ Optional NIfTI file-grain metadata is published separately on the same release t
 - `nifti_metadata.sqlite.gz`
 - `nifti_metadata_manifest.json`
 
-This optional NIfTI SQLite is **not** downloaded during skill install and is **not** downloaded by `python scripts/tcia_snapshot.py ensure`. Users who need NIfTI file-level metadata can fetch it on demand:
+Optional pathology Aspera metadata is also published separately on the same release tag when available:
+
+- `pathology_metadata.sqlite.gz`
+- `pathology_metadata_manifest.json`
+
+These optional SQLite files are **not** downloaded during skill install and are **not** downloaded by `python scripts/tcia_snapshot.py ensure`. Users who need NIfTI file-level metadata can fetch it on demand:
 
 ```bash
 python scripts/tcia_nifti_metadata.py ensure
 ```
 
+Users who need pathology Aspera download/package reconciliation metadata can fetch it on demand:
+
+```bash
+python scripts/tcia_pathology_metadata.py ensure
+```
+
 See [references/nifti.md](./references/nifti.md) for the NIfTI table guide and examples.
+See [references/pathology.md](./references/pathology.md) for the pathology Aspera table guide and examples.
 
 After installing or cloning the skill, refresh local metadata from the latest release:
 
@@ -171,6 +185,9 @@ python scripts/tcia_snapshot.py info
 python scripts/tcia_nifti_metadata.py ensure
 python scripts/tcia_nifti_metadata.py datasets --limit 20
 python scripts/tcia_nifti_metadata.py derived --collection BCBM-RadioGenomics --with-sources
+python scripts/tcia_pathology_metadata.py ensure
+python scripts/tcia_pathology_metadata.py datasets --limit 20
+python scripts/tcia_pathology_metadata.py disparities
 python scripts/tcia_wordpress_search.py --query breast --limit 10
 python scripts/tcia_wordpress_search.py --short-title EAY131 --json
 python scripts/tcia_wordpress_search.py --short-title 4D-Lung --json

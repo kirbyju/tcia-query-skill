@@ -6,6 +6,8 @@ The GitHub Release web exports mirror the two most useful agent-facing views for
 
 The optional NIfTI file-grain SQLite is separate from `cache/tcia_snapshot.sqlite`. It is downloaded only when needed with `python scripts/tcia_nifti_metadata.py ensure`, defaults to `cache/nifti_metadata.sqlite`, and is documented in `references/nifti.md`.
 
+The optional pathology Aspera SQLite is also separate from `cache/tcia_snapshot.sqlite`. It is downloaded only when needed with `python scripts/tcia_pathology_metadata.py ensure`, defaults to `cache/pathology_metadata.sqlite`, and is documented in `references/pathology.md`.
+
 ## Agent-Facing Views
 
 Prefer these views for normal discovery. They flatten common JSON fields and keep the base tables available as lower-level provenance.
@@ -138,6 +140,25 @@ Use base tables when the views do not expose a needed detail.
 - `pathdb_rows`: trimmed PathDB cohort-builder slide metadata.
 - `pathdb_collection_summary`: collection-level PathDB patient/slide summaries.
 - `datacite_dois`: TCIA DOI prefix records from DataCite.
+
+## Optional Pathology SQLite
+
+Use `cache/pathology_metadata.sqlite` only after the base snapshot has confirmed TCIA provenance, visibility, and access/license metadata. Important tables:
+
+- `pathology_downloads`: visible, non-controlled, current pathology Aspera download records selected from Collection Manager/WordPress metadata.
+- `pathology_download_label_matches`: label/title evidence for why a download was selected as pathology-related.
+- `pathology_package_files`: imported Aspera package browse or `.sums` inventory rows. This table may be empty before package inventories are imported.
+- `pathology_file_objects`: normalized file rows derived from package inventories. This table may be empty before package inventories are imported.
+- `pathdb_slide_crosswalk`: PathDB rows matched by exact TCIA/PathDB collection short title. Initial rows are `collection_only`, not file-level matches.
+- `pathology_disparities`: curator-facing rows for PathDB/download scope mismatches, multiple-download cases, and future package-file reconciliation issues.
+
+Common pathology summary:
+
+```sql
+SELECT short_title, download_records, pathdb_collection_slide_count, open_noncommercial_downloads
+FROM pathology_dataset_summary
+ORDER BY lower(short_title);
+```
 
 ## Common Joins
 

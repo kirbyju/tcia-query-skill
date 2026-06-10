@@ -80,6 +80,23 @@ jobs:
             echo "::warning title=NIfTI metadata missing::No nifti_metadata_manifest.json release asset found. Upload nifti_metadata.sqlite.gz and nifti_metadata_manifest.json to enable on-demand NIfTI metadata access."
           fi
 
+      - name: Check optional pathology metadata drift
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="tcia-snapshot-latest"
+          mkdir -p previous
+          if gh release download "$tag" --pattern pathology_metadata_manifest.json --dir previous >/dev/null 2>&1; then
+            if ! python scripts/tcia_pathology_metadata.py drift-check \
+              --snapshot-db dist/tcia_snapshot.sqlite \
+              --manifest previous/pathology_metadata_manifest.json; then
+              echo "::warning title=Pathology metadata drift::Current visible non-controlled pathology Aspera download records differ from the released pathology metadata manifest. Run a manual pathology metadata refresh and upload pathology_metadata.sqlite.gz plus pathology_metadata_manifest.json."
+            fi
+          else
+            echo "::warning title=Pathology metadata missing::No pathology_metadata_manifest.json release asset found. Upload pathology_metadata.sqlite.gz and pathology_metadata_manifest.json to enable on-demand pathology Aspera metadata access."
+          fi
+
       - name: Compare with published snapshot
         id: compare
         env:
