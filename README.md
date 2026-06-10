@@ -13,7 +13,8 @@ TCIA data can live across several access systems, including:
 - The local SQLite metadata snapshot published by this repository
 - TCIA WordPress Collection and Analysis Result pages
 - IDC / `idc-index` for many public DICOM datasets
-- General Commons for controlled-access TCIA face datasets
+- CTDC for Biobank controlled-access face datasets
+- General Commons for some other controlled-access TCIA face datasets
 - PathDB for non-DICOM histopathology metadata
 - DataCite for DOI, citation, version, and derived-data relationships
 - TCIA Publications EndNote XML for verified manuscripts written about TCIA data
@@ -38,7 +39,7 @@ This skill tells an agent how to:
 - Build browser visualization guidance for open-access DICOM through IDC viewers and public non-DICOM PathDB slides through caMicroscope.
 - Return viewer URLs as links instead of trying to launch browser automation.
 - Ask users whether they want direct agent downloads or portable TCIA Data Retriever CSV manifests.
-- Route users to IDC, General Commons, PathDB, DataCite, WordPress downloads, or Aspera.
+- Route users to IDC, CTDC, General Commons, PathDB, DataCite, WordPress downloads, or Aspera.
 - Point controlled-access users to TCIA's current access policy.
 - Start DOI, citation, version, and related-work questions from DataCite, then confirm TCIA publication/visibility in WordPress.
 - Start publication-mining questions from `https://cancerimagingarchive.net/endnote/Pubs_basedon_TCIA.xml`.
@@ -65,7 +66,6 @@ tcia-query-skill/
 |   +-- mcp-and-web-llms.md
 |   +-- nifti.md
 |   +-- pathdb.md
-|   +-- pathology.md
 |   +-- publications.md
 |   +-- routing.md
 |   +-- schema.md
@@ -78,7 +78,6 @@ tcia-query-skill/
     +-- idc_viewer_urls.py
     +-- pathdb_metadata.py
     +-- tcia_nifti_metadata.py
-    +-- tcia_pathology_metadata.py
     +-- tcia_snapshot.py
     +-- tcia_create_data_retriever_csv.py
     +-- tcia_manifest_series_uids.py
@@ -145,25 +144,13 @@ Optional NIfTI file-grain metadata is published separately on the same release t
 - `nifti_metadata.sqlite.gz`
 - `nifti_metadata_manifest.json`
 
-Optional pathology Aspera metadata is also published separately on the same release tag when available:
-
-- `pathology_metadata.sqlite.gz`
-- `pathology_metadata_manifest.json`
-
-These optional SQLite files are **not** downloaded during skill install and are **not** downloaded by `python scripts/tcia_snapshot.py ensure`. Users who need NIfTI file-level metadata can fetch it on demand:
+This optional NIfTI SQLite is **not** downloaded during skill install and is **not** downloaded by `python scripts/tcia_snapshot.py ensure`. Users who need NIfTI file-level metadata can fetch it on demand:
 
 ```bash
 python scripts/tcia_nifti_metadata.py ensure
 ```
 
-Users who need pathology Aspera download/package reconciliation metadata can fetch it on demand:
-
-```bash
-python scripts/tcia_pathology_metadata.py ensure
-```
-
 See [references/nifti.md](./references/nifti.md) for the NIfTI table guide and examples.
-See [references/pathology.md](./references/pathology.md) for the pathology Aspera table guide and examples.
 
 After installing or cloning the skill, refresh local metadata from the latest release:
 
@@ -185,9 +172,6 @@ python scripts/tcia_snapshot.py info
 python scripts/tcia_nifti_metadata.py ensure
 python scripts/tcia_nifti_metadata.py datasets --limit 20
 python scripts/tcia_nifti_metadata.py derived --collection BCBM-RadioGenomics --with-sources
-python scripts/tcia_pathology_metadata.py ensure
-python scripts/tcia_pathology_metadata.py datasets --limit 20
-python scripts/tcia_pathology_metadata.py disparities
 python scripts/tcia_wordpress_search.py --query breast --limit 10
 python scripts/tcia_wordpress_search.py --short-title EAY131 --json
 python scripts/tcia_wordpress_search.py --short-title 4D-Lung --json
@@ -252,11 +236,13 @@ For public DICOM downloads, use IDC/idc-index first. Existing TCIA `.tcia` manif
 
 For public DICOM series/file details, agents should use IDC/idc-index after TCIA provenance and access/license status have been confirmed from the snapshot. They should not query live WordPress APIs for DICOM details during normal end-user discovery.
 
-For new TCIA Data Retriever CSV manifests, the route is selected by column header. Use one preferred route header only: `SeriesInstanceUID` for public DICOM through IDC first/NBIA fallback, `imageUrl` for PathDB/direct public files, or `drs_uri` for General Commons controlled-access files.
+For new TCIA Data Retriever CSV manifests, the route is selected by column header. Use one preferred route header only: `SeriesInstanceUID` for public DICOM through IDC first/NBIA fallback, `imageUrl` for PathDB/direct public files, or `drs_uri` for controlled-access files when official WordPress, CTDC, or General Commons manifests provide DRS URIs.
 
 For public DICOM visualization before download, use IDC viewer capabilities. OHIF v3 is preferred for radiology, SliM is used for DICOM slide microscopy (`SM`), and VolView can be used when IDC metadata provides a public S3 series folder or CRDC series UUID. Agents should provide viewer URLs for users to open in their regular browser, not install browser automation just to display examples. Controlled-access data cannot be previewed in a public browser viewer before download, regardless of file format.
 
 For public non-DICOM histopathology slides in PathDB, use caMicroscope viewer URLs built from the PathDB cohort-builder CSV `camic_id`, for example `https://pathdb.cancerimagingarchive.net/caMicroscope/apps/mini/viewer.html?mode=pathdb&slideId=314525`. The URL parameter is named `slideId`, but it expects numeric `camic_id`, not CSV `slide_id`. The PathDB helper adds a `camicroscope_url` field to slide-level rows.
+
+When the same non-DICOM pathology data are available through both PathDB and an Aspera package, agents should explain the provenance difference. Aspera packages are the original submitter-provided data; PathDB copies may be converted or reformatted for browser-based pathology viewing. Recommend Aspera for analyses requiring the exact submitted files.
 
 ## Controlled Access
 
@@ -273,6 +259,8 @@ https://www.cancerimagingarchive.net/nih-controlled-data-access-policy/
 That page explains how to request access, create a JSON API key after approval, and configure TCIA Data Retriever to use that key.
 
 Agents should not directly download controlled data. For controlled data, provide the policy link and, when useful, portable TCIA Data Retriever manifest guidance for later authorized use.
+
+Biobank controlled-access face data are now available through CTDC using the manifests and download/view links on the relevant WordPress pages. Users must request access to dbGaP study `phs002192` for these images.
 
 ## Notes
 

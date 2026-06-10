@@ -2,8 +2,6 @@
 
 Use this reference for TCIA non-DICOM histopathology data after WordPress confirms the dataset is TCIA-published.
 
-For public pathology Aspera package/download scope, PathDB coverage disparities, and package-file reconciliation, use `references/pathology.md` and `scripts/tcia_pathology_metadata.py` after WordPress provenance/access is confirmed. PathDB enriches pathology rows but does not decide whether a Collection Manager package is in migration or download scope.
-
 ## Stable Cohort-Builder CSV
 
 PathDB publishes a stable CSV with rich per-slide metadata:
@@ -19,6 +17,12 @@ The filename includes a date, but TCIA expects this URL to remain consistent for
 Match the CSV `collection` field to WordPress `collection_short_title` or `result_short_title`.
 
 The older PathDB collection API may expose collection names as `collectionName`; prefer the CSV when the user needs detailed non-DICOM histopathology metadata.
+
+## PathDB Versus Aspera
+
+PathDB is the preferred route for rich slide-level metadata and browser visualization of public non-DICOM pathology data. PathDB copies may be converted or reformatted from the originally submitted files so they work properly in TCIA's browser-based pathology viewer.
+
+When a WordPress dataset also provides an IBM Aspera Faspex package for the same pathology data, describe the Aspera package as the original submitter-provided data. For real analyses where the user wants to ensure they are using the exact files submitted to TCIA, recommend the Aspera copy rather than the PathDB viewer copy.
 
 ## CSV Columns
 

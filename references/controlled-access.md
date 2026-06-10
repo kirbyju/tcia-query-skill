@@ -34,7 +34,7 @@ Do not invent approval requirements, timelines, or eligibility rules. Link to th
 
 ## Routing Notes
 
-- Controlled-access face datasets: route access questions to the policy page and, where applicable, General Commons metadata for `phs004225`.
-- NCTN trials or Biobank data: use WordPress license metadata and current TCIA access statements; CTDC support is planned but should not be assumed until confirmed.
+- Controlled-access face datasets: route access questions to the policy page. For Biobank controlled-access face data, use the current WordPress CTDC manifests/download/view links and tell users to request dbGaP study `phs002192`. For non-Biobank face datasets, use General Commons metadata for `phs004225` only when WordPress or GC metadata indicate that route.
+- NCTN trials or Biobank data: use WordPress license metadata and current TCIA access statements. Biobank controlled-access face data are now available in CTDC through the relevant WordPress manifests/links and require dbGaP study `phs002192`; for other controlled datasets, do not invent CTDC routing unless WordPress identifies it.
 - Public subsets of a mixed collection can be described separately from controlled/restricted subsets. For mixed datasets, use `agent_dataset_access_summary` to identify controlled download titles, licenses, IDs, and URLs before answering.
 - Web-only agents that cannot query SQLite should filter `agent_datasets.jsonl` from the latest release for `resolved_access_level` values such as `controlled` and `mixed` before attempting any live API lookup. Use `agent_datasets.jsonl.gz` only when the host can decompress gzip.

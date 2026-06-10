@@ -24,6 +24,7 @@ Downstream field mappings:
 | System | Matching field |
 | --- | --- |
 | General Commons | `study_acronym`, scoped to `phs004225` |
+| CTDC | Official CTDC manifest/download/view links exposed by WordPress; Biobank controlled-access face data require dbGaP study `phs002192` |
 | Cancer Data Aggregator | `subject_id` or source-specific IDs exposed through `upstream_identifiers.*`; validate identifiers from TCIA/IDC before matching |
 | PathDB cohort-builder CSV | `collection` |
 | PathDB API collection list | `collectionName` |
@@ -78,9 +79,10 @@ Controlled-access face datasets:
 - If license metadata indicates controlled/restricted access, alert users that the dataset is controlled access, not open access.
 - Link to `https://www.cancerimagingarchive.net/nih-controlled-data-access-policy/` for current request, JSON API key, and TCIA Data Retriever configuration guidance.
 - Do not construct public browser viewer links. Controlled-access data cannot be visualized in a browser before download regardless of file format.
-- Route to General Commons.
-- Scope all GC queries to `phs004225`.
-- Match WordPress short title to GC `study_acronym`.
+- For Biobank controlled-access face data, route through CTDC using the manifests and download/view links exposed by the current WordPress pages.
+- Tell users they must request access to dbGaP study `phs002192` for Biobank controlled-access face images.
+- Route to General Commons only when WordPress or GC metadata indicate that route.
+- When using GC, scope queries to `phs004225` and match WordPress short title to GC `study_acronym`.
 - Do not imply unauthenticated download.
 
 Controlled-access NCTN trials or Biobank data:
@@ -88,8 +90,8 @@ Controlled-access NCTN trials or Biobank data:
 - If license metadata indicates controlled/restricted access, alert users that the dataset is controlled access, not open access.
 - Link to the TCIA NIH Controlled Data Access Policy for current access-request and API-key guidance.
 - Do not construct public browser viewer links. Controlled-access data cannot be visualized in a browser before download regardless of file format.
-- Use WordPress license metadata and dataset pages for now.
-- CTDC is planned but should not be used until TCIA data and matching fields are confirmed there.
+- For Biobank controlled-access face data, use CTDC manifests and download/view links from the current WordPress pages and instruct users to request dbGaP study `phs002192`.
+- For NCTN trials and other controlled datasets, use WordPress license metadata and dataset pages unless WordPress identifies a downstream route.
 
 CDA subject enrichment:
 
@@ -103,11 +105,11 @@ CDA subject enrichment:
 
 Non-DICOM pathology:
 
-- Route slide-level metadata questions to PathDB.
+- Route slide-level metadata and browser visualization questions to PathDB.
 - Prefer the stable PathDB cohort-builder CSV for rich slide-level metadata.
 - Match WordPress short title to CSV `collection`; the PathDB API collection list may use `collectionName`.
-- For public pathology Aspera download/package scope, PathDB coverage gaps, and package-file reconciliation, use `references/pathology.md` and `scripts/tcia_pathology_metadata.py` after WordPress provenance/access is confirmed.
 - For open/public PathDB slides, construct caMicroscope browser viewer URLs from CSV `camic_id`: `https://pathdb.cancerimagingarchive.net/caMicroscope/apps/mini/viewer.html?mode=pathdb&slideId=<camic_id>`. The URL parameter is named `slideId`, but it must use numeric `camic_id`, not CSV `slide_id` or `patient_id`.
+- If the same pathology data are available through both PathDB and Aspera, explain the provenance difference: Aspera packages are the original submitter-provided data, while PathDB data may be converted or reformatted for TCIA's browser-based pathology viewer. Recommend Aspera for analyses that require the exact source files.
 - Use `tcia_utils.pathdb` if installed.
 - Load `pathdb.md` for the stable CSV URL, columns, and helper script.
 
@@ -179,8 +181,8 @@ For exact dataset questions, give a short prose summary first, then a table of a
 - Controlled-access metadata can be visible even when file downloads require approval. Determine controlled status from license metadata, then link to the TCIA NIH Controlled Data Access Policy for current request, JSON API key, and TCIA Data Retriever configuration steps.
 - Controlled-access data cannot be previewed through public browser viewers before download. Report metadata and access guidance instead of constructing OHIF, SliM, VolView, IDC, NBIA, PathDB, or other public viewer URLs.
 - Visualization answers should provide links for users to open in their own browser. Do not install Playwright or other browser automation just to demonstrate viewer links.
-- For open-access/public DICOM downloads, prefer IDC/idc-index. Existing TCIA `.tcia` manifests can be parsed for Series Instance UID allowlists, but NBIA should be fallback-only for public DICOM. New portable Data Retriever manifests should be CSV/TSV/XLSX-compatible, not `.tcia`, unless the user explicitly asks for the legacy NBIA-era format. If NBIA fallback is needed, use the NBIA v4 API documented by `https://cbiit.github.io/NBIA-TCIA/nbia-api.yaml`. For controlled-access DICOM, use WordPress license metadata and General Commons under `phs004225`; do not imply public IDC/NBIA download.
-- For new Data Retriever CSV manifests, route by one preferred header only: `SeriesInstanceUID` for public DICOM, `imageUrl` for PathDB/direct public files, or `drs_uri` for General Commons controlled-access files. Avoid mixed-route manifests because Data Retriever applies header precedence.
+- For open-access/public DICOM downloads, prefer IDC/idc-index. Existing TCIA `.tcia` manifests can be parsed for Series Instance UID allowlists, but NBIA should be fallback-only for public DICOM. New portable Data Retriever manifests should be CSV/TSV/XLSX-compatible, not `.tcia`, unless the user explicitly asks for the legacy NBIA-era format. If NBIA fallback is needed, use the NBIA v4 API documented by `https://cbiit.github.io/NBIA-TCIA/nbia-api.yaml`. For controlled-access DICOM, use WordPress license metadata plus the downstream route identified by current WordPress metadata, such as CTDC for Biobank controlled-access face data or General Commons for non-Biobank face data routed there; do not imply public IDC/NBIA download.
+- For new Data Retriever CSV manifests, route by one preferred header only: `SeriesInstanceUID` for public DICOM, `imageUrl` for PathDB/direct public files, or `drs_uri` for controlled-access files when official WordPress, CTDC, or General Commons manifests provide DRS URIs. Avoid mixed-route manifests because Data Retriever applies header precedence.
 - WordPress download metadata may contain nested objects or media IDs. Prefer the snapshot views and `wordpress_downloads` tables for normal tasks; source API helper packages are maintainer/developer tools.
 - DataCite relationships are about DOI provenance. They do not automatically make an external Zenodo or IDC record a TCIA-published dataset. WordPress remains the publication/visibility authority after DataCite discovery.
 - TCIA Publications EndNote XML is the bibliography authority for manuscripts written about TCIA datasets. DataCite remains the dataset DOI authority.

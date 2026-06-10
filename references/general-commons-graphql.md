@@ -1,6 +1,6 @@
 # General Commons GraphQL
 
-Use this reference for direct General Commons GraphQL work on controlled-access TCIA DICOM/face datasets. For broader cross-CRDC subject enrichment that includes General Commons alongside IDC, GDC, and PDC, use `cda.md` instead.
+Use this reference for direct General Commons GraphQL work on controlled-access TCIA DICOM/face datasets that WordPress or GC metadata route to General Commons. For Biobank controlled-access face data, use the current WordPress CTDC manifests/download/view links and dbGaP study `phs002192` guidance instead of GC `phs004225`. For broader cross-CRDC subject enrichment that includes General Commons alongside IDC, GDC, and PDC, use `cda.md` instead.
 
 ## Constants
 

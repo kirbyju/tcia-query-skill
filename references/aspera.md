@@ -2,8 +2,6 @@
 
 Some TCIA non-DICOM data are distributed through IBM Aspera Faspex package links from WordPress dataset pages or download metadata. Use this page when a TCIA download record points to a Faspex package URL, especially for large NIfTI, annotation, pathology, or supporting-data packages.
 
-For public pathology Aspera package scope and PathDB/package disparity metadata, use `references/pathology.md` and `scripts/tcia_pathology_metadata.py` after WordPress provenance/access is confirmed.
-
 ## Core Rules
 
 - Do not reconstruct package URLs. Use the exact Faspex link exposed by the TCIA dataset page or WordPress download metadata.
@@ -11,6 +9,7 @@ For public pathology Aspera package scope and PathDB/package disparity metadata,
 - Browse before transferring large packages. A package inventory is often enough to answer file-count, filename, and folder-layout questions.
 - Preserve browse output as a local CSV when doing metadata work. Future refreshes can reuse successful listings until the WordPress download ID, URL, date, or size changes.
 - Treat Aspera package listings as file inventory, not rich metadata. Look for companion spreadsheets/TSVs/XLSX files and root `.sums` files before recursively scanning a huge package.
+- For non-DICOM pathology that is also represented in PathDB, treat the Aspera package as the original submitter-provided data. PathDB files may be converted or reformatted for TCIA's browser-based pathology viewer, so recommend Aspera when the user needs the exact submitted files for analysis.
 
 ## Tooling
 
