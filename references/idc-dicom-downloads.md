@@ -85,7 +85,7 @@ TCIA Data Retriever accepts spreadsheets (`.csv`, `.tsv`, `.xlsx`) as manifests.
 - If the agent has a validated Series Instance UID list, direct image URLs, or DRS URIs, create a CSV manifest with `scripts/tcia_create_data_retriever_csv.py`.
 - For DICOM Series Instance UID workflows, use a single `SeriesInstanceUID` column.
 - For PathDB/direct public file workflows, use an `imageUrl` column.
-- For General Commons DRS/controlled-access workflows, use a `drs_uri` column and remind users that authorization may be required.
+- For DRS/controlled-access workflows from official WordPress, CTDC, or General Commons manifests, use a `drs_uri` column and remind users that authorization may be required.
 - Explain that a CSV manifest can be saved, opened with TCIA Data Retriever on another computer, or shared with a collaborator.
 - For controlled-access datasets, do not directly download files. Remind users that authorization and TCIA Data Retriever API-key configuration are required before they use a controlled manifest.
 
@@ -109,8 +109,8 @@ TCIA Data Retriever uses spreadsheet column headers as route selectors:
 | `Series UID` | Alternate exact header for public DICOM Series Instance UIDs | Same as `SeriesInstanceUID` |
 | `imageUrl` | Preferred direct public file URL header | Direct download; TCIA convention is PathDB/non-DICOM pathology |
 | `wsiimage_url` | Alternate direct public file URL header | Same as `imageUrl` |
-| `drs_uri` | Preferred General Commons DRS URI header | Gen3/DRS controlled-access download |
-| `File ID` or `file_id` | General Commons file ID header | Gen3/DRS controlled-access download; bare IDs are interpreted as `drs://nci-crdc.datacommons.io/<file-id>` |
+| `drs_uri` | Preferred controlled-access DRS URI header | Gen3/DRS controlled-access download |
+| `File ID` or `file_id` | Controlled-access file ID header | Gen3/DRS controlled-access download; bare IDs are interpreted as `drs://nci-crdc.datacommons.io/<file-id>` |
 
 For new manifests, use the preferred exact headers `SeriesInstanceUID`, `imageUrl`, or `drs_uri`. Create one manifest per route and do not mix these route headers. Data Retriever checks for Series UID columns before direct-file handling; if a direct-file spreadsheet contains both `drs_uri`/`File ID` and `imageUrl`, the DRS route takes precedence.
 

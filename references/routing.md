@@ -24,7 +24,7 @@ Downstream field mappings:
 | System | Matching field |
 | --- | --- |
 | General Commons | `study_acronym`, scoped to `phs004225` |
-| CTDC | Official CTDC manifest/download/view links exposed by WordPress; Biobank controlled-access face data require dbGaP study `phs002192` |
+| CTDC | Official CTDC manifest/download/view links exposed by WordPress; Biobank controlled-access face data require dbGaP study `phs002192`; use the optional controlled-access SQLite for public manifest/spreadsheet file-grain metadata |
 | Cancer Data Aggregator | `subject_id` or source-specific IDs exposed through `upstream_identifiers.*`; validate identifiers from TCIA/IDC before matching |
 | PathDB cohort-builder CSV | `collection` |
 | PathDB API collection list | `collectionName` |
@@ -45,7 +45,7 @@ For non-DOI discovery:
 4. Filter locally so criteria can match custom fields, download labels, and flattened snapshot columns.
 5. Use the snapshot's verbose-normalized text fields for abstracts/descriptions when needed.
 6. Flag controlled access from license metadata only. Creative Commons means open; Creative Commons NonCommercial means open with noncommercial restriction; controlled/restricted license text means controlled access.
-7. Enrich only the filtered candidate set through IDC, CDA, General Commons, PathDB, or DataCite.
+7. Enrich only the filtered candidate set through IDC, CDA, the controlled-access SQLite, CTDC, General Commons, PathDB, or DataCite.
 8. If a candidate does not appear in WordPress, exclude it from TCIA-published results. If useful, mention it separately as related or derived.
 9. If a named dataset is absent after refreshing the local snapshot, say the published snapshot may not include the newest TCIA metadata yet. Ask the user to try again after the next 7:17 AM or 7:17 PM America/New_York snapshot run has had time to finish, then rerun `python scripts/tcia_snapshot.py ensure`.
 
@@ -80,6 +80,7 @@ Controlled-access face datasets:
 - Link to `https://www.cancerimagingarchive.net/nih-controlled-data-access-policy/` for current request, JSON API key, and TCIA Data Retriever configuration guidance.
 - Do not construct public browser viewer links. Controlled-access data cannot be visualized in a browser before download regardless of file format.
 - For Biobank controlled-access face data, route through CTDC using the manifests and download/view links exposed by the current WordPress pages.
+- Use `references/controlled-access.md` and `scripts/tcia_controlled_access_metadata.py` for public CTDC/GC manifest/spreadsheet metadata and `drs_uri` rows when file-grain metadata are needed.
 - Tell users they must request access to dbGaP study `phs002192` for Biobank controlled-access face images.
 - Route to General Commons only when WordPress or GC metadata indicate that route.
 - When using GC, scope queries to `phs004225` and match WordPress short title to GC `study_acronym`.
@@ -91,6 +92,7 @@ Controlled-access NCTN trials or Biobank data:
 - Link to the TCIA NIH Controlled Data Access Policy for current access-request and API-key guidance.
 - Do not construct public browser viewer links. Controlled-access data cannot be visualized in a browser before download regardless of file format.
 - For Biobank controlled-access face data, use CTDC manifests and download/view links from the current WordPress pages and instruct users to request dbGaP study `phs002192`.
+- Use the optional controlled-access SQLite when WordPress identifies a controlled download route and file-grain public metadata are needed.
 - For NCTN trials and other controlled datasets, use WordPress license metadata and dataset pages unless WordPress identifies a downstream route.
 
 CDA subject enrichment:
@@ -164,7 +166,7 @@ For search/discovery:
 | Dataset | Use WordPress title and short title |
 | Type | Collection or Analysis Result |
 | Match reason | Cite the matching cancer type, modality, data type, body site, DOI, etc. |
-| Access route | IDC, General Commons, PathDB, WordPress downloads, Aspera, or DataCite |
+| Access route | IDC, CTDC, General Commons, PathDB, WordPress downloads, Aspera, or DataCite |
 | Visualization route | None for controlled access; OHIF v3, SliM, or VolView for open/public DICOM in IDC; caMicroscope for open/public PathDB slides |
 | Download delivery | Direct agent download or portable Data Retriever CSV manifest when DICOM Series Instance UIDs are available |
 | Access/license | Open Creative Commons, Open Creative Commons NonCommercial, controlled/restricted, or license-review-needed |

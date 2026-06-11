@@ -25,6 +25,9 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Install optional metadata dependencies
+        run: python -m pip install --upgrade pandas openpyxl xlrd
+
       - name: Prepare previous snapshot fallback
         env:
           GH_TOKEN: ${{ github.token }}
@@ -62,6 +65,21 @@ jobs:
           python scripts/tcia_snapshot.py validate \
             --db dist/tcia_snapshot.sqlite \
             --exports-dir dist
+
+      - name: Build controlled-access metadata
+        run: |
+          python scripts/tcia_controlled_access_metadata.py build \
+            --snapshot-db dist/tcia_snapshot.sqlite \
+            --out dist/controlled_access_metadata.sqlite \
+            --artifact-dir dist/controlled_access_source_artifacts \
+            --gzip-out dist/controlled_access_metadata.sqlite.gz \
+            --manifest-out dist/controlled_access_metadata_manifest.json \
+            --replace
+
+      - name: Validate controlled-access metadata
+        run: |
+          python scripts/tcia_controlled_access_metadata.py validate \
+            --db dist/controlled_access_metadata.sqlite
 
       - name: Check optional NIfTI metadata drift
         env:
@@ -121,6 +139,30 @@ jobs:
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Compare with published controlled-access metadata
+        id: compare_controlled
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="tcia-snapshot-latest"
+          new_fingerprint="$(python -c 'import json; print(json.load(open("dist/controlled_access_metadata_manifest.json"))["release_fingerprint"])')"
+          echo "new_fingerprint=${new_fingerprint}" >> "$GITHUB_OUTPUT"
+
+          mkdir -p previous
+          if gh release download "$tag" --pattern controlled_access_metadata_manifest.json --dir previous --clobber >/dev/null 2>&1; then
+            old_fingerprint="$(python -c 'import json; m=json.load(open("previous/controlled_access_metadata_manifest.json")); print(m.get("release_fingerprint") or m.get("sqlite_sha256", ""))')"
+          else
+            old_fingerprint=""
+          fi
+
+          echo "old_fingerprint=${old_fingerprint}" >> "$GITHUB_OUTPUT"
+          if [ "$new_fingerprint" = "$old_fingerprint" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Publish changed snapshot
         if: steps.compare.outputs.changed == 'true'
         env:
@@ -146,6 +188,27 @@ jobs:
             gh release delete-asset "$tag" "$asset" --yes >/dev/null 2>&1 || true
           done
 
+      - name: Publish changed controlled-access metadata
+        if: steps.compare_controlled.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="tcia-snapshot-latest"
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" \
+              --title "Latest TCIA metadata snapshot" \
+              --notes "Automatically updated SQLite metadata snapshot for the TCIA query skill."
+          fi
+          gh release upload "$tag" \
+            dist/controlled_access_metadata.sqlite.gz \
+            dist/controlled_access_metadata_manifest.json \
+            --clobber
+
       - name: Report unchanged snapshot
         if: steps.compare.outputs.changed == 'false'
         run: echo "Snapshot release fingerprint is unchanged; release assets were not updated."
+
+      - name: Report unchanged controlled-access metadata
+        if: steps.compare_controlled.outputs.changed == 'false'
+        run: echo "Controlled-access metadata release fingerprint is unchanged; release assets were not updated."

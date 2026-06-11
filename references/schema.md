@@ -8,6 +8,8 @@ The optional NIfTI file-grain SQLite is separate from `cache/tcia_snapshot.sqlit
 
 The optional pathology Aspera SQLite is also separate from `cache/tcia_snapshot.sqlite`. It is downloaded only when needed with `python scripts/tcia_pathology_metadata.py ensure`, defaults to `cache/pathology_metadata.sqlite`, and is documented in `references/pathology.md`.
 
+The optional controlled-access SQLite is also separate from `cache/tcia_snapshot.sqlite`. It is downloaded only when needed with `python scripts/tcia_controlled_access_metadata.py ensure`, defaults to `cache/controlled_access_metadata.sqlite`, and is documented in `references/controlled-access.md`.
+
 ## Agent-Facing Views
 
 Prefer these views for normal discovery. They flatten common JSON fields and keep the base tables available as lower-level provenance.
@@ -158,6 +160,45 @@ Common pathology summary:
 SELECT short_title, download_records, pathdb_collection_slide_count, open_noncommercial_downloads
 FROM pathology_dataset_summary
 ORDER BY lower(short_title);
+```
+
+## Optional Controlled-Access SQLite
+
+Use `cache/controlled_access_metadata.sqlite` only after the base snapshot has confirmed TCIA provenance and controlled/restricted access. The data are public metadata extracted from WordPress-controlled download records, public manifests, public spreadsheet metadata URLs, and WordPress `download_metadata` fields. The SQLite does not grant file access and must not be used to download controlled data directly.
+
+Important tables:
+
+- `controlled_downloads`: current visible WordPress controlled download records routed to `general_commons` or `ctdc`.
+- `wordpress_download_metadata`: key/value expansion of WordPress `download_metadata`, including nested objects serialized as JSON.
+- `wordpress_download_urls`: URLs extracted from download metadata and classified as manifest, metadata spreadsheet, data dictionary, supporting docs, or other.
+- `wordpress_search_filters`: parsed downstream search URL filters such as study names or IDs.
+- `source_artifacts`: fetched public manifest/spreadsheet artifacts, hashes, and fetch status.
+- `manifest_rows`: public manifest rows, including `drs_uri`, `file_id`, file name/type/size, study, participant, sample, and series identifiers when available.
+- `metadata_rows`: public spreadsheet rows with patient, study, series, modality, manufacturer, protocol, pixel spacing, release, species, phantom, and longitudinal metadata.
+- `controlled_files`: normalized file-grain rows combining manifest rows and spreadsheet rows by download and Series Instance UID where possible.
+- `radiology_series`: radiology-oriented rows aligned to the public NIfTI/pathology metadata model.
+- `idc_index`, `idc_ct_index`, `idc_pt_index`, `idc_contrast_index`, and `idc_series_links`: IDC-parquet-shaped indexes for controlled-access metadata discovery only.
+- `controlled_metadata_exceptions`: review rows for manifest rows without DRS URIs, rows without Series Instance UIDs, and spreadsheet series that did not match a manifest row.
+
+Common controlled-access summary:
+
+```sql
+SELECT route_system, short_title, controlled_file_rows,
+       participant_ids, patient_ids, series_instance_uids
+FROM controlled_dataset_summary
+ORDER BY route_system, lower(short_title);
+```
+
+Find controlled CTDC PET rows with DRS URIs:
+
+```sql
+SELECT short_title, file_name, modality, participant_id,
+       series_instance_uid, drs_uri
+FROM controlled_files
+WHERE route_system = 'ctdc'
+  AND upper(COALESCE(modality, image_modality, '')) = 'PT'
+  AND COALESCE(drs_uri, '') <> ''
+LIMIT 25;
 ```
 
 ## Common Joins

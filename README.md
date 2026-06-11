@@ -144,13 +144,25 @@ Optional NIfTI file-grain metadata is published separately on the same release t
 - `nifti_metadata.sqlite.gz`
 - `nifti_metadata_manifest.json`
 
-This optional NIfTI SQLite is **not** downloaded during skill install and is **not** downloaded by `python scripts/tcia_snapshot.py ensure`. Users who need NIfTI file-level metadata can fetch it on demand:
+Optional controlled-access public manifest/spreadsheet metadata is also published separately on the same release tag when available:
+
+- `controlled_access_metadata.sqlite.gz`
+- `controlled_access_metadata_manifest.json`
+
+These optional SQLite files are **not** downloaded during skill install and are **not** downloaded by `python scripts/tcia_snapshot.py ensure`. Users who need NIfTI file-level metadata can fetch it on demand:
 
 ```bash
 python scripts/tcia_nifti_metadata.py ensure
 ```
 
+Users who need controlled-access file-grain public metadata, `drs_uri` manifest rows, or IDC-shaped radiology indexes can fetch it on demand:
+
+```bash
+python scripts/tcia_controlled_access_metadata.py ensure
+```
+
 See [references/nifti.md](./references/nifti.md) for the NIfTI table guide and examples.
+See [references/controlled-access.md](./references/controlled-access.md) for the controlled-access table guide and policy guidance.
 
 After installing or cloning the skill, refresh local metadata from the latest release:
 
@@ -172,6 +184,9 @@ python scripts/tcia_snapshot.py info
 python scripts/tcia_nifti_metadata.py ensure
 python scripts/tcia_nifti_metadata.py datasets --limit 20
 python scripts/tcia_nifti_metadata.py derived --collection BCBM-RadioGenomics --with-sources
+python scripts/tcia_controlled_access_metadata.py ensure
+python scripts/tcia_controlled_access_metadata.py datasets --limit 20
+python scripts/tcia_controlled_access_metadata.py files --collection CMB-MEL --limit 10
 python scripts/tcia_wordpress_search.py --query breast --limit 10
 python scripts/tcia_wordpress_search.py --short-title EAY131 --json
 python scripts/tcia_wordpress_search.py --short-title 4D-Lung --json
@@ -202,6 +217,19 @@ python scripts/tcia_snapshot.py validate --db dist/tcia_snapshot.sqlite --export
 
 The validation step checks that the SQLite file contains the documented agent-facing views and that the web export assets were generated.
 
+The scheduled workflow also rebuilds the controlled-access metadata asset from the freshly built snapshot and public WordPress manifest/spreadsheet URLs:
+
+```bash
+python scripts/tcia_controlled_access_metadata.py build \
+  --snapshot-db dist/tcia_snapshot.sqlite \
+  --out dist/controlled_access_metadata.sqlite \
+  --artifact-dir dist/controlled_access_source_artifacts \
+  --gzip-out dist/controlled_access_metadata.sqlite.gz \
+  --manifest-out dist/controlled_access_metadata_manifest.json \
+  --replace
+python scripts/tcia_controlled_access_metadata.py validate --db dist/controlled_access_metadata.sqlite
+```
+
 ## Publications About TCIA Data
 
 For peer-reviewed manuscripts written about TCIA datasets, use TCIA's verified publications source:
@@ -219,10 +247,10 @@ python scripts/tcia_publications.py --dataset-doi 10.7937/K9/TCIA.2016.RNYFUYE9 
 
 ## Recommended Python Packages
 
-The bundled helper scripts use Python's standard library, so the skill can run basic snapshot and manifest workflows without extra packages. For best results on download, viewer, DICOM, and CDA enrichment tasks, install the domain packages in the same Python environment used by the local agent:
+Most bundled helper scripts use Python's standard library, so the skill can run basic snapshot and manifest workflows without extra packages. The controlled-access metadata builder needs `pandas`, `openpyxl`, and `xlrd` to read public WordPress spreadsheet artifacts. For best results on download, viewer, DICOM, and CDA enrichment tasks, install the domain packages in the same Python environment used by the local agent:
 
 ```bash
-python -m pip install --upgrade tcia_utils idc-index pydicom cdapython
+python -m pip install --upgrade pandas openpyxl xlrd tcia_utils idc-index pydicom cdapython
 ```
 
 Agents should check whether these packages are available before writing custom code, ask before installing missing packages, and prefer:
@@ -260,7 +288,7 @@ That page explains how to request access, create a JSON API key after approval, 
 
 Agents should not directly download controlled data. For controlled data, provide the policy link and, when useful, portable TCIA Data Retriever manifest guidance for later authorized use.
 
-Biobank controlled-access face data are now available through CTDC using the manifests and download/view links on the relevant WordPress pages. Users must request access to dbGaP study `phs002192` for these images.
+Biobank controlled-access face data are now available through CTDC using the manifests and download/view links on the relevant WordPress pages. Users must request access to dbGaP study `phs002192` for these images. Use the optional controlled-access SQLite for public CTDC/General Commons manifest and metadata spreadsheet rows when file-grain metadata are needed.
 
 ## Notes
 

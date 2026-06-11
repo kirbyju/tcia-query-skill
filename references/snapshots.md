@@ -28,6 +28,13 @@ Optional pathology Aspera assets:
 - `pathology_metadata.sqlite.gz`
 - `pathology_metadata_manifest.json`
 
+Optional controlled-access public manifest/spreadsheet assets:
+
+- `controlled_access_metadata.sqlite.gz`
+- `controlled_access_metadata_manifest.json`
+
+The controlled-access SQLite is rebuilt by the scheduled workflow from the fresh base snapshot plus public WordPress manifest and metadata spreadsheet URLs. The workflow uploads it when its controlled metadata release fingerprint changes. NIfTI and pathology assets are larger/manual sidecars: the scheduled workflow checks their source download signatures and warns when they need a manual refresh.
+
 The workflow validates that the SQLite file contains the documented `agent_*` views, writes web-friendly exports from those views, and compares a release fingerprint built from the source-content hash, schema version, SQLite hash, and export hashes. It skips release uploads only when the release fingerprint is unchanged.
 
 Source fetches use bounded retry/backoff for transient network failures such as connection refusals, timeouts, rate limits, and 5xx responses. If any source is temporarily unavailable but a previous release snapshot exists, the workflow reuses that source's previous rows, emits a warning annotation in the build log and a warning entry in the manifest, and still refreshes the other sources. The build fails after retries only when a required source fails and no usable previous snapshot data is available for that source.
@@ -77,6 +84,19 @@ Users or agents can override the pathology SQLite path with:
 export TCIA_PATHOLOGY_METADATA_DB=/path/to/pathology_metadata.sqlite
 ```
 
+The optional controlled-access SQLite uses separate cache paths and is downloaded only on demand:
+
+```text
+cache/controlled_access_metadata.sqlite
+cache/controlled_access_metadata_manifest.json
+```
+
+Users or agents can override the controlled-access SQLite path with:
+
+```bash
+export TCIA_CONTROLLED_ACCESS_METADATA_DB=/path/to/controlled_access_metadata.sqlite
+```
+
 ## Refresh Local Metadata
 
 End users do not need to reinstall the skill just to receive newer TCIA metadata. Skill code/instructions and snapshot data are separate.
@@ -105,6 +125,14 @@ python scripts/tcia_pathology_metadata.py ensure
 ```
 
 This downloads and verifies only the optional pathology release assets. It is not run by the base snapshot refresh command.
+
+For controlled-access file-grain public metadata, use the separate on-demand helper:
+
+```bash
+python scripts/tcia_controlled_access_metadata.py ensure
+```
+
+This downloads and verifies only the optional controlled-access release assets. It is not run by the base snapshot refresh command.
 
 ## Build A Snapshot
 
@@ -173,6 +201,11 @@ Optional pathology release URLs:
 - `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/pathology_metadata.sqlite.gz`
 - `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/pathology_metadata_manifest.json`
 
+Optional controlled-access release URLs:
+
+- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/controlled_access_metadata.sqlite.gz`
+- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/controlled_access_metadata_manifest.json`
+
 When an environment has no SQLite execution path, prefer these generic release exports before considering any live API. Use plain `.jsonl` for web LLM browse tools that cannot decompress gzip, and `.jsonl.gz` for local or connector tools that can. They are intentionally table-shaped rather than prompt-specific precomputed answer files. For MCP guidance, see `references/mcp-and-web-llms.md`.
 
 ## Optional NIfTI SQLite
@@ -186,6 +219,21 @@ Use `references/nifti.md` for table details and examples. The scheduled GitHub A
 The pathology SQLite is a package/download metadata layer for visible, non-controlled current pathology Aspera download records. It contains Collection Manager download scope, PathDB crosswalk rows, curator-facing disparity rows, and placeholder package/file tables that can be populated from Aspera browse output or root `.sums` inventories.
 
 Use `references/pathology.md` for table details and examples. The scheduled GitHub Action should not rebuild the pathology database by default. Instead, it compares the current snapshot's visible non-controlled pathology Aspera download signature against `pathology_metadata_manifest.json` and emits a warning if a manual pathology refresh is needed.
+
+## Optional Controlled-Access SQLite
+
+The controlled-access SQLite is a file-grain metadata layer for visible current WordPress controlled/restricted download records routed through General Commons or CTDC. It ingests public WordPress manifest URLs, public metadata spreadsheet URLs, and WordPress `download_metadata` fields; it does not use authenticated GraphQL APIs and does not download controlled files.
+
+Important tables include:
+
+- `controlled_downloads`: scoped current WordPress controlled download records with route classification.
+- `wordpress_download_metadata`, `wordpress_download_urls`, and `wordpress_search_filters`: public WordPress metadata fields and extracted URLs used to find manifests/spreadsheets.
+- `manifest_rows`: public manifest rows, including `drs_uri` and file IDs when available.
+- `metadata_rows`: public spreadsheet rows with TCIA/IDC-shaped radiology metadata.
+- `controlled_files`: normalized file-grain rows combining manifest and spreadsheet metadata.
+- `radiology_series`, `idc_index`, `idc_ct_index`, `idc_pt_index`, and `idc_series_links`: IDC-parquet-shaped radiology views for controlled metadata discovery only.
+
+Use `references/controlled-access.md` for policy guidance and examples. The scheduled GitHub Action rebuilds this database from the freshly built base snapshot and uploads `controlled_access_metadata.sqlite.gz` plus `controlled_access_metadata_manifest.json` when the controlled metadata fingerprint changes.
 
 ## WordPress Download Tables
 

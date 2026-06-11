@@ -1,6 +1,6 @@
 # General Commons GraphQL
 
-Use this reference for direct General Commons GraphQL work on controlled-access TCIA DICOM/face datasets that WordPress or GC metadata route to General Commons. For Biobank controlled-access face data, use the current WordPress CTDC manifests/download/view links and dbGaP study `phs002192` guidance instead of GC `phs004225`. For broader cross-CRDC subject enrichment that includes General Commons alongside IDC, GDC, and PDC, use `cda.md` instead.
+Use this reference for direct General Commons GraphQL work on controlled-access TCIA DICOM/face datasets that WordPress or GC metadata route to General Commons. For routine TCIA controlled-access file metadata, use the WordPress-derived controlled-access SQLite first (`scripts/tcia_controlled_access_metadata.py ensure` and `references/controlled-access.md`). For Biobank controlled-access face data, use the current WordPress CTDC manifests/download/view links and dbGaP study `phs002192` guidance instead of GC `phs004225`. For broader cross-CRDC subject enrichment that includes General Commons alongside IDC, GDC, and PDC, use `cda.md` instead.
 
 ## Constants
 
@@ -146,4 +146,4 @@ Most require `phs_accession: "phs004225"`. Some support additional filters, such
 
 ## Access Guidance
 
-General Commons hosts both open and controlled-access data. For TCIA controlled-access DICOM/face datasets, focus on metadata discovery and direct users to dbGaP/DAC authorization and SB-CGC access where controlled access applies. Do not claim that controlled files can be downloaded without authorization, and do not directly download controlled data.
+General Commons hosts both open and controlled-access data. For TCIA controlled-access DICOM/face datasets, focus on metadata discovery and direct users to dbGaP/DAC authorization and SB-CGC access where controlled access applies. Do not claim that controlled files can be downloaded without authorization, and do not directly download controlled data. Prefer the WordPress-derived controlled-access SQLite for manifest/spreadsheet metadata that TCIA publishes publicly; use direct GraphQL only for metadata gaps or explicit source-system checks.
