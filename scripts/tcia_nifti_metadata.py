@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 DEFAULT_REPO = "kirbyju/tcia-query-skill"
 DEFAULT_RELEASE_TAG = "tcia-snapshot-latest"
 NIFTI_ASSET = "nifti_metadata.sqlite.gz"
@@ -31,6 +31,7 @@ DEFAULT_MANIFEST_PATH = SKILL_ROOT / "cache" / NIFTI_MANIFEST_ASSET
 USER_AGENT = "tcia-nifti-metadata/1.0"
 
 REQUIRED_TABLES = [
+    "harvest_meta",
     "nifti_downloads",
     "candidate_downloads",
     "package_files",
@@ -50,6 +51,13 @@ REQUIRED_TABLES = [
     "derived_objects",
     "derived_object_references",
     "annotation_groups",
+]
+
+REQUIRED_VIEWS = [
+    "agent_nifti_downloads",
+    "agent_nifti_dataset_summary",
+    "agent_nifti_files",
+    "agent_nifti_derived_objects",
 ]
 
 NIFTI_DOWNLOAD_SIGNATURE_COLUMNS = [
@@ -315,7 +323,8 @@ def validate_db(path: Path) -> dict[str, Any]:
             "SELECT name FROM sqlite_master WHERE type IN ('table', 'view')"
         )
     }
-    missing = [table for table in REQUIRED_TABLES if table not in tables]
+    required = REQUIRED_TABLES + REQUIRED_VIEWS
+    missing = [table for table in required if table not in tables]
     integrity = conn.execute("PRAGMA integrity_check").fetchone()[0]
     counts = table_counts(conn)
     conn.close()
@@ -351,14 +360,23 @@ def command_info(args: argparse.Namespace) -> int:
         "table_counts": counts,
         "harvest_meta": meta,
         "release_fingerprint": manifest.get("release_fingerprint", ""),
+        "source_snapshot_matches_harvest": manifest.get("source_snapshot_matches_harvest"),
+        "schema_version": meta.get("schema_version") or manifest.get("schema_version", ""),
     }
     if args.json:
         print(json.dumps(payload, indent=2, sort_keys=True))
     else:
         print(f"DB: {payload['db']}")
         print(f"Manifest: {payload['manifest']}")
+        if payload["schema_version"]:
+            print(f"Schema version: {payload['schema_version']}")
         if payload["release_fingerprint"]:
             print(f"Release fingerprint: {payload['release_fingerprint']}")
+        if payload["source_snapshot_matches_harvest"] is not None:
+            print(
+                "Source snapshot compatibility: "
+                f"{'yes' if payload['source_snapshot_matches_harvest'] else 'no'}"
+            )
         for key in ("radiology_series", "derived_objects", "derived_object_references"):
             print(f"{key}: {counts.get(key, 0)}")
     return 0
@@ -368,17 +386,16 @@ def command_datasets(args: argparse.Namespace) -> int:
     conn = connect(args.db)
     sql = """
         SELECT
-          r.short_title,
-          COUNT(*) AS nifti_files,
-          SUM(CASE WHEN r.modality = 'MR' THEN 1 ELSE 0 END) AS mr_files,
-          SUM(CASE WHEN r.modality = 'CT' THEN 1 ELSE 0 END) AS ct_files,
-          SUM(CASE WHEN r.is_derived_object THEN 1 ELSE 0 END) AS derived_objects,
-          COUNT(DISTINCT dor.derived_object_id) AS linked_derived_objects
-        FROM radiology_series r
-        LEFT JOIN derived_object_references dor
-          ON dor.derived_radiology_id = r.radiology_id
-        GROUP BY r.short_title
-        ORDER BY lower(r.short_title)
+          short_title,
+          nifti_downloads,
+          nifti_files,
+          radiology_series_rows,
+          mr_files,
+          ct_files,
+          derived_objects,
+          linked_derived_objects
+        FROM agent_nifti_dataset_summary
+        ORDER BY lower(short_title)
         LIMIT ?
     """
     rows = rows_as_dicts(conn, sql, (args.limit,))
@@ -390,7 +407,9 @@ def command_datasets(args: argparse.Namespace) -> int:
             rows,
             [
                 "short_title",
+                "nifti_downloads",
                 "nifti_files",
+                "radiology_series_rows",
                 "mr_files",
                 "ct_files",
                 "derived_objects",
@@ -419,8 +438,8 @@ def command_files(args: argparse.Namespace) -> int:
         conn,
         f"""
         SELECT r.short_title, r.file_name, r.modality, r.subject_id,
-               r.series_id, r.is_derived_object, r.package_path
-        FROM radiology_series r
+               r.series_id, r.series_instance_uid, r.is_derived_object, r.package_path
+        FROM agent_nifti_files r
         WHERE {' AND '.join(where)}
         ORDER BY lower(r.short_title), r.file_name, r.package_path
         LIMIT ?
@@ -496,12 +515,19 @@ def command_drift_check(args: argparse.Namespace) -> int:
     current_signature = download_signature(current_rows)
     manifest = json.loads(Path(args.manifest).read_text(encoding="utf-8"))
     release_signature = manifest.get("nifti_download_signature")
+    release_schema_version = manifest.get("schema_version")
+    signature_changed = current_signature != release_signature
+    schema_changed = release_schema_version != SCHEMA_VERSION
     payload = {
-        "status": "unchanged" if current_signature == release_signature else "changed",
+        "status": "unchanged" if not signature_changed and not schema_changed else "changed",
         "current_nifti_download_count": len(current_rows),
         "release_nifti_download_count": manifest.get("nifti_download_count"),
         "current_nifti_download_signature": current_signature,
         "release_nifti_download_signature": release_signature,
+        "current_schema_version": SCHEMA_VERSION,
+        "release_schema_version": release_schema_version,
+        "signature_changed": signature_changed,
+        "schema_changed": schema_changed,
     }
     if args.json:
         print(json.dumps(payload, indent=2, sort_keys=True))
@@ -509,7 +535,8 @@ def command_drift_check(args: argparse.Namespace) -> int:
         print(
             f"NIfTI download signature {payload['status']}: "
             f"current={payload['current_nifti_download_count']} "
-            f"release={payload['release_nifti_download_count']}"
+            f"release={payload['release_nifti_download_count']} "
+            f"schema={payload['release_schema_version']}->{payload['current_schema_version']}"
         )
     return 0 if payload["status"] == "unchanged" else 2
 

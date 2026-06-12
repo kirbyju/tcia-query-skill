@@ -150,15 +150,25 @@ Use `cache/pathology_metadata.sqlite` only after the base snapshot has confirmed
 - `pathology_downloads`: visible, non-controlled, current pathology Aspera download records selected from Collection Manager/WordPress metadata.
 - `pathology_download_label_matches`: label/title evidence for why a download was selected as pathology-related.
 - `pathology_package_files`: imported Aspera package browse or `.sums` inventory rows. This table may be empty before package inventories are imported.
-- `pathology_file_objects`: normalized file rows derived from package inventories. This table may be empty before package inventories are imported.
-- `pathdb_slide_crosswalk`: PathDB rows matched by exact TCIA/PathDB collection short title. Initial rows are `collection_only`, not file-level matches.
+- `pathology_file_objects`: normalized file rows derived from imported Aspera package inventories.
+- `pathdb_slide_crosswalk`: PathDB rows matched by exact TCIA/PathDB collection short title for enrichment and discrepancy review. These rows do not define the Aspera package inventory.
 - `pathology_disparities`: curator-facing rows for PathDB/download scope mismatches, multiple-download cases, and future package-file reconciliation issues.
+
+Prefer the agent-facing views for normal use:
+
+- `agent_pathology_downloads`: current pathology Aspera download records with `download_label` fallback text.
+- `agent_pathology_dataset_summary`: dataset-level scope plus `package_inventory_status`.
+- `agent_pathology_package_files`: imported package inventory rows when available.
+- `agent_pathology_file_objects`: normalized file objects from imported Aspera package rows.
+
+`package_inventory_status = 'normalized_file_rows_available'` means imported Aspera package rows have been normalized into file objects. `package_inventory_status = 'not_imported'` means Aspera package inventory rows are not available for that dataset in the release. `pathdb_file_objects_available` can appear only in locally built or legacy SQLite files that opted into PathDB file-object seeding.
 
 Common pathology summary:
 
 ```sql
-SELECT short_title, download_records, pathdb_collection_slide_count, open_noncommercial_downloads
-FROM pathology_dataset_summary
+SELECT short_title, download_records, pathdb_collection_slide_count,
+       package_inventory_status, open_noncommercial_downloads
+FROM agent_pathology_dataset_summary
 ORDER BY lower(short_title);
 ```
 
@@ -180,12 +190,18 @@ Important tables:
 - `idc_index`, `idc_ct_index`, `idc_pt_index`, `idc_contrast_index`, and `idc_series_links`: IDC-parquet-shaped indexes for controlled-access metadata discovery only.
 - `controlled_metadata_exceptions`: review rows for manifest rows without DRS URIs, rows without Series Instance UIDs, and spreadsheet series that did not match a manifest row.
 
+Prefer the agent-facing views for normal use:
+
+- `agent_controlled_downloads`: scoped controlled downloads with `download_label` fallback text and policy URL.
+- `agent_controlled_files`: normalized file rows with lower-snake-case identifiers such as `series_instance_uid`, `study_instance_uid`, `drs_uri`, and `file_id`.
+- `agent_controlled_dataset_summary`: route/dataset summary with policy URL.
+
 Common controlled-access summary:
 
 ```sql
 SELECT route_system, short_title, controlled_file_rows,
        participant_ids, patient_ids, series_instance_uids
-FROM controlled_dataset_summary
+FROM agent_controlled_dataset_summary
 ORDER BY route_system, lower(short_title);
 ```
 
@@ -199,6 +215,24 @@ WHERE route_system = 'ctdc'
   AND upper(COALESCE(modality, image_modality, '')) = 'PT'
   AND COALESCE(drs_uri, '') <> ''
 LIMIT 25;
+```
+
+## Optional NIfTI SQLite
+
+Use `cache/nifti_metadata.sqlite` only after the base snapshot has confirmed TCIA provenance, visibility, and access/license metadata. Prefer these agent-facing views:
+
+- `agent_nifti_downloads`: WordPress NIfTI download provenance with `download_label` fallback text.
+- `agent_nifti_dataset_summary`: all NIfTI download scope plus file/radiology/derived-object counts.
+- `agent_nifti_files`: canonical radiology file/series rows with lower-snake-case aliases such as `series_instance_uid` and `study_instance_uid` when source UIDs exist.
+- `agent_nifti_derived_objects`: segmentation/derived object rows and best-effort source references.
+
+Common NIfTI summary:
+
+```sql
+SELECT short_title, nifti_downloads, nifti_files,
+       radiology_series_rows, mr_files, ct_files
+FROM agent_nifti_dataset_summary
+ORDER BY lower(short_title);
 ```
 
 ## Common Joins

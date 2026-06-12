@@ -76,6 +76,15 @@ python scripts/tcia_nifti_metadata.py drift-check \
 
 ## Core Tables
 
+Prefer the `agent_*` views for routine querying:
+
+| View | Use |
+| --- | --- |
+| `agent_nifti_downloads` | WordPress NIfTI download provenance with `download_label` fallback text when a source title is missing. |
+| `agent_nifti_dataset_summary` | Dataset summary across all NIfTI downloads, including datasets whose files do not collapse into `radiology_series` rows. |
+| `agent_nifti_files` | Canonical one-row-per-NIfTI logical radiology file/series table with lower-snake-case UID aliases. |
+| `agent_nifti_derived_objects` | Probable NIfTI segmentation objects and best-effort source-image references. |
+
 | Table | Use |
 | --- | --- |
 | `nifti_downloads` | WordPress/Collection Manager NIfTI download provenance. |
@@ -96,9 +105,9 @@ python scripts/tcia_nifti_metadata.py drift-check \
 List datasets and NIfTI file counts:
 
 ```sql
-SELECT short_title, COUNT(*) AS nifti_files
-FROM radiology_series
-GROUP BY short_title
+SELECT short_title, nifti_downloads, nifti_files,
+       radiology_series_rows, mr_files, ct_files
+FROM agent_nifti_dataset_summary
 ORDER BY lower(short_title);
 ```
 
@@ -106,7 +115,7 @@ Find NIfTI files for one collection:
 
 ```sql
 SELECT short_title, file_name, modality, subject_id, package_path
-FROM radiology_series
+FROM agent_nifti_files
 WHERE short_title = 'UCSF-PDGM'
 ORDER BY package_path
 LIMIT 20;
@@ -127,7 +136,7 @@ Find CT NIfTI rows:
 
 ```sql
 SELECT short_title, file_name, package_path
-FROM radiology_series
+FROM agent_nifti_files
 WHERE modality = 'CT'
 ORDER BY short_title, file_name
 LIMIT 20;
@@ -176,6 +185,8 @@ LIMIT 50;
 ## Interpretation Notes
 
 The NIfTI SQLite is a mined metadata layer, not a submitter-authored canonical submission model. Missing fields are expected.
+
+Some NIfTI downloads contain segmentations, masks, radiomic features, or package metadata that may not produce a `radiology_series` row. Use `agent_nifti_dataset_summary.nifti_downloads` for all scoped NIfTI downloads and `radiology_series_rows`/`nifti_files` for mined file-grain coverage.
 
 `radiology_series.study_id` and `radiology_series.series_id` use source UIDs when available. When source UIDs are missing, deterministic synthetic IDs are generated from dataset/path context; inspect `study_id_source` and `series_id_source`.
 

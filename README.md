@@ -144,15 +144,26 @@ Optional NIfTI file-grain metadata is published separately on the same release t
 - `nifti_metadata.sqlite.gz`
 - `nifti_metadata_manifest.json`
 
+Optional pathology Aspera package/download metadata is published separately on the same release tag when available:
+
+- `pathology_metadata.sqlite.gz`
+- `pathology_metadata_manifest.json`
+
 Optional controlled-access public manifest/spreadsheet metadata is also published separately on the same release tag when available:
 
 - `controlled_access_metadata.sqlite.gz`
 - `controlled_access_metadata_manifest.json`
 
-These optional SQLite files are **not** downloaded during skill install and are **not** downloaded by `python scripts/tcia_snapshot.py ensure`. Users who need NIfTI file-level metadata can fetch it on demand:
+These optional SQLite files are **not** downloaded during skill install and are **not** downloaded by `python scripts/tcia_snapshot.py ensure`. They expose `agent_*` views for routine use. Users who need NIfTI file-level metadata can fetch it on demand:
 
 ```bash
 python scripts/tcia_nifti_metadata.py ensure
+```
+
+Users who need public pathology Aspera package/download scope, Aspera-derived package file inventory, and PathDB crosswalk/disparity metadata can fetch it on demand:
+
+```bash
+python scripts/tcia_pathology_metadata.py ensure
 ```
 
 Users who need controlled-access file-grain public metadata, `drs_uri` manifest rows, or IDC-shaped radiology indexes can fetch it on demand:
@@ -162,6 +173,7 @@ python scripts/tcia_controlled_access_metadata.py ensure
 ```
 
 See [references/nifti.md](./references/nifti.md) for the NIfTI table guide and examples.
+See [references/pathology.md](./references/pathology.md) for the pathology table guide and package inventory status notes.
 See [references/controlled-access.md](./references/controlled-access.md) for the controlled-access table guide and policy guidance.
 
 After installing or cloning the skill, refresh local metadata from the latest release:
@@ -184,6 +196,9 @@ python scripts/tcia_snapshot.py info
 python scripts/tcia_nifti_metadata.py ensure
 python scripts/tcia_nifti_metadata.py datasets --limit 20
 python scripts/tcia_nifti_metadata.py derived --collection BCBM-RadioGenomics --with-sources
+python scripts/tcia_pathology_metadata.py ensure
+python scripts/tcia_pathology_metadata.py datasets --limit 20
+python scripts/tcia_pathology_metadata.py disparities
 python scripts/tcia_controlled_access_metadata.py ensure
 python scripts/tcia_controlled_access_metadata.py datasets --limit 20
 python scripts/tcia_controlled_access_metadata.py files --collection CMB-MEL --limit 10

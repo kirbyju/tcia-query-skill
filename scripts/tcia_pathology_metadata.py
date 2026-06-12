@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import gzip
 import hashlib
 import io
@@ -21,7 +22,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 DEFAULT_REPO = "kirbyju/tcia-query-skill"
 DEFAULT_RELEASE_TAG = "tcia-snapshot-latest"
 PATHOLOGY_ASSET = "pathology_metadata.sqlite.gz"
@@ -40,6 +41,14 @@ REQUIRED_TABLES = [
     "pathology_file_objects",
     "pathdb_slide_crosswalk",
     "pathology_disparities",
+]
+
+REQUIRED_VIEWS = [
+    "pathology_dataset_summary",
+    "agent_pathology_downloads",
+    "agent_pathology_dataset_summary",
+    "agent_pathology_package_files",
+    "agent_pathology_file_objects",
 ]
 
 PATHOLOGY_DOWNLOAD_SIGNATURE_COLUMNS = [
@@ -258,6 +267,143 @@ SELECT
 FROM pathology_downloads
 GROUP BY parent_source, dataset_type, short_title
 ORDER BY lower(short_title);
+
+CREATE VIEW IF NOT EXISTS agent_pathology_downloads AS
+SELECT
+    download_row_id,
+    parent_source,
+    dataset_type,
+    short_title,
+    title,
+    download_id,
+    COALESCE(
+        NULLIF(download_title, ''),
+        trim(
+            short_title || ' ' ||
+            CASE
+                WHEN COALESCE(download_id, '') <> '' THEN 'download ' || download_id || ' '
+                ELSE ''
+            END ||
+            CASE
+                WHEN COALESCE(file_types, '') <> '' THEN file_types
+                ELSE ''
+            END
+        )
+    ) AS download_label,
+    download_title,
+    download_url,
+    access_level,
+    noncommercial_license,
+    controlled_access,
+    license_label,
+    license_url,
+    requirements_label,
+    requirements_url,
+    requirements_text,
+    download_size,
+    download_size_unit,
+    subjects,
+    studies,
+    series,
+    images,
+    download_types,
+    data_types,
+    file_types,
+    pathology_match_reasons,
+    has_pathdb_rows,
+    pathdb_collection_slide_count,
+    pathdb_collection_patient_count
+FROM pathology_downloads;
+
+CREATE VIEW IF NOT EXISTS agent_pathology_dataset_summary AS
+SELECT
+    s.parent_source,
+    s.dataset_type,
+    s.short_title,
+    s.download_records,
+    s.downloads_with_pathdb_collection,
+    s.pathdb_collection_slide_count,
+    s.pathdb_collection_patient_count,
+    s.open_noncommercial_downloads,
+    CASE
+        WHEN COALESCE(p.package_file_rows, 0) = 0
+         AND COALESCE(o.file_object_rows, 0) = 0
+        THEN 'not_imported'
+        WHEN COALESCE(p.package_file_rows, 0) = 0
+         AND COALESCE(o.file_object_rows, 0) > 0
+        THEN 'pathdb_file_objects_available'
+        WHEN COALESCE(p.package_file_rows, 0) > 0
+         AND COALESCE(o.file_object_rows, 0) = 0
+        THEN 'package_rows_imported'
+        ELSE 'normalized_file_rows_available'
+    END AS package_inventory_status,
+    COALESCE(p.package_file_rows, 0) AS package_file_rows,
+    COALESCE(o.file_object_rows, 0) AS file_object_rows,
+    s.download_ids,
+    s.download_titles
+FROM pathology_dataset_summary s
+LEFT JOIN (
+    SELECT short_title, COUNT(*) AS package_file_rows
+    FROM pathology_package_files
+    GROUP BY short_title
+) p ON lower(p.short_title) = lower(s.short_title)
+LEFT JOIN (
+    SELECT short_title, COUNT(*) AS file_object_rows
+    FROM pathology_file_objects
+    GROUP BY short_title
+) o ON lower(o.short_title) = lower(s.short_title);
+
+CREATE VIEW IF NOT EXISTS agent_pathology_package_files AS
+SELECT
+    package_file_id,
+    download_row_id,
+    parent_source,
+    dataset_type,
+    short_title,
+    download_id,
+    COALESCE(NULLIF(download_title, ''), short_title || ' download ' || COALESCE(download_id, '')) AS download_label,
+    download_title,
+    source_url,
+    package_path,
+    file_name,
+    file_ext,
+    file_role,
+    bytes,
+    checksum,
+    checksum_algorithm,
+    modified_time,
+    inventory_source,
+    inventory_status,
+    browsed_at,
+    created_at
+FROM pathology_package_files;
+
+CREATE VIEW IF NOT EXISTS agent_pathology_file_objects AS
+SELECT
+    non_dicom_file_id,
+    package_file_id,
+    download_row_id,
+    parent_source,
+    dataset_type,
+    short_title,
+    download_id,
+    file_name,
+    file_ext,
+    package_path,
+    file_group_id,
+    file_role,
+    bytes,
+    checksum,
+    checksum_algorithm,
+    object_modality,
+    image_format,
+    is_wsi,
+    is_micrograph,
+    is_codex,
+    is_metadata,
+    source_table,
+    source_row_id
+FROM pathology_file_objects;
 """
 
 
@@ -297,6 +443,122 @@ def connect(path: str | os.PathLike[str] | None = None) -> sqlite3.Connection:
 
 def json_dumps(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def stable_id(prefix: str, *parts: Any) -> str:
+    payload = "\x1f".join(str(part or "") for part in parts)
+    digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:24]
+    return f"{prefix}:{digest}"
+
+
+def normalize_package_path(value: str | None) -> str:
+    if not value:
+        return ""
+    return str(value).replace("\\", "/").lstrip("/")
+
+
+def extension_for_name(name: str | None) -> str:
+    if not name:
+        return ""
+    lower = name.lower()
+    if lower.endswith(".nii.gz"):
+        return ".nii.gz"
+    return Path(name).suffix.lower()
+
+
+WSI_EXTENSIONS = {
+    ".svs",
+    ".tif",
+    ".tiff",
+    ".ndpi",
+    ".mrxs",
+    ".scn",
+    ".svslide",
+    ".bif",
+    ".vms",
+    ".vmu",
+}
+
+MICROGRAPH_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp"}
+
+METADATA_EXTENSIONS = {
+    ".csv",
+    ".tsv",
+    ".xlsx",
+    ".xls",
+    ".json",
+    ".xml",
+    ".txt",
+    ".pdf",
+    ".md",
+    ".sums",
+    ".sha1",
+    ".sha256",
+    ".md5",
+}
+
+
+def classify_file(path: str, file_name: str, file_ext: str) -> dict[str, Any]:
+    haystack = f"{path} {file_name}".lower()
+    ext = file_ext.lower()
+    is_codex = "codex" in haystack
+    is_wsi = ext in WSI_EXTENSIONS
+    is_micrograph = ext in MICROGRAPH_EXTENSIONS and not is_wsi
+    is_metadata = ext in METADATA_EXTENSIONS
+    if is_codex and not is_metadata:
+        role = "codex_image"
+        modality = "multiplex_immunofluorescence"
+    elif is_wsi:
+        role = "whole_slide_image"
+        modality = "SM"
+    elif is_micrograph:
+        role = "micrograph"
+        modality = "microscopy"
+    elif is_metadata:
+        role = "metadata"
+        modality = ""
+    elif any(token in haystack for token in ("readme", "manifest", "checksum", "license")):
+        role = "metadata"
+        modality = ""
+        is_metadata = True
+    else:
+        role = "other"
+        modality = ""
+    image_format = ext.lstrip(".").upper() if ext else ""
+    return {
+        "file_role": role,
+        "object_modality": modality,
+        "image_format": image_format,
+        "is_wsi": int(is_wsi),
+        "is_micrograph": int(is_micrograph),
+        "is_codex": int(is_codex),
+        "is_metadata": int(is_metadata),
+    }
+
+
+def parse_optional_int(value: Any) -> int | None:
+    if value in (None, ""):
+        return None
+    text = str(value).strip().replace(",", "")
+    if not text:
+        return None
+    try:
+        return int(float(text))
+    except ValueError:
+        return None
+
+
+def row_field(row: dict[str, Any], *names: str) -> str:
+    normalized = {str(key).strip().lower(): value for key, value in row.items()}
+    for name in names:
+        value = normalized.get(name.lower())
+        if value in (None, ""):
+            continue
+        text = str(value)
+        if text.strip().lower() in {"<empty string>", "<null>"}:
+            continue
+        return text
+    return ""
 
 
 def fetch_bytes(
@@ -348,6 +610,16 @@ def get_pathology_meta(conn: sqlite3.Connection) -> dict[str, str]:
         return {row["key"]: row["value"] for row in conn.execute("SELECT key, value FROM pathology_meta")}
     except sqlite3.Error:
         return {}
+
+
+def decoded_meta_value(meta: dict[str, str], key: str, default: Any = "") -> Any:
+    value = meta.get(key)
+    if value is None:
+        return default
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError:
+        return value
 
 
 def table_counts(conn: sqlite3.Connection) -> dict[str, int]:
@@ -855,7 +1127,395 @@ def seed_disparities(conn: sqlite3.Connection, created_at: str) -> int:
     return int(conn.execute("SELECT COUNT(*) FROM pathology_disparities").fetchone()[0])
 
 
-def build_pathology_db(snapshot_db: Path, out_path: Path, replace: bool = False) -> dict[str, Any]:
+def inventory_delimiter(path: Path) -> str:
+    return "," if path.suffix.lower() == ".csv" else "\t"
+
+
+def load_inventory_rows(path: Path) -> list[dict[str, Any]]:
+    delimiter = inventory_delimiter(path)
+    with path.open("r", encoding="utf-8-sig", newline="") as stream:
+        reader = csv.DictReader(stream, delimiter=delimiter)
+        if not reader.fieldnames:
+            return []
+        return [dict(row) for row in reader]
+
+
+def download_lookup_maps(conn: sqlite3.Connection) -> tuple[dict[int, sqlite3.Row], dict[tuple[str, str], list[sqlite3.Row]], dict[str, list[sqlite3.Row]]]:
+    by_row_id: dict[int, sqlite3.Row] = {}
+    by_short_download: dict[tuple[str, str], list[sqlite3.Row]] = {}
+    by_short_title: dict[str, list[sqlite3.Row]] = {}
+    for row in conn.execute("SELECT * FROM pathology_downloads"):
+        by_row_id[int(row["download_row_id"])] = row
+        short_key = str(row["short_title"] or "").lower()
+        download_key = str(row["download_id"] or "")
+        by_short_download.setdefault((short_key, download_key), []).append(row)
+        by_short_title.setdefault(short_key, []).append(row)
+    return by_row_id, by_short_download, by_short_title
+
+
+def match_inventory_download(
+    row: dict[str, Any],
+    by_row_id: dict[int, sqlite3.Row],
+    by_short_download: dict[tuple[str, str], list[sqlite3.Row]],
+    by_short_title: dict[str, list[sqlite3.Row]],
+) -> sqlite3.Row | None:
+    download_row_id = parse_optional_int(row_field(row, "download_row_id"))
+    if download_row_id is not None and download_row_id in by_row_id:
+        return by_row_id[download_row_id]
+    short_title = row_field(row, "short_title", "collection", "collection_short_title")
+    download_id = row_field(row, "download_id", "download")
+    if short_title:
+        matches = by_short_download.get((short_title.lower(), download_id))
+        if matches and len(matches) == 1:
+            return matches[0]
+        short_matches = by_short_title.get(short_title.lower(), [])
+        if not download_id and len(short_matches) == 1:
+            return short_matches[0]
+    return None
+
+
+def insert_package_inventory(conn: sqlite3.Connection, inventory_paths: list[Path], created_at: str) -> dict[str, Any]:
+    if not inventory_paths:
+        return {"inventory_files": 0, "inventory_source_rows": 0, "imported_package_files": 0, "unmatched_rows": 0}
+
+    by_row_id, by_short_download, by_short_title = download_lookup_maps(conn)
+    imported = 0
+    source_rows = 0
+    unmatched: list[dict[str, Any]] = []
+
+    for inventory_path in inventory_paths:
+        rows = load_inventory_rows(inventory_path)
+        source_rows += len(rows)
+        for row_number, row in enumerate(rows, 2):
+            download = match_inventory_download(row, by_row_id, by_short_download, by_short_title)
+            raw_path = row_field(row, "package_path", "path", "file_path", "object_path", "target_path")
+            package_path = normalize_package_path(raw_path)
+            file_name = row_field(row, "file_name", "name") or Path(package_path).name
+            entry_type = row_field(row, "entry_type", "type")
+            if entry_type.lower() == "directory":
+                continue
+            if not download or not package_path:
+                unmatched.append(
+                    {
+                        "inventory_file": str(inventory_path),
+                        "line_number": row_number,
+                        "short_title": row_field(row, "short_title", "collection", "collection_short_title"),
+                        "download_id": row_field(row, "download_id", "download"),
+                        "package_path": package_path,
+                    }
+                )
+                continue
+            file_ext = row_field(row, "file_ext", "extension") or extension_for_name(file_name)
+            classification = classify_file(package_path, file_name, file_ext)
+            file_role = row_field(row, "file_role") or classification["file_role"]
+            inventory_status = row_field(row, "inventory_status", "status") or "available"
+            browsed_at = row_field(row, "browsed_at", "crawled_at", "checked_at") or created_at
+            row_json = row_field(row, "row_json", "raw_json")
+            if not row_json:
+                row_json = json_dumps(
+                    {
+                        "inventory_file": str(inventory_path.name),
+                        "line_number": row_number,
+                        "source_row": row,
+                    }
+                )
+            package_file_id = row_field(row, "package_file_id") or stable_id(
+                "pathology-package-file",
+                download["download_row_id"],
+                package_path,
+            )
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO pathology_package_files
+                (package_file_id, download_row_id, parent_source, dataset_type, short_title,
+                 download_id, download_title, source_url, package_path, file_name, file_ext,
+                 file_role, bytes, checksum, checksum_algorithm, modified_time,
+                 inventory_source, inventory_status, row_json, browsed_at, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    package_file_id,
+                    download["download_row_id"],
+                    download["parent_source"],
+                    download["dataset_type"],
+                    download["short_title"],
+                    download["download_id"],
+                    download["download_title"],
+                    row_field(row, "source_url", "download_url") or download["download_url"],
+                    package_path,
+                    file_name,
+                    file_ext,
+                    file_role,
+                    parse_optional_int(row_field(row, "bytes", "size")),
+                    row_field(row, "checksum"),
+                    row_field(row, "checksum_algorithm", "algorithm"),
+                    row_field(row, "modified_time", "modified_at", "mtime"),
+                    row_field(row, "inventory_source") or inventory_path.name,
+                    inventory_status,
+                    row_json,
+                    browsed_at,
+                    created_at,
+                ),
+            )
+            imported += 1
+
+    if unmatched:
+        examples = json_dumps(unmatched[:10])
+        raise RuntimeError(
+            f"{len(unmatched)} pathology inventory rows could not be matched to pathology_downloads. "
+            f"First unmatched rows: {examples}"
+        )
+
+    return {
+        "inventory_files": len(inventory_paths),
+        "inventory_source_rows": source_rows,
+        "imported_package_files": imported,
+        "unmatched_rows": 0,
+    }
+
+
+def normalize_package_inventory(conn: sqlite3.Connection) -> int:
+    rows = conn.execute("SELECT * FROM pathology_package_files ORDER BY short_title, download_id, package_path")
+    inserted = 0
+    for row in rows:
+        package_path = row["package_path"] or ""
+        file_name = row["file_name"] or Path(package_path).name
+        file_ext = row["file_ext"] or extension_for_name(file_name)
+        classification = classify_file(package_path, file_name, file_ext)
+        stem = Path(file_name).name
+        for ext in (".nii.gz", file_ext):
+            if ext and stem.lower().endswith(ext):
+                stem = stem[: -len(ext)]
+                break
+        file_group_id = stable_id(
+            "pathology-file-group",
+            row["short_title"],
+            row["download_id"],
+            stem or package_path,
+        )
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO pathology_file_objects
+            (non_dicom_file_id, package_file_id, download_row_id, parent_source,
+             dataset_type, short_title, download_id, file_name, file_ext, package_path,
+             file_group_id, file_role, bytes, checksum, checksum_algorithm,
+             object_modality, image_format, is_wsi, is_micrograph, is_codex,
+             is_metadata, source_table, source_row_id, quality_flag_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                stable_id("pathology-file-object", row["package_file_id"]),
+                row["package_file_id"],
+                row["download_row_id"],
+                row["parent_source"],
+                row["dataset_type"],
+                row["short_title"],
+                row["download_id"],
+                file_name,
+                file_ext,
+                package_path,
+                file_group_id,
+                row["file_role"] or classification["file_role"],
+                row["bytes"],
+                row["checksum"],
+                row["checksum_algorithm"],
+                classification["object_modality"],
+                classification["image_format"],
+                classification["is_wsi"],
+                classification["is_micrograph"],
+                classification["is_codex"],
+                classification["is_metadata"],
+                "pathology_package_files",
+                row["package_file_id"],
+                None,
+            ),
+        )
+        inserted += 1
+    return inserted
+
+
+def file_name_from_url(url: str) -> str:
+    parsed = urllib.parse.urlparse(url)
+    return Path(urllib.parse.unquote(parsed.path)).name
+
+
+def seed_pathdb_file_objects(conn: sqlite3.Connection) -> int:
+    unique_downloads: dict[str, sqlite3.Row] = {}
+    for row in conn.execute(
+        """
+        SELECT d.*
+        FROM pathology_downloads d
+        JOIN (
+            SELECT lower(short_title) AS short_key, COUNT(*) AS download_count
+            FROM pathology_downloads
+            GROUP BY lower(short_title)
+        ) c ON c.short_key = lower(d.short_title)
+        WHERE c.download_count = 1
+        """
+    ):
+        unique_downloads[str(row["short_title"]).lower()] = row
+
+    package_inventory_short_titles = {
+        str(row["short_title"]).lower()
+        for row in conn.execute("SELECT DISTINCT short_title FROM pathology_package_files")
+    }
+
+    inserted = 0
+    rows = conn.execute(
+        """
+        SELECT *
+        FROM pathdb_slide_crosswalk
+        WHERE COALESCE(wsiimage_url, '') <> ''
+        ORDER BY lower(short_title), patient_id, slide_id, camic_id
+        """
+    )
+    for row in rows:
+        short_key = str(row["short_title"]).lower()
+        if short_key in package_inventory_short_titles:
+            continue
+        download = unique_downloads.get(short_key)
+        if not download:
+            continue
+        file_url = row["wsiimage_url"]
+        file_name = file_name_from_url(file_url) or row["slide_id"] or row["camic_id"] or row["crosswalk_id"]
+        file_ext = extension_for_name(file_name)
+        classification = classify_file(file_url, file_name, file_ext)
+        data_format = str(row["data_format"] or "").strip()
+        if not file_ext and data_format:
+            normalized_format = data_format.lower().lstrip(".")
+            if normalized_format in {"svs", "tif", "tiff", "ndpi", "jpg", "jpeg", "png"}:
+                file_ext = f".{normalized_format}"
+                classification = classify_file(file_url, file_name, file_ext)
+        pathdb_modality = str(row["modality"] or "").lower()
+        if "photomicrograph" in pathdb_modality or "micrograph" in pathdb_modality:
+            classification = {
+                **classification,
+                "file_role": "micrograph",
+                "is_wsi": 0,
+                "is_micrograph": 1,
+            }
+        elif (
+            "whole slide" in pathdb_modality
+            or pathdb_modality == "wsi"
+            or data_format.lower() in {"svs", "ndpi", "mrxs", "scn"}
+        ):
+            classification = {
+                **classification,
+                "file_role": "whole_slide_image",
+                "is_wsi": 1,
+                "is_micrograph": 0,
+            }
+        object_modality = row["modality"] or classification["object_modality"]
+        if str(object_modality).upper() == "WSI":
+            object_modality = "SM"
+        non_dicom_file_id = stable_id(
+            "pathdb-file-object",
+            row["crosswalk_id"],
+            file_url,
+        )
+        file_group_id = stable_id(
+            "pathology-file-group",
+            row["short_title"],
+            row["patient_id"],
+            row["slide_id"] or row["camic_id"] or file_name,
+        )
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO pathology_file_objects
+            (non_dicom_file_id, package_file_id, download_row_id, parent_source,
+             dataset_type, short_title, download_id, file_name, file_ext, package_path,
+             file_group_id, file_role, bytes, checksum, checksum_algorithm,
+             object_modality, image_format, is_wsi, is_micrograph, is_codex,
+             is_metadata, source_table, source_row_id, quality_flag_json)
+            VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL,
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                non_dicom_file_id,
+                download["download_row_id"],
+                download["parent_source"],
+                download["dataset_type"],
+                download["short_title"],
+                download["download_id"],
+                file_name,
+                file_ext,
+                file_url,
+                file_group_id,
+                classification["file_role"],
+                object_modality,
+                classification["image_format"],
+                classification["is_wsi"],
+                classification["is_micrograph"],
+                classification["is_codex"],
+                classification["is_metadata"],
+                "pathdb_slide_crosswalk",
+                row["crosswalk_id"],
+                json_dumps(
+                    {
+                        "note": "PathDB file URL seeded as initial file-level pathology content; not yet reconciled to an Aspera package path.",
+                        "pathdb_collection": row["pathdb_collection"],
+                        "slide_id": row["slide_id"],
+                        "camic_id": row["camic_id"],
+                    }
+                ),
+            ),
+        )
+        conn.execute(
+            """
+            UPDATE pathdb_slide_crosswalk
+            SET download_row_id = ?,
+                download_id = ?,
+                non_dicom_file_id = ?,
+                package_path = ?,
+                file_name = ?,
+                match_status = 'pathdb_file_object_seeded',
+                match_method = 'PathDB wsiimage_url seeded into pathology_file_objects for unique short-title download',
+                match_confidence = 'medium'
+            WHERE crosswalk_id = ?
+            """,
+            (
+                download["download_row_id"],
+                download["download_id"],
+                non_dicom_file_id,
+                file_url,
+                file_name,
+                row["crosswalk_id"],
+            ),
+        )
+        inserted += 1
+    return inserted
+
+
+def refresh_inventory_meta(conn: sqlite3.Connection) -> str:
+    package_files = int(conn.execute("SELECT COUNT(*) FROM pathology_package_files").fetchone()[0])
+    file_objects = int(conn.execute("SELECT COUNT(*) FROM pathology_file_objects").fetchone()[0])
+    if package_files == 0 and file_objects == 0:
+        status = "not_imported"
+    elif package_files == 0 and file_objects > 0:
+        status = "pathdb_file_objects_available"
+    elif package_files > 0 and file_objects == 0:
+        status = "package_rows_imported"
+    else:
+        status = "normalized_file_rows_available"
+    write_meta(conn, "package_inventory_status", status)
+    write_meta(
+        conn,
+        "package_inventory_counts",
+        {
+            "pathology_package_files": package_files,
+            "pathology_file_objects": file_objects,
+        },
+    )
+    return status
+
+
+def build_pathology_db(
+    snapshot_db: Path,
+    out_path: Path,
+    replace: bool = False,
+    package_inventory_paths: list[Path] | None = None,
+    seed_pathdb_files: bool = False,
+) -> dict[str, Any]:
     if not snapshot_db.exists():
         raise RuntimeError(f"source snapshot not found: {snapshot_db}")
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -880,8 +1540,18 @@ def build_pathology_db(snapshot_db: Path, out_path: Path, replace: bool = False)
     label_matches = seed_label_matches(conn)
     pathdb_rows = seed_pathdb_crosswalk(conn, created_at)
     disparities = seed_disparities(conn, created_at)
+    inventory_result = insert_package_inventory(
+        conn,
+        [Path(path) for path in package_inventory_paths or []],
+        created_at,
+    )
+    package_file_objects = normalize_package_inventory(conn)
+    pathdb_file_objects = seed_pathdb_file_objects(conn) if seed_pathdb_files else 0
+    file_objects = int(conn.execute("SELECT COUNT(*) FROM pathology_file_objects").fetchone()[0])
+    package_inventory_status = refresh_inventory_meta(conn)
     write_meta(conn, "created_at", created_at)
-    write_meta(conn, "source_snapshot_db", str(snapshot_db.resolve()))
+    write_meta(conn, "schema_version", SCHEMA_VERSION)
+    write_meta(conn, "source_snapshot_db", snapshot_db.name)
     write_meta(conn, "source_snapshot_meta", snapshot_meta(conn))
     write_meta(
         conn,
@@ -898,12 +1568,16 @@ def build_pathology_db(snapshot_db: Path, out_path: Path, replace: bool = False)
         "pathdb_note",
         "PathDB rows are seeded as collection_only crosswalk candidates, not file-level matches.",
     )
+    write_meta(conn, "package_inventory_sources", [Path(path).name for path in package_inventory_paths or []])
     write_meta(
         conn,
         "table_counts",
         {
             "pathology_downloads": downloads,
             "pathology_download_label_matches": label_matches,
+            "pathology_package_files": inventory_result["imported_package_files"],
+            "pathology_file_objects": file_objects,
+            "pathdb_file_objects": pathdb_file_objects,
             "pathdb_slide_crosswalk": pathdb_rows,
             "pathology_disparities": disparities,
         },
@@ -914,6 +1588,13 @@ def build_pathology_db(snapshot_db: Path, out_path: Path, replace: bool = False)
         "sqlite": str(out_path.resolve()),
         "pathology_downloads": downloads,
         "pathology_download_label_matches": label_matches,
+        "pathology_package_files": inventory_result["imported_package_files"],
+        "pathology_file_objects": file_objects,
+        "pathology_package_file_objects": package_file_objects,
+        "pathdb_file_objects": pathdb_file_objects,
+        "package_inventory_status": package_inventory_status,
+        "package_inventory_sources": inventory_result["inventory_files"],
+        "package_inventory_source_rows": inventory_result["inventory_source_rows"],
         "pathdb_slide_crosswalk_rows": pathdb_rows,
         "pathology_disparities": disparities,
     }
@@ -934,7 +1615,7 @@ def validate_db(path: Path) -> dict[str, Any]:
             "SELECT name FROM sqlite_master WHERE type IN ('table', 'view')"
         )
     }
-    missing = [table for table in REQUIRED_TABLES if table not in tables]
+    missing = [table for table in REQUIRED_TABLES + REQUIRED_VIEWS if table not in tables]
     integrity = conn.execute("PRAGMA integrity_check").fetchone()[0]
     counts = table_counts(conn)
     conn.close()
@@ -970,14 +1651,20 @@ def command_info(args: argparse.Namespace) -> int:
         "table_counts": counts,
         "pathology_meta": meta,
         "release_fingerprint": manifest.get("release_fingerprint", ""),
+        "schema_version": decoded_meta_value(meta, "schema_version", manifest.get("schema_version", "")),
+        "package_inventory_status": decoded_meta_value(meta, "package_inventory_status", ""),
     }
     if args.json:
         print(json.dumps(payload, indent=2, sort_keys=True))
     else:
         print(f"DB: {payload['db']}")
         print(f"Manifest: {payload['manifest']}")
+        if payload["schema_version"]:
+            print(f"Schema version: {payload['schema_version']}")
         if payload["release_fingerprint"]:
             print(f"Release fingerprint: {payload['release_fingerprint']}")
+        if payload["package_inventory_status"]:
+            print(f"Package inventory status: {payload['package_inventory_status']}")
         for key in ("pathology_downloads", "pathology_package_files", "pathdb_slide_crosswalk", "pathology_disparities"):
             print(f"{key}: {counts.get(key, 0)}")
     return 0
@@ -990,8 +1677,8 @@ def command_datasets(args: argparse.Namespace) -> int:
         """
         SELECT short_title, dataset_type, download_records,
                pathdb_collection_slide_count, pathdb_collection_patient_count,
-               open_noncommercial_downloads, download_ids
-        FROM pathology_dataset_summary
+               open_noncommercial_downloads, package_inventory_status, download_ids
+        FROM agent_pathology_dataset_summary
         ORDER BY lower(short_title)
         LIMIT ?
         """,
@@ -1010,6 +1697,7 @@ def command_datasets(args: argparse.Namespace) -> int:
                 "pathdb_collection_slide_count",
                 "pathdb_collection_patient_count",
                 "open_noncommercial_downloads",
+                "package_inventory_status",
                 "download_ids",
             ],
         )
@@ -1029,11 +1717,11 @@ def command_downloads(args: argparse.Namespace) -> int:
     rows = rows_as_dicts(
         conn,
         f"""
-        SELECT short_title, download_id, download_title, access_level,
+        SELECT short_title, download_id, download_label, access_level,
                license_label, download_size, download_size_unit, has_pathdb_rows
-        FROM pathology_downloads
+        FROM agent_pathology_downloads
         WHERE {' AND '.join(where)}
-        ORDER BY lower(short_title), download_id, download_title
+        ORDER BY lower(short_title), download_id, download_label
         LIMIT ?
         """,
         tuple(params),
@@ -1047,7 +1735,7 @@ def command_downloads(args: argparse.Namespace) -> int:
             [
                 "short_title",
                 "download_id",
-                "download_title",
+                "download_label",
                 "access_level",
                 "license_label",
                 "has_pathdb_rows",
@@ -1110,8 +1798,8 @@ def command_files(args: argparse.Namespace) -> int:
         conn,
         f"""
         SELECT short_title, download_id, file_name, file_ext, file_role,
-               bytes, package_path, inventory_status
-        FROM pathology_package_files
+               object_modality, bytes, package_path, source_table
+        FROM agent_pathology_file_objects
         WHERE {' AND '.join(where)}
         ORDER BY lower(short_title), download_id, package_path
         LIMIT ?
@@ -1122,7 +1810,7 @@ def command_files(args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps(rows, indent=2, sort_keys=True))
     else:
-        print_table(rows, ["short_title", "download_id", "file_name", "file_ext", "file_role", "inventory_status"])
+        print_table(rows, ["short_title", "download_id", "file_name", "file_ext", "file_role", "source_table"])
     return 0
 
 
@@ -1176,12 +1864,19 @@ def command_drift_check(args: argparse.Namespace) -> int:
     current_signature = download_signature(current_rows)
     manifest = json.loads(Path(args.manifest).read_text(encoding="utf-8"))
     release_signature = manifest.get("pathology_download_signature")
+    release_schema_version = manifest.get("schema_version")
+    signature_changed = current_signature != release_signature
+    schema_changed = release_schema_version != SCHEMA_VERSION
     payload = {
-        "status": "unchanged" if current_signature == release_signature else "changed",
+        "status": "unchanged" if not signature_changed and not schema_changed else "changed",
         "current_pathology_download_count": len(current_rows),
         "release_pathology_download_count": manifest.get("pathology_download_count"),
         "current_pathology_download_signature": current_signature,
         "release_pathology_download_signature": release_signature,
+        "current_schema_version": SCHEMA_VERSION,
+        "release_schema_version": release_schema_version,
+        "signature_changed": signature_changed,
+        "schema_changed": schema_changed,
     }
     if args.json:
         print(json.dumps(payload, indent=2, sort_keys=True))
@@ -1189,7 +1884,8 @@ def command_drift_check(args: argparse.Namespace) -> int:
         print(
             f"Pathology download signature {payload['status']}: "
             f"current={payload['current_pathology_download_count']} "
-            f"release={payload['release_pathology_download_count']}"
+            f"release={payload['release_pathology_download_count']} "
+            f"schema={payload['release_schema_version']}->{payload['current_schema_version']}"
         )
     return 0 if payload["status"] == "unchanged" else 2
 
@@ -1217,6 +1913,28 @@ def main(argv: Optional[list[str]] = None) -> int:
     build.add_argument("--replace", action="store_true", help="Replace existing output DB.")
     build.add_argument("--gzip-out", help="Optional gzipped SQLite output path.")
     build.add_argument("--manifest-out", help="Optional manifest JSON output path.")
+    build.add_argument(
+        "--package-inventory-tsv",
+        action="append",
+        default=[],
+        help=(
+            "Optional TSV/CSV file of browsed Aspera package file rows. "
+            "Repeat to import multiple inventories."
+        ),
+    )
+    build.set_defaults(seed_pathdb_file_objects=False)
+    build.add_argument(
+        "--pathdb-file-objects",
+        dest="seed_pathdb_file_objects",
+        action="store_true",
+        help="Opt into legacy seeding of pathology_file_objects from PathDB wsiimage_url values.",
+    )
+    build.add_argument(
+        "--no-pathdb-file-objects",
+        dest="seed_pathdb_file_objects",
+        action="store_false",
+        help="Do not seed pathology_file_objects from PathDB wsiimage_url values. This is the default.",
+    )
 
     manifest = subparsers.add_parser("manifest", help="Write a release manifest for a pathology DB.")
     manifest.add_argument("--db", required=True, help="SQLite path.")
@@ -1248,7 +1966,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     downloads.add_argument("--limit", type=int, default=50, help="Maximum rows.")
     downloads.add_argument("--json", action="store_true", help="Emit JSON.")
 
-    files = subparsers.add_parser("files", help="List imported pathology package file rows.")
+    files = subparsers.add_parser("files", help="List imported pathology file object rows.")
     files.add_argument("--db", default=str(DEFAULT_DB_PATH), help="SQLite path.")
     files.add_argument("--collection", help="Filter by TCIA short title.")
     files.add_argument("--file-ext", help="Filter by extension, such as .svs.")
@@ -1279,7 +1997,13 @@ def main(argv: Optional[list[str]] = None) -> int:
     if args.command == "info":
         return command_info(args)
     if args.command == "build":
-        payload = build_pathology_db(Path(args.snapshot_db), Path(args.out), args.replace)
+        payload = build_pathology_db(
+            Path(args.snapshot_db),
+            Path(args.out),
+            args.replace,
+            [Path(path) for path in args.package_inventory_tsv],
+            args.seed_pathdb_file_objects,
+        )
         if args.gzip_out:
             gzip_file(Path(args.out), Path(args.gzip_out))
             payload["gzip"] = str(Path(args.gzip_out).resolve())

@@ -2,6 +2,20 @@ name: Update TCIA metadata snapshot
 
 on:
   workflow_dispatch:
+    inputs:
+      refresh_pathology_inventory:
+        description: "Browse public pathology Aspera packages and include package file inventory"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+      pathology_inventory_limit:
+        description: "Optional max pathology downloads to browse for test refreshes"
+        required: false
+        default: ""
+        type: string
   schedule:
     - cron: "17 7,19 * * *"
       timezone: "America/New_York"
@@ -81,6 +95,51 @@ jobs:
           python scripts/tcia_controlled_access_metadata.py validate \
             --db dist/controlled_access_metadata.sqlite
 
+      - name: Install Aspera CLI
+        if: github.event_name == 'workflow_dispatch' && inputs.refresh_pathology_inventory == 'true'
+        run: gem install aspera-cli
+
+      - name: Build pathology Aspera package inventory
+        if: github.event_name == 'workflow_dispatch' && inputs.refresh_pathology_inventory == 'true'
+        run: |
+          set -euo pipefail
+          inventory_args=()
+          if [ -n "${{ inputs.pathology_inventory_limit }}" ]; then
+            inventory_args+=(--limit "${{ inputs.pathology_inventory_limit }}")
+          fi
+          python scripts/tcia_pathology_aspera_inventory.py \
+            --snapshot-db dist/tcia_snapshot.sqlite \
+            --out dist/pathology_aspera_inventory.tsv \
+            --summary-out dist/pathology_aspera_inventory_summary.json \
+            --sums-cache-dir dist/pathology_sums_manifests \
+            --offset-paging \
+            --page-limit 1000 \
+            --timeout 300 \
+            --workers 1 \
+            --retries 2 \
+            --retry-sleep 2 \
+            "${inventory_args[@]}"
+
+      - name: Build pathology metadata
+        run: |
+          set -euo pipefail
+          pathology_inventory_args=(--no-pathdb-file-objects)
+          if [ -s dist/pathology_aspera_inventory.tsv ]; then
+            pathology_inventory_args+=(--package-inventory-tsv dist/pathology_aspera_inventory.tsv)
+          fi
+          python scripts/tcia_pathology_metadata.py build \
+            --snapshot-db dist/tcia_snapshot.sqlite \
+            --out dist/pathology_metadata.sqlite \
+            --gzip-out dist/pathology_metadata.sqlite.gz \
+            --manifest-out dist/pathology_metadata_manifest.json \
+            --replace \
+            "${pathology_inventory_args[@]}"
+
+      - name: Validate pathology metadata
+        run: |
+          python scripts/tcia_pathology_metadata.py validate \
+            --db dist/pathology_metadata.sqlite
+
       - name: Check optional NIfTI metadata drift
         env:
           GH_TOKEN: ${{ github.token }}
@@ -92,27 +151,10 @@ jobs:
             if ! python scripts/tcia_nifti_metadata.py drift-check \
               --snapshot-db dist/tcia_snapshot.sqlite \
               --manifest previous/nifti_metadata_manifest.json; then
-              echo "::warning title=NIfTI metadata drift::Current visible non-controlled NIfTI download records differ from the released NIfTI metadata manifest. Run a manual NIfTI metadata refresh and upload nifti_metadata.sqlite.gz plus nifti_metadata_manifest.json."
+              echo "::warning title=NIfTI metadata drift::Current visible non-controlled NIfTI download records or the NIfTI SQLite schema differ from the released NIfTI metadata manifest. Run a manual NIfTI metadata refresh from the fresh snapshot so download titles, agent views, and file-grain metadata are current, then upload nifti_metadata.sqlite.gz plus nifti_metadata_manifest.json."
             fi
           else
             echo "::warning title=NIfTI metadata missing::No nifti_metadata_manifest.json release asset found. Upload nifti_metadata.sqlite.gz and nifti_metadata_manifest.json to enable on-demand NIfTI metadata access."
-          fi
-
-      - name: Check optional pathology metadata drift
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          tag="tcia-snapshot-latest"
-          mkdir -p previous
-          if gh release download "$tag" --pattern pathology_metadata_manifest.json --dir previous >/dev/null 2>&1; then
-            if ! python scripts/tcia_pathology_metadata.py drift-check \
-              --snapshot-db dist/tcia_snapshot.sqlite \
-              --manifest previous/pathology_metadata_manifest.json; then
-              echo "::warning title=Pathology metadata drift::Current visible non-controlled pathology Aspera download records differ from the released pathology metadata manifest. Run a manual pathology metadata refresh and upload pathology_metadata.sqlite.gz plus pathology_metadata_manifest.json."
-            fi
-          else
-            echo "::warning title=Pathology metadata missing::No pathology_metadata_manifest.json release asset found. Upload pathology_metadata.sqlite.gz and pathology_metadata_manifest.json to enable on-demand pathology Aspera metadata access."
           fi
 
       - name: Compare with published snapshot
@@ -152,6 +194,31 @@ jobs:
           mkdir -p previous
           if gh release download "$tag" --pattern controlled_access_metadata_manifest.json --dir previous --clobber >/dev/null 2>&1; then
             old_fingerprint="$(python -c 'import json; m=json.load(open("previous/controlled_access_metadata_manifest.json")); print(m.get("release_fingerprint") or m.get("sqlite_sha256", ""))')"
+          else
+            old_fingerprint=""
+          fi
+
+          echo "old_fingerprint=${old_fingerprint}" >> "$GITHUB_OUTPUT"
+          if [ "$new_fingerprint" = "$old_fingerprint" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Compare with published pathology metadata
+        if: github.event_name == 'workflow_dispatch' && inputs.refresh_pathology_inventory == 'true'
+        id: compare_pathology
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="tcia-snapshot-latest"
+          new_fingerprint="$(python -c 'import json; print(json.load(open("dist/pathology_metadata_manifest.json"))["release_fingerprint"])')"
+          echo "new_fingerprint=${new_fingerprint}" >> "$GITHUB_OUTPUT"
+
+          mkdir -p previous
+          if gh release download "$tag" --pattern pathology_metadata_manifest.json --dir previous --clobber >/dev/null 2>&1; then
+            old_fingerprint="$(python -c 'import json; m=json.load(open("previous/pathology_metadata_manifest.json")); print(m.get("release_fingerprint") or m.get("sqlite_sha256", ""))')"
           else
             old_fingerprint=""
           fi
@@ -205,6 +272,23 @@ jobs:
             dist/controlled_access_metadata_manifest.json \
             --clobber
 
+      - name: Publish changed pathology metadata
+        if: github.event_name == 'workflow_dispatch' && inputs.refresh_pathology_inventory == 'true' && steps.compare_pathology.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="tcia-snapshot-latest"
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" \
+              --title "Latest TCIA metadata snapshot" \
+              --notes "Automatically updated SQLite metadata snapshot for the TCIA query skill."
+          fi
+          gh release upload "$tag" \
+            dist/pathology_metadata.sqlite.gz \
+            dist/pathology_metadata_manifest.json \
+            --clobber
+
       - name: Report unchanged snapshot
         if: steps.compare.outputs.changed == 'false'
         run: echo "Snapshot release fingerprint is unchanged; release assets were not updated."
@@ -212,3 +296,11 @@ jobs:
       - name: Report unchanged controlled-access metadata
         if: steps.compare_controlled.outputs.changed == 'false'
         run: echo "Controlled-access metadata release fingerprint is unchanged; release assets were not updated."
+
+      - name: Report unchanged pathology metadata
+        if: github.event_name == 'workflow_dispatch' && inputs.refresh_pathology_inventory == 'true' && steps.compare_pathology.outputs.changed == 'false'
+        run: echo "Pathology metadata release fingerprint is unchanged; release assets were not updated."
+
+      - name: Report skipped pathology metadata refresh
+        if: github.event_name != 'workflow_dispatch' || inputs.refresh_pathology_inventory != 'true'
+        run: echo "Skipped pathology metadata release update; run workflow_dispatch with refresh_pathology_inventory=true to rebuild the Aspera package inventory."

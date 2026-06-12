@@ -60,6 +60,9 @@ The data source is public metadata only. The builder reads current controlled/re
 
 Important tables:
 
+- `agent_controlled_downloads`: scoped controlled downloads with a stable `download_label` and policy URL.
+- `agent_controlled_files`: normalized file-grain rows with lower-snake-case fields such as `series_instance_uid`, `study_instance_uid`, `drs_uri`, and `file_id`.
+- `agent_controlled_dataset_summary`: route/dataset summary with policy URL.
 - `controlled_downloads`: scoped WordPress download records and route system.
 - `wordpress_download_metadata`, `wordpress_download_urls`, `wordpress_search_filters`: WordPress-provided metadata fields and extracted URLs.
 - `manifest_rows`: public manifest rows with `drs_uri`, file ID, file name, size, study, participant, sample, and series fields when present.
@@ -73,14 +76,14 @@ Useful examples:
 ```sql
 SELECT route_system, short_title, controlled_file_rows,
        participant_ids, patient_ids, series_instance_uids
-FROM controlled_dataset_summary
+FROM agent_controlled_dataset_summary
 ORDER BY route_system, lower(short_title);
 ```
 
 ```sql
 SELECT short_title, file_name, modality, participant_id,
        series_instance_uid, drs_uri
-FROM controlled_files
+FROM agent_controlled_files
 WHERE route_system = 'ctdc'
   AND COALESCE(drs_uri, '') <> ''
 LIMIT 25;

@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Any
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 DEFAULT_REPO = "kirbyju/tcia-query-skill"
 DEFAULT_RELEASE_TAG = "tcia-snapshot-latest"
 CONTROLLED_ASSET = "controlled_access_metadata.sqlite.gz"
@@ -67,6 +67,12 @@ REQUIRED_TABLES = [
     "idc_contrast_index",
     "idc_series_links",
     "controlled_metadata_exceptions",
+]
+REQUIRED_VIEWS = [
+    "controlled_dataset_summary",
+    "agent_controlled_downloads",
+    "agent_controlled_files",
+    "agent_controlled_dataset_summary",
 ]
 COUNT_TABLES = [table for table in REQUIRED_TABLES if table != "controlled_meta"]
 
@@ -503,6 +509,8 @@ CREATE TABLE IF NOT EXISTS controlled_metadata_exceptions (
 
 CREATE INDEX IF NOT EXISTS idx_controlled_downloads_route
   ON controlled_downloads(route_system);
+CREATE INDEX IF NOT EXISTS idx_controlled_downloads_short_title
+  ON controlled_downloads(short_title);
 CREATE INDEX IF NOT EXISTS idx_manifest_rows_download
   ON manifest_rows(download_row_id);
 CREATE INDEX IF NOT EXISTS idx_manifest_rows_series
@@ -529,8 +537,18 @@ CREATE INDEX IF NOT EXISTS idx_wordpress_urls_role
   ON wordpress_download_urls(url_role);
 CREATE INDEX IF NOT EXISTS idx_radiology_series_series_id
   ON radiology_series(series_id);
+CREATE INDEX IF NOT EXISTS idx_radiology_series_short_title
+  ON radiology_series(short_title);
+CREATE INDEX IF NOT EXISTS idx_radiology_series_modality
+  ON radiology_series(modality);
 CREATE INDEX IF NOT EXISTS idx_idc_index_series
   ON idc_index(SeriesInstanceUID);
+CREATE INDEX IF NOT EXISTS idx_idc_ct_index_series
+  ON idc_ct_index(SeriesInstanceUID);
+CREATE INDEX IF NOT EXISTS idx_idc_pt_index_series
+  ON idc_pt_index(SeriesInstanceUID);
+CREATE INDEX IF NOT EXISTS idx_idc_contrast_index_series
+  ON idc_contrast_index(SeriesInstanceUID);
 CREATE INDEX IF NOT EXISTS idx_idc_links_series
   ON idc_series_links(SeriesInstanceUID);
 
@@ -550,6 +568,146 @@ SELECT
 FROM controlled_files
 GROUP BY route_system, dataset_type, short_title
 ORDER BY route_system, lower(short_title);
+
+CREATE VIEW IF NOT EXISTS agent_controlled_downloads AS
+SELECT
+    download_row_id,
+    parent_source,
+    dataset_type,
+    short_title,
+    title,
+    doi,
+    source_collections,
+    download_id,
+    COALESCE(
+        NULLIF(download_title, ''),
+        trim(
+            short_title || ' ' ||
+            CASE
+                WHEN COALESCE(download_id, '') <> '' THEN 'download ' || download_id || ' '
+                ELSE ''
+            END ||
+            CASE
+                WHEN COALESCE(file_types, '') <> '' THEN file_types
+                ELSE ''
+            END
+        )
+    ) AS download_label,
+    download_title,
+    download_url,
+    download_metadata,
+    search_url,
+    access_level,
+    controlled_access,
+    controlled_access_policy_url,
+    noncommercial_license,
+    license_label,
+    license_url,
+    requirements_label,
+    requirements_url,
+    requirements_text,
+    download_size,
+    download_size_unit,
+    subjects,
+    studies,
+    series,
+    images,
+    download_types,
+    data_types,
+    file_types,
+    route_system,
+    route_manifest_kind,
+    metadata_artifact_kind
+FROM controlled_downloads
+CROSS JOIN (SELECT '{CONTROLLED_POLICY_URL}' AS controlled_access_policy_url);
+
+CREATE VIEW IF NOT EXISTS agent_controlled_files AS
+SELECT
+    controlled_file_id,
+    download_row_id,
+    manifest_row_id,
+    metadata_row_id,
+    route_system,
+    dataset_type,
+    short_title,
+    title,
+    doi,
+    source_collections,
+    download_id,
+    COALESCE(NULLIF(download_title, ''), short_title || ' download ' || COALESCE(download_id, '')) AS download_label,
+    download_title,
+    access_level,
+    controlled_access_policy_url,
+    license_label,
+    license_url,
+    drs_uri,
+    file_id,
+    file_name,
+    file_ext,
+    file_type,
+    file_format,
+    file_size_bytes,
+    checksum,
+    checksum_algorithm,
+    study_name,
+    study_accession,
+    participant_id,
+    sample_id,
+    patient_id,
+    patient_name,
+    patient_age,
+    patient_sex,
+    race,
+    ethnicity,
+    species_code,
+    species_description,
+    is_phantom,
+    diagnosis,
+    study_data_type,
+    image_modality,
+    study_instance_uid,
+    series_instance_uid,
+    modality,
+    body_part_examined,
+    study_date,
+    series_date,
+    study_description,
+    series_description,
+    series_number,
+    protocol_name,
+    annotations_flag,
+    manufacturer,
+    manufacturer_model_name,
+    software_versions,
+    image_count,
+    collection_uri,
+    date_released,
+    longitudinal_temporal_event_type,
+    longitudinal_temporal_offset_from_event,
+    third_party_analysis,
+    pixel_spacing_row_mm,
+    pixel_spacing_col_mm,
+    slice_thickness_mm,
+    source_manifest_url,
+    source_metadata_url,
+    quality_flag_json
+FROM controlled_files;
+
+CREATE VIEW IF NOT EXISTS agent_controlled_dataset_summary AS
+SELECT
+    s.route_system,
+    s.dataset_type,
+    s.short_title,
+    s.controlled_file_rows,
+    s.participant_ids,
+    s.patient_ids,
+    s.study_instance_uids,
+    s.series_instance_uids,
+    s.total_file_size_bytes,
+    s.download_ids,
+    s.download_titles,
+    '{CONTROLLED_POLICY_URL}' AS controlled_access_policy_url
+FROM controlled_dataset_summary s;
 """
 
 
@@ -1942,7 +2100,7 @@ def validate_db(path: Path) -> dict[str, Any]:
             "SELECT name FROM sqlite_master WHERE type IN ('table', 'view')"
         )
     }
-    missing = sorted(set(REQUIRED_TABLES) - existing)
+    missing = sorted(set(REQUIRED_TABLES + REQUIRED_VIEWS) - existing)
     integrity = conn.execute("PRAGMA integrity_check").fetchone()[0]
     counts = table_counts(conn) if not missing else {}
     conn.close()
@@ -1993,10 +2151,10 @@ def build_manifest_from_db(
         "sqlite_asset": sqlite_path.name,
         "created_at": utc_now(),
         "schema_version": SCHEMA_VERSION,
-        "sqlite_path": str(sqlite_path.resolve()),
+        "sqlite_path": sqlite_path.name,
         "sqlite_sha256": file_sha256(sqlite_path),
         "sqlite_bytes": sqlite_path.stat().st_size,
-        "gzip_path": str(gzip_path.resolve()) if gzip_path else "",
+        "gzip_path": gzip_path.name if gzip_path else "",
         "gzip_sha256": file_sha256(gzip_path) if gzip_path and gzip_path.exists() else "",
         "gzip_bytes": gzip_path.stat().st_size if gzip_path and gzip_path.exists() else 0,
         "integrity_check": integrity,
@@ -2102,12 +2260,15 @@ def command_info(args: argparse.Namespace) -> int:
         "table_counts": counts,
         "controlled_meta": meta,
         "release_fingerprint": manifest.get("release_fingerprint", ""),
+        "schema_version": meta.get("schema_version") or manifest.get("schema_version", ""),
     }
     if args.json:
         print(json.dumps(payload, indent=2, sort_keys=True))
     else:
         print(f"DB: {payload['db']}")
         print(f"Manifest: {payload['manifest']}")
+        if payload["schema_version"]:
+            print(f"Schema version: {payload['schema_version']}")
         if payload["release_fingerprint"]:
             print(f"Release fingerprint: {payload['release_fingerprint']}")
         for key in (
@@ -2130,7 +2291,7 @@ def command_datasets(args: argparse.Namespace) -> int:
         SELECT route_system, dataset_type, short_title, controlled_file_rows,
                participant_ids, patient_ids, study_instance_uids,
                series_instance_uids, total_file_size_bytes, download_ids
-        FROM controlled_dataset_summary
+        FROM agent_controlled_dataset_summary
         ORDER BY route_system, lower(short_title)
         LIMIT ?
         """,
@@ -2168,9 +2329,9 @@ def command_downloads(args: argparse.Namespace) -> int:
     rows = rows_as_dicts(
         conn,
         f"""
-        SELECT route_system, short_title, download_id, download_title,
+        SELECT route_system, short_title, download_id, download_label,
                route_manifest_kind, metadata_artifact_kind, download_url
-        FROM controlled_downloads
+        FROM agent_controlled_downloads
         WHERE {' AND '.join(where)}
         ORDER BY route_system, lower(short_title), download_id
         LIMIT ?
@@ -2187,7 +2348,7 @@ def command_downloads(args: argparse.Namespace) -> int:
                 "route_system",
                 "short_title",
                 "download_id",
-                "download_title",
+                "download_label",
                 "route_manifest_kind",
             ],
         )
@@ -2213,7 +2374,7 @@ def command_files(args: argparse.Namespace) -> int:
         f"""
         SELECT route_system, short_title, file_name, modality, participant_id,
                patient_id, series_instance_uid, drs_uri
-        FROM controlled_files
+        FROM agent_controlled_files
         WHERE {' AND '.join(where)}
         ORDER BY route_system, lower(short_title), file_name, series_instance_uid
         LIMIT ?
@@ -2272,7 +2433,8 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
 
     counts = table_counts(conn)
     write_meta(conn, "created_at", created_at)
-    write_meta(conn, "source_snapshot_db", str(snapshot_path.resolve()))
+    write_meta(conn, "schema_version", SCHEMA_VERSION)
+    write_meta(conn, "source_snapshot_db", snapshot_path.name)
     write_meta(conn, "source_snapshot_meta", source_snapshot_meta(conn))
     write_meta(conn, "scope_note", "Visible current TCIA controlled-access WordPress downloads routed through General Commons or CTDC. Source rows come from public WordPress download manifests and download metadata spreadsheets only; no authenticated data download or GraphQL harvest is performed.")
     write_meta(conn, "controlled_access_policy_url", CONTROLLED_POLICY_URL)
@@ -2306,14 +2468,14 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
         "sqlite_asset": out_path.name,
         "created_at": created_at,
         "schema_version": SCHEMA_VERSION,
-        "sqlite_path": str(out_path.resolve()),
+        "sqlite_path": out_path.name,
         "sqlite_sha256": file_sha256(out_path),
         "sqlite_bytes": out_path.stat().st_size,
-        "gzip_path": str(gzip_path.resolve()) if gzip_path else "",
+        "gzip_path": gzip_path.name if gzip_path else "",
         "gzip_sha256": file_sha256(gzip_path) if gzip_path and gzip_path.exists() else "",
         "gzip_bytes": gzip_path.stat().st_size if gzip_path and gzip_path.exists() else 0,
-        "source_snapshot_db": str(snapshot_path.resolve()),
-        "artifact_dir": str(artifact_dir.resolve()),
+        "source_snapshot_db": snapshot_path.name,
+        "artifact_dir": artifact_dir.name,
         "integrity_check": integrity,
         "downloads_seeded": downloads,
         "wordpress_counts": wordpress_counts,
@@ -2375,6 +2537,12 @@ def main(argv: list[str] | None = None) -> int:
     manifest.add_argument("--db", required=True, help="SQLite path.")
     manifest.add_argument("--gzip", help="Gzipped SQLite path.")
     manifest.add_argument("--out", required=True, help="Manifest JSON output path.")
+    manifest.add_argument("--no-network", action="store_true", help="Mark manifest as built without network.")
+    manifest.add_argument(
+        "--include-legacy",
+        action="store_true",
+        help="Mark manifest as including controlled legacy .tcia downloads.",
+    )
 
     validate = subparsers.add_parser(
         "validate", help="Validate a local controlled-access metadata SQLite DB."
@@ -2426,8 +2594,8 @@ def main(argv: list[str] | None = None) -> int:
         payload = build_manifest_from_db(
             Path(args.db),
             Path(args.gzip) if args.gzip else None,
-            include_legacy=False,
-            no_network=False,
+            include_legacy=args.include_legacy,
+            no_network=args.no_network,
         )
         write_manifest(Path(args.out), payload)
         print(json.dumps(payload, indent=2, sort_keys=True))

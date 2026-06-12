@@ -31,6 +31,7 @@ from typing import Any, Iterable, Optional
 
 
 SKILL_ROOT = Path(__file__).resolve().parents[1]
+SCHEMA_VERSION = 2
 DEFAULT_SOURCE_DB = SKILL_ROOT / "cache" / "tcia_snapshot.sqlite"
 DEFAULT_OUT_DIR = SKILL_ROOT / "outputs" / "nifti_metadata"
 DEFAULT_OUT_DB = DEFAULT_OUT_DIR / "nifti_metadata.sqlite"
@@ -731,6 +732,8 @@ def create_output_schema(conn: sqlite3.Connection) -> None:
           ON radiology_series(non_dicom_file_id);
         CREATE INDEX IF NOT EXISTS idx_radiology_series_modality
           ON radiology_series(modality);
+        CREATE INDEX IF NOT EXISTS idx_radiology_series_series_id
+          ON radiology_series(series_id);
         CREATE INDEX IF NOT EXISTS idx_derived_objects_dataset
           ON derived_objects(short_title);
         CREATE INDEX IF NOT EXISTS idx_derived_objects_file
@@ -739,6 +742,191 @@ def create_output_schema(conn: sqlite3.Connection) -> None:
           ON derived_object_references(derived_object_id);
         CREATE INDEX IF NOT EXISTS idx_derived_object_refs_source
           ON derived_object_references(referenced_non_dicom_file_id);
+
+        CREATE VIEW IF NOT EXISTS agent_nifti_downloads AS
+        SELECT
+            download_row_id,
+            parent_source,
+            dataset_type,
+            short_title,
+            title,
+            download_id,
+            COALESCE(
+                NULLIF(download_title, ''),
+                trim(
+                    short_title || ' ' ||
+                    CASE
+                        WHEN COALESCE(download_id, '') <> '' THEN 'download ' || download_id || ' '
+                        ELSE ''
+                    END ||
+                    CASE
+                        WHEN COALESCE(file_types, '') <> '' THEN file_types
+                        ELSE ''
+                    END
+                )
+            ) AS download_label,
+            download_title,
+            download_url,
+            download_size,
+            download_size_unit,
+            subjects,
+            studies,
+            series,
+            images,
+            download_types,
+            data_types,
+            file_types,
+            license_label,
+            access_level
+        FROM nifti_downloads;
+
+        CREATE VIEW IF NOT EXISTS agent_nifti_dataset_summary AS
+        WITH download_summary AS (
+            SELECT
+                parent_source,
+                dataset_type,
+                short_title,
+                title,
+                COUNT(*) AS nifti_downloads,
+                group_concat(download_id, '; ') AS download_ids,
+                group_concat(download_label, '; ') AS download_labels
+            FROM agent_nifti_downloads
+            GROUP BY parent_source, dataset_type, short_title, title
+        ),
+        file_summary AS (
+            SELECT
+                short_title,
+                COUNT(*) AS non_dicom_files,
+                SUM(CASE WHEN is_nifti THEN 1 ELSE 0 END) AS nifti_files,
+                SUM(CASE WHEN is_sidecar THEN 1 ELSE 0 END) AS sidecar_files,
+                SUM(CASE WHEN is_package_metadata THEN 1 ELSE 0 END) AS package_metadata_files
+            FROM non_dicom_files
+            GROUP BY short_title
+        ),
+        radiology_summary AS (
+            SELECT
+                short_title,
+                COUNT(*) AS radiology_series_rows,
+                SUM(CASE WHEN modality = 'MR' THEN 1 ELSE 0 END) AS mr_files,
+                SUM(CASE WHEN modality = 'CT' THEN 1 ELSE 0 END) AS ct_files,
+                SUM(CASE WHEN is_derived_object THEN 1 ELSE 0 END) AS derived_radiology_rows,
+                COUNT(DISTINCT NULLIF(subject_id, '')) AS subject_ids,
+                COUNT(DISTINCT NULLIF(study_id, '')) AS study_ids,
+                COUNT(DISTINCT NULLIF(series_id, '')) AS series_ids
+            FROM radiology_series
+            GROUP BY short_title
+        ),
+        derived_summary AS (
+            SELECT
+                d.short_title,
+                COUNT(*) AS derived_objects,
+                COUNT(DISTINCT dor.derived_object_id) AS linked_derived_objects
+            FROM derived_objects d
+            LEFT JOIN derived_object_references dor
+              ON dor.derived_object_id = d.derived_object_id
+            GROUP BY d.short_title
+        )
+        SELECT
+            d.parent_source,
+            d.dataset_type,
+            d.short_title,
+            d.title,
+            d.nifti_downloads,
+            COALESCE(f.nifti_files, 0) AS nifti_files,
+            COALESCE(f.non_dicom_files, 0) AS non_dicom_files,
+            COALESCE(f.sidecar_files, 0) AS sidecar_files,
+            COALESCE(f.package_metadata_files, 0) AS package_metadata_files,
+            COALESCE(r.radiology_series_rows, 0) AS radiology_series_rows,
+            COALESCE(r.mr_files, 0) AS mr_files,
+            COALESCE(r.ct_files, 0) AS ct_files,
+            COALESCE(r.derived_radiology_rows, 0) AS derived_radiology_rows,
+            COALESCE(x.derived_objects, 0) AS derived_objects,
+            COALESCE(x.linked_derived_objects, 0) AS linked_derived_objects,
+            COALESCE(r.subject_ids, 0) AS subject_ids,
+            COALESCE(r.study_ids, 0) AS study_ids,
+            COALESCE(r.series_ids, 0) AS series_ids,
+            d.download_ids,
+            d.download_labels
+        FROM download_summary d
+        LEFT JOIN file_summary f ON lower(f.short_title) = lower(d.short_title)
+        LEFT JOIN radiology_summary r ON lower(r.short_title) = lower(d.short_title)
+        LEFT JOIN derived_summary x ON lower(x.short_title) = lower(d.short_title)
+        ORDER BY lower(d.short_title);
+
+        CREATE VIEW IF NOT EXISTS agent_nifti_files AS
+        SELECT
+            radiology_id,
+            non_dicom_file_id,
+            file_group_id,
+            short_title,
+            dataset_type,
+            download_ids,
+            download_ids AS download_id,
+            file_name,
+            package_path,
+            subject_id,
+            procedure_id,
+            study_id,
+            CASE WHEN study_id_source = 'source_metadata' THEN study_id ELSE '' END AS study_instance_uid,
+            study_id_source,
+            series_id,
+            CASE WHEN series_id_source = 'source_metadata' THEN series_id ELSE '' END AS series_instance_uid,
+            series_id_source,
+            source_doi,
+            modality,
+            body_part_examined,
+            study_date,
+            series_date,
+            study_description,
+            series_description,
+            series_number,
+            manufacturer,
+            manufacturer_model_name,
+            software_versions,
+            image_type,
+            object_type,
+            rows,
+            columns,
+            number_of_slices,
+            number_of_temporal_positions,
+            pixel_spacing_row_mm,
+            pixel_spacing_col_mm,
+            slice_thickness_mm,
+            spacing_between_slices_mm,
+            orientation_or_affine,
+            is_phantom,
+            is_derived_object,
+            quality_flag_json
+        FROM radiology_series;
+
+        CREATE VIEW IF NOT EXISTS agent_nifti_derived_objects AS
+        SELECT
+            d.derived_object_id,
+            d.non_dicom_file_id,
+            d.radiology_id,
+            d.short_title,
+            d.dataset_type,
+            d.file_name,
+            d.package_path,
+            d.file_ext,
+            d.referenced_radiology_id,
+            d.referenced_series_id,
+            d.derived_object_type,
+            d.segmentation_representation,
+            d.segmentation_type,
+            d.total_segments,
+            d.algorithm_type,
+            d.algorithm_name,
+            dor.referenced_non_dicom_file_id,
+            dor.referenced_file_name,
+            dor.referenced_package_path,
+            dor.reference_role,
+            dor.inference_method,
+            dor.confidence,
+            dor.evidence_json
+        FROM derived_objects d
+        LEFT JOIN derived_object_references dor
+          ON dor.derived_object_id = d.derived_object_id;
         """
     )
     ensure_column(conn, "derived_objects", "segmentation_representation", "TEXT")
@@ -1806,6 +1994,37 @@ def write_meta(conn: sqlite3.Connection, key: str, value: Any) -> None:
         (key, json_dumps(value)),
     )
     conn.commit()
+
+
+def snapshot_meta(conn: sqlite3.Connection) -> dict[str, Any]:
+    meta: dict[str, Any] = {}
+    try:
+        rows = conn.execute("SELECT key, value FROM snapshot_meta")
+    except sqlite3.Error:
+        return meta
+    for key, value in rows:
+        try:
+            meta[key] = json.loads(value)
+        except (TypeError, json.JSONDecodeError):
+            meta[key] = value
+    return meta
+
+
+def public_harvest_args(args: argparse.Namespace) -> dict[str, Any]:
+    payload = dict(vars(args))
+    path_keys = {
+        "ascli",
+        "files_dir",
+        "out_db",
+        "quality_flags_tsv",
+        "source_db",
+        "sums_inventory_tsv",
+    }
+    for key in path_keys:
+        value = payload.get(key)
+        if value:
+            payload[key] = Path(str(value)).name
+    return payload
 
 
 def import_sums_inventory(conn: sqlite3.Connection, tsv_path: Path) -> None:
@@ -2959,11 +3178,13 @@ def harvest(args: argparse.Namespace) -> None:
         "generated_at_utc",
         dt.datetime.now(dt.timezone.utc).isoformat(),
     )
-    write_meta(conn, "source_db", str(Path(args.source_db).resolve()))
+    write_meta(conn, "schema_version", SCHEMA_VERSION)
+    write_meta(conn, "source_db", Path(args.source_db).name)
+    write_meta(conn, "source_snapshot_meta", snapshot_meta(source_conn))
     write_meta(conn, "nifti_downloads", len(nifti_rows))
     write_meta(conn, "nifti_datasets", len(short_titles))
     write_meta(conn, "candidate_downloads", len(candidates))
-    write_meta(conn, "args", vars(args))
+    write_meta(conn, "args", public_harvest_args(args))
 
     if args.audit_only:
         return

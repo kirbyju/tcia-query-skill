@@ -33,7 +33,7 @@ Optional controlled-access public manifest/spreadsheet assets:
 - `controlled_access_metadata.sqlite.gz`
 - `controlled_access_metadata_manifest.json`
 
-The controlled-access SQLite is rebuilt by the scheduled workflow from the fresh base snapshot plus public WordPress manifest and metadata spreadsheet URLs. The workflow uploads it when its controlled metadata release fingerprint changes. NIfTI and pathology assets are larger/manual sidecars: the scheduled workflow checks their source download signatures and warns when they need a manual refresh.
+The controlled-access SQLite is rebuilt by the scheduled workflow from the fresh base snapshot plus public WordPress manifest and metadata spreadsheet URLs. The workflow uploads it when its controlled metadata release fingerprint changes. NIfTI and pathology assets are larger/manual sidecars: the scheduled workflow checks their source download signatures and optional SQLite schema versions, then warns when they need a manual refresh.
 
 The workflow validates that the SQLite file contains the documented `agent_*` views, writes web-friendly exports from those views, and compares a release fingerprint built from the source-content hash, schema version, SQLite hash, and export hashes. It skips release uploads only when the release fingerprint is unchanged.
 
@@ -212,13 +212,13 @@ When an environment has no SQLite execution path, prefer these generic release e
 
 The NIfTI SQLite is a file-grain metadata layer mined from visible, non-controlled current NIfTI download records, companion spreadsheets, root `.sums` files, and accepted Aspera listings. It is too large and too specialized to bundle with the normal snapshot refresh.
 
-Use `references/nifti.md` for table details and examples. The scheduled GitHub Action should not rebuild the NIfTI database by default. Instead, it compares the current snapshot's visible non-controlled NIfTI download signature against `nifti_metadata_manifest.json` and emits a warning if a manual NIfTI refresh is needed.
+Use `references/nifti.md` for table details and examples. The scheduled GitHub Action should not rebuild the NIfTI database by default. Instead, it compares the current snapshot's visible non-controlled NIfTI download signature and expected optional SQLite schema version against `nifti_metadata_manifest.json`, then emits a warning if a manual NIfTI refresh is needed. A refresh should use the fresh base snapshot so WordPress download titles and `agent_nifti_*` views are current.
 
 ## Optional Pathology SQLite
 
-The pathology SQLite is a package/download metadata layer for visible, non-controlled current pathology Aspera download records. It contains Collection Manager download scope, PathDB crosswalk rows, curator-facing disparity rows, and placeholder package/file tables that can be populated from Aspera browse output or root `.sums` inventories.
+The pathology SQLite is a package/download metadata layer for visible, non-controlled current pathology Aspera download records. It contains Collection Manager download scope, PathDB crosswalk rows for enrichment/disparity review, curator-facing disparity rows, and package/file-object tables populated from Aspera browse output or root `.sums` inventories. `normalized_file_rows_available` means imported Aspera package rows have been normalized. `not_imported` means Aspera package inventory rows are not available for that dataset in the release. The legacy `pathdb_file_objects_available` status can appear only in locally built or older SQLite files that opted into PathDB file-object seeding.
 
-Use `references/pathology.md` for table details and examples. The scheduled GitHub Action should not rebuild the pathology database by default. Instead, it compares the current snapshot's visible non-controlled pathology Aspera download signature against `pathology_metadata_manifest.json` and emits a warning if a manual pathology refresh is needed.
+Use `references/pathology.md` for table details and examples. The scheduled GitHub Action validates pathology metadata from the fresh snapshot but does not publish a pathology release by default. Publishing is tied to a manual workflow dispatch that refreshes the Aspera package inventory with `scripts/tcia_pathology_aspera_inventory.py` and passes it with `--package-inventory-tsv`.
 
 ## Optional Controlled-Access SQLite
 

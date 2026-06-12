@@ -200,6 +200,11 @@ def main() -> int:
         action="store_true",
         help="Skip recursive package browse and use staged directory browsing directly.",
     )
+    parser.add_argument(
+        "--no-fallback-staged",
+        action="store_true",
+        help="Do not fall back to staged directory browsing when recursive browse fails.",
+    )
     parser.add_argument("--root-timeout", type=int, default=120)
     parser.add_argument("--recursive-timeout", type=int, default=900)
     parser.add_argument("--staged-timeout", type=int, default=180)
@@ -288,23 +293,28 @@ def main() -> int:
             summary["listing"] = row_counts(rows)
         except Exception as recursive_exc:  # noqa: BLE001
             summary["recursive_error"] = str(recursive_exc)
-            rows, complete, errors = browse_staged(
-                args.ascli,
-                row["download_url"],
-                args.staged_timeout,
-                args.staged_max_dirs,
-                args.staged_max_depth,
-                root_rows or None,
-                seed_paths,
-                args.verbose_paths,
-                browse_query,
-            )
-            write_rows_csv(row_dir / "staged_listing.csv", rows)
-            summary["status"] = "ok" if complete else "partial"
-            summary["method"] = "staged"
-            summary["listing"] = row_counts(rows)
-            summary["staged_complete"] = complete
-            summary["staged_errors"] = errors
+            if args.no_fallback_staged:
+                summary["status"] = "error"
+                summary["method"] = "recursive"
+                summary["listing"] = row_counts(rows)
+            else:
+                rows, complete, errors = browse_staged(
+                    args.ascli,
+                    row["download_url"],
+                    args.staged_timeout,
+                    args.staged_max_dirs,
+                    args.staged_max_depth,
+                    root_rows or None,
+                    seed_paths,
+                    args.verbose_paths,
+                    browse_query,
+                )
+                write_rows_csv(row_dir / "staged_listing.csv", rows)
+                summary["status"] = "ok" if complete else "partial"
+                summary["method"] = "staged"
+                summary["listing"] = row_counts(rows)
+                summary["staged_complete"] = complete
+                summary["staged_errors"] = errors
 
         if summary["status"] == "ok":
             cache_listing = candidate_local_dir(args.files_dir, row) / "aspera_package_listing.csv"
