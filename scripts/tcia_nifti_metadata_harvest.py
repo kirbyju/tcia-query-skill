@@ -292,6 +292,134 @@ def clean_package_path(value: str) -> str:
     return str(value or "").strip().lstrip("/")
 
 
+def split_package_path(value: str) -> list[str]:
+    return [
+        part.strip()
+        for part in clean_package_path(value).split("/")
+        if part and part.strip()
+    ]
+
+
+def strip_session_suffix(value: str) -> str:
+    text = value.strip()
+    for pattern in (
+        r"^(.+?)[_-](?:timepoint|tp|t)\d+$",
+        r"^(.+?)[_-]\d{1,2}$",
+        r"^(.+?)[_-]day\d+$",
+    ):
+        match = re.fullmatch(pattern, text, flags=re.IGNORECASE)
+        if match and re.search(r"\d{3,}", match.group(1)):
+            return match.group(1)
+    return text
+
+
+def path_component_looks_like_subject_id(value: str) -> bool:
+    text = value.strip("._- ")
+    if not text:
+        return False
+    lower = text.lower()
+    skip_exact = {
+        "images",
+        "masks",
+        "mask",
+        "nifti",
+        "niftis",
+        "seg",
+        "segs",
+        "segmentations",
+        "segmentation",
+        "training",
+        "validation",
+        "test",
+        "labels",
+        "resampled",
+        "annotations",
+        "atlas",
+        "otherneoplasms",
+    }
+    if lower in skip_exact or lower.endswith("_nifti") or lower.endswith("-nifti"):
+        return False
+    if re.search(r"(?:^|[_-])(?:t|tp|timepoint|day)\d+$", lower):
+        return False
+    patterns = (
+        r"[A-Za-z][A-Za-z0-9]*(?:[-_][A-Za-z0-9]+)+[-_]\d{1,6}(?:[-_]\d{1,6})?",
+        r"(?:PatientID|Myel|id|BT|VS|YG)[-_]?[A-Za-z0-9]{3,}",
+        r"\d{3,}",
+    )
+    return any(re.fullmatch(pattern, text) for pattern in patterns)
+
+
+def path_component_looks_like_package_root(value: str, short_title: str) -> bool:
+    text = value.strip("._- ")
+    if not text:
+        return False
+    normalized_text = normalize_key(re.sub(r"(?:[_-]?v(?:ersion)?[_-]?\d+)$", "", text, flags=re.IGNORECASE))
+    normalized_short_title = normalize_key(short_title)
+    return bool(normalized_short_title and normalized_text.startswith(normalized_short_title))
+
+
+def subject_id_from_file_stem(value: str) -> str:
+    stem = value.strip("._- ")
+    if not stem:
+        return ""
+
+    stem = re.sub(r"[_-]day\d+.*", "", stem, flags=re.IGNORECASE)
+    patterns = (
+        r"^(ACRIN[-_]\d+[-_]\d+)",
+        r"^(BraTS[-_][A-Za-z0-9]+[-_]\d{3,}(?:[-_]\d{3,})?)",
+        r"^(ISPY1[-_]\d+)",
+        r"^(RHUH[-_]\d{4})",
+        r"^(volume[-_]covid19[-_][A-Za-z][-_]\d+)",
+    )
+    for pattern in patterns:
+        match = re.match(pattern, stem, flags=re.IGNORECASE)
+        if match:
+            return strip_session_suffix(match.group(1))
+
+    if re.search(r"(?:adc|asl|brain|ce|dce|defaced|flair|label|mask|post|seg|t1|t1c|t2)", stem, flags=re.IGNORECASE):
+        return ""
+    if path_component_looks_like_subject_id(stem):
+        return strip_session_suffix(stem)
+    return ""
+
+
+def infer_patient_id_from_path(short_title: str, package_path: str) -> tuple[str, str]:
+    """Infer a patient-like identifier from common NIfTI package path layouts.
+
+    This is intentionally conservative and only fills gaps when no submitter
+    spreadsheet supplied a PatientID. The method string is stored in provenance.
+    """
+
+    parts = split_package_path(package_path)
+    if not parts:
+        return "", ""
+
+    for index, part in enumerate(parts[:-1]):
+        if index == 0 and path_component_looks_like_package_root(part, short_title):
+            continue
+        candidate = part.removesuffix("_nifti").removesuffix("-nifti")
+        if path_component_looks_like_subject_id(candidate):
+            return strip_session_suffix(candidate), "path_component"
+
+    stem = strip_known_file_suffix(parts[-1])
+    patient_id = subject_id_from_file_stem(stem)
+    if patient_id:
+        return patient_id, "file_stem"
+
+    short_tokens = [token for token in re.split(r"[^A-Za-z0-9]+", short_title) if token]
+    if short_tokens:
+        prefix_pattern = r"[-_ ]+".join(re.escape(token) for token in short_tokens[:3])
+        match = re.search(
+            rf"\b({prefix_pattern}[-_ ]+\d{{1,6}}(?:[-_]\d{{1,6}})?)\b",
+            package_path,
+            flags=re.IGNORECASE,
+        )
+        if match:
+            return strip_session_suffix(match.group(1).replace(" ", "-")), "short_title_pattern"
+
+    return "", ""
+
+
 def is_plausible_nifti_file(value: str) -> bool:
     text = clean_package_path(value)
     lower = text.lower()
@@ -2175,6 +2303,15 @@ def build_nifti_file_series(conn: sqlite3.Connection) -> None:
             records[key] = record
         return record
 
+    def apply_path_patient_inference(record: dict[str, Any], short_title: str, path: str) -> None:
+        if record["normalized"].get("PatientID"):
+            return
+        patient_id, method = infer_patient_id_from_path(short_title, path)
+        if not patient_id:
+            return
+        record["normalized"]["PatientID"] = patient_id
+        record["metadata_sources"].add(f"path_patient_id:{method}")
+
     for row in conn.execute("SELECT * FROM normalized_series_rows"):
         nifti_file = clean_package_path(row["nifti_file"] or "")
         if not is_plausible_nifti_file(nifti_file):
@@ -2182,6 +2319,7 @@ def build_nifti_file_series(conn: sqlite3.Connection) -> None:
         if (row["short_title"], nifti_file) in excluded:
             continue
         record = ensure(row["short_title"], row["dataset_type"], nifti_file)
+        apply_path_patient_inference(record, row["short_title"], nifti_file)
         record["source_row_count"] += 1
         if row["download_id"]:
             record["download_ids"].add(row["download_id"])
@@ -2204,6 +2342,7 @@ def build_nifti_file_series(conn: sqlite3.Connection) -> None:
         meta = candidate_meta.get((row["short_title"], row["download_id"]), {})
         dataset_type = meta.get("dataset_type", "")
         record = ensure(row["short_title"], dataset_type, package_path)
+        apply_path_patient_inference(record, row["short_title"], package_path)
         record["source_row_count"] += 1
         record["download_ids"].add(row["download_id"] or "")
         record["download_titles"].add(row["download_title"] or "")
@@ -2218,6 +2357,7 @@ def build_nifti_file_series(conn: sqlite3.Connection) -> None:
             (row["short_title"], row["download_id"]), {}
         ).get("dataset_type", "")
         record = ensure(row["short_title"], dataset_type, package_path)
+        apply_path_patient_inference(record, row["short_title"], package_path)
         record["source_row_count"] += 1
         record["download_ids"].add(row["download_id"] or "")
         record["download_titles"].add(row["download_title"] or "")

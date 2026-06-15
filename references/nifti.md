@@ -190,6 +190,8 @@ Some NIfTI downloads contain segmentations, masks, radiomic features, or package
 
 `radiology_series.study_id` and `radiology_series.series_id` use source UIDs when available. When source UIDs are missing, deterministic synthetic IDs are generated from dataset/path context; inspect `study_id_source` and `series_id_source`.
 
+`agent_nifti_files.subject_id` / `radiology_series.subject_id` prefer a submitter-provided `PatientID` from parsed companion metadata. When no submitter `PatientID` exists, refreshed releases may fill a conservative path-derived identifier from common NIfTI package layouts. These inferred IDs are intended as file grouping keys, not clinical truth; inspect `metadata_sources` for `path_patient_id:*` provenance before relying on them.
+
 `derived_objects.derived_object_type` is normalized to `segmentation` for current NIfTI-derived rows. Use `segmentation_representation` for the representation hint:
 
 - `binary_mask`: usually one ROI/class per file.
@@ -212,3 +214,19 @@ Scheduled workflow should:
 4. Warn maintainers if current visible, non-controlled NIfTI download records no longer match the released NIfTI manifest.
 
 When drift is detected, run a manual maintainer refresh using the existing release SQLite and harvested file caches as the baseline, then upload refreshed `nifti_metadata.sqlite.gz` and `nifti_metadata_manifest.json` release assets.
+
+For patient-coverage refreshes, include Aspera metadata files as well as NIfTI package listings when the runtime can safely browse/download the packages:
+
+```bash
+python scripts/tcia_nifti_metadata_harvest.py \
+  --source-db cache/tcia_snapshot.sqlite \
+  --out-db outputs/nifti_metadata/nifti_metadata.sqlite \
+  --files-dir outputs/nifti_metadata/files \
+  --include-aspera \
+  --no-aspera-nifti-only \
+  --download-aspera-metadata-files \
+  --reuse-cache \
+  --replace
+```
+
+This is a manual maintainer workflow, not a routine scheduled job, because Aspera package browsing can be slow and may download large companion spreadsheets.
