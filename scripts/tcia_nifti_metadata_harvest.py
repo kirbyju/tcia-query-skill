@@ -68,10 +68,16 @@ FIELD_SYNONYMS: dict[str, tuple[str, ...]] = {
     "PatientID": (
         "patientid",
         "patient_id",
+        "pid",
         "subjectid",
         "subject_id",
         "caseid",
         "case_id",
+        "tcia_case_id",
+        "tcia_caseid",
+        "tcia_patient_id",
+        "patientidontciaradiologyportal",
+        "bratssubjectid",
         "tciaid",
         "tcia_id",
         "bratsid",
@@ -79,10 +85,22 @@ FIELD_SYNONYMS: dict[str, tuple[str, ...]] = {
     ),
     "PatientAge": ("patientage", "patient_age", "age", "ageatimaging", "age_at_imaging"),
     "PatientSex": ("patientsex", "patient_sex", "sex", "gender"),
-    "StudyInstanceUID": ("studyinstanceuid", "study_instance_uid", "studyuid"),
+    "StudyInstanceUID": (
+        "studyinstanceuid",
+        "study_instance_uid",
+        "studyuid",
+        "tcia_study_instance_uid",
+        "tciastudyinstanceuid",
+    ),
     "StudyDate": ("studydate", "study_date", "scan_date", "exam_date", "date"),
     "StudyDescription": ("studydescription", "study_description", "exam_description"),
-    "SeriesInstanceUID": ("seriesinstanceuid", "series_instance_uid", "seriesuid"),
+    "SeriesInstanceUID": (
+        "seriesinstanceuid",
+        "series_instance_uid",
+        "seriesuid",
+        "tcia_series_instance_uid",
+        "tciaseriesinstanceuid",
+    ),
     "SeriesDate": ("seriesdate", "series_date"),
     "SeriesDescription": (
         "seriesdescription",
@@ -190,6 +208,8 @@ FIELD_SYNONYMS: dict[str, tuple[str, ...]] = {
         "segmented_series_instance_uid",
         "referencedseriesinstanceuid",
         "referenced_series_instance_uid",
+        "tcia_series_instance_uid",
+        "tciaseriesinstanceuid",
     ),
 }
 
@@ -1624,6 +1644,75 @@ def zip_member_is_metadata(name: str) -> bool:
     return text_has_metadata_hint(lower) and ext in {".txt", ".json"}
 
 
+def zip_member_is_inventory_file(name: str) -> bool:
+    parts = split_package_path(name)
+    if not parts:
+        return False
+    if any(part == "__MACOSX" or part.startswith("._") for part in parts):
+        return False
+    return is_plausible_nifti_file(name)
+
+
+def insert_direct_zip_nifti_package_files(
+    conn: sqlite3.Connection, candidate: dict[str, Any], zip_path: Path
+) -> int:
+    existing = {
+        row["package_path"]
+        for row in conn.execute(
+            """
+            SELECT package_path
+            FROM package_files
+            WHERE short_title = ?
+              AND download_id = ?
+            """,
+            (candidate.get("short_title"), candidate.get("download_id")),
+        )
+    }
+    records = []
+    with zipfile.ZipFile(zip_path) as archive:
+        for info in archive.infolist():
+            package_path = clean_package_path(info.filename)
+            if info.is_dir() or not zip_member_is_inventory_file(package_path):
+                continue
+            if package_path in existing:
+                continue
+            row_json = {
+                "source_kind": "direct_zip_member",
+                "zip_file": str(zip_path),
+                "filename": info.filename,
+                "file_size": info.file_size,
+                "compress_size": info.compress_size,
+                "crc": info.CRC,
+            }
+            records.append(
+                (
+                    candidate.get("download_row_id"),
+                    candidate.get("short_title"),
+                    candidate.get("download_id"),
+                    candidate.get("download_title"),
+                    str(zip_path),
+                    package_path,
+                    Path(package_path).name,
+                    extension_for_name(package_path),
+                    str(info.file_size),
+                    json_dumps(row_json),
+                    0,
+                )
+            )
+    if records:
+        conn.executemany(
+            """
+            INSERT INTO package_files
+            (download_row_id, short_title, download_id, download_title, source_url,
+             package_path, file_name, file_ext, bytes, row_json, is_metadata_candidate)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            records,
+        )
+        conn.commit()
+    return len(records)
+
+
 def harvest_zip_members(
     conn: sqlite3.Connection,
     candidate: dict[str, Any],
@@ -1632,6 +1721,7 @@ def harvest_zip_members(
     max_zip_member_bytes: int,
     max_rows: int | None,
 ) -> None:
+    insert_direct_zip_nifti_package_files(conn, candidate, zip_path)
     with zipfile.ZipFile(zip_path) as archive:
         for info in archive.infolist():
             if info.is_dir() or not zip_member_is_metadata(info.filename):
@@ -3301,6 +3391,418 @@ def build_canonical_non_dicom_layer(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def append_json_list_value(value: str, item: str) -> str:
+    values = parse_json_list(value)
+    if item not in values:
+        values.append(item)
+    return json_dumps(sorted(values))
+
+
+def resolve_harvested_file_path(file_meta: sqlite3.Row, files_dir: Path) -> Path | None:
+    candidates: list[Path] = []
+    local_path = str(file_meta["local_path"] or "")
+    if local_path:
+        candidates.append(Path(local_path))
+    candidates.append(candidate_local_path(files_dir, dict(file_meta), file_meta["file_name"] or "download"))
+    for path in candidates:
+        if path.exists():
+            return path
+    glob_root = files_dir / safe_slug(file_meta["short_title"] or "dataset")
+    if glob_root.exists():
+        matches = sorted(glob_root.glob(f"*/{safe_slug(file_meta['file_name'] or '', 'download')}"))
+        for path in matches:
+            if path.exists():
+                return path
+    return None
+
+
+def harvested_support_file(
+    conn: sqlite3.Connection, short_title: str, file_name: str, files_dir: Path
+) -> Path | None:
+    for row in conn.execute(
+        """
+        SELECT *
+        FROM harvested_files
+        WHERE short_title = ?
+          AND file_name = ?
+          AND status = 'ok'
+        ORDER BY file_id DESC
+        """,
+        (short_title, file_name),
+    ):
+        path = resolve_harvested_file_path(row, files_dir)
+        if path:
+            return path
+    return None
+
+
+def inventory_cached_direct_zip_nifti_members(conn: sqlite3.Connection, files_dir: Path) -> int:
+    inserted = 0
+    for row in conn.execute(
+        """
+        SELECT
+            h.*,
+            c.download_row_id AS candidate_download_row_id,
+            c.dataset_type AS candidate_dataset_type,
+            c.download_title AS candidate_download_title,
+            c.download_url AS candidate_download_url
+        FROM harvested_files h
+        LEFT JOIN candidate_downloads c
+          ON c.short_title = h.short_title
+         AND c.download_id = h.download_id
+        WHERE h.source_kind = 'direct_zip'
+          AND h.status = 'ok'
+        """
+    ):
+        zip_path = resolve_harvested_file_path(row, files_dir)
+        if not zip_path:
+            continue
+        candidate = {
+            "download_row_id": row["candidate_download_row_id"] or row["download_row_id"],
+            "short_title": row["short_title"],
+            "dataset_type": row["candidate_dataset_type"] or row["dataset_type"],
+            "download_id": row["download_id"],
+            "download_title": row["candidate_download_title"] or row["download_title"],
+            "download_url": row["candidate_download_url"] or row["source_url"],
+        }
+        inserted += insert_direct_zip_nifti_package_files(conn, candidate, zip_path)
+    return inserted
+
+
+def parse_brats2021_mapping(path: Path) -> dict[str, str]:
+    try:
+        import openpyxl  # type: ignore
+    except ImportError as exc:
+        raise RuntimeError("openpyxl is required to parse BraTS2021_MappingToTCIA.xlsx") from exc
+    workbook = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    mapping: dict[str, str] = {}
+    try:
+        worksheet = workbook[workbook.sheetnames[0]]
+        for index, row in enumerate(worksheet.iter_rows(values_only=True), 1):
+            if index == 1:
+                continue
+            tcia_patient_id = stringify_cell(row[2] if len(row) > 2 else "").strip()
+            challenge_id = stringify_cell(row[4] if len(row) > 4 else "").strip()
+            if tcia_patient_id and challenge_id:
+                if normalize_key(tcia_patient_id) in {"newnotpreviouslyintcia", "newnotintcia"}:
+                    tcia_patient_id = challenge_id
+                mapping[challenge_id] = tcia_patient_id
+    finally:
+        workbook.close()
+    return mapping
+
+
+def parse_csv_dicts(path: Path, delimiter: str | None = None) -> list[dict[str, str]]:
+    _headers, rows = parse_csv_like(path, delimiter=delimiter)
+    return rows
+
+
+def update_nifti_series_fields(
+    conn: sqlite3.Connection,
+    nifti_file_series_id: int,
+    updates: dict[str, str],
+    metadata_source: str,
+) -> None:
+    row = conn.execute(
+        """
+        SELECT metadata_sources
+        FROM nifti_file_series
+        WHERE nifti_file_series_id = ?
+        """,
+        (nifti_file_series_id,),
+    ).fetchone()
+    if row is None:
+        return
+    updates = {key: value for key, value in updates.items() if value is not None}
+    if not updates:
+        return
+    updates["metadata_sources"] = append_json_list_value(row["metadata_sources"], metadata_source)
+    assignments = ", ".join(f'"{key}" = ?' for key in updates)
+    conn.execute(
+        f"UPDATE nifti_file_series SET {assignments} WHERE nifti_file_series_id = ?",
+        (*updates.values(), nifti_file_series_id),
+    )
+
+
+def apply_rsna_brats2021_mapping(conn: sqlite3.Connection, files_dir: Path) -> int:
+    path = harvested_support_file(
+        conn,
+        "RSNA-ASNR-MICCAI-BraTS-2021",
+        "BraTS2021_MappingToTCIA.xlsx",
+        files_dir,
+    )
+    if not path:
+        return 0
+    mapping = parse_brats2021_mapping(path)
+    updates = 0
+    for row in conn.execute(
+        """
+        SELECT nifti_file_series_id, PatientID, file_name, package_path
+        FROM nifti_file_series
+        WHERE short_title = 'RSNA-ASNR-MICCAI-BraTS-2021'
+        """
+    ):
+        match = re.search(r"(BraTS2021_\d{5})", row["package_path"] or row["file_name"] or "")
+        if not match:
+            continue
+        patient_id = mapping.get(match.group(1), "")
+        if not patient_id or row["PatientID"] == patient_id:
+            continue
+        update_nifti_series_fields(
+            conn,
+            row["nifti_file_series_id"],
+            {"PatientID": patient_id},
+            "dataset_specific:BraTS2021_MappingToTCIA.xlsx:column_C_by_column_E",
+        )
+        updates += 1
+    return updates
+
+
+def apply_saros_mapping(conn: sqlite3.Connection, files_dir: Path) -> int:
+    path = harvested_support_file(conn, "SAROS", "Segmentation-Info_09-29-2023.csv", files_dir)
+    if not path:
+        return 0
+    rows = parse_csv_dicts(path)
+    mapping = {
+        (row.get("id") or "").strip(): row
+        for row in rows
+        if (row.get("id") or "").strip()
+    }
+    updates = 0
+    for row in conn.execute(
+        """
+        SELECT nifti_file_series_id, file_name, package_path
+        FROM nifti_file_series
+        WHERE short_title = 'SAROS'
+        """
+    ):
+        match = re.search(r"(case_\d{3})", row["package_path"] or row["file_name"] or "")
+        if not match:
+            continue
+        source = mapping.get(match.group(1))
+        if not source:
+            continue
+        update_nifti_series_fields(
+            conn,
+            row["nifti_file_series_id"],
+            {
+                "PatientID": (source.get("tcia_case_id") or "").strip(),
+                "StudyInstanceUID": (source.get("tcia_study_instance_uid") or "").strip(),
+                "segmented_SeriesInstanceUID": (source.get("tcia_series_instance_uid") or "").strip(),
+                "PatientSex": (source.get("gender") or "").strip(),
+                "BodyPartExamined": (source.get("anatomic_region") or "").strip(),
+            },
+            "dataset_specific:Segmentation-Info_09-29-2023.csv:id_to_tcia_case_id",
+        )
+        updates += 1
+    return updates
+
+
+def apply_breastdcedl_ispy2_mapping(conn: sqlite3.Connection, files_dir: Path) -> int:
+    path = harvested_support_file(
+        conn,
+        "BreastDCEDL_ISPY2",
+        "BreastDCEDL_ISPY2_files_sizes.tsv",
+        files_dir,
+    )
+    if not path:
+        return 0
+    rows = parse_csv_dicts(path, delimiter="\t")
+    mapping = {
+        (row.get("filename") or "").strip(): row
+        for row in rows
+        if (row.get("filename") or "").strip()
+    }
+    updates = 0
+    for row in conn.execute(
+        """
+        SELECT nifti_file_series_id, file_name, PatientID
+        FROM nifti_file_series
+        WHERE short_title = 'BreastDCEDL_ISPY2'
+        """
+    ):
+        source = mapping.get(row["file_name"] or "")
+        if not source:
+            continue
+        patient_id = (source.get("pid") or "").strip()
+        if not patient_id:
+            continue
+        field_updates = {"PatientID": patient_id}
+        file_size = (source.get("file_size") or "").strip()
+        if file_size:
+            field_updates["bytes"] = file_size
+        update_nifti_series_fields(
+            conn,
+            row["nifti_file_series_id"],
+            field_updates,
+            "dataset_specific:BreastDCEDL_ISPY2_files_sizes.tsv:filename_to_pid",
+        )
+        updates += 1
+    return updates
+
+
+def apply_plethora_mapping(conn: sqlite3.Connection) -> int:
+    updates = 0
+    for row in conn.execute(
+        """
+        SELECT nifti_file_series_id, file_name, package_path
+        FROM nifti_file_series
+        WHERE short_title = 'PleThora'
+        """
+    ):
+        match = re.search(r"(LUNG1-\d{3})", row["package_path"] or row["file_name"] or "")
+        if not match:
+            continue
+        update_nifti_series_fields(
+            conn,
+            row["nifti_file_series_id"],
+            {"PatientID": match.group(1)},
+            "dataset_specific:PleThora_zip_directory_patient_id",
+        )
+        updates += 1
+    return updates
+
+
+def apply_vs_mc_rc2_mapping(conn: sqlite3.Connection) -> int:
+    updates = 0
+    pattern = re.compile(
+        r"^(VS_MC_RC2_\d{3})_(\d{4}-\d{2}-\d{2})_([A-Za-z0-9]+(?:_seg)?)\.nii(?:\.gz)?$",
+        flags=re.IGNORECASE,
+    )
+    for row in conn.execute(
+        """
+        SELECT nifti_file_series_id, file_name
+        FROM nifti_file_series
+        WHERE short_title = 'Vestibular-Schwannoma-MC-RC2'
+        """
+    ):
+        match = pattern.match(row["file_name"] or "")
+        if not match:
+            continue
+        patient_id, scan_date, scan_type = match.groups()
+        update_nifti_series_fields(
+            conn,
+            row["nifti_file_series_id"],
+            {
+                "PatientID": patient_id,
+                "StudyDate": scan_date,
+                "SeriesDate": scan_date,
+                "SeriesDescription": scan_type,
+            },
+            "dataset_specific:VS-MC-RC2_filename_convention",
+        )
+        updates += 1
+    return updates
+
+
+def apply_dataset_specific_nifti_enrichment(
+    conn: sqlite3.Connection, files_dir: Path
+) -> dict[str, int]:
+    counts = {
+        "rsna_brats2021_rows": apply_rsna_brats2021_mapping(conn, files_dir),
+        "saros_rows": apply_saros_mapping(conn, files_dir),
+        "breastdcedl_ispy2_rows": apply_breastdcedl_ispy2_mapping(conn, files_dir),
+        "plethora_rows": apply_plethora_mapping(conn),
+        "vestibular_schwannoma_mc_rc2_rows": apply_vs_mc_rc2_mapping(conn),
+    }
+    conn.commit()
+    write_meta(conn, "dataset_specific_enrichment_rows", counts)
+    return counts
+
+
+def apply_saros_external_source_references(conn: sqlite3.Connection) -> int:
+    records = []
+    for row in conn.execute(
+        """
+        SELECT
+            d.derived_object_id,
+            d.non_dicom_file_id,
+            d.radiology_id,
+            d.referenced_series_id,
+            d.package_path,
+            r.study_id,
+            r.subject_id
+        FROM derived_objects d
+        JOIN radiology_series r
+          ON r.radiology_id = d.radiology_id
+        WHERE d.short_title = 'SAROS'
+          AND NULLIF(d.referenced_series_id, '') IS NOT NULL
+        """
+    ):
+        evidence = {
+            "source": "Segmentation-Info_09-29-2023.csv",
+            "tcia_case_id": row["subject_id"],
+            "tcia_study_instance_uid": row["study_id"],
+            "tcia_series_instance_uid": row["referenced_series_id"],
+            "derived_package_path": row["package_path"],
+        }
+        records.append(
+            (
+                stable_hash_id("dor", row["derived_object_id"], row["referenced_series_id"], "saros_csv_source_series"),
+                row["derived_object_id"],
+                row["non_dicom_file_id"],
+                row["radiology_id"],
+                "",
+                "",
+                row["referenced_series_id"],
+                "",
+                "",
+                "source_image_series",
+                "saros_csv_source_series",
+                "high",
+                json_dumps(evidence),
+            )
+        )
+    if records:
+        conn.executemany(
+            """
+            INSERT OR REPLACE INTO derived_object_references
+            (derived_object_reference_id, derived_object_id, derived_non_dicom_file_id,
+             derived_radiology_id, referenced_non_dicom_file_id, referenced_radiology_id,
+             referenced_series_id, referenced_file_name, referenced_package_path,
+             reference_role, inference_method, confidence, evidence_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            records,
+        )
+        conn.commit()
+    return len(records)
+
+
+def write_canonical_layer_counts(conn: sqlite3.Connection) -> None:
+    for table_name in (
+        "nifti_file_series",
+        "non_dicom_files",
+        "radiology_series",
+        "radiology_mr",
+        "radiology_ct",
+        "radiology_pet",
+        "radiology_contrast",
+        "derived_objects",
+        "derived_object_references",
+        "annotation_groups",
+    ):
+        write_meta(
+            conn,
+            f"{table_name}_rows",
+            conn.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()[0],
+        )
+
+
+def postprocess_nifti_metadata(conn: sqlite3.Connection, files_dir: Path) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    counts["direct_zip_nifti_package_files_inserted"] = inventory_cached_direct_zip_nifti_members(
+        conn, files_dir
+    )
+    build_nifti_file_series(conn)
+    counts.update(apply_dataset_specific_nifti_enrichment(conn, files_dir))
+    build_canonical_non_dicom_layer(conn)
+    counts["saros_external_source_references"] = apply_saros_external_source_references(conn)
+    write_meta(conn, "postprocess_nifti_metadata_counts", counts)
+    write_canonical_layer_counts(conn)
+    return counts
+
+
 def harvest(args: argparse.Namespace) -> None:
     source_conn = connect_source(Path(args.source_db))
     out_db = Path(args.out_db)
@@ -3391,25 +3893,7 @@ def harvest(args: argparse.Namespace) -> None:
 
     import_sums_inventory(conn, Path(args.sums_inventory_tsv))
     import_quality_flags(conn, Path(args.quality_flags_tsv))
-    build_nifti_file_series(conn)
-    build_canonical_non_dicom_layer(conn)
-    for table_name in (
-        "nifti_file_series",
-        "non_dicom_files",
-        "radiology_series",
-        "radiology_mr",
-        "radiology_ct",
-        "radiology_pet",
-        "radiology_contrast",
-        "derived_objects",
-        "derived_object_references",
-        "annotation_groups",
-    ):
-        write_meta(
-            conn,
-            f"{table_name}_rows",
-            conn.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()[0],
-        )
+    postprocess_nifti_metadata(conn, files_dir)
 
 
 def summary(db_path: Path) -> dict[str, Any]:
@@ -3583,6 +4067,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Maximum parsed rows per sheet. -1 means no limit.",
     )
     parser.add_argument("--summary", action="store_true")
+    parser.add_argument(
+        "--postprocess-only",
+        action="store_true",
+        help="Rebuild canonical NIfTI layers and apply cached dataset-specific enrichments without harvesting.",
+    )
     return parser
 
 
@@ -3591,6 +4080,11 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.summary:
         print(json.dumps(summary(Path(args.out_db)), indent=2, ensure_ascii=False))
+        return 0
+    if args.postprocess_only:
+        conn = open_output(Path(args.out_db), replace=False)
+        counts = postprocess_nifti_metadata(conn, Path(args.files_dir))
+        print(json.dumps({"postprocess": counts, "summary": summary(Path(args.out_db))}, indent=2, ensure_ascii=False))
         return 0
     harvest(args)
     print(json.dumps(summary(Path(args.out_db)), indent=2, ensure_ascii=False))
