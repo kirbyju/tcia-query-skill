@@ -31,6 +31,7 @@ Key columns:
 - `controlled_access_policy_url`: populated when the dataset-level license is controlled.
 - `subjects`, `data_types`, `download_types`, `download_data_types`, `download_file_types`.
 - `cancer_types`, `cancer_locations`, `species`, `program`.
+- `source_collections`: populated for some Analysis Results; use it as strong relationship evidence when mapping an Analysis Result back to source Collections.
 
 Default user-facing filter:
 
@@ -180,6 +181,102 @@ One row per DataCite record under the TCIA DOI prefix `10.7937`.
 Key columns:
 
 - `doi`, `tcia_short_name`, `title`, `publisher`, `publication_year`, `version`, `state`, `url`.
+
+## Related Analysis Result Checks
+
+When a user asks whether a Collection has ground truth, labels, segmentations, classifications, or annotations, do not stop after checking the Collection's own current downloads. TCIA often publishes reusable annotation files as separate Analysis Result datasets. Before saying a Collection has no labels, search visible Analysis Results and report any related result separately.
+
+Use ranked relationship evidence. Prefer explicit `source_collections`; then result short-title patterns such as `EAY131-Tumor-Annotations`; then result titles that name the Collection; then result download/search URLs or manifest filenames scoped to the Collection. Avoid broad `raw_json LIKE '%short_title%'` matching as primary evidence because program metadata may list many related datasets and cause false positives.
+
+Find annotation-like Analysis Results related to one Collection:
+
+```sql
+WITH input(short_title) AS (VALUES ('EAY131')),
+collection AS (
+  SELECT short_title, title
+  FROM agent_datasets
+  WHERE hidden = 0
+    AND source = 'collections'
+    AND lower(short_title) = lower((SELECT short_title FROM input))
+),
+collection_norm AS (
+  SELECT short_title, title,
+         lower(replace(replace(replace(short_title, ' ', ''), '-', ''), '_', '')) AS norm_short_title
+  FROM collection
+),
+annotation_results AS (
+  SELECT ar.short_title, ar.title, ar.doi, ar.link,
+         ar.access_level, ar.download_data_types, ar.download_types,
+         ar.source_collections,
+         lower(replace(replace(replace(ar.short_title, ' ', ''), '-', ''), '_', '')) AS norm_result_short_title
+  FROM agent_datasets ar
+  WHERE ar.hidden = 0
+    AND ar.source = 'analysis-results'
+    AND (
+      lower(COALESCE(ar.download_data_types, '')) LIKE '%seg%'
+      OR lower(COALESCE(ar.download_data_types, '')) LIKE '%rtstruct%'
+      OR lower(COALESCE(ar.download_data_types, '')) LIKE '%sr%'
+      OR lower(COALESCE(ar.download_data_types, '')) LIKE '%fiducial%'
+      OR lower(COALESCE(ar.download_data_types, '')) LIKE '%classification%'
+      OR lower(COALESCE(ar.download_data_types, '')) LIKE '%measurement%'
+      OR lower(COALESCE(ar.download_types, '')) LIKE '%annotation%'
+    )
+),
+download_scope AS (
+  SELECT d.short_title,
+         group_concat(DISTINCT d.download_title) AS download_titles,
+         group_concat(DISTINCT d.data_types) AS download_data_type_json,
+         group_concat(DISTINCT d.file_types) AS download_file_type_json,
+         lower(group_concat(DISTINCT COALESCE(d.search_url, '') || ' ' ||
+                            COALESCE(d.download_url, '') || ' ' ||
+                            COALESCE(d.download_metadata, ''))) AS scoped_urls
+  FROM agent_current_downloads d
+  WHERE d.hidden = 0
+    AND d.parent_source = 'analysis-results'
+  GROUP BY d.short_title
+)
+SELECT ar.short_title AS analysis_result,
+       ar.title,
+       ar.download_data_types,
+       ds.download_titles,
+       ds.download_file_type_json,
+       ar.access_level,
+       ar.doi,
+       ar.link,
+       trim(
+         CASE
+           WHEN lower(COALESCE(ar.source_collections, '')) LIKE '%' || lower(c.short_title) || '%'
+             OR lower(COALESCE(ar.source_collections, '')) LIKE '%' || lower(c.title) || '%'
+             THEN 'source_collections; '
+           ELSE ''
+         END ||
+         CASE
+           WHEN ar.norm_result_short_title LIKE c.norm_short_title || '%'
+             THEN 'result_short_title_prefix; '
+           ELSE ''
+         END ||
+         CASE
+           WHEN lower(ar.title) LIKE '%' || lower(c.short_title) || '%'
+             OR lower(ar.title) LIKE '%' || lower(c.title) || '%'
+             THEN 'result_title; '
+           ELSE ''
+         END ||
+         CASE
+           WHEN ds.scoped_urls LIKE '%collectioncriteria=' || lower(c.short_title) || '%'
+             OR lower(replace(replace(replace(COALESCE(ds.scoped_urls, ''), ' ', ''), '-', ''), '_', '')) LIKE '%' || c.norm_short_title || '%'
+             THEN 'result_download_scope; '
+           ELSE ''
+         END
+       ) AS relationship_evidence
+FROM collection_norm c
+JOIN annotation_results ar
+LEFT JOIN download_scope ds
+  ON ds.short_title = ar.short_title
+WHERE relationship_evidence <> ''
+ORDER BY ar.short_title;
+```
+
+For broad or ambiguous Collection short titles, inspect the returned `relationship_evidence` and the Analysis Result page before treating the relationship as definitive. A title or scoped-download match is useful evidence; explicit source metadata is stronger.
 
 ## Base Tables
 

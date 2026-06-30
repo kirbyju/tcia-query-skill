@@ -144,6 +144,8 @@ Use `agent_current_downloads` when answering file/download questions. If you nee
 
 For Collections, use `collection_downloads` as the actual dataset download records. For Analysis Results, use `result_downloads` as the actual result file records. Source collection metadata explains provenance only; do not present source collection downloads as if they are the Analysis Result files. If an Analysis Result lacks `result_downloads`, say that result-file metadata is unavailable in the current snapshot instead of substituting `collection_downloads`. Do not rely only on top-level `data_types` for modality filtering; mixed collections can have modality labels only on individual download records.
 
+When answering whether a Collection lacks ground truth, reusable labels, segmentations, classifications, or annotations, check related visible Analysis Results before concluding labels are absent. A Collection's own download records may lack `Image Annotations`, `SEG`, `RTSTRUCT`, `SR`, `Segmentation`, `Classification`, `Measurement`, or `Fiducial` labels even when a separate TCIA Analysis Result publishes those labels. Use the related-Analysis-Result SQL pattern in `references/schema.md`, and report related results separately with their own DOI, access terms, and download labels.
+
 `download_type` is intended as the parent category, but all three fields are multi-select. Mixed parent categories are normal when one download record represents a combined TCIA Data Retriever manifest or package. Examples:
 
 - A single Data Retriever manifest may include source radiology images plus annotation DICOM objects, such as CT/MR with RTSTRUCT or SEG.
