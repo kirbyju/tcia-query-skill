@@ -40,6 +40,17 @@ SPREADSHEET_EXTENSIONS = {".csv", ".tsv", ".xlsx"}
 ZIP_EXTENSIONS = {".zip"}
 NIFTI_EXTENSIONS = {".nii", ".nii.gz"}
 NON_FILE_NIFTI_VALUES = {"directory", "dir", "folder", "file", "symbolic_link", "symlink"}
+LOCAL_EXTRACTED_PACKAGE_SPECS = (
+    {
+        "short_title": "BraTS-TCGA-GBM",
+        "dirname": "Pre-operative_TCGA_GBM_NIfTI_and_Segmentations",
+    },
+    {
+        "short_title": "BraTS-TCGA-LGG",
+        "dirname": "Pre-operative_TCGA_LGG_NIfTI_and_Segmentations",
+    },
+)
+PANCREAS_CT_MANIFEST_FILE = "Pancreas-CT-20200910.tcia"
 METADATA_NAME_HINTS = (
     "acquisition",
     "clinical",
@@ -1713,6 +1724,151 @@ def insert_direct_zip_nifti_package_files(
     return len(records)
 
 
+def local_extract_search_bases(files_dir: Path) -> list[Path]:
+    bases: list[Path] = []
+    env_value = os.environ.get("TCIA_NIFTI_LOCAL_EXTRACT_ROOTS", "")
+    for token in env_value.split(os.pathsep):
+        token = token.strip()
+        if token:
+            bases.append(Path(token).expanduser())
+    for base in (Path.cwd(), files_dir, SKILL_ROOT):
+        bases.append(base)
+        bases.extend(list(base.parents)[:4])
+    unique: list[Path] = []
+    seen: set[str] = set()
+    for base in bases:
+        key = str(base)
+        if key not in seen:
+            seen.add(key)
+            unique.append(base)
+    return unique
+
+
+def local_support_search_bases(files_dir: Path) -> list[Path]:
+    bases: list[Path] = []
+    env_value = os.environ.get("TCIA_NIFTI_LOCAL_SUPPORT_ROOTS", "")
+    for token in env_value.split(os.pathsep):
+        token = token.strip()
+        if token:
+            bases.append(Path(token).expanduser())
+    bases.extend(local_extract_search_bases(files_dir))
+    unique: list[Path] = []
+    seen: set[str] = set()
+    for base in bases:
+        key = str(base)
+        if key not in seen:
+            seen.add(key)
+            unique.append(base)
+    return unique
+
+
+def find_local_extracted_package_dir(files_dir: Path, dirname: str) -> Path | None:
+    for base in local_extract_search_bases(files_dir):
+        candidates = [base] if base.name == dirname else [base / dirname]
+        for candidate in candidates:
+            if candidate.is_dir():
+                return candidate
+    return None
+
+
+def local_extract_member_is_inventory_file(path: Path) -> bool:
+    parts = path.parts
+    if any(part == "__MACOSX" or part.startswith("._") for part in parts):
+        return False
+    if path.name == ".DS_Store":
+        return False
+    return path.is_file()
+
+
+def insert_local_extracted_package_files(
+    conn: sqlite3.Connection, short_title: str, dirname: str, extracted_dir: Path
+) -> int:
+    candidate_row = conn.execute(
+        """
+        SELECT download_row_id, short_title, dataset_type, download_id,
+               download_title, download_url
+        FROM candidate_downloads
+        WHERE short_title = ?
+        ORDER BY download_row_id
+        LIMIT 1
+        """,
+        (short_title,),
+    ).fetchone()
+    if candidate_row is None:
+        return 0
+    candidate = dict(candidate_row)
+    existing = {
+        row["package_path"]
+        for row in conn.execute(
+            """
+            SELECT package_path
+            FROM package_files
+            WHERE short_title = ?
+              AND download_id = ?
+            """,
+            (candidate.get("short_title"), candidate.get("download_id")),
+        )
+    }
+    records = []
+    for path in sorted(extracted_dir.rglob("*")):
+        if not local_extract_member_is_inventory_file(path):
+            continue
+        relative_path = clean_package_path(str(path.relative_to(extracted_dir)))
+        if not relative_path:
+            continue
+        package_path = clean_package_path(f"{short_title}/{dirname}/{relative_path}")
+        if package_path in existing:
+            continue
+        row_json = {
+            "source_kind": "local_extracted_package",
+            "extracted_dir_name": dirname,
+            "relative_path": relative_path,
+            "file_size": path.stat().st_size,
+        }
+        records.append(
+            (
+                candidate.get("download_row_id"),
+                candidate.get("short_title"),
+                candidate.get("download_id"),
+                candidate.get("download_title"),
+                candidate.get("download_url"),
+                package_path,
+                Path(package_path).name,
+                extension_for_name(package_path),
+                str(path.stat().st_size),
+                json_dumps(row_json),
+                1 if aspera_file_is_metadata(package_path) else 0,
+            )
+        )
+    if records:
+        conn.executemany(
+            """
+            INSERT INTO package_files
+            (download_row_id, short_title, download_id, download_title, source_url,
+             package_path, file_name, file_ext, bytes, row_json, is_metadata_candidate)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            records,
+        )
+        conn.commit()
+    return len(records)
+
+
+def inventory_local_extracted_package_files(conn: sqlite3.Connection, files_dir: Path) -> int:
+    inserted = 0
+    for spec in LOCAL_EXTRACTED_PACKAGE_SPECS:
+        extracted_dir = find_local_extracted_package_dir(files_dir, spec["dirname"])
+        if not extracted_dir:
+            continue
+        inserted += insert_local_extracted_package_files(
+            conn,
+            spec["short_title"],
+            spec["dirname"],
+            extracted_dir,
+        )
+    return inserted
+
+
 def harvest_zip_members(
     conn: sqlite3.Connection,
     candidate: dict[str, Any],
@@ -2911,6 +3067,40 @@ def infer_reference_candidates(
             {"derived_stem": stem, "source_prefix": prefix, "atlas_hint": atlas},
         )
 
+    brats_tcga_match = re.fullmatch(
+        r"(TCGA-[A-Z0-9]{2}-[A-Z0-9]{4}_\d{4}\.\d{2}\.\d{2})_GlistrBoost(?:_ManuallyCorrected)?",
+        stem,
+        flags=re.IGNORECASE,
+    )
+    if short_title in {"BraTS-TCGA-GBM", "BraTS-TCGA-LGG"} and brats_tcga_match:
+        prefix = brats_tcga_match.group(1)
+        matches = [source for source in same_parent if source_startswith(source, prefix)]
+        add_reference_candidates(
+            candidates,
+            derived,
+            matches,
+            "brats_tcga_glistrboost_same_subject_date",
+            "high",
+            {"derived_stem": stem, "source_prefix": prefix, "same_parent_source_count": len(matches)},
+        )
+
+    brats_peds_match = re.fullmatch(
+        r"(BraTS-PED-\d{5}-\d{3})-seg",
+        stem,
+        flags=re.IGNORECASE,
+    )
+    if short_title == "BraTS-PEDs" and brats_peds_match:
+        prefix = brats_peds_match.group(1)
+        matches = [source for source in same_parent if source_startswith(source, prefix)]
+        add_reference_candidates(
+            candidates,
+            derived,
+            matches,
+            "brats_peds_seg_same_subject_timepoint",
+            "high",
+            {"derived_stem": stem, "source_prefix": prefix, "same_parent_source_count": len(matches)},
+        )
+
     if not candidates and 0 < len(same_parent) <= 50:
         add_reference_candidates(
             candidates,
@@ -3436,6 +3626,38 @@ def harvested_support_file(
     return None
 
 
+def find_local_support_file(files_dir: Path, file_name: str) -> Path | None:
+    for base in local_support_search_bases(files_dir):
+        candidates = [base] if base.name == file_name else [base / file_name]
+        candidates.extend(
+            [
+                base / "outputs" / "nifti_metadata_candidate" / file_name,
+                base / "outputs" / "nifti_metadata" / file_name,
+                base / "outputs" / "nifti_metadata_full" / file_name,
+            ]
+        )
+        for candidate in candidates:
+            if candidate.is_file():
+                return candidate
+    return None
+
+
+def parse_tcia_manifest_series_uids(path: Path) -> list[str]:
+    uid_re = re.compile(r"\b\d+(?:\.\d+)+\b")
+    uids: list[str] = []
+    seen: set[str] = set()
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith(("#", ";")):
+            continue
+        for match in uid_re.finditer(stripped):
+            uid = match.group(0)
+            if 10 <= len(uid) <= 64 and uid not in seen:
+                seen.add(uid)
+                uids.append(uid)
+    return uids
+
+
 def inventory_cached_direct_zip_nifti_members(conn: sqlite3.Connection, files_dir: Path) -> int:
     inserted = 0
     for row in conn.execute(
@@ -3641,6 +3863,215 @@ def apply_breastdcedl_ispy2_mapping(conn: sqlite3.Connection, files_dir: Path) -
     return updates
 
 
+def apply_ct_org_mapping(conn: sqlite3.Connection) -> int:
+    updates = 0
+    pattern = re.compile(r"^(?:volume|labels)-(\d+)\.nii(?:\.gz)?$", flags=re.IGNORECASE)
+    for row in conn.execute(
+        """
+        SELECT nifti_file_series_id, file_name
+        FROM nifti_file_series
+        WHERE short_title = 'CT-ORG'
+        """
+    ):
+        match = pattern.match(row["file_name"] or "")
+        if not match:
+            continue
+        case_number = match.group(1)
+        update_nifti_series_fields(
+            conn,
+            row["nifti_file_series_id"],
+            {"PatientID": f"CT-ORG-{case_number}", "Modality": "CT"},
+            "dataset_specific:CT-ORG_readme_volume_labels_case_number",
+        )
+        updates += 1
+    return updates
+
+
+def idc_series_metadata_for_uids(uids: list[str]) -> dict[str, dict[str, str]]:
+    if not uids:
+        return {}
+    try:
+        from idc_index import IDCClient  # type: ignore
+    except ImportError:
+        return {}
+    client = IDCClient()
+    quoted_uids = ",".join("'" + uid.replace("'", "''") + "'" for uid in uids)
+    query = f"""
+        SELECT collection_id, PatientID, StudyInstanceUID, SeriesInstanceUID, Modality,
+               BodyPartExamined, StudyDate, StudyDescription, SeriesDescription,
+               instanceCount, license_short_name, source_DOI
+        FROM index
+        WHERE SeriesInstanceUID IN ({quoted_uids})
+    """
+    rows = client.sql_query(query).to_dict("records")
+    by_patient: dict[str, dict[str, str]] = {}
+    for row in rows:
+        record = {key: "" if value is None else str(value) for key, value in row.items()}
+        patient_id = record.get("PatientID", "")
+        if patient_id:
+            by_patient[patient_id] = record
+    return by_patient
+
+
+def apply_pancreas_ct_mapping(conn: sqlite3.Connection, files_dir: Path) -> int:
+    manifest_path = find_local_support_file(files_dir, PANCREAS_CT_MANIFEST_FILE)
+    if not manifest_path:
+        return 0
+    uids = parse_tcia_manifest_series_uids(manifest_path)
+    try:
+        source_by_patient = idc_series_metadata_for_uids(uids)
+    except Exception as exc:  # noqa: BLE001 - IDC enrichment is optional at postprocess time.
+        write_meta(conn, "pancreas_ct_idc_mapping_error", str(exc))
+        return 0
+    if not source_by_patient:
+        return 0
+    updates = 0
+    pattern = re.compile(r"^label(\d{4})\.nii(?:\.gz)?$", flags=re.IGNORECASE)
+    for row in conn.execute(
+        """
+        SELECT nifti_file_series_id, file_name
+        FROM nifti_file_series
+        WHERE short_title = 'Pancreas-CT'
+        """
+    ):
+        match = pattern.match(row["file_name"] or "")
+        if not match:
+            continue
+        patient_id = f"PANCREAS_{int(match.group(1)):04d}"
+        source = source_by_patient.get(patient_id)
+        if not source:
+            continue
+        update_nifti_series_fields(
+            conn,
+            row["nifti_file_series_id"],
+            {
+                "collection_id": source.get("collection_id", ""),
+                "PatientID": patient_id,
+                "StudyInstanceUID": source.get("StudyInstanceUID", ""),
+                "source_DOI": source.get("source_DOI", ""),
+                "StudyDate": source.get("StudyDate", ""),
+                "SeriesDate": source.get("StudyDate", ""),
+                "StudyDescription": source.get("StudyDescription", ""),
+                "BodyPartExamined": source.get("BodyPartExamined", "") or "PANCREAS",
+                "Modality": source.get("Modality", "") or "CT",
+                "SeriesDescription": "manual pancreas segmentation",
+                "SegmentationType": "labelmap",
+                "total_segments": "1",
+                "AlgorithmType": "MANUAL",
+                "AlgorithmName": "manual pancreas annotation",
+                "segmented_SeriesInstanceUID": source.get("SeriesInstanceUID", ""),
+                "license_short_name": source.get("license_short_name", ""),
+            },
+            "dataset_specific:Pancreas-CT_manifest_idc_patient_suffix",
+        )
+        updates += 1
+    write_meta(
+        conn,
+        "pancreas_ct_manifest_idc_summary",
+        {
+            "manifest_file": PANCREAS_CT_MANIFEST_FILE,
+            "manifest_series_instance_uids": len(uids),
+            "idc_patient_rows": len(source_by_patient),
+        },
+    )
+    return updates
+
+
+def apply_brats_tcga_mapping(conn: sqlite3.Connection) -> int:
+    updates = 0
+    pattern = re.compile(
+        r"^(TCGA-[A-Z0-9]{2}-[A-Z0-9]{4})_(\d{4})\.(\d{2})\.(\d{2})_(.+?)\.nii(?:\.gz)?$",
+        flags=re.IGNORECASE,
+    )
+    for row in conn.execute(
+        """
+        SELECT nifti_file_series_id, short_title, file_name
+        FROM nifti_file_series
+        WHERE short_title IN ('BraTS-TCGA-GBM', 'BraTS-TCGA-LGG')
+        """
+    ):
+        match = pattern.match(row["file_name"] or "")
+        if not match:
+            continue
+        patient_id, year, month, day, scan_type = match.groups()
+        scan_type_lower = scan_type.lower()
+        field_updates = {
+            "PatientID": patient_id,
+            "StudyDate": f"{year}-{month}-{day}",
+            "SeriesDate": f"{year}-{month}-{day}",
+            "SeriesDescription": scan_type,
+            "BodyPartExamined": "BRAIN",
+            "Modality": "MR",
+        }
+        if scan_type_lower.startswith("glistrboost"):
+            field_updates.update(
+                {
+                    "SegmentationType": "labelmap",
+                    "AlgorithmName": "GLISTRboost",
+                    "AlgorithmType": "SEMIAUTOMATIC"
+                    if "manuallycorrected" in normalize_key(scan_type)
+                    else "AUTOMATIC",
+                }
+            )
+        update_nifti_series_fields(
+            conn,
+            row["nifti_file_series_id"],
+            field_updates,
+            "dataset_specific:BraTS-TCGA_filename_patient_date_scan_type",
+        )
+        updates += 1
+    return updates
+
+
+def apply_brats_peds_mapping(conn: sqlite3.Connection) -> int:
+    updates = 0
+    pattern = re.compile(
+        r"^(BraTS-PED-\d{5}-\d{3})-(t1n|t1c|t2w|t2f|seg)\.nii(?:\.gz)?$",
+        flags=re.IGNORECASE,
+    )
+    sequence_labels = {
+        "t1n": "native T1",
+        "t1c": "contrast-enhanced T1",
+        "t2w": "T2-weighted",
+        "t2f": "T2-FLAIR",
+        "seg": "expert-refined tumor segmentation",
+    }
+    for row in conn.execute(
+        """
+        SELECT nifti_file_series_id, file_name
+        FROM nifti_file_series
+        WHERE short_title = 'BraTS-PEDs'
+        """
+    ):
+        match = pattern.match(row["file_name"] or "")
+        if not match:
+            continue
+        patient_id, scan_type = match.groups()
+        scan_type = scan_type.lower()
+        field_updates = {
+            "PatientID": patient_id,
+            "BodyPartExamined": "BRAIN",
+            "Modality": "MR",
+            "SeriesDescription": sequence_labels[scan_type],
+        }
+        if scan_type == "seg":
+            field_updates.update(
+                {
+                    "SegmentationType": "labelmap",
+                    "AlgorithmType": "MANUAL",
+                    "AlgorithmName": "expert-refined tumor segmentation",
+                }
+            )
+        update_nifti_series_fields(
+            conn,
+            row["nifti_file_series_id"],
+            field_updates,
+            "dataset_specific:BraTS-PEDs_filename_subject_timepoint_scan_type",
+        )
+        updates += 1
+    return updates
+
+
 def apply_plethora_mapping(conn: sqlite3.Connection) -> int:
     updates = 0
     for row in conn.execute(
@@ -3702,6 +4133,10 @@ def apply_dataset_specific_nifti_enrichment(
         "rsna_brats2021_rows": apply_rsna_brats2021_mapping(conn, files_dir),
         "saros_rows": apply_saros_mapping(conn, files_dir),
         "breastdcedl_ispy2_rows": apply_breastdcedl_ispy2_mapping(conn, files_dir),
+        "ct_org_rows": apply_ct_org_mapping(conn),
+        "pancreas_ct_rows": apply_pancreas_ct_mapping(conn, files_dir),
+        "brats_tcga_rows": apply_brats_tcga_mapping(conn),
+        "brats_peds_rows": apply_brats_peds_mapping(conn),
         "plethora_rows": apply_plethora_mapping(conn),
         "vestibular_schwannoma_mc_rc2_rows": apply_vs_mc_rc2_mapping(conn),
     }
@@ -3769,6 +4204,72 @@ def apply_saros_external_source_references(conn: sqlite3.Connection) -> int:
     return len(records)
 
 
+def apply_pancreas_ct_external_source_references(conn: sqlite3.Connection) -> int:
+    records = []
+    for row in conn.execute(
+        """
+        SELECT
+            d.derived_object_id,
+            d.non_dicom_file_id,
+            d.radiology_id,
+            d.file_name,
+            d.referenced_series_id,
+            d.package_path,
+            r.study_id,
+            r.subject_id
+        FROM derived_objects d
+        JOIN radiology_series r
+          ON r.radiology_id = d.radiology_id
+        WHERE d.short_title = 'Pancreas-CT'
+          AND NULLIF(d.referenced_series_id, '') IS NOT NULL
+        """
+    ):
+        evidence = {
+            "source": f"{PANCREAS_CT_MANIFEST_FILE} plus IDC index",
+            "tcia_patient_id": row["subject_id"],
+            "tcia_study_instance_uid": row["study_id"],
+            "tcia_series_instance_uid": row["referenced_series_id"],
+            "derived_file_name": row["file_name"],
+            "derived_package_path": row["package_path"],
+        }
+        records.append(
+            (
+                stable_hash_id(
+                    "dor",
+                    row["derived_object_id"],
+                    row["referenced_series_id"],
+                    "pancreas_ct_manifest_idc_patient_suffix",
+                ),
+                row["derived_object_id"],
+                row["non_dicom_file_id"],
+                row["radiology_id"],
+                "",
+                "",
+                row["referenced_series_id"],
+                "",
+                "",
+                "source_image_series",
+                "pancreas_ct_manifest_idc_patient_suffix",
+                "high",
+                json_dumps(evidence),
+            )
+        )
+    if records:
+        conn.executemany(
+            """
+            INSERT OR REPLACE INTO derived_object_references
+            (derived_object_reference_id, derived_object_id, derived_non_dicom_file_id,
+             derived_radiology_id, referenced_non_dicom_file_id, referenced_radiology_id,
+             referenced_series_id, referenced_file_name, referenced_package_path,
+             reference_role, inference_method, confidence, evidence_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            records,
+        )
+        conn.commit()
+    return len(records)
+
+
 def write_canonical_layer_counts(conn: sqlite3.Connection) -> None:
     for table_name in (
         "nifti_file_series",
@@ -3794,10 +4295,16 @@ def postprocess_nifti_metadata(conn: sqlite3.Connection, files_dir: Path) -> dic
     counts["direct_zip_nifti_package_files_inserted"] = inventory_cached_direct_zip_nifti_members(
         conn, files_dir
     )
+    counts["local_extracted_package_files_inserted"] = inventory_local_extracted_package_files(
+        conn, files_dir
+    )
     build_nifti_file_series(conn)
     counts.update(apply_dataset_specific_nifti_enrichment(conn, files_dir))
     build_canonical_non_dicom_layer(conn)
     counts["saros_external_source_references"] = apply_saros_external_source_references(conn)
+    counts["pancreas_ct_external_source_references"] = apply_pancreas_ct_external_source_references(
+        conn
+    )
     write_meta(conn, "postprocess_nifti_metadata_counts", counts)
     write_canonical_layer_counts(conn)
     return counts
