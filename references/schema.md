@@ -2,7 +2,7 @@
 
 Use this reference when querying `cache/tcia_snapshot.sqlite` or a database selected by `TCIA_SNAPSHOT_DB`.
 
-The GitHub Release web exports mirror the two most useful agent-facing views for environments that cannot run SQLite. Use `agent_datasets.jsonl` or `agent_datasets.jsonl.gz` for `agent_dataset_access_summary`, and `agent_current_downloads.jsonl` or `agent_current_downloads.jsonl.gz` for `agent_current_downloads`. Prefer plain `.jsonl` for web LLM browse tools that cannot decompress gzip. Filter these generic JSONL tables for controlled/mixed access, modalities, DICOM annotation labels, and download routes instead of relying on prompt-specific precomputed exports.
+The GitHub Release web exports mirror the most useful agent-facing views for environments that cannot run SQLite. Use `agent_datasets.jsonl` or `agent_datasets.jsonl.gz` for `agent_dataset_access_summary`, `agent_current_downloads.jsonl` or `agent_current_downloads.jsonl.gz` for `agent_current_downloads`, `agent_dataset_versions.jsonl` or `.gz` for matched version history, and `agent_dataset_v1_releases.jsonl` or `.gz` for first-release dates. Prefer plain `.jsonl` for web LLM browse tools that cannot decompress gzip. Filter these generic JSONL tables for controlled/mixed access, modalities, DICOM annotation labels, download routes, or release dates instead of relying on prompt-specific precomputed exports.
 
 The optional NIfTI file-grain SQLite is separate from `cache/tcia_snapshot.sqlite`. It is downloaded only when needed with `python scripts/tcia_nifti_metadata.py ensure`, defaults to `cache/nifti_metadata.sqlite`, and is documented in `references/nifti.md`.
 
@@ -23,7 +23,9 @@ Key columns:
 - `source`: `collections` or `analysis-results`.
 - `dataset_type`: `Collection` or `Analysis Result`.
 - `short_title`: WordPress short title; use this as the cross-system key.
+- `short_title_key`: normalized short-title join key used internally for version history matching across punctuation/case differences.
 - `title`, `doi`, `link`, `date_updated`, `hidden`.
+- `current_version_number`: current Collection Manager version number, when exposed by WordPress.
 - `license_status`, `licenses`, `controlled_access`, `noncommercial_license`.
 - `access_level`: `open`, `open_noncommercial`, `controlled`, `mixed`, `review_needed`, or `unknown`.
 - `controlled_access_policy_url`: populated when the dataset-level license is controlled.
@@ -103,6 +105,54 @@ WHERE hidden = 0
   AND resolved_access_level = 'mixed';
 ```
 
+### `agent_dataset_versions`
+
+One row per current TCIA dataset matched to a `/api/v2/versions` record. The match uses exact short titles when possible and a normalized fallback key that strips punctuation and case. This matters for historical records where the version endpoint may use legacy related short titles such as `CT-IMAGES-IN-COVID-19` while the current Collection page uses `CT Images in COVID-19`.
+
+Key columns:
+
+- Dataset columns: `source`, `dataset_type`, `short_title`, `title`, `doi`, `link`, `date_updated`, `current_version_number`, `subjects`, `hidden`.
+- Version columns: `version_id`, `version_slug`, `version_post_title`, `version_number`, `version_date`, `version_related_short_title`.
+- `match_method`: `exact_short_title` or `normalized_short_title`.
+- `version_downloads`, `version_text`, `version_normalized_json`, `version_raw_json`.
+
+Find the version history for a dataset:
+
+```sql
+SELECT short_title, version_number, version_date, version_post_title, match_method
+FROM agent_dataset_versions
+WHERE hidden = 0
+  AND short_title = 'CT Images in COVID-19'
+ORDER BY CAST(NULLIF(version_number, '') AS INTEGER), version_date;
+```
+
+### `agent_dataset_v1_releases`
+
+One row per current TCIA dataset with the best available version 1 release date. The view prefers matched `/api/v2/versions` rows with `version_number = '1'`. If no matched v1 row exists and the current dataset is still version 1, it falls back to the current record's `date_updated`.
+
+Key columns:
+
+- Dataset columns: `source`, `dataset_type`, `short_title`, `title`, `doi`, `link`, `date_updated`, `current_version_number`, `subjects`, `hidden`.
+- `v1_release_date`: best available first-release date.
+- `v1_release_date_source`: `versions_endpoint_exact_short_title`, `versions_endpoint_normalized_short_title`, `current_record_still_v1_date_updated`, or blank when no v1 date can be inferred.
+- Version provenance: `version_id`, `version_slug`, `version_post_title`, `version_related_short_title`, `match_method`.
+
+Find visible datasets first released since a given date:
+
+```sql
+SELECT dataset_type,
+       short_title,
+       title,
+       v1_release_date,
+       v1_release_date_source,
+       subjects,
+       link
+FROM agent_dataset_v1_releases
+WHERE hidden = 0
+  AND v1_release_date >= '2025-01-01'
+ORDER BY v1_release_date, lower(short_title);
+```
+
 ### `agent_pathdb_slides`
 
 One row per PathDB cohort-builder slide row.
@@ -139,6 +189,7 @@ Use base tables when the views do not expose a needed detail.
 - `wordpress_records`: WordPress Collections, Analysis Results, and global Downloads endpoint rows. `raw_json` stores source JSON. `normalized_json` is populated for Collections and Analysis Results.
 - `wordpress_downloads`: normalized nested current download records plus global Downloads endpoint rows. Use `is_current_version = 1` for normal user-facing downloads.
 - `wordpress_download_labels`: one row per `download_type`, `data_type`, `file_type`, and `external_resource` label.
+- `wordpress_versions`: normalized `/api/v2/versions` rows, expanded to one row per related Collection or Analysis Result short title.
 - `pathdb_rows`: trimmed PathDB cohort-builder slide metadata.
 - `pathdb_collection_summary`: collection-level PathDB patient/slide summaries.
 - `datacite_dois`: TCIA DOI prefix records from DataCite.

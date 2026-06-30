@@ -4,6 +4,7 @@ The skill uses a local SQLite snapshot for routine TCIA discovery instead of que
 
 - TCIA WordPress Collections, Analysis Results, and Downloads.
 - Normalized current WordPress download records and their multi-select labels.
+- TCIA WordPress version records from `/api/v2/versions`, matched back to datasets with exact and normalized short-title keys.
 - PathDB cohort-builder slide metadata, trimmed to TCIA query fields.
 - DataCite records under the TCIA DOI prefix `10.7937`.
 
@@ -13,8 +14,12 @@ Generated snapshot files are intentionally not committed to the repository. GitH
 - `tcia_snapshot_manifest.json`
 - `agent_datasets.jsonl`
 - `agent_current_downloads.jsonl`
+- `agent_dataset_versions.jsonl`
+- `agent_dataset_v1_releases.jsonl`
 - `agent_datasets.jsonl.gz`
 - `agent_current_downloads.jsonl.gz`
+- `agent_dataset_versions.jsonl.gz`
+- `agent_dataset_v1_releases.jsonl.gz`
 
 Large optional derived metadata assets may also be published on the same release tag. They are not part of `python scripts/tcia_snapshot.py ensure` and are not downloaded during skill install or normal snapshot refresh.
 
@@ -179,8 +184,12 @@ These assets are generated from the same agent-facing views for hosted/web LLMs 
 | --- | --- |
 | `agent_datasets.jsonl` | Plain-text dataset/access export for web LLMs and browse tools that cannot decompress gzip. |
 | `agent_current_downloads.jsonl` | Plain-text current WordPress download export for web LLMs and browse tools that cannot decompress gzip. |
+| `agent_dataset_versions.jsonl` | Plain-text matched version-history export for web LLMs and browse tools that cannot decompress gzip. |
+| `agent_dataset_v1_releases.jsonl` | Plain-text first-release date export for web LLMs and browse tools that cannot decompress gzip. |
 | `agent_datasets.jsonl.gz` | General flattened dataset/access discovery from `agent_dataset_access_summary`. |
 | `agent_current_downloads.jsonl.gz` | Current WordPress download records from `agent_current_downloads`. |
+| `agent_dataset_versions.jsonl.gz` | Matched `/api/v2/versions` records from `agent_dataset_versions`. |
+| `agent_dataset_v1_releases.jsonl.gz` | Best available dataset v1 release dates from `agent_dataset_v1_releases`. |
 
 Direct release URLs:
 
@@ -188,8 +197,12 @@ Direct release URLs:
 - `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/tcia_snapshot_manifest.json`
 - `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/agent_datasets.jsonl`
 - `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/agent_current_downloads.jsonl`
+- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/agent_dataset_versions.jsonl`
+- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/agent_dataset_v1_releases.jsonl`
 - `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/agent_datasets.jsonl.gz`
 - `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/agent_current_downloads.jsonl.gz`
+- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/agent_dataset_versions.jsonl.gz`
+- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/agent_dataset_v1_releases.jsonl.gz`
 
 Optional NIfTI release URLs:
 
@@ -207,6 +220,12 @@ Optional controlled-access release URLs:
 - `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/controlled_access_metadata_manifest.json`
 
 When an environment has no SQLite execution path, prefer these generic release exports before considering any live API. Use plain `.jsonl` for web LLM browse tools that cannot decompress gzip, and `.jsonl.gz` for local or connector tools that can. They are intentionally table-shaped rather than prompt-specific precomputed answer files. For MCP guidance, see `references/mcp-and-web-llms.md`.
+
+## WordPress Version Tables
+
+The base snapshot includes `/api/v2/versions` records in `wordpress_versions`, expanded to one row per related Collection or Analysis Result short title. Version records are matched to current datasets in `agent_dataset_versions` using exact short titles when possible and a normalized key that strips punctuation and case when legacy version records differ from current Collection Manager short titles.
+
+Use `agent_dataset_v1_releases` for first-release timelines. It prefers matched version 1 rows from `/api/v2/versions`; only when no matched v1 row exists and the current dataset is still version 1 does it fall back to the current Collection or Analysis Result `date_updated` value. That fallback is useful for still-v1 records but should not be used to reconstruct older v1 release dates for datasets now on later versions.
 
 ## Optional NIfTI SQLite
 

@@ -30,6 +30,7 @@ This skill tells an agent how to:
 
 - Confirm whether a dataset is TCIA-published.
 - Query the local SQLite snapshot for routine discovery, access/license metadata, PathDB slide metadata, and TCIA DOI records.
+- Query WordPress version history and v1 release dates through the snapshot instead of rebuilding release timelines from live endpoints.
 - Use TCIA's Publications EndNote XML, not DataCite, for peer-reviewed manuscripts written about TCIA data.
 - Ignore hidden WordPress records unless TCIA staff explicitly request them.
 - Use snapshot text fields for abstracts and descriptions.
@@ -114,7 +115,7 @@ Examples:
 - **Cursor, Cline, Roo Code, Continue, OpenHands, or similar coding agents**: Clone the repo and tell the agent to use `SKILL.md` as the task guide. These tools can usually read the references and run the Python helper scripts.
 - **Custom agents**: Load `SKILL.md` as the primary system/domain instruction, then load files from `references/` on demand. Permit script execution so the agent can refresh/query the SQLite snapshot and create manifests.
 - **SQLite-aware agents**: Mount `cache/tcia_snapshot.sqlite` directly and prefer the views documented in [references/schema.md](./references/schema.md).
-- **Web-based LLMs without local execution**: Use the latest GitHub Release SQLite snapshot when possible, or the generic JSONL exports `agent_datasets.jsonl` and `agent_current_downloads.jsonl`. Compressed `.jsonl.gz` copies are also published for tools that can decompress gzip. See [references/mcp-and-web-llms.md](./references/mcp-and-web-llms.md).
+- **Web-based LLMs without local execution**: Use the latest GitHub Release SQLite snapshot when possible, or the generic JSONL exports `agent_datasets.jsonl`, `agent_current_downloads.jsonl`, `agent_dataset_versions.jsonl`, and `agent_dataset_v1_releases.jsonl`. Compressed `.jsonl.gz` copies are also published for tools that can decompress gzip. See [references/mcp-and-web-llms.md](./references/mcp-and-web-llms.md).
 - **MCP-capable hosted agents**: Connect to a read-only MCP server backed by the published SQLite snapshot or release exports. The MCP server should expose typed search/download-summary tools, not live WordPress scraping.
 
 For non-Codex tools, this repository may not be "installed" automatically as a native skill. It can still be used as structured agent guidance.
@@ -127,8 +128,12 @@ Routine discovery should use the local SQLite snapshot, not live public API call
 - `tcia_snapshot_manifest.json`
 - `agent_datasets.jsonl`
 - `agent_current_downloads.jsonl`
+- `agent_dataset_versions.jsonl`
+- `agent_dataset_v1_releases.jsonl`
 - `agent_datasets.jsonl.gz`
 - `agent_current_downloads.jsonl.gz`
+- `agent_dataset_versions.jsonl.gz`
+- `agent_dataset_v1_releases.jsonl.gz`
 
 Direct release URLs:
 
@@ -136,8 +141,12 @@ Direct release URLs:
 - `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/tcia_snapshot_manifest.json`
 - `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/agent_datasets.jsonl`
 - `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/agent_current_downloads.jsonl`
+- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/agent_dataset_versions.jsonl`
+- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/agent_dataset_v1_releases.jsonl`
 - `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/agent_datasets.jsonl.gz`
 - `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/agent_current_downloads.jsonl.gz`
+- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/agent_dataset_versions.jsonl.gz`
+- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/agent_dataset_v1_releases.jsonl.gz`
 
 Optional NIfTI file-grain metadata is published separately on the same release tag when available:
 

@@ -26,25 +26,35 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 DEFAULT_REPO = "kirbyju/tcia-query-skill"
 DEFAULT_RELEASE_TAG = "tcia-snapshot-latest"
 SNAPSHOT_ASSET = "tcia_snapshot.sqlite.gz"
 MANIFEST_ASSET = "tcia_snapshot_manifest.json"
 AGENT_DATASETS_JSONL = "agent_datasets.jsonl"
 AGENT_DOWNLOADS_JSONL = "agent_current_downloads.jsonl"
+AGENT_VERSIONS_JSONL = "agent_dataset_versions.jsonl"
+AGENT_V1_RELEASES_JSONL = "agent_dataset_v1_releases.jsonl"
 AGENT_DATASETS_JSONL_GZ = f"{AGENT_DATASETS_JSONL}.gz"
 AGENT_DOWNLOADS_JSONL_GZ = f"{AGENT_DOWNLOADS_JSONL}.gz"
+AGENT_VERSIONS_JSONL_GZ = f"{AGENT_VERSIONS_JSONL}.gz"
+AGENT_V1_RELEASES_JSONL_GZ = f"{AGENT_V1_RELEASES_JSONL}.gz"
 WEB_EXPORT_ASSETS = [
     AGENT_DATASETS_JSONL,
     AGENT_DOWNLOADS_JSONL,
+    AGENT_VERSIONS_JSONL,
+    AGENT_V1_RELEASES_JSONL,
     AGENT_DATASETS_JSONL_GZ,
     AGENT_DOWNLOADS_JSONL_GZ,
+    AGENT_VERSIONS_JSONL_GZ,
+    AGENT_V1_RELEASES_JSONL_GZ,
 ]
 REQUIRED_AGENT_VIEWS = [
     "agent_datasets",
     "agent_current_downloads",
     "agent_dataset_access_summary",
+    "agent_dataset_versions",
+    "agent_dataset_v1_releases",
     "agent_pathdb_slides",
     "agent_datacite_dois",
 ]
@@ -193,6 +203,16 @@ def quote_identifier(identifier: str) -> str:
 def clean_text(value: Any) -> str:
     text = strip_html(value)
     return "" if text.lower() in FALSEY_TEXT else text
+
+
+def short_title_key(value: Any) -> str:
+    """Normalize TCIA short titles for cross-endpoint joins.
+
+    The WordPress versions endpoint often stores legacy related short titles with
+    punctuation/hyphen differences, e.g. CT-IMAGES-IN-COVID-19, while current
+    collection records may use CT Images in COVID-19.
+    """
+    return re.sub(r"[^a-z0-9]+", "", clean_text(value).lower())
 
 
 def scalar_field(item: dict[str, Any], *keys: str) -> str:
@@ -361,6 +381,31 @@ def load_wordpress_records_from_snapshot(path: Path, source: str) -> list[dict[s
     except sqlite3.Error as exc:
         raise RuntimeError(
             f"Could not read WordPress {source} records from fallback snapshot {path}: {exc}"
+        ) from exc
+    return sort_wordpress_records([json.loads(row["raw_json"]) for row in rows])
+
+
+def load_wordpress_versions_from_snapshot(path: Path) -> list[dict[str, Any]]:
+    if not path.exists() or path.stat().st_size == 0:
+        return []
+    try:
+        with sqlite3.connect(path) as conn:
+            conn.row_factory = sqlite3.Row
+            table_exists = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'wordpress_versions'"
+            ).fetchone()
+            if not table_exists:
+                return []
+            rows = conn.execute(
+                """
+                SELECT version_id, version_slug, raw_json
+                FROM wordpress_versions
+                GROUP BY version_id, version_slug, raw_json
+                """
+            ).fetchall()
+    except sqlite3.Error as exc:
+        raise RuntimeError(
+            f"Could not read WordPress version records from fallback snapshot {path}: {exc}"
         ) from exc
     return sort_wordpress_records([json.loads(row["raw_json"]) for row in rows])
 
@@ -701,6 +746,17 @@ def normalize_wordpress_record(
         "species": strip_html(item.get("species")),
         "program": strip_html(item.get("program")),
         "date_updated": strip_html(item.get("date_updated")),
+        "current_version_number": scalar_field(
+            item,
+            "version",
+            "version_number",
+            "collection_version",
+            "collection_version_number",
+            "result_version",
+            "result_version_number",
+            "current_version",
+            "current_version_number",
+        ),
         "supporting_data": strip_html(item.get("supporting_data")),
         "source_collections": "" if is_collection else strip_html(item.get("collections")),
         "download_info": strip_html(item.get(download_info_key)),
@@ -767,6 +823,36 @@ def normalize_datacite(work: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def wordpress_version_targets(record: dict[str, Any]) -> list[tuple[str, str, str, str]]:
+    targets: list[tuple[str, str, str, str]] = []
+    for related_source, related_kind, field_name in (
+        ("collections", "Collection", "related_collections"),
+        ("analysis-results", "Analysis Result", "related_analysis_results"),
+    ):
+        for short_title in label_list(record.get(field_name)):
+            key = short_title_key(short_title)
+            if key:
+                targets.append((related_source, related_kind, short_title, key))
+    if targets:
+        return targets
+    return [("", "", "", "")]
+
+
+def normalize_wordpress_version(record: dict[str, Any]) -> dict[str, Any]:
+    downloads = label_list(record.get("downloads"))
+    normalized = {
+        "version_id": str(record.get("id") or ""),
+        "version_slug": scalar_field(record, "slug"),
+        "post_title": scalar_field(record, "post_title", "title"),
+        "version_number": scalar_field(record, "version"),
+        "version_date": scalar_field(record, "date", "date_updated"),
+        "text": strip_html(record.get("text")),
+        "downloads": downloads,
+    }
+    normalized["search_text"] = " ".join(str(value) for value in normalized.values()).lower()
+    return normalized
+
+
 def camicroscope_url(camic_id: str) -> str:
     camic_id = (camic_id or "").strip()
     if not camic_id:
@@ -812,6 +898,7 @@ def create_schema(conn: sqlite3.Connection) -> None:
             id TEXT,
             slug TEXT,
             short_title TEXT,
+            short_title_key TEXT,
             doi TEXT,
             title TEXT,
             link TEXT,
@@ -868,6 +955,24 @@ def create_schema(conn: sqlite3.Connection) -> None:
             FOREIGN KEY(download_row_id) REFERENCES wordpress_downloads(download_row_id)
         );
 
+        CREATE TABLE wordpress_versions (
+            version_row_id INTEGER PRIMARY KEY,
+            version_id TEXT,
+            version_slug TEXT,
+            post_title TEXT,
+            version_number TEXT,
+            version_date TEXT,
+            related_source TEXT,
+            related_kind TEXT,
+            related_short_title TEXT,
+            related_short_title_key TEXT,
+            downloads_json TEXT NOT NULL,
+            text TEXT,
+            normalized_json TEXT NOT NULL,
+            raw_json TEXT NOT NULL,
+            search_text TEXT NOT NULL
+        );
+
         CREATE TABLE pathdb_rows (
             {quoted_pathdb}
         );
@@ -911,11 +1016,13 @@ def create_schema(conn: sqlite3.Connection) -> None:
             id,
             slug,
             short_title,
+            short_title_key,
             title,
             doi,
             link,
             date_updated,
             hidden,
+            json_extract(normalized_json, '$.current_version_number') AS current_version_number,
             json_extract(normalized_json, '$.license_status') AS license_status,
             json_extract(normalized_json, '$.licenses') AS licenses,
             CAST(COALESCE(json_extract(normalized_json, '$.controlled_access'), 0) AS INTEGER) AS controlled_access,
@@ -1058,6 +1165,89 @@ def create_schema(conn: sqlite3.Connection) -> None:
             END AS resolved_controlled_access_policy_url
         FROM summary;
 
+        CREATE VIEW agent_dataset_versions AS
+        SELECT
+            d.source,
+            d.dataset_type,
+            d.id,
+            d.slug,
+            d.short_title,
+            d.title,
+            d.doi,
+            d.link,
+            d.date_updated,
+            d.current_version_number,
+            d.subjects,
+            d.hidden,
+            v.version_row_id,
+            v.version_id,
+            v.version_slug,
+            v.post_title AS version_post_title,
+            v.version_number,
+            v.version_date,
+            v.related_short_title AS version_related_short_title,
+            CASE
+                WHEN lower(v.related_short_title) = lower(d.short_title) THEN 'exact_short_title'
+                ELSE 'normalized_short_title'
+            END AS match_method,
+            v.downloads_json AS version_downloads,
+            v.text AS version_text,
+            v.normalized_json AS version_normalized_json,
+            v.raw_json AS version_raw_json
+        FROM agent_datasets d
+        JOIN wordpress_versions v
+          ON v.related_source = d.source
+         AND v.related_short_title_key = d.short_title_key
+        WHERE v.related_short_title_key != '';
+
+        CREATE VIEW agent_dataset_v1_releases AS
+        WITH ranked_versions AS (
+            SELECT
+                *,
+                ROW_NUMBER() OVER (
+                    PARTITION BY source, short_title
+                    ORDER BY
+                        CASE WHEN version_date = '' THEN 1 ELSE 0 END,
+                        version_date,
+                        CAST(NULLIF(version_id, '') AS INTEGER)
+                ) AS version_rank
+            FROM agent_dataset_versions
+            WHERE trim(version_number) = '1'
+        ),
+        version_v1 AS (
+            SELECT *
+            FROM ranked_versions
+            WHERE version_rank = 1
+        )
+        SELECT
+            d.source,
+            d.dataset_type,
+            d.id,
+            d.slug,
+            d.short_title,
+            d.title,
+            d.doi,
+            d.link,
+            d.date_updated,
+            d.current_version_number,
+            d.subjects,
+            d.hidden,
+            COALESCE(v.version_date, CASE WHEN trim(d.current_version_number) = '1' THEN d.date_updated ELSE '' END) AS v1_release_date,
+            CASE
+                WHEN v.version_row_id IS NOT NULL THEN 'versions_endpoint_' || v.match_method
+                WHEN trim(d.current_version_number) = '1' AND trim(d.date_updated) != '' THEN 'current_record_still_v1_date_updated'
+                ELSE ''
+            END AS v1_release_date_source,
+            v.version_id,
+            v.version_slug,
+            v.version_post_title,
+            v.version_related_short_title,
+            v.match_method
+        FROM agent_datasets d
+        LEFT JOIN version_v1 v
+          ON v.source = d.source
+         AND v.short_title = d.short_title;
+
         CREATE VIEW agent_pathdb_slides AS
         SELECT
             collection,
@@ -1140,6 +1330,7 @@ def insert_wordpress(
                 str(record.get("id") or ""),
                 str(record.get("slug") or ""),
                 short_title,
+                short_title_key(short_title),
                 doi,
                 title,
                 link,
@@ -1154,9 +1345,9 @@ def insert_wordpress(
     conn.executemany(
         """
         INSERT INTO wordpress_records
-        (source, id, slug, short_title, doi, title, link, date_updated, hidden,
+        (source, id, slug, short_title, short_title_key, doi, title, link, date_updated, hidden,
          normalized_json, raw_json, search_text)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         rows,
     )
@@ -1297,6 +1488,54 @@ def insert_wordpress_downloads(
         insert_download_row(conn, normalized, raw_download)
 
 
+def insert_wordpress_versions(conn: sqlite3.Connection, versions: list[dict[str, Any]]) -> None:
+    rows = []
+    for raw_version in versions:
+        normalized = normalize_wordpress_version(raw_version)
+        for related_source, related_kind, related_short_title, related_key in wordpress_version_targets(raw_version):
+            search_values = [
+                normalized.get("version_id", ""),
+                normalized.get("version_slug", ""),
+                normalized.get("post_title", ""),
+                normalized.get("version_number", ""),
+                normalized.get("version_date", ""),
+                related_source,
+                related_kind,
+                related_short_title,
+                *(normalized.get("downloads", []) or []),
+                normalized.get("text", ""),
+            ]
+            rows.append(
+                (
+                    normalized.get("version_id", ""),
+                    normalized.get("version_slug", ""),
+                    normalized.get("post_title", ""),
+                    normalized.get("version_number", ""),
+                    normalized.get("version_date", ""),
+                    related_source,
+                    related_kind,
+                    related_short_title,
+                    related_key,
+                    json_dumps(normalized.get("downloads", [])),
+                    normalized.get("text", ""),
+                    json_dumps(normalized),
+                    json_dumps(raw_version),
+                    " ".join(str(value).lower() for value in search_values if value),
+                )
+            )
+
+    conn.executemany(
+        """
+        INSERT INTO wordpress_versions
+        (version_id, version_slug, post_title, version_number, version_date,
+         related_source, related_kind, related_short_title, related_short_title_key,
+         downloads_json, text, normalized_json, raw_json, search_text)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        rows,
+    )
+
+
 def insert_pathdb(conn: sqlite3.Connection, rows: list[dict[str, str]]) -> None:
     placeholders = ", ".join("?" for _ in PATHDB_COLUMNS)
     columns = ", ".join(quote_identifier(column) for column in PATHDB_COLUMNS)
@@ -1369,6 +1608,7 @@ def add_indexes(conn: sqlite3.Connection) -> None:
     conn.executescript(
         """
         CREATE INDEX idx_wordpress_source_short_title ON wordpress_records(source, short_title);
+        CREATE INDEX idx_wordpress_source_short_title_key ON wordpress_records(source, short_title_key);
         CREATE INDEX idx_wordpress_doi ON wordpress_records(doi);
         CREATE INDEX idx_wordpress_hidden ON wordpress_records(hidden);
         CREATE INDEX idx_wordpress_search_source ON wordpress_records(source);
@@ -1378,6 +1618,9 @@ def add_indexes(conn: sqlite3.Connection) -> None:
         CREATE INDEX idx_wordpress_downloads_hidden ON wordpress_downloads(parent_hidden);
         CREATE INDEX idx_wordpress_download_labels_kind_label ON wordpress_download_labels(label_kind, label COLLATE NOCASE);
         CREATE INDEX idx_wordpress_download_labels_row ON wordpress_download_labels(download_row_id);
+        CREATE INDEX idx_wordpress_versions_related_key ON wordpress_versions(related_source, related_short_title_key);
+        CREATE INDEX idx_wordpress_versions_number_date ON wordpress_versions(version_number, version_date);
+        CREATE INDEX idx_wordpress_versions_id ON wordpress_versions(version_id);
         CREATE INDEX idx_pathdb_collection ON pathdb_rows(collection);
         CREATE INDEX idx_pathdb_patient ON pathdb_rows(patient_id);
         CREATE INDEX idx_pathdb_slide ON pathdb_rows(slide_id);
@@ -1504,6 +1747,19 @@ def build_snapshot(
     warnings.extend(source_warnings)
     log(f"  {len(downloads)} records")
 
+    log("Fetching WordPress versions...")
+    versions, source_status["wordpress_versions"], source_warnings = fetch_rows_for_build(
+        "wordpress_versions",
+        "WordPress versions",
+        "WordPress version records",
+        lambda: fetch_wordpress_endpoint("versions"),
+        load_wordpress_versions_from_snapshot,
+        fallback_db,
+        log,
+    )
+    warnings.extend(source_warnings)
+    log(f"  {len(versions)} records")
+
     log("Fetching PathDB cohort-builder CSV...")
     pathdb_rows, source_status["pathdb"], source_warnings = fetch_pathdb_rows_for_build(fallback_db, log)
     warnings.extend(source_warnings)
@@ -1526,6 +1782,7 @@ def build_snapshot(
         "collections": collections,
         "analysis-results": analysis_results,
         "downloads": downloads,
+        "versions": versions,
     }
     download_title_by_id = endpoint_download_title_lookup(downloads)
     content_sha256 = canonical_content_hash(wordpress_sources, pathdb_rows, datacite_records)
@@ -1544,6 +1801,7 @@ def build_snapshot(
         "wordpress_downloads": (
             len(downloads) + current_collection_downloads + current_analysis_result_downloads
         ),
+        "wordpress_versions": len(versions),
         "pathdb_rows": len(pathdb_rows),
         "datacite_dois": len(datacite_records),
     }
@@ -1558,6 +1816,7 @@ def build_snapshot(
         insert_wordpress(conn, "analysis-results", analysis_results, download_title_by_id)
         insert_wordpress(conn, "downloads", downloads)
         insert_wordpress_downloads(conn, collections, analysis_results, downloads, download_title_by_id)
+        insert_wordpress_versions(conn, versions)
         insert_pathdb(conn, pathdb_rows)
         insert_datacite(conn, datacite_records)
         add_indexes(conn)
@@ -1568,6 +1827,7 @@ def build_snapshot(
                 "content_sha256": content_sha256,
                 "wordpress_base_url": BASE_WORDPRESS_URL,
                 "wordpress_mode": "v2 verbose v=1",
+                "wordpress_versions_endpoint": f"{BASE_WORDPRESS_URL}/versions",
                 "pathdb_csv_url": PATHDB_CSV_URL,
                 "datacite_prefix": DEFAULT_TCIA_PREFIX,
                 "counts": counts,
@@ -1589,6 +1849,7 @@ def build_snapshot(
         "counts": counts,
         "sources": {
             "wordpress_base_url": BASE_WORDPRESS_URL,
+            "wordpress_versions_endpoint": f"{BASE_WORDPRESS_URL}/versions",
             "pathdb_csv_url": PATHDB_CSV_URL,
             "datacite_prefix": DEFAULT_TCIA_PREFIX,
         },
@@ -1682,12 +1943,35 @@ def export_web_artifacts(db_path: Path, exports_dir: Path) -> dict[str, dict[str
             ORDER BY hidden, lower(short_title), download_id, download_slug
             """,
         )
+        versions = rows_as_dicts(
+            conn,
+            """
+            SELECT *
+            FROM agent_dataset_versions
+            ORDER BY hidden, lower(short_title), CAST(NULLIF(version_number, '') AS INTEGER), version_date, version_id
+            """,
+        )
+        v1_releases = rows_as_dicts(
+            conn,
+            """
+            SELECT *
+            FROM agent_dataset_v1_releases
+            ORDER BY hidden, lower(short_title), source
+            """,
+        )
 
     return {
         AGENT_DATASETS_JSONL: write_jsonl(exports_dir / AGENT_DATASETS_JSONL, datasets),
         AGENT_DOWNLOADS_JSONL: write_jsonl(exports_dir / AGENT_DOWNLOADS_JSONL, downloads),
+        AGENT_VERSIONS_JSONL: write_jsonl(exports_dir / AGENT_VERSIONS_JSONL, versions),
+        AGENT_V1_RELEASES_JSONL: write_jsonl(exports_dir / AGENT_V1_RELEASES_JSONL, v1_releases),
         AGENT_DATASETS_JSONL_GZ: write_jsonl_gz(exports_dir / AGENT_DATASETS_JSONL_GZ, datasets),
         AGENT_DOWNLOADS_JSONL_GZ: write_jsonl_gz(exports_dir / AGENT_DOWNLOADS_JSONL_GZ, downloads),
+        AGENT_VERSIONS_JSONL_GZ: write_jsonl_gz(exports_dir / AGENT_VERSIONS_JSONL_GZ, versions),
+        AGENT_V1_RELEASES_JSONL_GZ: write_jsonl_gz(
+            exports_dir / AGENT_V1_RELEASES_JSONL_GZ,
+            v1_releases,
+        ),
     }
 
 
@@ -1882,6 +2166,55 @@ def datacite_records_from_snapshot(
     records = [json.loads(row["normalized_json"]) for row in rows]
     records = [record for record in records if terms_match(record, query)]
     return sorted(records, key=lambda record: str(record.get("doi", "")).lower())
+
+
+def dataset_versions_from_snapshot(
+    short_titles: set[str] | None = None,
+    include_hidden: bool = False,
+    path: str | os.PathLike[str] | None = None,
+) -> list[dict[str, Any]]:
+    if not snapshot_available(path):
+        return []
+    requested = {value.lower() for value in (short_titles or set())}
+    sql = "SELECT * FROM agent_dataset_versions WHERE 1 = 1"
+    params: list[Any] = []
+    if not include_hidden:
+        sql += " AND hidden = 0"
+    if requested:
+        sql += f" AND lower(short_title) IN ({', '.join('?' for _ in requested)})"
+        params.extend(sorted(requested))
+    sql += (
+        " ORDER BY hidden, lower(short_title), "
+        "CAST(NULLIF(version_number, '') AS INTEGER), version_date, version_id"
+    )
+    try:
+        with connect_snapshot(path) as conn:
+            return [dict(row) for row in conn.execute(sql, params).fetchall()]
+    except sqlite3.OperationalError:
+        return []
+
+
+def dataset_v1_releases_from_snapshot(
+    short_titles: set[str] | None = None,
+    include_hidden: bool = False,
+    path: str | os.PathLike[str] | None = None,
+) -> list[dict[str, Any]]:
+    if not snapshot_available(path):
+        return []
+    requested = {value.lower() for value in (short_titles or set())}
+    sql = "SELECT * FROM agent_dataset_v1_releases WHERE 1 = 1"
+    params: list[Any] = []
+    if not include_hidden:
+        sql += " AND hidden = 0"
+    if requested:
+        sql += f" AND lower(short_title) IN ({', '.join('?' for _ in requested)})"
+        params.extend(sorted(requested))
+    sql += " ORDER BY hidden, lower(short_title), source"
+    try:
+        with connect_snapshot(path) as conn:
+            return [dict(row) for row in conn.execute(sql, params).fetchall()]
+    except sqlite3.OperationalError:
+        return []
 
 
 def pathdb_collections_for_dois(dois: set[str], path: str | os.PathLike[str] | None = None) -> set[str]:
