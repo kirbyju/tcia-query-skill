@@ -8,14 +8,15 @@ The skill is designed to hide the complexity of TCIA's multi-system data ecosyst
 
 The Cancer Imaging Archive is an NCI-supported service that de-identifies and hosts a large archive of cancer medical imaging data. TCIA datasets are organized into collections, usually around a disease, imaging modality, data type, trial, or research focus. TCIA primarily hosts DICOM radiology imaging, but it also connects users with digital pathology, clinical data, genomics, treatment details, expert annotations, segmentations, analysis results, and other supporting data when available.
 
-TCIA data can live across several access systems, including:
+TCIA data can live across several access systems and metadata layers, including:
 
-- The local SQLite metadata snapshot published by this repository
+- The base SQLite metadata snapshot and optional SQLite metadata assets published by this repository
 - TCIA WordPress Collection and Analysis Result pages
 - IDC / `idc-index` for many public DICOM datasets
 - CTDC for Biobank controlled-access face datasets
 - General Commons for some other controlled-access TCIA face datasets
-- PathDB for non-DICOM histopathology metadata
+- PathDB and the optional pathology SQLite for non-DICOM histopathology metadata
+- Optional NIfTI and controlled-access SQLite assets for file-grain metadata
 - DataCite for DOI, citation, version, and derived-data relationships
 - TCIA Publications EndNote XML for verified manuscripts written about TCIA data
 - IBM Aspera packages for some large non-DICOM downloads
@@ -29,8 +30,8 @@ An agent skill is a portable bundle of instructions, references, and helper scri
 This skill tells an agent how to:
 
 - Confirm whether a dataset is TCIA-published.
-- Query the local SQLite snapshot for routine discovery, access/license metadata, PathDB slide metadata, and TCIA DOI records.
-- Query WordPress version history and v1 release dates through the snapshot instead of rebuilding release timelines from live endpoints.
+- Query the local SQLite snapshot for routine discovery, access/license metadata, download labels, PathDB slide metadata, and TCIA DOI records.
+- Use optional SQLite assets for file-grain NIfTI metadata, public controlled-access manifest/spreadsheet metadata, and pathology Aspera package metadata when needed.
 - Use TCIA's Publications EndNote XML, not DataCite, for peer-reviewed manuscripts written about TCIA data.
 - Ignore hidden WordPress records unless TCIA staff explicitly request them.
 - Use snapshot text fields for abstracts and descriptions.
@@ -40,18 +41,19 @@ This skill tells an agent how to:
 - Build browser visualization guidance for open-access DICOM through IDC viewers and public non-DICOM PathDB slides through caMicroscope.
 - Return viewer URLs as links instead of trying to launch browser automation.
 - Ask users whether they want direct agent downloads or portable TCIA Data Retriever CSV manifests.
-- Route users to IDC, CTDC, General Commons, PathDB, DataCite, WordPress downloads, or Aspera.
+- Route users to IDC, CTDC, General Commons, PathDB, DataCite, WordPress downloads, TCIA Data Retriever manifests, or Aspera.
 - Point controlled-access users to TCIA's current access policy.
 - Start DOI, citation, version, and related-work questions from DataCite, then confirm TCIA publication/visibility in WordPress.
 - Start publication-mining questions from `https://cancerimagingarchive.net/endnote/Pubs_basedon_TCIA.xml`.
 
-The `references/` directory contains focused guidance the agent can load when needed, while `scripts/` contains small standard-library Python helpers for snapshot refresh, snapshot querying, manifests, and viewer URL construction.
+The `references/` directory contains focused guidance the agent can load when needed, while `scripts/` contains Python helpers for snapshot refresh, snapshot querying, optional metadata assets, manifests, and viewer URL construction.
 
 ## Repository Layout
 
 ```text
 tcia-query-skill/
 +-- SKILL.md
++-- README.md
 +-- .github/
 |   +-- workflows/
 |       +-- update-snapshot.yml
@@ -67,6 +69,7 @@ tcia-query-skill/
 |   +-- mcp-and-web-llms.md
 |   +-- nifti.md
 |   +-- pathdb.md
+|   +-- pathology.md
 |   +-- publications.md
 |   +-- routing.md
 |   +-- schema.md
@@ -78,13 +81,19 @@ tcia-query-skill/
     +-- general_commons_studies.py
     +-- idc_viewer_urls.py
     +-- pathdb_metadata.py
-    +-- tcia_nifti_metadata.py
-    +-- tcia_snapshot.py
+    +-- tcia_controlled_access_metadata.py
     +-- tcia_create_data_retriever_csv.py
     +-- tcia_manifest_series_uids.py
+    +-- tcia_nifti_metadata.py
+    +-- tcia_pathology_metadata.py
     +-- tcia_publications.py
+    +-- tcia_snapshot.py
     +-- tcia_wordpress_search.py
++-- cache/
+    +-- *.sqlite and manifests created or refreshed locally
 ```
+
+The `scripts/` directory also contains maintainer helpers for harvesting NIfTI metadata, checking Aspera package inventories, and rebuilding release assets. Routine users usually only need the scripts shown above.
 
 ## Example Uses
 
@@ -111,11 +120,19 @@ Different agent tools handle skills differently. The core requirement is that th
 Examples:
 
 - **OpenAI Codex**: Install the GitHub repository as a Codex skill, or clone it into a local Codex skills directory so Codex can discover `SKILL.md`.
-- **Claude Code / Claude Desktop**: Add this repository as a project knowledge/source folder or adapt `SKILL.md` into a Claude skill-style instruction file.
+- **Claude in a browser**: Start a chat with Claude and prompt it with:
+
+  ```text
+  Let's create a skill together using your skill-creator skill. I would just like to configure Claude to use [https://github.com/kirbyju/tcia-query-skill/blob/main/SKILL.md](https://github.com/kirbyju/tcia-query-skill/blob/main/SKILL.md)
+  ```
+
+  Then follow Claude's instructions to finish the setup. If Claude asks for source files, point it to this repository so it can use `references/` and `scripts/` when the product supports them.
+
+- **Claude Code / Claude Desktop**: Add this repository as a project knowledge/source folder or adapt `SKILL.md` into a Claude skill-style instruction file. Local script execution and SQLite refresh support depend on the Claude product and environment.
 - **Cursor, Cline, Roo Code, Continue, OpenHands, or similar coding agents**: Clone the repo and tell the agent to use `SKILL.md` as the task guide. These tools can usually read the references and run the Python helper scripts.
 - **Custom agents**: Load `SKILL.md` as the primary system/domain instruction, then load files from `references/` on demand. Permit script execution so the agent can refresh/query the SQLite snapshot and create manifests.
 - **SQLite-aware agents**: Mount `cache/tcia_snapshot.sqlite` directly and prefer the views documented in [references/schema.md](./references/schema.md).
-- **Web-based LLMs without local execution**: Use the latest GitHub Release SQLite snapshot when possible, or the generic JSONL exports `agent_datasets.jsonl`, `agent_current_downloads.jsonl`, `agent_dataset_versions.jsonl`, and `agent_dataset_v1_releases.jsonl`. Compressed `.jsonl.gz` copies are also published for tools that can decompress gzip. See [references/mcp-and-web-llms.md](./references/mcp-and-web-llms.md).
+- **Web-based LLMs without local execution**: Use the latest GitHub Release SQLite snapshot when possible, or the generic JSONL exports `agent_datasets.jsonl` and `agent_current_downloads.jsonl`. Compressed `.jsonl.gz` copies are also published for tools that can decompress gzip. See [references/mcp-and-web-llms.md](./references/mcp-and-web-llms.md).
 - **MCP-capable hosted agents**: Connect to a read-only MCP server backed by the published SQLite snapshot or release exports. The MCP server should expose typed search/download-summary tools, not live WordPress scraping.
 
 For non-Codex tools, this repository may not be "installed" automatically as a native skill. It can still be used as structured agent guidance.
@@ -128,12 +145,8 @@ Routine discovery should use the local SQLite snapshot, not live public API call
 - `tcia_snapshot_manifest.json`
 - `agent_datasets.jsonl`
 - `agent_current_downloads.jsonl`
-- `agent_dataset_versions.jsonl`
-- `agent_dataset_v1_releases.jsonl`
 - `agent_datasets.jsonl.gz`
 - `agent_current_downloads.jsonl.gz`
-- `agent_dataset_versions.jsonl.gz`
-- `agent_dataset_v1_releases.jsonl.gz`
 
 Direct release URLs:
 
@@ -141,12 +154,8 @@ Direct release URLs:
 - `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/tcia_snapshot_manifest.json`
 - `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/agent_datasets.jsonl`
 - `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/agent_current_downloads.jsonl`
-- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/agent_dataset_versions.jsonl`
-- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/agent_dataset_v1_releases.jsonl`
 - `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/agent_datasets.jsonl.gz`
 - `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/agent_current_downloads.jsonl.gz`
-- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/agent_dataset_versions.jsonl.gz`
-- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/agent_dataset_v1_releases.jsonl.gz`
 
 Optional NIfTI file-grain metadata is published separately on the same release tag when available:
 
@@ -162,6 +171,17 @@ Optional controlled-access public manifest/spreadsheet metadata is also publishe
 
 - `controlled_access_metadata.sqlite.gz`
 - `controlled_access_metadata_manifest.json`
+
+Optional direct release URLs:
+
+- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/nifti_metadata.sqlite.gz`
+- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/nifti_metadata_manifest.json`
+- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/pathology_metadata.sqlite.gz`
+- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/pathology_metadata_manifest.json`
+- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/controlled_access_metadata.sqlite.gz`
+- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/controlled_access_metadata_manifest.json`
+
+The base snapshot and controlled-access metadata are checked by the scheduled workflow. Pathology metadata can include a more expensive Aspera package inventory and is refreshed by maintainers when that workflow is dispatched with pathology inventory enabled. NIfTI metadata is maintained as an optional on-demand asset, with scheduled drift checks warning maintainers when it may need refresh.
 
 These optional SQLite files are **not** downloaded during skill install and are **not** downloaded by `python scripts/tcia_snapshot.py ensure`. They expose `agent_*` views for routine use. Users who need NIfTI file-level metadata can fetch it on demand:
 
@@ -197,7 +217,7 @@ If a dataset appears to be missing, the snapshot may not include the newest TCIA
 
 ## Helper Scripts
 
-The helper scripts use Python's standard library. Discovery scripts query the local SQLite snapshot and ask you to run `scripts/tcia_snapshot.py ensure` if the snapshot is missing.
+Most routine helper scripts use Python's standard library. Discovery scripts query the local SQLite snapshot and ask you to run `scripts/tcia_snapshot.py ensure` if the snapshot is missing. Optional metadata build commands may need the packages listed below.
 
 ```bash
 python scripts/tcia_snapshot.py ensure
@@ -207,9 +227,12 @@ python scripts/tcia_nifti_metadata.py datasets --limit 20
 python scripts/tcia_nifti_metadata.py derived --collection BCBM-RadioGenomics --with-sources
 python scripts/tcia_pathology_metadata.py ensure
 python scripts/tcia_pathology_metadata.py datasets --limit 20
+python scripts/tcia_pathology_metadata.py downloads --collection CPTAC-CCRCC
+python scripts/tcia_pathology_metadata.py pathdb --collection CPTAC-STAD --limit 10
 python scripts/tcia_pathology_metadata.py disparities
 python scripts/tcia_controlled_access_metadata.py ensure
 python scripts/tcia_controlled_access_metadata.py datasets --limit 20
+python scripts/tcia_controlled_access_metadata.py downloads --collection CMB-MEL
 python scripts/tcia_controlled_access_metadata.py files --collection CMB-MEL --limit 10
 python scripts/tcia_wordpress_search.py --query breast --limit 10
 python scripts/tcia_wordpress_search.py --short-title EAY131 --json
@@ -254,6 +277,8 @@ python scripts/tcia_controlled_access_metadata.py build \
 python scripts/tcia_controlled_access_metadata.py validate --db dist/controlled_access_metadata.sqlite
 ```
 
+When maintainers need to refresh pathology Aspera package inventory, the scheduled workflow can be manually dispatched with `refresh_pathology_inventory=true`; it runs `scripts/tcia_pathology_aspera_inventory.py`, then rebuilds and validates `pathology_metadata.sqlite.gz`.
+
 ## Publications About TCIA Data
 
 For peer-reviewed manuscripts written about TCIA datasets, use TCIA's verified publications source:
@@ -271,7 +296,7 @@ python scripts/tcia_publications.py --dataset-doi 10.7937/K9/TCIA.2016.RNYFUYE9 
 
 ## Recommended Python Packages
 
-Most bundled helper scripts use Python's standard library, so the skill can run basic snapshot and manifest workflows without extra packages. The controlled-access metadata builder needs `pandas`, `openpyxl`, and `xlrd` to read public WordPress spreadsheet artifacts. For best results on download, viewer, DICOM, and CDA enrichment tasks, install the domain packages in the same Python environment used by the local agent:
+Most bundled helper scripts use Python's standard library, so the skill can run basic snapshot and manifest workflows without extra packages. The controlled-access metadata builder needs `pandas`, `openpyxl`, and `xlrd` to read public WordPress spreadsheet artifacts. Maintainer pathology package inventory refreshes also need IBM Aspera CLI. For best results on download, viewer, DICOM, and CDA enrichment tasks, install the domain packages in the same Python environment used by the local agent:
 
 ```bash
 python -m pip install --upgrade pandas openpyxl xlrd tcia_utils idc-index pydicom cdapython
