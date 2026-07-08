@@ -36,7 +36,7 @@ When a downstream record is derived from a TCIA DOI but is not itself listed in 
 3. Filter candidates by the user's criteria: cancer type, body site, modality, species, data type, access/license, DOI, program, supporting data, segmentations/annotations, or download need. For modality, file format, download-route, and access/license questions, prefer download-level metadata over top-level Collection or Analysis Result `data_types`; mixed datasets can have modality labels such as MR only on individual download records. For public DICOM series/file details after TCIA provenance and access are established, use IDC/idc-index rather than querying live WordPress.
    - Before saying a Collection has no ground truth, segmentations, annotations, labels, or classifications, also search visible WordPress Analysis Results that are related to that Collection. TCIA often publishes annotations as separate Analysis Results, not as current downloads on the source Collection. Check `references/schema.md` for the related-Analysis-Result SQL pattern. Use strong relationship evidence first: Analysis Result `source_collections`, result short titles that start with the collection short title (for example `EAY131-Tumor-Annotations`), result titles that name the collection, and scoped result download/search URLs such as `CollectionCriteria=<short_title>` or manifest filenames containing the short title. Do not rely on broad `raw_json LIKE '%short_title%'` scans alone because program metadata can list many loosely related datasets and create false positives.
 4. Use `collection_short_title` or `result_short_title` as the cross-system key whenever possible.
-5. For download questions, inspect `agent_current_downloads` plus WordPress `download_type`, `data_type`, and `file_type` together. These are multi-select labels, not a strict one-parent tree.
+5. For external-resource questions, use the top-level Collection or Analysis Result `external_resources` labels. For download questions, inspect `agent_current_downloads` plus WordPress `download_type`, `data_type`, and `file_type` together. These download labels are multi-select labels, not a strict one-parent tree.
 6. Route access with the matrix below.
 7. Decide open versus controlled access from WordPress license metadata, not from collection/page accessibility fields. Creative Commons licenses mean open access; Creative Commons NonCommercial licenses are open access with a noncommercial-use restriction. If license text indicates NIH Controlled Data Access, TCIA Restricted, or another controlled/restricted license, alert the user that the dataset is not open access and link to the TCIA NIH Controlled Data Access Policy before giving download/API-key/Data Retriever guidance.
 8. If `agent_dataset_access_summary.resolved_access_level = 'mixed'`, split open/noncontrolled downloads from controlled downloads. Do not imply that all files in a mixed dataset are open.
@@ -114,8 +114,8 @@ For new CSV manifests, create a single-route file with exactly one of the prefer
 
 WordPress download metadata uses three related multi-select fields:
 
-- `download_type`: broad category, such as Radiology Images, Image Annotations, Clinical Data, Pathology Images, or Other.
-- `data_type`: modality, annotation, clinical, pathology, or content label, such as CT, MR, RTSTRUCT, SEG, Segmentation, Demographic, Protocol, or Whole Slide Image.
+- `download_type`: broad category of data within the dataset or download, such as Radiology Images, Image Annotations, Clinical Data, Pathology Images, or Other.
+- `data_type`: more specific modality, annotation, clinical, pathology, or content label, such as CT, MR, RTSTRUCT, SEG, Segmentation, Demographic, Protocol, or Whole Slide Image.
 - `file_type`: file format, such as DICOM, CSV, TSV, XLSX, ZIP, NIfTI, SVS, JSON, or PDF.
 
 Treat `download_type` as the broad parent category, but do not require each download to have exactly one parent. TCIA often publishes one download record for a Data Retriever manifest that contains mixed content, such as CT or MR images plus RTSTRUCT or SEG annotations. TCIA may also publish one ZIP or supporting package that legitimately combines categories, such as image annotations plus protocol/acquisition details labeled as Other.
@@ -127,6 +127,12 @@ For Collections, `collection_downloads` are the dataset's download records. For 
 When answering whether a Collection lacks reusable labels or ground truth, inspect both the Collection's own current downloads and any related Analysis Result records. A Collection-level absence of `Image Annotations`, `SEG`, `RTSTRUCT`, `SR`, `Segmentation`, `Classification`, `Measurement`, or `Fiducial` labels is not enough to conclude that no labels exist. Report related Analysis Results separately, with their own links, DOIs, download labels, and access terms.
 
 In local SQLite snapshots, current-version nested `collection_downloads` and `result_downloads` are normalized into `wordpress_downloads` and `wordpress_download_labels`. Use the boolean `is_current_version` column for user-facing dataset downloads, for example `is_current_version IS TRUE`. The global WordPress downloads endpoint is also stored there with `is_current_version = FALSE`; use those rows for troubleshooting, not routine discovery, because they can include historical or orphaned endpoint records.
+
+## WordPress Dataset External Resources
+
+Top-level Collection and Analysis Result `external_resources` values are curated multi-select labels for related resources such as Clinical, Genomics, Proteomics, Image Analyses, Software/Source Code, and segmentations. Use these dataset-level labels, exposed as `agent_datasets.external_resource_labels` and `agent_datasets.external_resources`, when answering whether a dataset has external clinical data or other related resources.
+
+Do not infer external clinical availability from arbitrary prose. The snapshot sets `has_external_clinical_resource` from an exact top-level `Clinical` external-resource label. Download-level `external_resources` labels are still preserved in `agent_current_downloads.external_resources` and `wordpress_download_labels` when present, but they are sparse and should not be treated as the primary TCIA curator signal for dataset-level external resources.
 
 ## Bundled Scripts
 

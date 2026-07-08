@@ -30,7 +30,10 @@ Key columns:
 - `access_level`: `open`, `open_noncommercial`, `controlled`, `mixed`, `review_needed`, or `unknown`.
 - `controlled_access_policy_url`: populated when the dataset-level license is controlled.
 - `subjects`, `data_types`, `download_types`, `download_data_types`, `download_file_types`.
+- `external_resources`: semicolon-delimited top-level Collection or Analysis Result external-resource labels.
+- `external_resource_labels`: JSON array of those top-level external-resource labels.
 - `cancer_types`, `cancer_locations`, `species`, `program`.
+- `has_tcia_clinical_download`, `has_external_clinical_resource`.
 - `source_collections`: populated for some Analysis Results; use it as strong relationship evidence when mapping an Analysis Result back to source Collections.
 
 Default user-facing filter:
@@ -285,7 +288,7 @@ Use base tables when the views do not expose a needed detail.
 - `snapshot_meta`: schema version, source hashes, source URLs, generated timestamp, and counts.
 - `wordpress_records`: WordPress Collections, Analysis Results, and global Downloads endpoint rows. `raw_json` stores source JSON. `normalized_json` is populated for Collections and Analysis Results.
 - `wordpress_downloads`: normalized nested current download records plus global Downloads endpoint rows. Use `is_current_version = 1` for normal user-facing downloads.
-- `wordpress_download_labels`: one row per `download_type`, `data_type`, `file_type`, and `external_resource` label.
+- `wordpress_download_labels`: one row per download-level `download_type`, `data_type`, `file_type`, and `external_resource` label.
 - `wordpress_versions`: normalized `/api/v2/versions` rows, expanded to one row per related Collection or Analysis Result short title.
 - `pathdb_rows`: trimmed PathDB cohort-builder slide metadata.
 - `pathdb_collection_summary`: collection-level PathDB patient/slide summaries.

@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 DEFAULT_REPO = "kirbyju/tcia-query-skill"
 DEFAULT_RELEASE_TAG = "tcia-snapshot-latest"
 SNAPSHOT_ASSET = "tcia_snapshot.sqlite.gz"
@@ -729,7 +729,10 @@ def normalize_wordpress_record(
                 download_title_by_id,
             )
         )
-    external_resources = strip_html(item.get("external_resources") or item.get("additional_resources"))
+    external_resource_labels = labels_field(item, "external_resources")
+    if not external_resource_labels:
+        external_resource_labels = labels_field(item, "additional_resources")
+    external_resources = "; ".join(external_resource_labels)
 
     return {
         "type": "Collection" if is_collection else "Analysis Result",
@@ -765,9 +768,12 @@ def normalize_wordpress_record(
         "download_data_types": aggregate_download_labels(current_downloads, "data_types"),
         "download_file_types": aggregate_download_labels(current_downloads, "file_types"),
         "has_tcia_clinical_download": has_clinical_download(current_downloads),
-        "has_external_clinical_resource": "clinical" in external_resources.lower(),
+        "has_external_clinical_resource": any(
+            label.lower() == "clinical" for label in external_resource_labels
+        ),
         "current_downloads": [compact_download(download) for download in current_downloads],
         "external_resources": external_resources,
+        "external_resource_labels": external_resource_labels,
         "summary": strip_html(item.get(summary_key)),
         "abstract": strip_html(item.get(abstract_key)),
         "detailed_description": strip_html(item.get("detailed_description")),
@@ -1048,6 +1054,8 @@ def create_schema(conn: sqlite3.Connection) -> None:
             json_extract(normalized_json, '$.cancer_locations') AS cancer_locations,
             json_extract(normalized_json, '$.species') AS species,
             json_extract(normalized_json, '$.program') AS program,
+            json_extract(normalized_json, '$.external_resources') AS external_resources,
+            json_extract(normalized_json, '$.external_resource_labels') AS external_resource_labels,
             json_extract(normalized_json, '$.has_tcia_clinical_download') AS has_tcia_clinical_download,
             json_extract(normalized_json, '$.has_external_clinical_resource') AS has_external_clinical_resource,
             json_extract(normalized_json, '$.source_collections') AS source_collections,

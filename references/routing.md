@@ -138,7 +138,7 @@ Use `agent_current_downloads` when answering file/download questions. If you nee
 
 | Field | Meaning |
 | --- | --- |
-| `download_type` | Broad category label, such as Radiology Images, Image Annotations, Clinical Data, Pathology Images, or Other |
+| `download_type` | Broad category of data within the dataset or download, such as Radiology Images, Image Annotations, Clinical Data, Pathology Images, or Other |
 | `data_type` | More specific content/modality/metadata label, such as CT, MR, RTSTRUCT, SEG, Segmentation, Demographic, Protocol, Histopathology, or Whole Slide Image |
 | `file_type` | Physical or logical file format, such as DICOM, CSV, TSV, XLSX, ZIP, NIfTI, SVS, JSON, or PDF |
 
@@ -158,6 +158,12 @@ Do not collapse mixed labels into one category. Report the mixed content and cho
 - Non-DICOM pathology image labels should be checked against PathDB guidance when slide-level metadata or image URLs are needed.
 
 If a global downloads endpoint row has no `download_type`, `data_type`, `file_type`, title, or URL, treat it as a metadata anomaly and ignore it for normal discovery. Prefer downloads nested under a visible Collection or Analysis Result for user-facing answers.
+
+## Dataset External Resources
+
+Use top-level Collection or Analysis Result `external_resources` labels for external related resources such as Clinical, Genomics, Proteomics, Image Analyses, Software/Source Code, Histopathology, and segmentations. In the SQLite snapshot, `agent_datasets.external_resource_labels` preserves these labels as a JSON array, while `agent_datasets.external_resources` is a semicolon-delimited display string.
+
+For external clinical availability, prefer the exact top-level `Clinical` label and the derived `has_external_clinical_resource` flag. Do not infer external clinical availability by searching arbitrary prose. Download-level `external_resources` values are preserved when curators populate them, but they are sparse and should not replace the top-level dataset labels.
 
 ## Recommended Response Fields
 
