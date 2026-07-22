@@ -1,0 +1,39 @@
+[Unit]
+Description=TCIA Query MCP HTTP Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+
+# Edit these for your host before installing this example under /etc/systemd/system.
+User=tcia-mcp
+Group=tcia-mcp
+WorkingDirectory=/srv/tcia-query-mcp/tcia-query-skill
+
+Environment=TCIA_MCP_ROOT=/srv/tcia-query-mcp
+Environment=PIP_CACHE_DIR=/srv/tcia-query-mcp/pip-cache
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=TCIA_SNAPSHOT_DB=/srv/tcia-query-mcp/cache/tcia_snapshot.sqlite
+Environment=TCIA_CONTROLLED_ACCESS_METADATA_DB=/srv/tcia-query-mcp/cache/controlled_access_metadata.sqlite
+Environment=TCIA_NIFTI_METADATA_DB=/srv/tcia-query-mcp/cache/nifti_metadata.sqlite
+Environment=TCIA_PATHOLOGY_METADATA_DB=/srv/tcia-query-mcp/cache/pathology_metadata.sqlite
+
+# Leave DNS-rebinding protection disabled when a trusted reverse proxy handles
+# host/origin policy. Enable and set allowlists if exposing FastMCP directly.
+Environment=TCIA_MCP_DNS_REBINDING_PROTECTION=false
+# Environment=TCIA_MCP_ALLOWED_HOSTS=mcp.example.org
+# Environment=TCIA_MCP_ALLOWED_ORIGINS=https://mcp.example.org
+
+ExecStart=/srv/tcia-query-mcp/.venv/bin/python -m mcp_server --transport http --host 127.0.0.1 --port 8765
+Restart=on-failure
+RestartSec=5
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadOnlyPaths=/srv/tcia-query-mcp/tcia-query-skill /srv/tcia-query-mcp/cache
+
+[Install]
+WantedBy=multi-user.target
