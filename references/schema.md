@@ -10,6 +10,12 @@ The optional pathology Aspera SQLite is also separate from `cache/tcia_snapshot.
 
 The optional controlled-access SQLite is also separate from `cache/tcia_snapshot.sqlite`. It is downloaded only when needed with `python scripts/tcia_controlled_access_metadata.py ensure`, defaults to `cache/controlled_access_metadata.sqlite`, and is documented in `references/controlled-access.md`.
 
+The optional patient-level clinical SQLite is separate from
+`cache/tcia_snapshot.sqlite`. Download it with
+`python scripts/tcia_clinical_metadata.py ensure`; it defaults to
+`cache/clinical_metadata.sqlite` and is documented in
+`references/clinical.md`.
+
 ## Agent-Facing Views
 
 Prefer these views for normal discovery. They flatten common JSON fields and keep the base tables available as lower-level provenance.
@@ -366,6 +372,155 @@ WHERE route_system = 'ctdc'
   AND upper(COALESCE(modality, image_modality, '')) = 'PT'
   AND COALESCE(drs_uri, '') <> ''
 LIMIT 25;
+```
+
+## Optional Patient-Level Clinical SQLite
+
+Use `cache/clinical_metadata.sqlite` only after the base snapshot confirms
+TCIA provenance, visibility, and access/license metadata. Important tables:
+
+- `clinical_downloads`: official clinical-download candidates and ingest status.
+- `clinical_idc_tables`: IDC table/version inventory and imaging-linked counts.
+- `clinical_dictionary`: IDC column labels and coded-value dictionaries.
+- `clinical_imaging_subjects`: TCIA/IDC imaging subject allowlist.
+- `clinical_dataset_inferences`: audit of eligible/rejected WordPress
+  Collection diagnosis/site labels, `screening_signal`, `review_required`,
+  `review_reason`, `review_evidence`, and the numbers of subjects backfilled
+  or suppressed. Curator-cleared screening matches use
+  `review_required = 0` and a `screening_review_resolved_*` reason.
+- `clinical_sources`: source kind, priority, lineage, signature, hash, and URL.
+- `clinical_rows`: lossless patient rows, imaging flag, and original `row_json`.
+- `clinical_facts`: long-form normalized concepts from every source.
+- `clinical_subjects`: materialized one-row-per-subject resolution.
+- `clinical_build_warnings`: downloads or tables needing curator review.
+
+`clinical_meta.ct_colonography_histology_result` records spreadsheet coverage
+and patient classifications for ACRIN 6664. Its patient-level long-form facts
+include `lesion_histology`, `lesion_histology_code`, and `screening_result`;
+the resolved subject view exposes `screening_result`. Histology-derived
+diagnoses are direct patient-level facts, while subjects with code 88/98 or no
+spreadsheet evidence remain unclassified.
+
+`clinical_meta.ea1141_screening_pathology_result` records the EA1141 official
+ZIP coverage and classification totals. Its direct facts include decoded
+demographics, `screening_result`, `lesion_outcome`,
+`lesion_outcome_detail`, and core/surgical tumor-grade codes. The derived
+patient-level facts classify code `1` as a positive screen, code `0` as a
+negative screen, and leave withdrawn/missing outcomes without a diagnosis.
+Positive subjects receive pathology-specific diagnosis, breast site, and grade
+when available; negative subjects receive `primary_diagnosis = 'Non-Cancer'`.
+
+`clinical_meta.hnscc_official_cohort_result` records the two official HNSCC
+patient-table subject counts, their overlap and union, invalid-ID count, and
+the number promoted into `clinical_imaging_subjects`. Promotion occurs only
+when the current files contain 215 CT-atlas subjects and 492 radiomics
+subjects, with 80 overlapping and exactly 627 in the union. These controlled
+imaging PatientIDs use
+`imaging_source = 'tcia_official_clinical_union'`; the linkage is cohort
+metadata and does not authorize controlled-image access.
+
+`clinical_meta.hungarian_colorectal_icd10_result` records the official CSV
+subject count, PathDB patient and slide counts, exact ID overlap/differences,
+three-character ICD-10 category counts, malignant/non-malignant/indeterminate
+totals, unknown-category count, and promoted-subject count. Promotion requires
+an exact 200-subject official CSV to 200-patient/200-slide PathDB match.
+Patient-level long-form facts retain the full `icd10_code`, stable
+`icd10_category`, and `screening_result`. Category `R89` is retained as
+indeterminate without a derived diagnosis or site.
+
+`clinical_meta.ivygap_allen_clinical_result` records Allen tumor and patient
+counts, current TCIA General Commons manifest row/participant counts, matched
+tumor rows and subjects, external-only and manifest-only subjects,
+multiple-tumor subjects, per-concept patient coverage, and promoted imaging
+subjects. Allen `tumor_name` is linked to TCIA `Participant ID` by its leading
+deidentified `W<number>` patient component. The current result contains 40
+matched tumor rows for all 39 TCIA subjects; `W22` has primary and recurrent
+tumor rows, while Allen-only `W27` and `W28` are excluded.
+
+`clinical_meta.idc_clinical_result` includes a `victre` object recording FDA
+VICTRE source status, patient count, signal-present/absent counts, derived
+cancer/non-cancer counts, unresolved subjects, artifact bytes, and density
+coverage. VICTRE direct facts retain synthetic subject type, DICOM sex, breast
+density, lesion status, and FDA location-file lesion counts. Diagnosis,
+screening result, and positive-case breast site are explicitly marked as
+patient-level inferences. The VICTRE Collection label is audited with
+`eligibility_reason = 'screening_patient_level_only'`, so it never supplies a
+dataset-level cancer diagnosis or site.
+
+Prefer these views:
+
+- `agent_clinical_subjects`
+- `agent_clinical_all_subjects`
+- `agent_clinical_facts`
+- `agent_clinical_conflicts`
+- `agent_clinical_dataset_summary`
+- `agent_clinical_source_tables`
+- `agent_clinical_dictionary`
+- `agent_clinical_imaging_subjects`
+- `agent_clinical_dataset_inferences`
+
+Resolution is concept-specific and ordered official TCIA clinical download,
+TCIA-linked external clinical source with validated identities, IDC clinical,
+CDA, DICOM, and finally a single-label WordPress Collection fallback for a
+missing diagnosis or site. Direct TCIA and IDC-normalized copies share one
+official-data lineage. Lower-priority patient facts are retained even when
+they lose resolution. WordPress fallbacks are added only when the concept has
+no patient-level fact. `agent_clinical_subjects` contains only image-linked
+subjects; use `agent_clinical_all_subjects` to audit clinical-only source rows.
+See `references/clinical.md`.
+
+Resolved subject rows expose `primary_diagnosis_is_inferred` and
+`primary_site_is_inferred`. Long-form facts expose `evidence_scope` and
+`is_inferred`; filter to `is_inferred = 0` when an analysis requires
+patient-observed values only.
+
+For screening review:
+
+```sql
+SELECT short_title, raw_value AS cancer_label, screening_signal,
+       review_reason, candidate_subjects, subjects_applied,
+       subjects_suppressed
+FROM agent_clinical_dataset_inferences
+WHERE concept = 'primary_diagnosis'
+  AND review_required = 1
+ORDER BY short_title;
+```
+
+These rows have no Collection-level diagnosis or site facts applied. Any
+patient-level facts from official artifacts, IDC, CDA, or DICOM remain
+available through their normal source precedence.
+
+Resolved screening reviews can be audited separately:
+
+```sql
+SELECT short_title, raw_value AS cancer_label, screening_signal,
+       review_reason, review_evidence, subjects_applied
+FROM agent_clinical_dataset_inferences
+WHERE concept = 'primary_diagnosis'
+  AND review_required = 0
+  AND review_reason LIKE 'screening_review_resolved_%'
+ORDER BY short_title;
+```
+
+```sql
+SELECT short_title, subject_id, vital_status, overall_survival_days,
+       source_kinds, conflict_count
+FROM agent_clinical_subjects
+WHERE short_title = 'RADCURE';
+
+SELECT table_name, row_count, subject_count, subjects_with_imaging
+FROM agent_clinical_source_tables
+WHERE short_title = 'NLST';
+
+SELECT *
+FROM agent_clinical_conflicts
+WHERE short_title = 'RADCURE';
+
+SELECT short_title, concept, inferred_value, eligibility_reason,
+       candidate_subjects, subjects_applied
+FROM agent_clinical_dataset_inferences
+WHERE eligible = 1
+ORDER BY subjects_applied DESC;
 ```
 
 ## Optional NIfTI SQLite

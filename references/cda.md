@@ -63,7 +63,7 @@ Use `columns()` before relying on a specific column name. CDA's docs list search
 ## TCIA Cohort Workflow
 
 1. Confirm the dataset is a visible TCIA Collection or Analysis Result in WordPress.
-2. Decide whether CDA is answering a real enrichment question. Use WordPress downloads for official TCIA clinical spreadsheets; use CDA for harmonized cross-commons discovery and summaries.
+2. Decide whether CDA is answering a real enrichment question. Use direct TCIA artifacts or IDC clinical tables for official collection clinical data; use CDA for harmonized cross-commons discovery and summaries.
 3. Obtain subject identifiers from IDC/TCIA metadata. For public DICOM, IDC patient/subject metadata is usually the best starting point after WordPress provenance is confirmed.
 4. Validate identifier shape. CDA `subject_id` values may include source/project prefixes, such as `TCGA.TCGA-04-1369`; raw DICOM `PatientID` values may not match directly.
 5. For many subjects, write a TSV with one identifier column and use `match_from_file`. For a few known CDA subject IDs, use `match_all` or `match_any`.

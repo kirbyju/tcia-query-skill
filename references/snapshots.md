@@ -38,9 +38,38 @@ Optional controlled-access public manifest/spreadsheet assets:
 - `controlled_access_metadata.sqlite.gz`
 - `controlled_access_metadata_manifest.json`
 
-The controlled-access SQLite is rebuilt by the scheduled workflow from the fresh base snapshot plus public WordPress manifest and metadata spreadsheet URLs. The workflow uploads it when its controlled metadata release fingerprint changes. NIfTI and pathology assets are larger/manual sidecars: the scheduled workflow checks their source download signatures and optional SQLite schema versions, then warns when they need a manual refresh.
+Optional patient-level clinical assets:
+
+- `clinical_metadata.sqlite.gz`
+- `clinical_metadata_manifest.json`
+
+The controlled-access SQLite is rebuilt by the scheduled workflow from the fresh base snapshot plus public WordPress manifest and metadata spreadsheet URLs. The clinical SQLite uses a hybrid refresh: unchanged direct official artifacts and same-version IDC clinical tables are reused, while a new clinical schema or IDC version triggers complete reprocessing so revised column mappings take effect. Small TCIA-linked external clinical sources, currently Allen Institute IvyGAP tumor details and FDA DIDSR VICTRE lesion-location archives, are fetched on every scheduled build and matched to current TCIA/IDC imaging identifiers so source additions change the release fingerprint and appear in the metadata change report. The prior strict CDA/DICOM seed is carried forward. Single-label WordPress Collection diagnosis/site fallbacks are recomputed locally from every fresh base snapshot. The workflow uploads either sidecar only when its release fingerprint changes. NIfTI and pathology assets are larger/manual sidecars: the scheduled workflow checks their source download signatures and optional SQLite schema versions, then warns when they need a manual refresh.
+
+The imaging-subject allowlist is built from every IDC collection that maps
+unambiguously to a visible TCIA short title, including collections without an
+IDC clinical table. This permits official TCIA spreadsheets such as the ACRIN
+6664 polyp files to link to imaging subjects while leaving participants absent
+from those spreadsheets unclassified. For controlled HNSCC imaging, which is
+not present in IDC's public index, the allowlist additionally accepts the two
+official public patient tables only when their audited counts are exactly
+492 and 215 subjects, 80 overlapping, and 627 in the union. This identifies
+the TCIA cohort but does not grant controlled-image access.
 
 The workflow validates that the SQLite file contains the documented `agent_*` views, writes web-friendly exports from those views, and compares a release fingerprint built from the source-content hash, schema version, SQLite hash, and export hashes. It skips release uploads only when the release fingerprint is unchanged.
+
+Each scheduled or manual run also compares the newly built base,
+controlled-access, and clinical SQLite files with their previously published
+copies. `scripts/tcia_metadata_change_report.py` writes a Markdown table of
+monitored row additions/removals and representative new identifiers to the
+GitHub Actions job summary. New additions and newly appearing clinical
+screening-review flags also emit warning annotations. Manual pathology refreshes
+include the pathology SQLite in the same report.
+
+GitHub's standard workflow notification email reports run status and links to
+the workflow run; arbitrary job-summary content is not guaranteed to appear in
+the email body. Enable successful Actions email notifications if every
+scheduled run should produce an email, then use its run link to open the change
+report and annotations.
 
 Source fetches use bounded retry/backoff for transient network failures such as connection refusals, timeouts, rate limits, and 5xx responses. If any source is temporarily unavailable but a previous release snapshot exists, the workflow reuses that source's previous rows, emits a warning annotation in the build log and a warning entry in the manifest, and still refreshes the other sources. The build fails after retries only when a required source fails and no usable previous snapshot data is available for that source.
 
@@ -102,6 +131,19 @@ Users or agents can override the controlled-access SQLite path with:
 export TCIA_CONTROLLED_ACCESS_METADATA_DB=/path/to/controlled_access_metadata.sqlite
 ```
 
+The optional patient-level clinical SQLite also uses separate on-demand paths:
+
+```text
+cache/clinical_metadata.sqlite
+cache/clinical_metadata_manifest.json
+```
+
+Users or agents can override the clinical SQLite path with:
+
+```bash
+export TCIA_CLINICAL_METADATA_DB=/path/to/clinical_metadata.sqlite
+```
+
 ## Refresh Local Metadata
 
 End users do not need to reinstall the skill just to receive newer TCIA metadata. Skill code/instructions and snapshot data are separate.
@@ -138,6 +180,15 @@ python scripts/tcia_controlled_access_metadata.py ensure
 ```
 
 This downloads and verifies only the optional controlled-access release assets. It is not run by the base snapshot refresh command.
+
+For patient-level clinical metadata, use:
+
+```bash
+python scripts/tcia_clinical_metadata.py ensure
+```
+
+This downloads and verifies only the optional clinical release assets. It is
+not run by the base snapshot refresh command.
 
 ## Build A Snapshot
 
@@ -219,6 +270,11 @@ Optional controlled-access release URLs:
 - `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/controlled_access_metadata.sqlite.gz`
 - `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/controlled_access_metadata_manifest.json`
 
+Optional patient-level clinical release URLs:
+
+- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/clinical_metadata.sqlite.gz`
+- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/clinical_metadata_manifest.json`
+
 When an environment has no SQLite execution path, prefer these generic release exports before considering any live API. Use plain `.jsonl` for web LLM browse tools that cannot decompress gzip, and `.jsonl.gz` for local or connector tools that can. They are intentionally table-shaped rather than prompt-specific precomputed answer files. For MCP guidance, see `references/mcp-and-web-llms.md`.
 
 ## WordPress Version Tables
@@ -226,6 +282,38 @@ When an environment has no SQLite execution path, prefer these generic release e
 The base snapshot includes `/api/v2/versions` records in `wordpress_versions`, expanded to one row per related Collection or Analysis Result short title. Version records are matched to current datasets in `agent_dataset_versions` using exact short titles when possible and a normalized key that strips punctuation and case when legacy version records differ from current Collection Manager short titles.
 
 Use `agent_dataset_v1_releases` for first-release timelines. It prefers matched version 1 rows from `/api/v2/versions`; only when no matched v1 row exists and the current dataset is still version 1 does it fall back to the current Collection or Analysis Result `date_updated` value. That fallback is useful for still-v1 records but should not be used to reconstruct older v1 release dates for datasets now on later versions.
+
+## Optional Patient-Level Clinical SQLite
+
+The clinical SQLite combines direct official public TCIA clinical artifacts,
+public TCIA-linked external clinical sources with manifest-validated
+identities, IDC collection clinical tables, strict TCIA-matched CDA
+enrichment, and sparse DICOM fallback values. It preserves raw source rows,
+IDC dictionaries, imaging linkage, and conflicting facts while materializing
+convenient resolved subject rows with direct TCIA > linked external > IDC
+clinical > CDA > DICOM precedence. When the corresponding patient-level fact
+is absent, one non-generic WordPress Collection cancer type/location may
+provide a lower-priority diagnosis/site fallback marked as a dataset-scope
+inference.
+
+Bootstrap CDA/DICOM locally from the existing prototype, publish the resulting
+clinical assets once, and let scheduled GitHub Actions reuse that seed.
+Scheduled runs refresh the base snapshot, reuse direct artifacts whose
+Collection Manager signature is unchanged, reuse IDC tables when the IDC
+version is unchanged, fully rebuild IDC clinical tables on a version change,
+fetch small linked external sources on every run, and carry prior CDA/DICOM
+sources forward. Manual workflow inputs can force
+either direct official artifacts or IDC clinical tables to be fetched again.
+WordPress dataset-scope inference is inexpensive and is always regenerated
+from the fresh base snapshot rather than reused from the previous sidecar.
+Collections containing `screen*` with one otherwise-eligible diagnosis label
+and no non-cancer designation are placed in the clinical review queue. Their
+Collection-level diagnosis and site fallbacks are suppressed, while any
+patient-level source facts continue through normal precedence.
+
+Do not perform the full CDA harvest twice daily. Refresh the local seed after
+relevant CDA releases or material IDC subject-inventory changes, then upload
+the refreshed clinical assets. See `references/clinical.md`.
 
 ## Optional NIfTI SQLite
 

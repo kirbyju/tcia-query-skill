@@ -16,6 +16,22 @@ on:
         required: false
         default: ""
         type: string
+      refresh_all_clinical_downloads:
+        description: "Re-fetch every public official clinical artifact instead of reusing unchanged rows"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+      refresh_idc_clinical:
+        description: "Re-fetch IDC clinical tables even when the IDC release version is unchanged"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
   schedule:
     - cron: "17 7,19 * * *"
       timezone: "America/New_York"
@@ -40,7 +56,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install optional metadata dependencies
-        run: python -m pip install --upgrade pandas openpyxl xlrd
+        run: python -m pip install --upgrade pandas openpyxl xlrd "idc-index>=0.12.3"
 
       - name: Prepare previous snapshot fallback
         env:
@@ -94,6 +110,50 @@ jobs:
         run: |
           python scripts/tcia_controlled_access_metadata.py validate \
             --db dist/controlled_access_metadata.sqlite
+
+      - name: Prepare previous clinical metadata
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="tcia-snapshot-latest"
+          mkdir -p previous
+          if gh release download "$tag" --pattern clinical_metadata.sqlite.gz --dir previous --clobber >/dev/null 2>&1; then
+            if gzip -dc previous/clinical_metadata.sqlite.gz > previous/clinical_metadata.sqlite; then
+              echo "Previous clinical metadata is available for incremental reuse."
+            else
+              echo "::warning::Previous clinical metadata could not be decompressed; clinical sources will be rebuilt."
+              rm -f previous/clinical_metadata.sqlite previous/clinical_metadata.sqlite.gz
+            fi
+          else
+            echo "::warning title=Clinical seed missing::No previous clinical_metadata.sqlite.gz exists. Official TCIA and IDC clinical tables will be harvested, but CDA and DICOM fallback rows require a one-time locally built seed."
+          fi
+
+      - name: Build patient-level clinical metadata
+        run: |
+          set -euo pipefail
+          clinical_args=()
+          if [ -s previous/clinical_metadata.sqlite ]; then
+            clinical_args+=(--previous-db previous/clinical_metadata.sqlite)
+          fi
+          if [ "${{ inputs.refresh_all_clinical_downloads || 'false' }}" = "true" ]; then
+            clinical_args+=(--refresh-all-official)
+          fi
+          if [ "${{ inputs.refresh_idc_clinical || 'false' }}" = "true" ]; then
+            clinical_args+=(--refresh-idc-clinical)
+          fi
+          python scripts/tcia_clinical_metadata.py build \
+            --snapshot-db dist/tcia_snapshot.sqlite \
+            --out dist/clinical_metadata.sqlite \
+            --gzip-out dist/clinical_metadata.sqlite.gz \
+            --manifest-out dist/clinical_metadata_manifest.json \
+            --replace \
+            "${clinical_args[@]}"
+
+      - name: Validate patient-level clinical metadata
+        run: |
+          python scripts/tcia_clinical_metadata.py validate \
+            --db dist/clinical_metadata.sqlite
 
       - name: Install Aspera CLI
         if: github.event_name == 'workflow_dispatch' && inputs.refresh_pathology_inventory == 'true'
@@ -155,6 +215,40 @@ jobs:
             fi
           else
             echo "::warning title=NIfTI metadata missing::No nifti_metadata_manifest.json release asset found. Upload nifti_metadata.sqlite.gz and nifti_metadata_manifest.json to enable on-demand NIfTI metadata access."
+          fi
+
+      - name: Prepare previous sidecars for change reporting
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="tcia-snapshot-latest"
+          mkdir -p previous
+
+          if gh release download "$tag" \
+            --pattern controlled_access_metadata.sqlite.gz \
+            --dir previous --clobber >/dev/null 2>&1; then
+            if ! gzip -dc previous/controlled_access_metadata.sqlite.gz \
+              > previous/controlled_access_metadata.sqlite; then
+              echo "::warning title=Controlled-access comparison unavailable::The previous controlled-access SQLite could not be decompressed."
+              rm -f previous/controlled_access_metadata.sqlite
+            fi
+          else
+            echo "::warning title=Controlled-access comparison baseline::No previous controlled-access SQLite was found; this run will establish the comparison baseline."
+          fi
+
+          if [ "${{ inputs.refresh_pathology_inventory || 'false' }}" = "true" ]; then
+            if gh release download "$tag" \
+              --pattern pathology_metadata.sqlite.gz \
+              --dir previous --clobber >/dev/null 2>&1; then
+              if ! gzip -dc previous/pathology_metadata.sqlite.gz \
+                > previous/pathology_metadata.sqlite; then
+                echo "::warning title=Pathology comparison unavailable::The previous pathology SQLite could not be decompressed."
+                rm -f previous/pathology_metadata.sqlite
+              fi
+            else
+              echo "::warning title=Pathology comparison baseline::No previous pathology SQLite was found; this manual refresh will establish the comparison baseline."
+            fi
           fi
 
       - name: Compare with published snapshot
@@ -230,6 +324,62 @@ jobs:
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Compare with published clinical metadata
+        id: compare_clinical
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="tcia-snapshot-latest"
+          new_fingerprint="$(python -c 'import json; print(json.load(open("dist/clinical_metadata_manifest.json"))["release_fingerprint"])')"
+          echo "new_fingerprint=${new_fingerprint}" >> "$GITHUB_OUTPUT"
+
+          mkdir -p previous
+          if gh release download "$tag" --pattern clinical_metadata_manifest.json --dir previous --clobber >/dev/null 2>&1; then
+            old_fingerprint="$(python -c 'import json; m=json.load(open("previous/clinical_metadata_manifest.json")); print(m.get("release_fingerprint") or m.get("sqlite_sha256", ""))')"
+          else
+            old_fingerprint=""
+          fi
+
+          echo "old_fingerprint=${old_fingerprint}" >> "$GITHUB_OUTPUT"
+          if [ "$new_fingerprint" = "$old_fingerprint" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Report SQLite additions and clinical review flags
+        run: |
+          set -euo pipefail
+          report_args=(
+            --snapshot-new dist/tcia_snapshot.sqlite
+            --controlled-new dist/controlled_access_metadata.sqlite
+            --clinical-new dist/clinical_metadata.sqlite
+          )
+          if [ -s previous/tcia_snapshot.sqlite ]; then
+            report_args+=(--snapshot-old previous/tcia_snapshot.sqlite)
+          fi
+          if [ -s previous/controlled_access_metadata.sqlite ]; then
+            report_args+=(
+              --controlled-old previous/controlled_access_metadata.sqlite
+            )
+          fi
+          if [ -s previous/clinical_metadata.sqlite ]; then
+            report_args+=(--clinical-old previous/clinical_metadata.sqlite)
+          fi
+          if [ "${{ inputs.refresh_pathology_inventory || 'false' }}" = "true" ]; then
+            report_args+=(--pathology-new dist/pathology_metadata.sqlite)
+            if [ -s previous/pathology_metadata.sqlite ]; then
+              report_args+=(--pathology-old previous/pathology_metadata.sqlite)
+            fi
+          fi
+
+          python scripts/tcia_metadata_change_report.py \
+            "${report_args[@]}" \
+            --github-actions \
+            --markdown-out dist/metadata_change_report.md
+          cat dist/metadata_change_report.md >> "$GITHUB_STEP_SUMMARY"
+
       - name: Publish changed snapshot
         if: steps.compare.outputs.changed == 'true'
         env:
@@ -272,6 +422,23 @@ jobs:
             dist/controlled_access_metadata_manifest.json \
             --clobber
 
+      - name: Publish changed patient-level clinical metadata
+        if: steps.compare_clinical.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="tcia-snapshot-latest"
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" \
+              --title "Latest TCIA metadata snapshot" \
+              --notes "Automatically updated SQLite metadata snapshot for the TCIA query skill."
+          fi
+          gh release upload "$tag" \
+            dist/clinical_metadata.sqlite.gz \
+            dist/clinical_metadata_manifest.json \
+            --clobber
+
       - name: Publish changed pathology metadata
         if: github.event_name == 'workflow_dispatch' && inputs.refresh_pathology_inventory == 'true' && steps.compare_pathology.outputs.changed == 'true'
         env:
@@ -296,6 +463,10 @@ jobs:
       - name: Report unchanged controlled-access metadata
         if: steps.compare_controlled.outputs.changed == 'false'
         run: echo "Controlled-access metadata release fingerprint is unchanged; release assets were not updated."
+
+      - name: Report unchanged patient-level clinical metadata
+        if: steps.compare_clinical.outputs.changed == 'false'
+        run: echo "Patient-level clinical metadata release fingerprint is unchanged; release assets were not updated."
 
       - name: Report unchanged pathology metadata
         if: github.event_name == 'workflow_dispatch' && inputs.refresh_pathology_inventory == 'true' && steps.compare_pathology.outputs.changed == 'false'

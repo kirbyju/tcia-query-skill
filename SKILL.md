@@ -24,7 +24,8 @@ When a downstream record is derived from a TCIA DOI but is not itself listed in 
    - For peer-reviewed publications or manuscripts about TCIA data, use TCIA's EndNote XML export, not DataCite. Prefer `scripts/tcia_publications.py`, and load `references/publications.md`.
    - For DOI, citation, or version questions, start with DataCite metadata from the snapshot. Prefer `scripts/datacite_tcia_dois.py` for TCIA DOI prefix records.
    - For TCIA dataset release timelines, first-release dates, or version-history questions, use `agent_dataset_versions` and `agent_dataset_v1_releases` from the snapshot. These views are derived from the WordPress `/api/v2/versions` endpoint and match related datasets by exact short title plus a normalized punctuation/case-insensitive key. For v1 timelines, prefer `v1_release_date_source` values from the versions endpoint; treat `current_record_still_v1_date_updated` as a fallback only for datasets that are still version 1.
-   - For subject-level clinical, demographic, diagnosis, treatment, or cross-commons data-availability enrichment, confirm the TCIA dataset in WordPress first, then use CDA from validated TCIA/IDC subject identifiers. Load `references/cda.md`.
+   - For reusable patient-level clinical, demographic, diagnosis, outcome, response, or DICOM-fallback queries, confirm the TCIA dataset in WordPress first, then load `references/clinical.md` and use the optional clinical SQLite. Follow that reference for source precedence, identity validation, dataset-specific transformations, inference safeguards, and the preferred `agent_clinical_*` views.
+   - For additional harmonized treatment or cross-commons data-availability enrichment not present in official/IDC clinical tables, use CDA only from validated TCIA/IDC subject identifiers. Load `references/cda.md`.
    - For file-level public NIfTI questions, confirm TCIA provenance/access through the normal snapshot first, then load `references/nifti.md` and use the optional NIfTI SQLite release only if file-grain metadata are needed. Prefer `agent_nifti_dataset_summary`, `agent_nifti_downloads`, `agent_nifti_files`, and `agent_nifti_derived_objects`.
    - For controlled-access file, manifest, `drs_uri`, modality, or series-level metadata, confirm controlled status through the normal snapshot first, then load `references/controlled-access.md` and use the optional controlled-access SQLite release when file-grain public metadata are needed. Prefer `agent_controlled_dataset_summary`, `agent_controlled_downloads`, and `agent_controlled_files`.
    - For all other discovery and access questions, search WordPress snapshot records first for Collections and Analysis Results.
@@ -53,7 +54,8 @@ When a downstream record is derived from a TCIA DOI but is not itself listed in 
 | Browser visualization before download | Controlled-access data cannot be previewed before download. For open/public DICOM in IDC, use OHIF v3 for radiology, VolView when a public S3 series folder/CRDC UUID is available, and SliM for SM slide microscopy. For open/public non-DICOM PathDB slides, use caMicroscope with the PathDB CSV `camic_id`. Load `references/visualization.md`. |
 | Controlled-access face datasets | If license metadata indicates controlled/restricted access, alert that the dataset is controlled access and point to `https://www.cancerimagingarchive.net/nih-controlled-data-access-policy/`. For Biobank controlled-access face data, use the current WordPress dataset pages/download metadata and optional controlled-access SQLite for CTDC manifest, `drs_uri`, metadata, download, and viewer links; users must request access to dbGaP study `phs002192`. For non-Biobank face datasets, use General Commons only when WordPress or GC metadata indicate that route; scope GC queries to `phs004225` and match `study_acronym` to the WordPress short title. Do not directly download controlled data; provide policy and TCIA Data Retriever manifest guidance for later authorized use. |
 | Controlled-access NCTN trials or Biobank data | If license metadata indicates controlled/restricted access, alert that the dataset is controlled access and point to the TCIA NIH Controlled Data Access Policy. For Biobank controlled-access face data, route through CTDC using the manifests and download/view links now exposed on the relevant WordPress pages, and use the optional controlled-access SQLite when file-grain public metadata are needed; tell users they must request dbGaP access to `phs002192`. For NCTN trials or other controlled datasets, use WordPress for current metadata and access statements unless WordPress identifies a downstream route. |
-| Subject-level clinical/demographic/diagnosis enrichment or cross-commons availability | Use CDA after WordPress provenance is established. Prefer `cdapython` for harmonized subject and file summaries across IDC, GDC, PDC, GC, ICDC, and related upstream identifiers. Use CDA to enrich TCIA/IDC cohorts, not to decide TCIA publication, replace official WordPress downloads, or authorize controlled data access. Load `references/cda.md`. |
+| Subject-level clinical/demographic/diagnosis/outcome metadata | Confirm WordPress provenance, then load `references/clinical.md` and use the optional clinical SQLite. |
+| Cross-commons clinical or file availability | Use CDA after WordPress provenance and TCIA/IDC subject identity are established. Prefer `cdapython` for harmonized summaries across IDC, GDC, PDC, GC, ICDC, and related upstream identifiers. Load `references/cda.md`. |
 | Non-DICOM pathology | Use PathDB. Prefer the stable cohort-builder CSV for rich slide-level metadata, and match its `collection` field to the WordPress short title. The PathDB API collection list may use `collectionName`. |
 | Spreadsheets, ZIP files, supporting files, manifests, and ancillary downloads | Use WordPress download metadata. If a download is an IBM Aspera Faspex package, see `references/aspera.md`. |
 | Peer-reviewed manuscripts about TCIA datasets | Use TCIA Publications and the EndNote XML export. Search title, abstract, keywords, journal, PMID, manuscript DOI, and linked TCIA dataset DOIs. Load `references/publications.md`. |
@@ -144,6 +146,8 @@ Run scripts from the skill root.
 | `scripts/tcia_snapshot.py` | Build, inspect, validate, or download the local SQLite metadata snapshot, and export web-friendly release files. |
 | `scripts/tcia_nifti_metadata.py` | Download, validate, summarize, and query the optional release SQLite for visible non-controlled TCIA NIfTI file-grain metadata. |
 | `scripts/tcia_controlled_access_metadata.py` | Build/download, validate, summarize, and query the optional release SQLite for public controlled-access WordPress manifests, metadata spreadsheets, `drs_uri` rows, and IDC-shaped radiology indexes. |
+| `scripts/tcia_clinical_metadata.py` | Build/download and validate the optional patient-level clinical SQLite from official TCIA artifacts, IDC collection clinical tables, strict TCIA-matched CDA rows, and DICOM fallback. |
+| `scripts/tcia_metadata_change_report.py` | Compare newly built SQLite assets with their previous releases and generate GitHub Actions summaries/annotations for additions and clinical review flags. |
 | `scripts/tcia_manifest_series_uids.py` | Extract DICOM Series Instance UIDs from a legacy TCIA `.tcia` manifest path or URL for IDC/idc-index lookup. |
 | `scripts/tcia_create_data_retriever_csv.py` | Create a TCIA Data Retriever CSV manifest from validated DICOM Series Instance UIDs, direct `imageUrl` values, or `drs_uri` values. |
 | `scripts/idc_viewer_urls.py` | Construct OHIF v3, SliM, or VolView URLs after TCIA provenance, license, and IDC presence are already verified. |
@@ -180,6 +184,8 @@ python scripts/datacite_tcia_dois.py --doi 10.7937/4qad-4280 --json
 python scripts/tcia_publications.py --query radiogenomics --limit 10
 python scripts/tcia_publications.py --dataset-doi 10.7937/K9/TCIA.2016.RNYFUYE9 --json
 python scripts/pathdb_metadata.py --collection CPTAC-STAD --summary
+python scripts/tcia_clinical_metadata.py ensure
+python scripts/tcia_clinical_metadata.py info
 ```
 
 ## General Commons
@@ -193,6 +199,16 @@ Load `references/general-commons-graphql.md` when querying General Commons.
 Use CDA when a user asks whether TCIA/IDC subjects have additional harmonized clinical, demographic, diagnosis, treatment, genomic, proteomic, General Commons, or cross-CRDC file metadata. Load `references/cda.md`.
 
 Use CDA after WordPress confirms TCIA publication and after subject identifiers are validated through TCIA/IDC metadata. CDA can enrich a cohort, summarize which subjects have IDC/GDC/PDC/GC/ICDC data, and expose upstream identifiers, but WordPress remains the TCIA publication/download authority and source systems remain the access authorities.
+
+For patient-level TCIA clinical facts, load `references/clinical.md` before using CDA.
+
+## Patient-Level Clinical Metadata
+
+Load `references/clinical.md` for patient-level demographics, diagnosis,
+outcome, response, survival, and DICOM-fallback work. Use the optional clinical
+SQLite for reusable local queries. Follow the reference's source precedence,
+identity allowlists, provenance and inference flags, conflict handling, and
+dataset-specific transformations.
 
 ## Controlled Access
 
@@ -263,6 +279,7 @@ Include the TCIA page link, WordPress short title, and any caveats about control
 - Do not present VolView as UID-based. Map Study/Series UIDs through IDC/idc-index to a public S3 series folder or `crdc_series_uuid` before constructing a VolView URL.
 - Do not broaden IDC, CDA, GC, or PathDB searches beyond WordPress short titles, TCIA DOIs, subject identifiers from validated TCIA/IDC cohorts, or explicit user-approved exploratory scope.
 - Do not use CDA to claim TCIA publication, official TCIA clinical spreadsheet completeness, or controlled-data access rights. Use CDA as harmonized discovery/enrichment metadata and route users back to TCIA, IDC, GDC, PDC, GC, or other source systems for authoritative files and access controls.
+- For patient-level clinical work, load `references/clinical.md` and preserve its source-lineage, subject-identity, inference, and review safeguards.
 - Distinguish open Creative Commons, open Creative Commons NonCommercial, mixed open/controlled, and controlled/restricted license statuses clearly.
 - Do not provide medical, regulatory, or legal conclusions about data suitability. Report metadata, access terms, and citations.
 - Verify current package/API behavior when the user asks for latest status, current availability, or exact download commands.

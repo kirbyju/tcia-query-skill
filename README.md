@@ -16,7 +16,7 @@ TCIA data can live across several access systems and metadata layers, including:
 - CTDC for Biobank controlled-access face datasets
 - General Commons for some other controlled-access TCIA face datasets
 - PathDB and the optional pathology SQLite for non-DICOM histopathology metadata
-- Optional NIfTI and controlled-access SQLite assets for file-grain metadata
+- Optional NIfTI, controlled-access, and patient-level clinical SQLite assets
 - DataCite for DOI, citation, version, and derived-data relationships
 - TCIA Publications EndNote XML for verified manuscripts written about TCIA data
 - IBM Aspera packages for some large non-DICOM downloads
@@ -31,7 +31,7 @@ This skill tells an agent how to:
 
 - Confirm whether a dataset is TCIA-published.
 - Query the local SQLite snapshot for routine discovery, access/license metadata, download labels, PathDB slide metadata, and TCIA DOI records.
-- Use optional SQLite assets for file-grain NIfTI metadata, public controlled-access manifest/spreadsheet metadata, and pathology Aspera package metadata when needed.
+- Use optional SQLite assets for file-grain NIfTI metadata, public controlled-access manifest/spreadsheet metadata, pathology Aspera package metadata, and patient-level clinical metadata when needed.
 - Use TCIA's Publications EndNote XML, not DataCite, for peer-reviewed manuscripts written about TCIA data.
 - Ignore hidden WordPress records unless TCIA staff explicitly request them.
 - Use snapshot text fields for abstracts and descriptions.
@@ -63,6 +63,7 @@ tcia-query-skill/
 |   +-- aspera.md
 |   +-- cda.md
 |   +-- controlled-access.md
+|   +-- clinical.md
 |   +-- datacite-relationships.md
 |   +-- general-commons-graphql.md
 |   +-- idc-dicom-downloads.md
@@ -86,6 +87,8 @@ tcia-query-skill/
     +-- tcia_manifest_series_uids.py
     +-- tcia_nifti_metadata.py
     +-- tcia_pathology_metadata.py
+    +-- tcia_clinical_metadata.py
+    +-- tcia_metadata_change_report.py
     +-- tcia_publications.py
     +-- tcia_snapshot.py
     +-- tcia_wordpress_search.py
@@ -172,6 +175,12 @@ Optional controlled-access public manifest/spreadsheet metadata is also publishe
 - `controlled_access_metadata.sqlite.gz`
 - `controlled_access_metadata_manifest.json`
 
+Optional patient-level clinical metadata is published separately on the same
+release tag:
+
+- `clinical_metadata.sqlite.gz`
+- `clinical_metadata_manifest.json`
+
 Optional direct release URLs:
 
 - `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/nifti_metadata.sqlite.gz`
@@ -180,8 +189,10 @@ Optional direct release URLs:
 - `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/pathology_metadata_manifest.json`
 - `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/controlled_access_metadata.sqlite.gz`
 - `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/controlled_access_metadata_manifest.json`
+- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/clinical_metadata.sqlite.gz`
+- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/clinical_metadata_manifest.json`
 
-The base snapshot and controlled-access metadata are checked by the scheduled workflow. Pathology metadata can include a more expensive Aspera package inventory and is refreshed by maintainers when that workflow is dispatched with pathology inventory enabled. NIfTI metadata is maintained as an optional on-demand asset, with scheduled drift checks warning maintainers when it may need refresh.
+The base snapshot, controlled-access metadata, and clinical metadata are checked by the scheduled workflow. Each run writes a SQLite additions/removals report to the GitHub Actions job summary and emits warning annotations for new additions or clinical review flags. Clinical refreshes reuse unchanged direct official artifacts, fetch small TCIA-linked external clinical sources such as Allen IvyGAP and FDA DIDSR VICTRE lesion ground truth on every run, reuse IDC clinical tables while the IDC version is unchanged, fully rebuild those small tables on an IDC version change, and carry the existing strict CDA/DICOM seed forward. Pathology metadata can include a more expensive Aspera package inventory and is refreshed by maintainers when that workflow is dispatched with pathology inventory enabled. NIfTI metadata is maintained as an optional on-demand asset, with scheduled drift checks warning maintainers when it may need refresh.
 
 These optional SQLite files are **not** downloaded during skill install and are **not** downloaded by `python scripts/tcia_snapshot.py ensure`. They expose `agent_*` views for routine use. Users who need NIfTI file-level metadata can fetch it on demand:
 
@@ -201,9 +212,19 @@ Users who need controlled-access file-grain public metadata, `drs_uri` manifest 
 python scripts/tcia_controlled_access_metadata.py ensure
 ```
 
+Users who need patient-level demographics, diagnoses, outcomes, response, or
+DICOM fallback values can fetch the clinical sidecar. Missing diagnosis/site
+values may also be populated from one unambiguous Collection-level WordPress
+label and are explicitly flagged as dataset-scope inferences:
+
+```bash
+python scripts/tcia_clinical_metadata.py ensure
+```
+
 See [references/nifti.md](./references/nifti.md) for the NIfTI table guide and examples.
 See [references/pathology.md](./references/pathology.md) for the pathology table guide and package inventory status notes.
 See [references/controlled-access.md](./references/controlled-access.md) for the controlled-access table guide and policy guidance.
+See [references/clinical.md](./references/clinical.md) for source precedence, schema, conflicts, and the incremental refresh model.
 
 After installing or cloning the skill, refresh local metadata from the latest release:
 
@@ -234,6 +255,8 @@ python scripts/tcia_controlled_access_metadata.py ensure
 python scripts/tcia_controlled_access_metadata.py datasets --limit 20
 python scripts/tcia_controlled_access_metadata.py downloads --collection CMB-MEL
 python scripts/tcia_controlled_access_metadata.py files --collection CMB-MEL --limit 10
+python scripts/tcia_clinical_metadata.py ensure
+python scripts/tcia_clinical_metadata.py info
 python scripts/tcia_wordpress_search.py --query breast --limit 10
 python scripts/tcia_wordpress_search.py --short-title EAY131 --json
 python scripts/tcia_wordpress_search.py --short-title 4D-Lung --json
@@ -276,6 +299,37 @@ python scripts/tcia_controlled_access_metadata.py build \
   --replace
 python scripts/tcia_controlled_access_metadata.py validate --db dist/controlled_access_metadata.sqlite
 ```
+
+The workflow also builds patient-level clinical metadata incrementally. For
+the initial release, seed CDA and DICOM locally from the existing prototype:
+
+```bash
+python scripts/tcia_clinical_metadata.py build \
+  --snapshot-db dist/tcia_snapshot.sqlite \
+  --legacy-seed-db /path/to/clinical_cda_metadata.sqlite \
+  --out dist/clinical_metadata.sqlite \
+  --gzip-out dist/clinical_metadata.sqlite.gz \
+  --manifest-out dist/clinical_metadata_manifest.json \
+  --replace
+python scripts/tcia_clinical_metadata.py validate --db dist/clinical_metadata.sqlite
+```
+
+After those assets are uploaded once, scheduled runs carry strict CDA/DICOM
+facts forward, fetch only new or changed direct TCIA clinical downloads, and
+fetch small TCIA-linked external clinical sources (currently Allen IvyGAP and
+FDA DIDSR VICTRE lesion ground truth) on every run so external changes enter
+the additions/removals report. They reuse IDC clinical tables
+until the IDC version changes. A new IDC version triggers a complete IDC
+clinical rebuild. Single-label WordPress
+diagnosis/site inference is recomputed locally from every fresh base snapshot.
+Collections containing `screen*` with one otherwise-eligible cancer label and
+no non-cancer designation are held for review: patient-level facts remain, but
+Collection-label diagnosis and site fallback is suppressed.
+Use workflow dispatch with
+`refresh_all_clinical_downloads=true` to re-fetch every direct official
+artifact or `refresh_idc_clinical=true` to force the IDC rebuild. Rebuild the
+local seed after relevant CDA releases rather than repeating the full CDA
+harvest twice daily.
 
 When maintainers need to refresh pathology Aspera package inventory, the scheduled workflow can be manually dispatched with `refresh_pathology_inventory=true`; it runs `scripts/tcia_pathology_aspera_inventory.py`, then rebuilds and validates `pathology_metadata.sqlite.gz`.
 
