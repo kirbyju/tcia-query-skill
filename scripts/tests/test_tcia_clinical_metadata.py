@@ -1012,6 +1012,37 @@ class ClinicalMetadataTest(unittest.TestCase):
                         has_imaging=False,
                     )
 
+            CLINICAL.insert_source(
+                conn,
+                source_id="dicom:hnscc:legacy-extra",
+                source_kind="dicom",
+                short_title="HNSCC",
+                source_signature_value="legacy-extra",
+            )
+            CLINICAL.insert_row_and_facts(
+                conn,
+                source_id="dicom:hnscc:legacy-extra",
+                source_kind="dicom",
+                short_title="HNSCC",
+                subject_id="HNSCC-01-9999",
+                table_name="legacy.idc_index",
+                row_number=1,
+                row={"subject_id": "HNSCC-01-9999"},
+                facts=[],
+                has_imaging=True,
+            )
+            conn.execute(
+                """INSERT INTO clinical_imaging_subjects
+                   (subject_key, short_title, subject_id, imaging_source)
+                   VALUES (?, 'HNSCC', 'HNSCC-01-9999', 'legacy_idc_index')""",
+                (
+                    conn.execute(
+                        """SELECT subject_key FROM clinical_rows
+                           WHERE subject_id = 'HNSCC-01-9999'"""
+                    ).fetchone()[0],
+                ),
+            )
+
             result = CLINICAL.promote_hnscc_official_cohort(conn)
             self.assertEqual(result["atlas_subjects"], 215)
             self.assertEqual(result["radiomics_subjects"], 492)
@@ -1031,6 +1062,13 @@ class ClinicalMetadataTest(unittest.TestCase):
                        WHERE short_title = 'HNSCC' AND has_imaging = 1"""
                 ).fetchone()[0],
                 707,
+            )
+            self.assertEqual(
+                conn.execute(
+                    """SELECT has_imaging FROM clinical_rows
+                       WHERE subject_id = 'HNSCC-01-9999'"""
+                ).fetchone()[0],
+                0,
             )
             conn.close()
 
@@ -1102,6 +1140,15 @@ class ClinicalMetadataTest(unittest.TestCase):
                 """INSERT INTO agent_pathdb_slides VALUES
                    ('Hungarian-Colorectal-Screening', ?, ?)""",
                 [(str(number), f"slide-{number}") for number in range(1, 201)],
+            )
+            snapshot_conn.executemany(
+                """INSERT INTO agent_pathdb_slides VALUES
+                   ('Hungarian-Colorectal-Screening', ?, ?)""",
+                [
+                    (f"{number}_zoom_2", f"tile-{tile}")
+                    for number in range(1, 201)
+                    for tile in range(2)
+                ],
             )
             snapshot_conn.commit()
             snapshot_conn.close()

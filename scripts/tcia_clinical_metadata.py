@@ -3385,6 +3385,24 @@ def promote_hnscc_official_cohort(
         )
         return result
 
+    official_subject_keys = set(all_subjects)
+    conn.execute(
+        """DELETE FROM clinical_imaging_subjects
+           WHERE short_title = 'HNSCC'
+             AND subject_key NOT IN (
+                 SELECT value FROM json_each(?)
+             )""",
+        (json.dumps(sorted(official_subject_keys)),),
+    )
+    conn.execute(
+        """UPDATE clinical_rows
+           SET has_imaging = 0
+           WHERE short_title = 'HNSCC'
+             AND subject_key NOT IN (
+                 SELECT value FROM json_each(?)
+             )""",
+        (json.dumps(sorted(official_subject_keys)),),
+    )
     for subject_key, subject_id in sorted(all_subjects.items()):
         conn.execute(
             """INSERT OR REPLACE INTO clinical_imaging_subjects
@@ -3429,20 +3447,26 @@ def promote_and_audit_hungarian_colorectal_cohort(
                 "SELECT name FROM sqlite_master WHERE type IN ('table', 'view')"
             )
         }
-        if "agent_pathdb_slides" in tables:
+        if "agent_pathdb_slides" in tables and official:
+            placeholders = ",".join("?" for _ in official)
+            matched_rows = snapshot.execute(
+                f"""SELECT patient_id, slide_id
+                    FROM agent_pathdb_slides
+                    WHERE collection = 'Hungarian-Colorectal-Screening'
+                      AND patient_id IN ({placeholders})""",
+                tuple(official.values()),
+            ).fetchall()
             pathdb_ids = {
                 clean_value(row[0])
-                for row in snapshot.execute(
-                    """SELECT DISTINCT patient_id FROM agent_pathdb_slides
-                       WHERE collection = 'Hungarian-Colorectal-Screening'
-                         AND patient_id IS NOT NULL"""
-                )
+                for row in matched_rows
                 if clean_value(row[0])
             }
-            pathdb_slides = snapshot.execute(
-                """SELECT COUNT(*) FROM agent_pathdb_slides
-                   WHERE collection = 'Hungarian-Colorectal-Screening'"""
-            ).fetchone()[0]
+            pathdb_slides = len(
+                {
+                    (clean_value(patient_id), clean_value(slide_id))
+                    for patient_id, slide_id in matched_rows
+                }
+            )
         else:
             pathdb_ids = set()
             pathdb_slides = 0
