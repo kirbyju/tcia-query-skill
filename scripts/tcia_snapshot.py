@@ -451,8 +451,24 @@ def fetch_pathdb_rows(url: str = PATHDB_CSV_URL) -> list[dict[str, str]]:
     text = body.decode("utf-8-sig", errors="replace")
     rows = []
     for row in csv.DictReader(io.StringIO(text)):
-        rows.append({column: row.get(column, "") for column in PATHDB_COLUMNS})
+        rows.append(normalize_pathdb_row(row))
     return sort_pathdb_rows(rows)
+
+
+def canonical_pathdb_modality(value: Any) -> str:
+    text = " ".join(str(value or "").strip().split())
+    if text.casefold() == "whole slide image":
+        return "Whole Slide Image"
+    return text
+
+
+def normalize_pathdb_row(row: dict[str, Any]) -> dict[str, str]:
+    result = {
+        column: "" if row.get(column) is None else str(row.get(column, ""))
+        for column in PATHDB_COLUMNS
+    }
+    result["modality"] = canonical_pathdb_modality(result["modality"])
+    return result
 
 
 def sort_pathdb_rows(rows: list[dict[str, str]]) -> list[dict[str, str]]:
@@ -484,7 +500,7 @@ def load_pathdb_rows_from_snapshot(path: Path) -> list[dict[str, str]]:
                     f"Fallback snapshot is missing PathDB columns: {', '.join(missing)}"
                 )
             rows = [
-                {column: "" if row[column] is None else str(row[column]) for column in PATHDB_COLUMNS}
+                normalize_pathdb_row(dict(row))
                 for row in conn.execute(f"SELECT {columns} FROM pathdb_rows").fetchall()
             ]
     except sqlite3.Error as exc:

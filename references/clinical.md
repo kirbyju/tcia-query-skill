@@ -26,6 +26,20 @@ value and `agent_clinical_conflicts` exposes disagreements. A blank
 higher-priority value does not suppress a populated lower-priority value.
 Controlled-access clinical files are not harvested.
 
+Resolved subject columns use canonical display spellings for equivalent
+case-only values while `clinical_facts.value_text` and
+`clinical_rows.row_json` retain the source text. For example, `M`, `m`,
+`male`, and `Male` resolve to `Male`; the same principle removes case-only
+filter duplicates for race, site, diagnosis, and outcome values without
+discarding their original evidence.
+
+Coded demographic values are decoded only from the applicable dataset/table
+dictionary. Equivalent numeric representations such as `1` and `1.0` may be
+matched as the same code, but their meaning is never assumed globally.
+Dataset-specific official dictionaries take precedence; EA1141, for example,
+defines sex code `1` as Female, whereas several ACRIN datasets define `1` as
+Male. Unmapped codes remain visible for review.
+
 Treat a direct TCIA artifact and the IDC table derived from it as one official
 clinical-data lineage, not two independent confirmations. Prefer the direct
 artifact on conflict. Use IDC as the operational parser/delivery route when the
@@ -121,7 +135,8 @@ remain in `lesion_histology` and `lesion_histology_code` long-form facts.
 The source page is
 `https://www.cancerimagingarchive.net/collection/ct-colonography/`.
 
-`EA1141` also remains in the screening review queue, but its official clinical
+`EA1141` also remains permanently in the screening review queue, even if
+future Collection prose no longer contains the word `screening`. Its official clinical
 ZIP supplies patient-level resolution for nearly the entire 500-subject imaging
 cohort. The ZIP contains seven CSV tables and seven PDF dictionaries. The
 harvester recognizes `SUBJECT_DE` as the patient identifier, decodes baseline
@@ -151,7 +166,7 @@ eligible single Collection diagnosis. This prevents a mixed screening
 Collection with a `Non-Cancer` label from assigning a disease site to subjects
 whose screening outcome is unknown.
 
-`Hungarian-Colorectal-Screening` remains in the screening review queue, but
+`Hungarian-Colorectal-Screening` remains permanently in the screening review queue, but
 its official 200-row clinical CSV provides patient-level age, sex, and
 `ICD10_health_status`. Its generic `ID` column is accepted only for this
 Collection. Before those rows are exposed as image-linked clinical subjects,
@@ -227,7 +242,8 @@ empty. That last diagnosis is intentionally withheld and emits
 lesion status, and
 screening result. The single Collection-level `Breast Cancer` and `Breast`
 labels are permanently in patient-level-only mode for VICTRE; they cannot fill
-the negative or unresolved phantoms. Coverage and the unresolved identity are
+the negative or unresolved phantoms, even if future WordPress prose no longer
+contains a `screen*` term. Coverage and the unresolved identity are
 stored in `clinical_meta.idc_clinical_result` under `victre`.
 
 ## Main views

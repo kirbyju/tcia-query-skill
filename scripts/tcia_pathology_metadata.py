@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 DEFAULT_REPO = "kirbyju/tcia-query-skill"
 DEFAULT_RELEASE_TAG = "tcia-snapshot-latest"
 PATHOLOGY_ASSET = "pathology_metadata.sqlite.gz"
@@ -1030,7 +1030,11 @@ def seed_pathdb_crosswalk(conn: sqlite3.Connection, created_at: str) -> int:
             p.cancer_type,
             p.cancer_location,
             p.data_format,
-            p.modality,
+            CASE
+                WHEN lower(trim(COALESCE(p.modality, ''))) = 'whole slide image'
+                    THEN 'Whole Slide Image'
+                ELSE trim(COALESCE(p.modality, ''))
+            END,
             p.protocol,
             p.par,
             p.magnification,

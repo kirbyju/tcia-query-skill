@@ -22,6 +22,46 @@ SPEC.loader.exec_module(CLINICAL)
 
 
 class ClinicalMetadataTest(unittest.TestCase):
+    def test_sex_codes_follow_dataset_specific_dictionaries(self) -> None:
+        self.assertEqual(
+            CLINICAL.decode_dataset_concept(
+                "HCC-TACE-Seg", "sex_at_birth", "1.0"
+            ),
+            "Male",
+        )
+        self.assertEqual(
+            CLINICAL.decode_dataset_concept(
+                "EA1141", "sex_at_birth", "1"
+            ),
+            "Female",
+        )
+        self.assertEqual(
+            CLINICAL.decode_dataset_concept(
+                "UNMAPPED", "sex_at_birth", "1"
+            ),
+            "1",
+        )
+
+    def test_idc_dictionary_matches_integral_float_codes_and_label_fallback(
+        self,
+    ) -> None:
+        mapping = CLINICAL.idc_value_mapping(
+            [
+                {"option_code": "1.0", "option_description": "Male"},
+                {"option_code": "2.0", "option_description": "Female"},
+            ]
+        )
+        self.assertEqual(mapping["1"], "Male")
+        self.assertEqual(mapping["2"], "Female")
+        label_mapping = CLINICAL.idc_value_mapping(
+            [
+                {"option_code": "1", "option_description": None},
+                {"option_code": "2", "option_description": None},
+            ],
+            "Sex: 1=Male, 2=Female",
+        )
+        self.assertEqual(label_mapping, {"1": "Male", "2": "Female"})
+
     @staticmethod
     def _victre_archive(
         density: str, members: dict[str, str]
@@ -517,7 +557,7 @@ class ClinicalMetadataTest(unittest.TestCase):
                 INSERT INTO agent_datasets VALUES
                     ('VICTRE', 'VICTRE', '', '2026-01-01', 'Collection', 0,
                      'Breast Cancer', 'Breast',
-                     'Virtual breast cancer screening trial', '', '');
+                     'Virtual breast phantom trial', '', '');
                 """
             )
             snapshot_conn.commit()
@@ -550,6 +590,60 @@ class ClinicalMetadataTest(unittest.TestCase):
                 conn.execute(
                     """SELECT COUNT(*) FROM clinical_facts
                        WHERE short_title = 'VICTRE'"""
+                ).fetchone()[0],
+                0,
+            )
+            conn.close()
+
+    def test_permanent_screening_review_survives_wordpress_text_changes(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            snapshot = root / "snapshot.sqlite"
+            snapshot_conn = sqlite3.connect(snapshot)
+            snapshot_conn.executescript(
+                """
+                CREATE TABLE agent_datasets (
+                    short_title TEXT, title TEXT, link TEXT, date_updated TEXT,
+                    dataset_type TEXT, hidden INTEGER, cancer_types TEXT,
+                    cancer_locations TEXT, summary TEXT, abstract TEXT,
+                    detailed_description TEXT
+                );
+                INSERT INTO agent_datasets VALUES
+                    ('EA1141', 'EA1141', '', '2026-01-01', 'Collection', 0,
+                     'Breast Cancer', 'Breast', 'Updated page text', '', '');
+                """
+            )
+            snapshot_conn.commit()
+            snapshot_conn.close()
+            conn = CLINICAL.init_db(root / "clinical.sqlite", replace=True)
+            conn.execute(
+                """INSERT INTO clinical_imaging_subjects VALUES
+                   ('ea1141:unknown', 'EA1141', 'UNKNOWN', 'test')"""
+            )
+            result = CLINICAL.apply_wordpress_dataset_inferences(conn, snapshot)
+            audit = conn.execute(
+                """SELECT eligibility_reason, review_required,
+                          screening_signal, subjects_applied
+                   FROM clinical_dataset_inferences
+                   WHERE short_title = 'EA1141'
+                     AND concept = 'primary_site'"""
+            ).fetchone()
+            self.assertEqual(result["screening_reviews_required"], 1)
+            self.assertEqual(
+                tuple(audit),
+                (
+                    "screening_review_required",
+                    1,
+                    "curated:permanent_screening_review",
+                    0,
+                ),
+            )
+            self.assertEqual(
+                conn.execute(
+                    """SELECT COUNT(*) FROM clinical_facts
+                       WHERE short_title = 'EA1141'"""
                 ).fetchone()[0],
                 0,
             )
@@ -1443,8 +1537,8 @@ W22,file-2
                             "column": "gender",
                             "column_label": "Gender",
                             "values": [
-                                {"option_code": "1", "option_description": "Male"},
-                                {"option_code": "2", "option_description": "Female"},
+                                {"option_code": "1.0", "option_description": "Male"},
+                                {"option_code": "2.0", "option_description": "Female"},
                             ],
                         },
                     ],
@@ -1559,7 +1653,7 @@ W22,file-2
                    WHERE short_title = 'TEST' AND subject_id = 'SUB-1'"""
             ).fetchone()
             self.assertIsNotNone(subject)
-            self.assertEqual(subject["sex_at_birth"], "F")
+            self.assertEqual(subject["sex_at_birth"], "Female")
             self.assertEqual(subject["vital_status"], "Dead")
             self.assertEqual(subject["overall_survival_days"], "400")
             self.assertGreaterEqual(subject["conflict_count"], 2)

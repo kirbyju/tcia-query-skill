@@ -49,6 +49,10 @@ Observed columns:
 - `magnification`
 - `update`
 
+The snapshot canonicalizes case-only variants of `Whole slide image` to
+`Whole Slide Image`. Source CSV values remain recoverable from the upstream
+PathDB file; no other modality is reinterpreted.
+
 ## Helper Script
 
 Use `scripts/pathdb_metadata.py` from the skill root:

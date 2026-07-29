@@ -39,7 +39,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 
-SCHEMA_VERSION = 13
+SCHEMA_VERSION = 14
 DEFAULT_REPO = "kirbyju/tcia-query-skill"
 DEFAULT_RELEASE_TAG = "tcia-snapshot-latest"
 CLINICAL_ASSET = "clinical_metadata.sqlite.gz"
@@ -71,6 +71,53 @@ SOURCE_PRIORITIES = {
     "cda": 200,
     "dicom": 100,
     "wordpress_dataset_inference": 50,
+}
+
+# These mappings are intentionally scoped to datasets whose official TCIA
+# clinical package or dictionary defines the codes. Numeric demographic codes
+# are not portable across studies (for example, EA1141 defines 1 as Female).
+DATASET_SPECIFIC_CONCEPT_CODES = {
+    "acrincontralateralbreastmr": {
+        "sex_at_birth": {"1": "Male", "2": "Female"},
+    },
+    "acrinfltbreast": {
+        "sex_at_birth": {"1": "Male", "2": "Female"},
+    },
+    "acrinnsclcfdgpet": {
+        "sex_at_birth": {"1": "Male", "2": "Female"},
+    },
+    "colorectallivermetastases": {
+        "sex_at_birth": {"1": "Male", "2": "Female"},
+    },
+    "hcctaceseg": {
+        "sex_at_birth": {"1": "Male", "2": "Female"},
+    },
+    "ea1141": {
+        "sex_at_birth": {"1": "Female"},
+    },
+}
+
+CANONICAL_DISPLAY_VALUES = {
+    "sex_at_birth": {
+        "male": "Male",
+        "female": "Female",
+        "other": "Other",
+        "unknown": "Unknown",
+    },
+    "vital_status": {
+        "alive": "Alive",
+        "dead": "Dead",
+    },
+    "recurrence": {
+        "yes": "Yes",
+        "no": "No",
+        "unknown": "Unknown",
+    },
+    "progression": {
+        "yes": "Yes",
+        "no": "No",
+        "unknown": "Unknown",
+    },
 }
 
 GENERIC_DATASET_LABELS = {
@@ -279,6 +326,15 @@ CURATED_SCREENING_DIAGNOSIS_RESOLUTIONS = {
         ),
         "allow_dataset_inference": False,
     },
+}
+
+# These cohorts must remain in patient-level-only review even if a future
+# WordPress edit removes the word "screening" from the page text. Their
+# official subject-level transformations classify mixed outcomes safely;
+# Collection-level cancer/site labels must never refill unresolved subjects.
+PERMANENT_SCREENING_REVIEW_DATASETS = {
+    "EA1141",
+    "Hungarian-Colorectal-Screening",
 }
 
 CT_COLONOGRAPHY_HISTOLOGY = {
@@ -810,6 +866,71 @@ def normalize_concept_value(concept: str, value: str) -> str:
     return normalized
 
 
+def normalize_dictionary_code(value: Any) -> str:
+    """Match equivalent integral dictionary codes without global semantics.
+
+    IDC dictionaries sometimes serialize an option as ``1.0`` while the
+    corresponding clinical table returns ``1``. Only the representation is
+    normalized here; the meaning still comes from that table's dictionary.
+    """
+    text = clean_value(value)
+    match = re.fullmatch(r"([+-]?\d+)\.0+", text)
+    return match.group(1) if match else text
+
+
+def decode_dataset_concept(
+    short_title: str, concept: str, value: Any
+) -> str:
+    """Apply only an audited dataset-specific coded-value dictionary."""
+    text = clean_value(value)
+    mappings = DATASET_SPECIFIC_CONCEPT_CODES.get(
+        normalize_name(short_title), {}
+    ).get(concept, {})
+    return mappings.get(normalize_dictionary_code(text), text)
+
+
+def canonical_display_map(
+    conn: sqlite3.Connection,
+) -> dict[tuple[str, str], str]:
+    """Choose one display spelling while retaining every raw clinical fact."""
+    rows = conn.execute(
+        """SELECT concept, value_normalized, value_text,
+                  COUNT(*) AS frequency, MAX(source_priority) AS max_priority
+           FROM clinical_facts
+           GROUP BY concept, value_normalized, value_text
+           ORDER BY concept, value_normalized"""
+    ).fetchall()
+
+    def case_rank(value: str) -> int:
+        letters = "".join(character for character in value if character.isalpha())
+        has_lower = any(character.islower() for character in letters)
+        has_upper = any(character.isupper() for character in letters)
+        if not letters or (has_lower and has_upper):
+            return 0
+        return 1 if letters.isupper() else 2
+
+    rows = sorted(
+        rows,
+        key=lambda row: (
+            row["concept"],
+            row["value_normalized"],
+            -row["frequency"],
+            -row["max_priority"],
+            case_rank(row["value_text"]),
+            row["value_text"].casefold(),
+            row["value_text"],
+        ),
+    )
+    result: dict[tuple[str, str], str] = {}
+    for row in rows:
+        key = (row["concept"], row["value_normalized"])
+        result.setdefault(key, row["value_text"])
+    for concept, values in CANONICAL_DISPLAY_VALUES.items():
+        for normalized, display in values.items():
+            result[(concept, normalized)] = display
+    return result
+
+
 def number_value(value: str) -> float | None:
     match = re.search(r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)", value.replace(",", ""))
     if not match:
@@ -1228,20 +1349,26 @@ def apply_wordpress_dataset_inferences(
         candidates = len(subject_rows)
         candidate_keys = {row["subject_key"] for row in subject_rows}
         screening_signal = dataset_screening_signal(dataset)
+        permanent_review = (
+            short_title in PERMANENT_SCREENING_REVIEW_DATASETS
+        )
+        if permanent_review and not screening_signal:
+            screening_signal = "curated:permanent_screening_review"
         diagnosis_labels = parse_dataset_labels(dataset["cancer_types"])
         _, diagnosis_label_reason = eligible_dataset_label(
             dataset["cancer_types"]
         )
         screening_review_candidate = bool(
-            screening_signal
-            and len(diagnosis_labels) == 1
-            and diagnosis_label_reason == "eligible"
-            and not has_non_cancer_designation(dataset["cancer_types"])
+            permanent_review
+            or (
+                screening_signal
+                and len(diagnosis_labels) == 1
+                and diagnosis_label_reason == "eligible"
+                and not has_non_cancer_designation(dataset["cancer_types"])
+            )
         )
-        curated_resolution = (
-            CURATED_SCREENING_DIAGNOSIS_RESOLUTIONS.get(short_title)
-            if screening_review_candidate
-            else None
+        curated_resolution = CURATED_SCREENING_DIAGNOSIS_RESOLUTIONS.get(
+            short_title
         )
         review_required = screening_review_candidate and not curated_resolution
         patient_level_only = bool(
@@ -1723,7 +1850,7 @@ def idc_collection_title_map(
     return result
 
 
-def idc_value_mapping(value: Any) -> dict[str, str]:
+def idc_value_mapping(value: Any, column_label: Any = "") -> dict[str, str]:
     result: dict[str, str] = {}
     for item in json_safe(value) or []:
         if not isinstance(item, dict):
@@ -1732,6 +1859,17 @@ def idc_value_mapping(value: Any) -> dict[str, str]:
         description = clean_value(item.get("option_description"))
         if code and description:
             result[code] = description
+            result.setdefault(normalize_dictionary_code(code), description)
+    label = clean_value(column_label)
+    if normalize_name(label).startswith(("sex", "gender")):
+        for code, description in re.findall(
+            r"([+-]?\d+(?:\.0+)?)\s*=\s*(Male|Female|Other|Unknown)\b",
+            label,
+            flags=re.IGNORECASE,
+        ):
+            display = description.title()
+            result.setdefault(code, display)
+            result.setdefault(normalize_dictionary_code(code), display)
     return result
 
 
@@ -2349,7 +2487,7 @@ def ingest_idc_clinical(
             }
             mappings = {
                 clean_value(column.get("column")): idc_value_mapping(
-                    column.get("values")
+                    column.get("values"), column.get("column_label")
                 )
                 for column in columns
             }
@@ -2388,7 +2526,14 @@ def ingest_idc_clinical(
                     )
                     if not concept:
                         continue
-                    decoded = mappings.get(column, {}).get(raw_text, raw_text)
+                    mapping = mappings.get(column, {})
+                    decoded = mapping.get(
+                        raw_text,
+                        mapping.get(normalize_dictionary_code(raw_text), raw_text),
+                    )
+                    decoded = decode_dataset_concept(
+                        short_title, concept, decoded
+                    )
                     if is_idc_missing_value(decoded):
                         continue
                     facts.append((concept, decoded, column, None))
@@ -2781,7 +2926,16 @@ def ingest_official_bytes(
                 )
                 value = clean_value(record[column])
                 if concept and value:
-                    facts.append((concept, value, str(column), None))
+                    facts.append(
+                        (
+                            concept,
+                            decode_dataset_concept(
+                                row["short_title"], concept, value
+                            ),
+                            str(column),
+                            None,
+                        )
+                    )
             facts.extend(
                 ct_colonography_workbook_facts(
                     row["short_title"],
@@ -4144,6 +4298,7 @@ def import_legacy_seed(
 
 def materialize_subjects(conn: sqlite3.Connection) -> None:
     conn.execute("DELETE FROM clinical_subjects")
+    display_values = canonical_display_map(conn)
     cursor = conn.execute(
         """SELECT f.*, s.source_date, s.source_lineage, r.has_imaging
            FROM clinical_facts f
@@ -4165,7 +4320,9 @@ def materialize_subjects(conn: sqlite3.Connection) -> None:
         conflicts: dict[str, list[dict[str, Any]]] = {}
         for concept, concept_facts in grouped.items():
             winner = concept_facts[0]
-            resolved[concept] = winner["value_text"]
+            resolved[concept] = display_values.get(
+                (concept, winner["value_normalized"]), winner["value_text"]
+            )
             resolved_sources[concept] = {
                 "source_kind": winner["source_kind"],
                 "source_id": winner["source_id"],
