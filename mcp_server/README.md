@@ -16,6 +16,7 @@ The server is backed by release SQLite files:
 - `controlled_access_metadata.sqlite`: optional controlled-access file-grain public metadata.
 - `nifti_metadata.sqlite`: optional public non-DICOM NIfTI file-grain metadata.
 - `pathology_metadata.sqlite`: optional pathology, PathDB, and Aspera package metadata.
+- `clinical_metadata.sqlite`: optional patient-level resolved clinical facts, provenance, and conflicts.
 
 It does not expose arbitrary SQL, shell commands, live WordPress scraping, or
 direct controlled-data downloads.
@@ -46,6 +47,10 @@ Optional sidecar tools:
 - `get_pathology_package_files`
 - `get_pathology_file_objects`
 - `get_pathology_disparities`
+- `find_clinical_datasets`
+- `get_clinical_subjects`
+- `get_clinical_facts`
+- `get_clinical_conflicts`
 
 MCP resources:
 
@@ -68,7 +73,7 @@ checkout. See `DEPLOYMENT.md`.
 
 ## Configure Snapshots
 
-The base snapshot is required. The sidecars are optional, but install all three
+The base snapshot is required. The sidecars are optional, but install all four
 for the full MCP interface.
 
 ```bash
@@ -76,11 +81,13 @@ export TCIA_SNAPSHOT_DB=/path/to/cache/tcia_snapshot.sqlite
 export TCIA_CONTROLLED_ACCESS_METADATA_DB=/path/to/cache/controlled_access_metadata.sqlite
 export TCIA_NIFTI_METADATA_DB=/path/to/cache/nifti_metadata.sqlite
 export TCIA_PATHOLOGY_METADATA_DB=/path/to/cache/pathology_metadata.sqlite
+export TCIA_CLINICAL_METADATA_DB=/path/to/cache/clinical_metadata.sqlite
 
 python3 scripts/tcia_snapshot.py ensure
 python3 scripts/tcia_controlled_access_metadata.py ensure
 python3 scripts/tcia_nifti_metadata.py ensure
 python3 scripts/tcia_pathology_metadata.py ensure
+python3 scripts/tcia_clinical_metadata.py ensure
 ```
 
 Use the `ensure` commands rather than copying scratch SQLite files. They fetch

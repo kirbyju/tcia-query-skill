@@ -336,6 +336,74 @@ def create_app(service: TciaQueryService | None = None) -> FastAPI:
             limit=limit,
         )
 
+    @app.get(f"{API_PREFIX}/clinical/datasets")
+    def find_clinical_datasets(
+        short_titles: Annotated[list[str] | None, Query()] = None,
+        source_kinds: Annotated[list[str] | None, Query()] = None,
+        concepts: Annotated[list[str] | None, Query()] = None,
+        has_conflicts: bool | None = None,
+        has_clinical_only_subjects: bool | None = None,
+        limit: int = Query(default=25, ge=1, le=200),
+    ) -> dict[str, Any]:
+        return S().find_clinical_datasets(
+            short_titles=short_titles,
+            source_kinds=source_kinds,
+            concepts=concepts,
+            has_conflicts=has_conflicts,
+            has_clinical_only_subjects=has_clinical_only_subjects,
+            limit=limit,
+        )
+
+    @app.get(f"{API_PREFIX}/clinical/{{short_title}}/subjects")
+    def get_clinical_subjects(
+        short_title: str,
+        subject_ids: Annotated[list[str] | None, Query()] = None,
+        include_clinical_only: bool = False,
+        has_conflicts: bool | None = None,
+        include_inferred: bool = True,
+        limit: int = Query(default=50, ge=1, le=500),
+    ) -> dict[str, Any]:
+        return S().get_clinical_subjects(
+            short_title=short_title,
+            subject_ids=subject_ids,
+            include_clinical_only=include_clinical_only,
+            has_conflicts=has_conflicts,
+            include_inferred=include_inferred,
+            limit=limit,
+        )
+
+    @app.get(f"{API_PREFIX}/clinical/{{short_title}}/facts")
+    def get_clinical_facts(
+        short_title: str,
+        subject_id: str | None = None,
+        concepts: Annotated[list[str] | None, Query()] = None,
+        source_kinds: Annotated[list[str] | None, Query()] = None,
+        inferred: bool | None = None,
+        limit: int = Query(default=100, ge=1, le=500),
+    ) -> dict[str, Any]:
+        return S().get_clinical_facts(
+            short_title=short_title,
+            subject_id=subject_id,
+            concepts=concepts,
+            source_kinds=source_kinds,
+            inferred=inferred,
+            limit=limit,
+        )
+
+    @app.get(f"{API_PREFIX}/clinical/{{short_title}}/conflicts")
+    def get_clinical_conflicts(
+        short_title: str,
+        subject_id: str | None = None,
+        concepts: Annotated[list[str] | None, Query()] = None,
+        limit: int = Query(default=100, ge=1, le=500),
+    ) -> dict[str, Any]:
+        return S().get_clinical_conflicts(
+            short_title=short_title,
+            subject_id=subject_id,
+            concepts=concepts,
+            limit=limit,
+        )
+
     return app
 
 
@@ -345,6 +413,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--controlled-db", help="Path to controlled_access_metadata.sqlite.")
     parser.add_argument("--nifti-db", help="Path to nifti_metadata.sqlite.")
     parser.add_argument("--pathology-db", help="Path to pathology_metadata.sqlite.")
+    parser.add_argument("--clinical-db", help="Path to clinical_metadata.sqlite.")
     parser.add_argument("--skill-root", type=Path, help="Skill repository root.")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8766)
@@ -358,6 +427,7 @@ def main(argv: list[str] | None = None) -> int:
         controlled_db=args.controlled_db,
         nifti_db=args.nifti_db,
         pathology_db=args.pathology_db,
+        clinical_db=args.clinical_db,
         skill_root=args.skill_root,
     )
     app = create_app(service)

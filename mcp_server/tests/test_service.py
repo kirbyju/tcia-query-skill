@@ -4,6 +4,8 @@ import json
 import sqlite3
 import tempfile
 import unittest
+from contextlib import contextmanager
+from collections.abc import Iterator
 from pathlib import Path
 
 from mcp_server.tcia_query_mcp.service import TciaQueryService
@@ -13,10 +15,15 @@ def q(value):
     return json.dumps(value)
 
 
-def connect(path: Path) -> sqlite3.Connection:
+@contextmanager
+def connect(path: Path) -> Iterator[sqlite3.Connection]:
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
-    return conn
+    try:
+        yield conn
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def create_base_snapshot(path: Path) -> None:
@@ -344,6 +351,76 @@ def create_pathology_db(path: Path) -> None:
         )
 
 
+def create_clinical_db(path: Path) -> None:
+    with connect(path) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE clinical_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+            INSERT INTO clinical_meta VALUES ('schema_version', '13');
+
+            CREATE TABLE agent_clinical_dataset_summary (
+              short_title TEXT, subjects INTEGER, all_source_subjects INTEGER,
+              clinical_only_subjects INTEGER, subjects_with_conflicts INTEGER,
+              subjects_with_inferred_diagnosis INTEGER, subjects_with_inferred_site INTEGER,
+              source_kinds TEXT, concepts INTEGER
+            );
+            INSERT INTO agent_clinical_dataset_summary VALUES
+              ('TCGA-BRCA', 1, 2, 1, 1, 0, 0,
+               'idc_clinical,tcia_clinical_download', 2);
+
+            CREATE TABLE agent_clinical_subjects (
+              subject_key TEXT, short_title TEXT, subject_id TEXT, source_kinds TEXT,
+              source_count INTEGER, conflict_count INTEGER, has_imaging INTEGER,
+              sex_at_birth TEXT, race TEXT, ethnicity TEXT, age_at_diagnosis TEXT,
+              age_at_enrollment_years TEXT, age_at_imaging_years TEXT,
+              primary_diagnosis TEXT, primary_site TEXT, stage TEXT, grade TEXT,
+              vital_status TEXT, days_to_death TEXT, days_to_last_followup TEXT,
+              overall_survival_days TEXT, progression_free_survival_days TEXT,
+              recurrence TEXT, progression TEXT, response TEXT, screening_result TEXT,
+              primary_diagnosis_is_inferred INTEGER, primary_site_is_inferred INTEGER,
+              resolved_values_json TEXT, resolved_sources_json TEXT, conflicts_json TEXT
+            );
+            INSERT INTO agent_clinical_subjects VALUES
+              ('tcgabrcca:brca-1', 'TCGA-BRCA', 'BRCA-1', '["idc_clinical","tcia_clinical_download"]',
+               2, 1, 1, 'Female', 'White', NULL, '55', NULL, NULL,
+               'Breast Cancer', 'Breast', NULL, NULL, 'Alive', NULL, '800', '800', NULL,
+               NULL, NULL, 'pCR', NULL, 0, 0,
+               '{"primary_diagnosis":"Breast Cancer","response":"pCR"}',
+               '{"response":{"source_kind":"tcia_clinical_download","priority":400}}',
+               '{"response":["Yes","pCR"]}');
+            CREATE TABLE agent_clinical_all_subjects AS SELECT * FROM agent_clinical_subjects;
+            INSERT INTO agent_clinical_all_subjects VALUES
+              ('tcgabrcca:brca-2', 'TCGA-BRCA', 'BRCA-2', '["tcia_clinical_download"]',
+               1, 0, 0, 'Female', NULL, NULL, NULL, NULL, NULL,
+               'Breast Cancer', 'Breast', NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+               NULL, NULL, NULL, NULL, 0, 0,
+               '{"primary_diagnosis":"Breast Cancer"}', '{}', '{}');
+
+            CREATE TABLE agent_clinical_facts (
+              short_title TEXT, subject_id TEXT, concept TEXT, value_text TEXT,
+              value_number REAL, unit TEXT, source_kind TEXT, source_priority INTEGER,
+              source_url TEXT, source_date TEXT, original_column TEXT,
+              evidence_scope TEXT, is_inferred INTEGER, provenance_json TEXT
+            );
+            INSERT INTO agent_clinical_facts VALUES
+              ('TCGA-BRCA', 'BRCA-1', 'response', 'pCR', NULL, NULL,
+               'tcia_clinical_download', 400, 'https://example.org/clinical.csv',
+               '2026-01-01', 'pcr', 'patient', 0, '{"row_number":2}'),
+              ('TCGA-BRCA', 'BRCA-1', 'response', 'Yes', NULL, NULL,
+               'idc_clinical', 300, 'https://example.org/idc', 'v24',
+               'response', 'patient', 0, '{"row_number":2}');
+
+            CREATE TABLE agent_clinical_conflicts (
+              short_title TEXT, subject_id TEXT, concept TEXT, distinct_values INTEGER,
+              values_seen TEXT, source_kinds TEXT
+            );
+            INSERT INTO agent_clinical_conflicts VALUES
+              ('TCGA-BRCA', 'BRCA-1', 'response', 2, 'Yes,pCR',
+               'idc_clinical,tcia_clinical_download');
+            """
+        )
+
+
 class TciaQueryServiceTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
@@ -352,15 +429,18 @@ class TciaQueryServiceTests(unittest.TestCase):
         self.controlled = root / "controlled_access_metadata.sqlite"
         self.nifti = root / "nifti_metadata.sqlite"
         self.pathology = root / "pathology_metadata.sqlite"
+        self.clinical = root / "clinical_metadata.sqlite"
         create_base_snapshot(self.snapshot)
         create_controlled_db(self.controlled)
         create_nifti_db(self.nifti)
         create_pathology_db(self.pathology)
+        create_clinical_db(self.clinical)
         self.service = TciaQueryService(
             snapshot_db=self.snapshot,
             controlled_db=self.controlled,
             nifti_db=self.nifti,
             pathology_db=self.pathology,
+            clinical_db=self.clinical,
         )
 
     def tearDown(self) -> None:
@@ -372,6 +452,8 @@ class TciaQueryServiceTests(unittest.TestCase):
         self.assertTrue(info["controlled_access_db_exists"])
         self.assertTrue(info["nifti_metadata_db_exists"])
         self.assertTrue(info["pathology_metadata_db_exists"])
+        self.assertTrue(info["clinical_metadata_db_exists"])
+        self.assertEqual(info["clinical_counts"]["image_linked_subjects"], 1)
         self.assertTrue(info["capabilities"]["release_history"])
         self.assertTrue(info["capabilities"]["external_resource_labels"])
 
@@ -426,6 +508,39 @@ class TciaQueryServiceTests(unittest.TestCase):
         self.assertEqual(files["count"], 1)
         disparities = self.service.get_pathology_disparities(short_titles=["CPTAC-STAD"])
         self.assertEqual(disparities["count"], 1)
+
+    def test_clinical_sidecar_queries(self) -> None:
+        datasets = self.service.find_clinical_datasets(
+            source_kinds=["tcia_clinical_download"],
+            concepts=["response"],
+            has_conflicts=True,
+            has_clinical_only_subjects=True,
+        )
+        self.assertEqual(datasets["count"], 1)
+        self.assertEqual(datasets["datasets"][0]["concepts"], 2)
+
+        subjects = self.service.get_clinical_subjects("TCGA-BRCA", subject_ids=["BRCA-1"])
+        self.assertEqual(subjects["count"], 1)
+        self.assertTrue(subjects["subjects"][0]["has_imaging"])
+        self.assertEqual(subjects["subjects"][0]["resolved_values"]["response"], "pCR")
+
+        all_subjects = self.service.get_clinical_subjects(
+            "TCGA-BRCA", include_clinical_only=True
+        )
+        self.assertEqual(all_subjects["count"], 2)
+
+        facts = self.service.get_clinical_facts(
+            "TCGA-BRCA", subject_id="BRCA-1", concepts=["response"]
+        )
+        self.assertEqual(facts["count"], 2)
+        self.assertEqual(facts["facts"][0]["source_priority"], 400)
+        self.assertEqual(facts["facts"][0]["provenance"], {"row_number": 2})
+
+        conflicts = self.service.get_clinical_conflicts(
+            "TCGA-BRCA", subject_id="BRCA-1"
+        )
+        self.assertEqual(conflicts["count"], 1)
+        self.assertEqual(conflicts["conflicts"][0]["values_seen"], ["Yes", "pCR"])
 
 
 if __name__ == "__main__":

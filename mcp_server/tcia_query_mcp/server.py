@@ -44,8 +44,8 @@ Work this way:
    access decisions. Split mixed-access datasets into open and controlled
    downloads.
 4. Use the optional sidecar tools only after confirming TCIA provenance in the
-   base snapshot: controlled-access files, public NIfTI metadata, and pathology
-   Aspera/PathDB metadata.
+   base snapshot: patient-level clinical metadata, controlled-access files,
+   public NIfTI metadata, and pathology Aspera/PathDB metadata.
 5. Do not directly download controlled data. Return policy and manifest/DRS
    guidance only.
 """
@@ -75,8 +75,11 @@ Recommended workflow:
    questions when the loaded base snapshot includes those views.
 6. Use `get_controlled_access_files` only for public file-grain metadata about
    controlled-access records. It does not grant authorization.
-7. Use the NIfTI tools for public non-DICOM NIfTI file-grain metadata.
-8. Use the pathology tools for PathDB/Aspera metadata. PathDB is optimized for
+7. Use the clinical tools for patient-level resolved values, sourced facts, and
+   conflicts. Subject identity is scoped by `(short_title, subject_id)`; retain
+   source provenance and distinguish dataset-scope inferred values.
+8. Use the NIfTI tools for public non-DICOM NIfTI file-grain metadata.
+9. Use the pathology tools for PathDB/Aspera metadata. PathDB is optimized for
    metadata/viewers and may use converted files; Aspera packages are the
    original submitter-provided route.
 """
@@ -124,6 +127,7 @@ def configure_service(
     controlled_db: str | os.PathLike[str] | None = None,
     nifti_db: str | os.PathLike[str] | None = None,
     pathology_db: str | os.PathLike[str] | None = None,
+    clinical_db: str | os.PathLike[str] | None = None,
     skill_root: str | os.PathLike[str] | None = None,
 ) -> TciaQueryService:
     """Replace the process-wide service used by MCP tools."""
@@ -134,6 +138,7 @@ def configure_service(
         controlled_db=controlled_db,
         nifti_db=nifti_db,
         pathology_db=pathology_db,
+        clinical_db=clinical_db,
         skill_root=skill_root,
     )
     return _service
@@ -540,6 +545,94 @@ def get_pathology_disparities(
     )
 
 
+@mcp.tool()
+@guard
+def find_clinical_datasets(
+    short_titles: list[str] | None = None,
+    source_kinds: list[str] | None = None,
+    concepts: list[str] | None = None,
+    has_conflicts: bool | None = None,
+    has_clinical_only_subjects: bool | None = None,
+    limit: int = 25,
+) -> dict:
+    """Summarize dataset coverage in the optional patient-level clinical SQLite sidecar."""
+
+    return service().find_clinical_datasets(
+        short_titles=short_titles,
+        source_kinds=source_kinds,
+        concepts=concepts,
+        has_conflicts=has_conflicts,
+        has_clinical_only_subjects=has_clinical_only_subjects,
+        limit=limit,
+    )
+
+
+@mcp.tool()
+@guard
+def get_clinical_subjects(
+    short_title: str,
+    subject_ids: list[str] | None = None,
+    include_clinical_only: bool = False,
+    has_conflicts: bool | None = None,
+    include_inferred: bool = True,
+    limit: int = 50,
+) -> dict:
+    """Return resolved patient-level clinical rows for one TCIA dataset.
+
+    By default, only image-linked subjects are returned. Dataset-scope inferred diagnosis/site
+    values are included but explicitly flagged; set include_inferred false to exclude those rows.
+    """
+
+    return service().get_clinical_subjects(
+        short_title=short_title,
+        subject_ids=subject_ids,
+        include_clinical_only=include_clinical_only,
+        has_conflicts=has_conflicts,
+        include_inferred=include_inferred,
+        limit=limit,
+    )
+
+
+@mcp.tool()
+@guard
+def get_clinical_facts(
+    short_title: str,
+    subject_id: str | None = None,
+    concepts: list[str] | None = None,
+    source_kinds: list[str] | None = None,
+    inferred: bool | None = None,
+    limit: int = 100,
+) -> dict:
+    """Return long-form clinical facts with source priority, provenance, and inference flags."""
+
+    return service().get_clinical_facts(
+        short_title=short_title,
+        subject_id=subject_id,
+        concepts=concepts,
+        source_kinds=source_kinds,
+        inferred=inferred,
+        limit=limit,
+    )
+
+
+@mcp.tool()
+@guard
+def get_clinical_conflicts(
+    short_title: str,
+    subject_id: str | None = None,
+    concepts: list[str] | None = None,
+    limit: int = 100,
+) -> dict:
+    """Return patient/concept disagreements retained by the clinical sidecar."""
+
+    return service().get_clinical_conflicts(
+        short_title=short_title,
+        subject_id=subject_id,
+        concepts=concepts,
+        limit=limit,
+    )
+
+
 @mcp.resource("tcia://guide", mime_type="text/markdown")
 def guide_resource() -> str:
     """How to query TCIA with these tools."""
@@ -578,6 +671,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--controlled-db", help="Path to controlled_access_metadata.sqlite.")
     parser.add_argument("--nifti-db", help="Path to nifti_metadata.sqlite.")
     parser.add_argument("--pathology-db", help="Path to pathology_metadata.sqlite.")
+    parser.add_argument("--clinical-db", help="Path to clinical_metadata.sqlite.")
     parser.add_argument("--skill-root", type=Path, help="Skill repository root.")
     parser.add_argument("--transport", choices=["stdio", "http"], default="stdio")
     parser.add_argument("--http", action="store_true", help="Alias for --transport http.")
@@ -593,6 +687,7 @@ def main(argv: list[str] | None = None) -> int:
         controlled_db=args.controlled_db,
         nifti_db=args.nifti_db,
         pathology_db=args.pathology_db,
+        clinical_db=args.clinical_db,
         skill_root=args.skill_root,
     )
     transport = "http" if args.http else args.transport

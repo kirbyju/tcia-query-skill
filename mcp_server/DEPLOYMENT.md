@@ -49,6 +49,7 @@ export TCIA_SNAPSHOT_DB="$TCIA_MCP_ROOT/cache/tcia_snapshot.sqlite"
 export TCIA_CONTROLLED_ACCESS_METADATA_DB="$TCIA_MCP_ROOT/cache/controlled_access_metadata.sqlite"
 export TCIA_NIFTI_METADATA_DB="$TCIA_MCP_ROOT/cache/nifti_metadata.sqlite"
 export TCIA_PATHOLOGY_METADATA_DB="$TCIA_MCP_ROOT/cache/pathology_metadata.sqlite"
+export TCIA_CLINICAL_METADATA_DB="$TCIA_MCP_ROOT/cache/clinical_metadata.sqlite"
 ```
 
 Fetch and verify the current GitHub release artifacts:
@@ -59,10 +60,11 @@ cd "$TCIA_MCP_ROOT/tcia-query-skill"
 "$TCIA_MCP_ROOT/.venv/bin/python" scripts/tcia_controlled_access_metadata.py ensure
 "$TCIA_MCP_ROOT/.venv/bin/python" scripts/tcia_nifti_metadata.py ensure
 "$TCIA_MCP_ROOT/.venv/bin/python" scripts/tcia_pathology_metadata.py ensure
+"$TCIA_MCP_ROOT/.venv/bin/python" scripts/tcia_clinical_metadata.py ensure
 ```
 
-The base snapshot is required. The controlled-access, NIfTI, and pathology
-sidecars are optional, but the full public MCP interface expects all three.
+The base snapshot is required. The controlled-access, NIfTI, pathology, and
+clinical sidecars are optional, but the full public MCP interface expects all four.
 
 ## 5. Smoke Test
 
@@ -147,6 +149,7 @@ cd "$TCIA_MCP_ROOT/tcia-query-skill"
 "$TCIA_MCP_ROOT/.venv/bin/python" scripts/tcia_controlled_access_metadata.py ensure
 "$TCIA_MCP_ROOT/.venv/bin/python" scripts/tcia_nifti_metadata.py ensure
 "$TCIA_MCP_ROOT/.venv/bin/python" scripts/tcia_pathology_metadata.py ensure
+"$TCIA_MCP_ROOT/.venv/bin/python" scripts/tcia_clinical_metadata.py ensure
 sudo systemctl restart tcia-query-mcp
 ```
 

@@ -101,6 +101,22 @@ def parse_json_array(value: Any) -> list[Any]:
     return [value]
 
 
+def parse_json_object(value: Any) -> dict[str, Any]:
+    if not isinstance(value, str) or not value:
+        return value if isinstance(value, dict) else {}
+    try:
+        loaded = json.loads(value)
+    except json.JSONDecodeError:
+        return {}
+    return loaded if isinstance(loaded, dict) else {}
+
+
+def parse_comma_values(value: Any) -> list[str]:
+    if value in (None, ""):
+        return []
+    return [item.strip() for item in str(value).split(",") if item.strip()]
+
+
 def normalize_row(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
     output: dict[str, Any] = dict(row)
     for key in (
@@ -439,6 +455,44 @@ def compact_pathology_file_object(row: sqlite3.Row | dict[str, Any]) -> dict[str
     }
 
 
+def compact_clinical_summary(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
+    data = dict(row)
+    data["source_kinds"] = parse_comma_values(data.get("source_kinds"))
+    return data
+
+
+def compact_clinical_subject(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
+    data = dict(row)
+    data["source_kinds"] = parse_json_array(data.get("source_kinds"))
+    for key in ("resolved_values_json", "resolved_sources_json", "conflicts_json"):
+        if key in data:
+            data[key.removesuffix("_json")] = parse_json_object(data.pop(key))
+    for key in (
+        "has_imaging",
+        "primary_diagnosis_is_inferred",
+        "primary_site_is_inferred",
+    ):
+        if data.get(key) in (0, 1):
+            data[key] = bool(data[key])
+    return data
+
+
+def compact_clinical_fact(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
+    data = dict(row)
+    if "provenance_json" in data:
+        data["provenance"] = parse_json_object(data.pop("provenance_json"))
+    if data.get("is_inferred") in (0, 1):
+        data["is_inferred"] = bool(data["is_inferred"])
+    return data
+
+
+def compact_clinical_conflict(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
+    data = dict(row)
+    data["values_seen"] = parse_comma_values(data.get("values_seen"))
+    data["source_kinds"] = parse_comma_values(data.get("source_kinds"))
+    return data
+
+
 def contains_all_label_values(values: list[Any], requested: list[str]) -> bool:
     if not requested:
         return True
@@ -473,6 +527,7 @@ class TciaQueryService:
         controlled_db: str | os.PathLike[str] | None = None,
         nifti_db: str | os.PathLike[str] | None = None,
         pathology_db: str | os.PathLike[str] | None = None,
+        clinical_db: str | os.PathLike[str] | None = None,
         skill_root: str | os.PathLike[str] | None = None,
     ) -> None:
         self.skill_root = Path(skill_root) if skill_root else default_skill_root()
@@ -495,6 +550,11 @@ class TciaQueryService:
             pathology_db
             or os.environ.get("TCIA_PATHOLOGY_METADATA_DB", "")
             or self.skill_root / "cache" / "pathology_metadata.sqlite"
+        )
+        self.clinical_db = Path(
+            clinical_db
+            or os.environ.get("TCIA_CLINICAL_METADATA_DB", "")
+            or self.skill_root / "cache" / "clinical_metadata.sqlite"
         )
 
     def _connect_snapshot(self) -> sqlite3.Connection:
@@ -534,6 +594,16 @@ class TciaQueryService:
                 "Run `python scripts/tcia_pathology_metadata.py ensure` from the skill root."
             )
         conn = sqlite3.connect(self.pathology_db)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def _connect_clinical(self) -> sqlite3.Connection:
+        if not self.clinical_db.exists():
+            raise SnapshotNotFoundError(
+                f"Clinical metadata snapshot not found at {self.clinical_db}. "
+                "Run `python scripts/tcia_clinical_metadata.py ensure` from the skill root."
+            )
+        conn = sqlite3.connect(self.clinical_db)
         conn.row_factory = sqlite3.Row
         return conn
 
@@ -581,6 +651,8 @@ class TciaQueryService:
             "nifti_metadata_db_exists": self.nifti_db.exists(),
             "pathology_metadata_db": str(self.pathology_db),
             "pathology_metadata_db_exists": self.pathology_db.exists(),
+            "clinical_metadata_db": str(self.clinical_db),
+            "clinical_metadata_db_exists": self.clinical_db.exists(),
             "controlled_access_policy_url": CONTROLLED_ACCESS_POLICY_URL,
         }
         if self.snapshot_db.exists():
@@ -665,6 +737,26 @@ class TciaQueryService:
                     "pathdb_slide_crosswalk": self._count_object(conn, "pathdb_slide_crosswalk"),
                     "disparities": self._count_object(conn, "pathology_disparities"),
                     "has_agent_views": self._object_exists(conn, "agent_pathology_dataset_summary"),
+                }
+        if self.clinical_db.exists():
+            with self._connect_clinical() as conn:
+                info["clinical_metadata"] = self._read_meta_table(conn, "clinical_meta")
+                info["clinical_counts"] = {
+                    "datasets": self._count_object(conn, "agent_clinical_dataset_summary"),
+                    "image_linked_subjects": self._count_object(conn, "agent_clinical_subjects"),
+                    "all_source_subjects": self._count_object(conn, "agent_clinical_all_subjects"),
+                    "facts": self._count_object(conn, "agent_clinical_facts"),
+                    "conflicts": self._count_object(conn, "agent_clinical_conflicts"),
+                    "has_agent_views": all(
+                        self._object_exists(conn, name)
+                        for name in (
+                            "agent_clinical_dataset_summary",
+                            "agent_clinical_subjects",
+                            "agent_clinical_all_subjects",
+                            "agent_clinical_facts",
+                            "agent_clinical_conflicts",
+                        )
+                    ),
                 }
         return info
 
@@ -1523,6 +1615,139 @@ class TciaQueryService:
             params.append(limit)
             rows = [normalize_row(row) for row in conn.execute(sql, params).fetchall()]
         return {"disparities": rows, "count": len(rows), "limit": limit}
+
+    def find_clinical_datasets(self, **filters: Any) -> dict[str, Any]:
+        limit = coerce_limit(filters.get("limit"))
+        short_titles = [item.lower() for item in as_list(filters.get("short_titles"))]
+        source_kinds = [item.lower() for item in as_list(filters.get("source_kinds"))]
+        concepts = [item.lower() for item in as_list(filters.get("concepts"))]
+        has_conflicts = filters.get("has_conflicts")
+        has_clinical_only_subjects = filters.get("has_clinical_only_subjects")
+        with self._connect_clinical() as conn:
+            sql = "SELECT s.* FROM agent_clinical_dataset_summary AS s WHERE 1 = 1"
+            params: list[Any] = []
+            if short_titles:
+                sql += f" AND lower(s.short_title) IN ({','.join('?' for _ in short_titles)})"
+                params.extend(short_titles)
+            for source_kind in source_kinds:
+                sql += " AND (',' || lower(s.source_kinds) || ',') LIKE ?"
+                params.append(f"%,{source_kind},%")
+            for concept in concepts:
+                sql += (
+                    " AND EXISTS (SELECT 1 FROM agent_clinical_facts AS f "
+                    "WHERE lower(f.short_title) = lower(s.short_title) "
+                    "AND lower(f.concept) = ?)"
+                )
+                params.append(concept)
+            if has_conflicts is not None:
+                sql += " AND s.subjects_with_conflicts " + ("> 0" if is_truthy(has_conflicts) else "= 0")
+            if has_clinical_only_subjects is not None:
+                sql += " AND s.clinical_only_subjects " + (
+                    "> 0" if is_truthy(has_clinical_only_subjects) else "= 0"
+                )
+            sql += " ORDER BY lower(s.short_title) LIMIT ?"
+            params.append(limit)
+            rows = [compact_clinical_summary(row) for row in conn.execute(sql, params).fetchall()]
+        return {
+            "datasets": rows,
+            "count": len(rows),
+            "limit": limit,
+            "note": "Confirm each dataset in the base TCIA snapshot before using patient-level clinical metadata.",
+        }
+
+    def get_clinical_subjects(self, short_title: str, **filters: Any) -> dict[str, Any]:
+        title = short_title.strip()
+        if not title:
+            raise TciaServiceError("short_title is required")
+        limit = coerce_limit(filters.get("limit"), default=50, maximum=500)
+        subject_ids = [item.lower() for item in as_list(filters.get("subject_ids"))]
+        include_clinical_only = is_truthy(filters.get("include_clinical_only"))
+        has_conflicts = filters.get("has_conflicts")
+        include_inferred = filters.get("include_inferred")
+        table = "agent_clinical_all_subjects" if include_clinical_only else "agent_clinical_subjects"
+        with self._connect_clinical() as conn:
+            sql = f"SELECT * FROM {table} WHERE lower(short_title) = lower(?)"
+            params: list[Any] = [title]
+            if subject_ids:
+                sql += f" AND lower(subject_id) IN ({','.join('?' for _ in subject_ids)})"
+                params.extend(subject_ids)
+            if has_conflicts is not None:
+                sql += " AND conflict_count " + ("> 0" if is_truthy(has_conflicts) else "= 0")
+            if include_inferred is not None and not is_truthy(include_inferred):
+                sql += " AND primary_diagnosis_is_inferred = 0 AND primary_site_is_inferred = 0"
+            sql += " ORDER BY lower(subject_id) LIMIT ?"
+            params.append(limit)
+            rows = [compact_clinical_subject(row) for row in conn.execute(sql, params).fetchall()]
+        return {
+            "short_title": title,
+            "subjects": rows,
+            "count": len(rows),
+            "limit": limit,
+            "includes_clinical_only_subjects": include_clinical_only,
+            "identity_scope": "Subject identity is scoped by (short_title, subject_id).",
+        }
+
+    def get_clinical_facts(self, short_title: str, **filters: Any) -> dict[str, Any]:
+        title = short_title.strip()
+        if not title:
+            raise TciaServiceError("short_title is required")
+        limit = coerce_limit(filters.get("limit"), default=100, maximum=500)
+        subject_id = str(filters.get("subject_id") or "").strip()
+        concepts = [item.lower() for item in as_list(filters.get("concepts"))]
+        source_kinds = [item.lower() for item in as_list(filters.get("source_kinds"))]
+        inferred = filters.get("inferred")
+        with self._connect_clinical() as conn:
+            sql = "SELECT * FROM agent_clinical_facts WHERE lower(short_title) = lower(?)"
+            params: list[Any] = [title]
+            if subject_id:
+                sql += " AND lower(subject_id) = lower(?)"
+                params.append(subject_id)
+            if concepts:
+                sql += f" AND lower(concept) IN ({','.join('?' for _ in concepts)})"
+                params.extend(concepts)
+            if source_kinds:
+                sql += f" AND lower(source_kind) IN ({','.join('?' for _ in source_kinds)})"
+                params.extend(source_kinds)
+            if inferred is not None:
+                sql += " AND is_inferred = ?"
+                params.append(1 if is_truthy(inferred) else 0)
+            sql += " ORDER BY lower(subject_id), lower(concept), source_priority DESC LIMIT ?"
+            params.append(limit)
+            rows = [compact_clinical_fact(row) for row in conn.execute(sql, params).fetchall()]
+        return {
+            "short_title": title,
+            "facts": rows,
+            "count": len(rows),
+            "limit": limit,
+            "note": "Lower-priority values remain available for provenance; use resolved subjects for preferred values.",
+        }
+
+    def get_clinical_conflicts(self, short_title: str, **filters: Any) -> dict[str, Any]:
+        title = short_title.strip()
+        if not title:
+            raise TciaServiceError("short_title is required")
+        limit = coerce_limit(filters.get("limit"), default=100, maximum=500)
+        subject_id = str(filters.get("subject_id") or "").strip()
+        concepts = [item.lower() for item in as_list(filters.get("concepts"))]
+        with self._connect_clinical() as conn:
+            sql = "SELECT * FROM agent_clinical_conflicts WHERE lower(short_title) = lower(?)"
+            params: list[Any] = [title]
+            if subject_id:
+                sql += " AND lower(subject_id) = lower(?)"
+                params.append(subject_id)
+            if concepts:
+                sql += f" AND lower(concept) IN ({','.join('?' for _ in concepts)})"
+                params.extend(concepts)
+            sql += " ORDER BY lower(subject_id), lower(concept) LIMIT ?"
+            params.append(limit)
+            rows = [compact_clinical_conflict(row) for row in conn.execute(sql, params).fetchall()]
+        return {
+            "short_title": title,
+            "conflicts": rows,
+            "count": len(rows),
+            "limit": limit,
+            "note": "Review conflicts before analysis; resolved values follow the documented source precedence.",
+        }
 
     def _download_has_annotation(self, row: dict[str, Any]) -> bool:
         labels = json_text_values(row, ["download_types", "data_types", "file_types"])

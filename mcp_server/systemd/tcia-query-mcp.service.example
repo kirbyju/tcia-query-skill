@@ -18,6 +18,7 @@ Environment=TCIA_SNAPSHOT_DB=/srv/tcia-query-mcp/cache/tcia_snapshot.sqlite
 Environment=TCIA_CONTROLLED_ACCESS_METADATA_DB=/srv/tcia-query-mcp/cache/controlled_access_metadata.sqlite
 Environment=TCIA_NIFTI_METADATA_DB=/srv/tcia-query-mcp/cache/nifti_metadata.sqlite
 Environment=TCIA_PATHOLOGY_METADATA_DB=/srv/tcia-query-mcp/cache/pathology_metadata.sqlite
+Environment=TCIA_CLINICAL_METADATA_DB=/srv/tcia-query-mcp/cache/clinical_metadata.sqlite
 
 # Leave DNS-rebinding protection disabled when a trusted reverse proxy handles
 # host/origin policy. Enable and set allowlists if exposing FastMCP directly.

@@ -24,10 +24,11 @@ Follow the IDC-REST-MCP pattern:
 - Optional but supported: `controlled_access_metadata.sqlite`.
 - Optional but supported: `nifti_metadata.sqlite`.
 - Optional but supported: `pathology_metadata.sqlite`.
+- Optional but supported: `clinical_metadata.sqlite`.
 
 The base snapshot is the TCIA provenance, visibility, release-history, DOI, and
 access/license authority. Optional sidecars add file-grain controlled-access,
-NIfTI, pathology, PathDB, and Aspera inventory metadata.
+NIfTI, pathology, PathDB, Aspera inventory, and patient-level clinical metadata.
 
 ## Tool Families
 
@@ -43,6 +44,8 @@ NIfTI, pathology, PathDB, and Aspera inventory metadata.
 - Pathology/Aspera: `find_pathology_datasets`, `get_pathology_downloads`,
   `get_pathology_package_files`, `get_pathology_file_objects`,
   `get_pathology_disparities`.
+- Clinical: `find_clinical_datasets`, `get_clinical_subjects`,
+  `get_clinical_facts`, `get_clinical_conflicts`.
 
 ## Guardrails
 
@@ -55,6 +58,8 @@ NIfTI, pathology, PathDB, and Aspera inventory metadata.
 - Do not directly download controlled data.
 - Use optional SQLite sidecars only as public metadata surfaces; they do not
   grant authorization.
+- Scope clinical identities by `(short_title, subject_id)`, retain source
+  provenance/conflicts, and flag dataset-scope inferred values.
 - Use `scripts/*_metadata.py ensure` and `scripts/tcia_snapshot.py ensure` to
   fetch current release artifacts instead of copying stale local databases.
 
