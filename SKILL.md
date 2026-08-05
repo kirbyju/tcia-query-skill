@@ -24,7 +24,7 @@ When a downstream record is derived from a TCIA DOI but is not itself listed in 
    - For peer-reviewed publications or manuscripts about TCIA data, use TCIA's EndNote XML export, not DataCite. Prefer `scripts/tcia_publications.py`, and load `references/publications.md`.
    - For DOI, citation, or version questions, start with DataCite metadata from the snapshot. Prefer `scripts/datacite_tcia_dois.py` for TCIA DOI prefix records.
    - For TCIA dataset release timelines, first-release dates, or version-history questions, use `agent_dataset_versions` and `agent_dataset_v1_releases` from the snapshot. These views are derived from the WordPress `/api/v2/versions` endpoint and match related datasets by exact short title plus a normalized punctuation/case-insensitive key. For v1 timelines, prefer `v1_release_date_source` values from the versions endpoint; treat `current_record_still_v1_date_updated` as a fallback only for datasets that are still version 1.
-   - For reusable patient-level clinical, demographic, diagnosis, outcome, response, or DICOM-fallback queries, confirm the TCIA dataset in WordPress first, then load `references/clinical.md` and use the optional clinical SQLite. Follow that reference for source precedence, identity validation, dataset-specific transformations, inference safeguards, and the preferred `agent_clinical_*` views.
+   - For reusable patient-level clinical, demographic, diagnosis, outcome, response, or DICOM-fallback queries, confirm the TCIA dataset in WordPress first, then load `references/clinical.md` and use the optional clinical SQLite. Follow that reference for source precedence, identity validation, dataset-specific transformations, inference safeguards, and the preferred `agent_clinical_*` views. For Analysis Results, inspect `agent_clinical_dataset_relationships`: patient facts may be inherited from a WordPress-confirmed source Collection only after an exact PatientID match, and direct result-dataset facts always take precedence.
    - For additional harmonized treatment or cross-commons data-availability enrichment not present in official/IDC clinical tables, use CDA only from validated TCIA/IDC subject identifiers. Load `references/cda.md`.
    - For file-level public NIfTI questions, confirm TCIA provenance/access through the normal snapshot first, then load `references/nifti.md` and use the optional NIfTI SQLite release only if file-grain metadata are needed. Prefer `agent_nifti_dataset_summary`, `agent_nifti_downloads`, `agent_nifti_files`, and `agent_nifti_derived_objects`.
    - For controlled-access file, manifest, `drs_uri`, modality, or series-level metadata, confirm controlled status through the normal snapshot first, then load `references/controlled-access.md` and use the optional controlled-access SQLite release when file-grain public metadata are needed. Prefer `agent_controlled_dataset_summary`, `agent_controlled_downloads`, and `agent_controlled_files`.
@@ -186,6 +186,7 @@ python scripts/tcia_publications.py --dataset-doi 10.7937/K9/TCIA.2016.RNYFUYE9 
 python scripts/pathdb_metadata.py --collection CPTAC-STAD --summary
 python scripts/tcia_clinical_metadata.py ensure
 python scripts/tcia_clinical_metadata.py info
+python scripts/tcia_clinical_metadata.py export-qc --out clinical_qc_manual_review.csv
 ```
 
 ## General Commons

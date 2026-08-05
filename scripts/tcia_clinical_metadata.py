@@ -39,7 +39,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 
-SCHEMA_VERSION = 14
+SCHEMA_VERSION = 16
 DEFAULT_REPO = "kirbyju/tcia-query-skill"
 DEFAULT_RELEASE_TAG = "tcia-snapshot-latest"
 CLINICAL_ASSET = "clinical_metadata.sqlite.gz"
@@ -70,6 +70,10 @@ SOURCE_PRIORITIES = {
     "idc_clinical": 300,
     "cda": 200,
     "dicom": 100,
+    # Exact PatientID inheritance is a fallback. Any direct target-dataset
+    # fact, including DICOM, outranks it; it still outranks dataset-level
+    # WordPress label inference.
+    "tcia_collection_subject_inheritance": 75,
     "wordpress_dataset_inference": 50,
 }
 
@@ -88,9 +92,13 @@ DATASET_SPECIFIC_CONCEPT_CODES = {
     },
     "colorectallivermetastases": {
         "sex_at_birth": {"1": "Male", "2": "Female"},
+        "vital_status": {"0": "Alive", "1": "Dead"},
     },
     "hcctaceseg": {
         "sex_at_birth": {"1": "Male", "2": "Female"},
+    },
+    "histologyhsibcrecurrence": {
+        "vital_status": {"0": "Alive", "1": "Dead"},
     },
     "ea1141": {
         "sex_at_birth": {"1": "Female"},
@@ -270,6 +278,10 @@ SOURCE_COLUMN_CONCEPT_OVERRIDES = {
     ("acrin6698", "age"): "age_at_enrollment_years",
     # The EA1141 dictionary defines AGE as age at study enrollment.
     ("ea1141", "age"): "age_at_enrollment_years",
+    # A0.csv defines entryage as age at protocol enrollment.
+    ("acrinfmisobrain", "entryage"): "age_at_enrollment_years",
+    # The official data dictionary defines Age as age at operation.
+    ("colorectallivermetastases", "age"): "age_at_treatment_years",
     ("hnscc", "ageatdiag"): "age_at_diagnosis",
     ("hnscc", "cancersubsiteoforigin"): "primary_site",
     ("hnscc", "ajccstage7thedition"): "stage",
@@ -406,6 +418,12 @@ HNSCC_HANDLED_COLUMNS = {
 }
 
 SUBJECT_COLUMN_OVERRIDES = {
+    # A0.csv uses the ACRIN case number column `cn`; it maps to the suffix of
+    # the TCIA PatientID after zero-padding to three digits.
+    "acrinfmisobrain": {"cn"},
+    # The accompanying table also contains a four-character patient_id, but
+    # the full TCGA barcode is the identifier shared with TCGA-BRCA.
+    "tcgabreastradiogenomics": {"bcrpatientbarcode"},
     # This official file has one row for each of the 200 PathDB patients and
     # identifies them with the otherwise-too-generic column name "ID".
     "hungariancolorectalscreening": {"id"},
@@ -460,6 +478,7 @@ NUMERIC_CONCEPTS = {
     "age_at_diagnosis",
     "age_at_enrollment_years",
     "age_at_imaging_years",
+    "age_at_treatment_years",
     "days_to_death",
     "days_to_last_followup",
     "overall_survival_days",
@@ -476,6 +495,7 @@ RESOLVED_COLUMNS = [
     "age_at_diagnosis",
     "age_at_enrollment_years",
     "age_at_imaging_years",
+    "age_at_treatment_years",
     "primary_diagnosis",
     "primary_site",
     "stage",
@@ -491,6 +511,14 @@ RESOLVED_COLUMNS = [
     "screening_result",
 ]
 
+# Carry stable patient attributes and outcomes across a WordPress-confirmed
+# Analysis Result -> Collection relationship after an exact PatientID match.
+# Imaging age is intentionally excluded because it belongs to a particular
+# acquisition and need not describe every derived result for that patient.
+INHERITABLE_PATIENT_CONCEPTS = set(RESOLVED_COLUMNS) - {
+    "age_at_imaging_years",
+}
+
 REQUIRED_TABLES = [
     "clinical_meta",
     "clinical_downloads",
@@ -498,11 +526,13 @@ REQUIRED_TABLES = [
     "clinical_dictionary",
     "clinical_imaging_subjects",
     "clinical_dataset_inferences",
+    "clinical_dataset_relationships",
     "clinical_sources",
     "clinical_rows",
     "clinical_facts",
     "clinical_subjects",
     "clinical_build_warnings",
+    "clinical_qc_findings",
 ]
 REQUIRED_VIEWS = [
     "agent_clinical_subjects",
@@ -514,6 +544,8 @@ REQUIRED_VIEWS = [
     "agent_clinical_dictionary",
     "agent_clinical_imaging_subjects",
     "agent_clinical_dataset_inferences",
+    "agent_clinical_dataset_relationships",
+    "agent_clinical_qc_findings",
 ]
 SOURCE_REUSE_TABLES = {
     "clinical_sources",
@@ -617,6 +649,19 @@ CREATE TABLE clinical_dataset_inferences (
     PRIMARY KEY (short_title, concept)
 );
 
+CREATE TABLE clinical_dataset_relationships (
+    relationship_id TEXT PRIMARY KEY,
+    target_short_title TEXT NOT NULL,
+    source_short_title TEXT NOT NULL,
+    relationship_source TEXT NOT NULL,
+    relationship_evidence TEXT NOT NULL,
+    target_subjects INTEGER NOT NULL DEFAULT 0,
+    matched_subjects INTEGER NOT NULL DEFAULT 0,
+    inherited_facts INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL,
+    provenance_json TEXT NOT NULL
+);
+
 CREATE TABLE clinical_sources (
     source_id TEXT PRIMARY KEY,
     source_kind TEXT NOT NULL,
@@ -656,12 +701,15 @@ CREATE TABLE clinical_facts (
     subject_key TEXT NOT NULL,
     concept TEXT NOT NULL,
     value_text TEXT NOT NULL,
+    value_resolved TEXT NOT NULL,
     value_normalized TEXT NOT NULL,
     value_number REAL,
     unit TEXT,
     original_column TEXT,
     evidence_scope TEXT NOT NULL DEFAULT 'patient',
     is_inferred INTEGER NOT NULL DEFAULT 0,
+    qc_excluded INTEGER NOT NULL DEFAULT 0,
+    qc_status TEXT NOT NULL DEFAULT 'accepted',
     provenance_json TEXT,
     FOREIGN KEY (source_row_id) REFERENCES clinical_rows(source_row_id),
     FOREIGN KEY (source_id) REFERENCES clinical_sources(source_id)
@@ -681,6 +729,7 @@ CREATE TABLE clinical_subjects (
     age_at_diagnosis TEXT,
     age_at_enrollment_years TEXT,
     age_at_imaging_years TEXT,
+    age_at_treatment_years TEXT,
     primary_diagnosis TEXT,
     primary_site TEXT,
     stage TEXT,
@@ -709,10 +758,32 @@ CREATE TABLE clinical_build_warnings (
     warning_text TEXT NOT NULL
 );
 
+CREATE TABLE clinical_qc_findings (
+    finding_id TEXT PRIMARY KEY,
+    rule_id TEXT NOT NULL,
+    severity TEXT NOT NULL,
+    disposition TEXT NOT NULL,
+    review_status TEXT NOT NULL DEFAULT 'open',
+    short_title TEXT NOT NULL,
+    subject_id TEXT,
+    subject_key TEXT,
+    source_id TEXT,
+    source_row_id TEXT,
+    fact_id TEXT,
+    concept TEXT,
+    original_value TEXT,
+    resolved_value TEXT,
+    unit TEXT,
+    message TEXT NOT NULL,
+    provenance_json TEXT NOT NULL
+);
+
 CREATE INDEX idx_clinical_rows_subject ON clinical_rows(short_title, subject_id);
 CREATE INDEX idx_clinical_facts_subject ON clinical_facts(subject_key, concept);
 CREATE INDEX idx_clinical_facts_concept ON clinical_facts(concept, value_normalized);
 CREATE INDEX idx_clinical_facts_source ON clinical_facts(source_id);
+CREATE INDEX idx_clinical_qc_rule ON clinical_qc_findings(rule_id, review_status);
+CREATE INDEX idx_clinical_qc_subject ON clinical_qc_findings(short_title, subject_id);
 
 CREATE VIEW agent_clinical_subjects AS
 SELECT * FROM clinical_subjects
@@ -727,6 +798,7 @@ SELECT
     f.subject_id,
     f.concept,
     f.value_text,
+    f.value_resolved,
     f.value_number,
     f.unit,
     f.source_kind,
@@ -736,6 +808,8 @@ SELECT
     f.original_column,
     f.evidence_scope,
     f.is_inferred,
+    f.qc_excluded,
+    f.qc_status,
     f.provenance_json
 FROM clinical_facts f
 JOIN clinical_sources s USING (source_id);
@@ -749,6 +823,7 @@ SELECT
     GROUP_CONCAT(DISTINCT value_text) AS values_seen,
     GROUP_CONCAT(DISTINCT source_kind) AS source_kinds
 FROM clinical_facts
+WHERE qc_excluded = 0
 GROUP BY short_title, subject_key, concept
 HAVING COUNT(DISTINCT value_normalized) > 1;
 
@@ -769,7 +844,8 @@ SELECT
     GROUP_CONCAT(DISTINCT f.source_kind) AS source_kinds,
     COUNT(DISTINCT f.concept) AS concepts
 FROM clinical_subjects s
-LEFT JOIN clinical_facts f USING (subject_key)
+LEFT JOIN clinical_facts f
+       ON f.subject_key = s.subject_key AND f.qc_excluded = 0
 GROUP BY s.short_title;
 
 CREATE VIEW agent_clinical_source_tables AS
@@ -783,6 +859,29 @@ SELECT * FROM clinical_imaging_subjects;
 
 CREATE VIEW agent_clinical_dataset_inferences AS
 SELECT * FROM clinical_dataset_inferences;
+
+CREATE VIEW agent_clinical_dataset_relationships AS
+SELECT * FROM clinical_dataset_relationships;
+
+CREATE VIEW agent_clinical_qc_findings AS
+SELECT
+    finding_id,
+    rule_id,
+    severity,
+    disposition,
+    review_status,
+    short_title,
+    subject_id,
+    concept,
+    original_value,
+    resolved_value,
+    unit,
+    message,
+    source_id,
+    source_row_id,
+    fact_id,
+    provenance_json
+FROM clinical_qc_findings;
 """
 
 
@@ -894,10 +993,11 @@ def canonical_display_map(
 ) -> dict[tuple[str, str], str]:
     """Choose one display spelling while retaining every raw clinical fact."""
     rows = conn.execute(
-        """SELECT concept, value_normalized, value_text,
+        """SELECT concept, value_normalized, value_resolved,
                   COUNT(*) AS frequency, MAX(source_priority) AS max_priority
            FROM clinical_facts
-           GROUP BY concept, value_normalized, value_text
+           WHERE qc_excluded = 0
+           GROUP BY concept, value_normalized, value_resolved
            ORDER BY concept, value_normalized"""
     ).fetchall()
 
@@ -916,15 +1016,15 @@ def canonical_display_map(
             row["value_normalized"],
             -row["frequency"],
             -row["max_priority"],
-            case_rank(row["value_text"]),
-            row["value_text"].casefold(),
-            row["value_text"],
+            case_rank(row["value_resolved"]),
+            row["value_resolved"].casefold(),
+            row["value_resolved"],
         ),
     )
     result: dict[tuple[str, str], str] = {}
     for row in rows:
         key = (row["concept"], row["value_normalized"])
-        result.setdefault(key, row["value_text"])
+        result.setdefault(key, row["value_resolved"])
     for concept, values in CANONICAL_DISPLAY_VALUES.items():
         for normalized, display in values.items():
             result[(concept, normalized)] = display
@@ -992,6 +1092,10 @@ def normalize_official_subject_id(short_title: str, subject_id: str) -> str:
         and re.fullmatch(r"\d+", subject_id)
     ):
         return f"ea1141-{subject_id}"
+    if normalize_name(short_title) == "acrinfmisobrain":
+        match = re.fullmatch(r"(\d+)(?:\.0+)?", subject_id)
+        if match:
+            return f"ACRIN-FMISO-Brain-{int(match.group(1)):03d}"
     return subject_id
 
 
@@ -1172,9 +1276,10 @@ def insert_row_and_facts(
             """INSERT OR IGNORE INTO clinical_facts
                (fact_id, source_row_id, source_id, source_kind, source_priority,
                 short_title, subject_id, subject_key, concept, value_text,
-                value_normalized, value_number, unit, original_column,
-                evidence_scope, is_inferred, provenance_json)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                value_resolved, value_normalized, value_number, unit,
+                original_column, evidence_scope, is_inferred, qc_excluded,
+                qc_status, provenance_json)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 fact_id,
                 source_row_id,
@@ -1186,12 +1291,15 @@ def insert_row_and_facts(
                 subject_key,
                 concept,
                 value,
+                value,
                 normalized,
                 number_value(value) if concept in NUMERIC_CONCEPTS else None,
                 unit,
                 original_column,
                 evidence_scope,
                 int(is_inferred),
+                0,
+                "accepted",
                 json_dumps(
                     {
                         "table_name": table_name,
@@ -1285,6 +1393,113 @@ def has_non_cancer_designation(value: Any) -> bool:
         )
         for label in parse_dataset_labels(value)
     )
+
+
+def contains_dataset_short_title(text: Any, short_title: str) -> bool:
+    """Return true for a delimited short-title mention in WordPress text."""
+    value = clean_value(text)
+    if not value or not short_title:
+        return False
+    pattern = rf"(?<![A-Za-z0-9]){re.escape(short_title)}(?![A-Za-z0-9])"
+    return re.search(pattern, value, re.IGNORECASE) is not None
+
+
+def wordpress_analysis_result_relationships(
+    snapshot_db: Path,
+) -> list[dict[str, Any]]:
+    """Find strong WordPress Analysis Result -> Collection relationships.
+
+    The Collection Manager's explicit source-collection prose is preferred.
+    A Collection short title scoped in that Analysis Result's own download
+    title/URL/search/metadata is also accepted. Program-wide related lists are
+    deliberately ignored because they are not dataset-specific provenance.
+    """
+    snapshot = sqlite3.connect(snapshot_db)
+    snapshot.row_factory = sqlite3.Row
+    dataset_columns = {
+        row[1] for row in snapshot.execute("PRAGMA table_info(agent_datasets)")
+    }
+    required = {"source", "short_title", "hidden", "source_collections"}
+    if not required.issubset(dataset_columns):
+        snapshot.close()
+        return []
+    collections = snapshot.execute(
+        """SELECT short_title, title, link
+           FROM agent_datasets
+           WHERE source = 'collections' AND hidden = 0
+             AND short_title IS NOT NULL
+           ORDER BY length(short_title) DESC, short_title"""
+    ).fetchall()
+    results = snapshot.execute(
+        """SELECT short_title, title, link, source_collections
+           FROM agent_datasets
+           WHERE source = 'analysis-results' AND hidden = 0
+             AND short_title IS NOT NULL
+           ORDER BY short_title"""
+    ).fetchall()
+    download_scope: dict[str, list[str]] = {}
+    available = {
+        row[1]
+        for row in snapshot.execute("PRAGMA table_info(agent_current_downloads)")
+    }
+    scope_columns = [
+        column
+        for column in (
+            "download_title",
+            "download_url",
+            "search_url",
+            "download_metadata",
+            "description",
+        )
+        if column in available
+    ]
+    if {"short_title", "parent_source"}.issubset(available) and scope_columns:
+        select_scope = ", ".join(scope_columns)
+        for row in snapshot.execute(
+            f"""SELECT short_title, {select_scope}
+                FROM agent_current_downloads
+                WHERE parent_source = 'analysis-results' AND hidden = 0"""
+        ):
+            download_scope.setdefault(row["short_title"], []).append(
+                " ".join(clean_value(row[column]) for column in scope_columns)
+            )
+    snapshot.close()
+
+    relationships: list[dict[str, Any]] = []
+    for result in results:
+        target = clean_value(result["short_title"])
+        source_text = clean_value(result["source_collections"])
+        scoped_downloads = download_scope.get(target, [])
+        for collection in collections:
+            source = clean_value(collection["short_title"])
+            evidence: list[str] = []
+            if contains_dataset_short_title(source_text, source):
+                evidence.append("wordpress_source_collections")
+            matching_downloads = [
+                text
+                for text in scoped_downloads
+                if contains_dataset_short_title(text, source)
+            ]
+            if matching_downloads:
+                evidence.append("wordpress_scoped_download")
+            if not evidence:
+                continue
+            relationships.append(
+                {
+                    "relationship_id": stable_id(target, source),
+                    "target_short_title": target,
+                    "target_title": clean_value(result["title"]),
+                    "target_url": clean_value(result["link"]),
+                    "source_short_title": source,
+                    "source_title": clean_value(collection["title"]),
+                    "source_url": clean_value(collection["link"]),
+                    "relationship_source": ";".join(evidence),
+                    "relationship_evidence": source_text
+                    if "wordpress_source_collections" in evidence
+                    else matching_downloads[0],
+                }
+            )
+    return relationships
 
 
 def apply_wordpress_dataset_inferences(
@@ -1646,9 +1861,10 @@ def copy_source_from_previous(
             """INSERT OR IGNORE INTO clinical_facts
                (fact_id, source_row_id, source_id, source_kind, source_priority,
                 short_title, subject_id, subject_key, concept, value_text,
-                value_normalized, value_number, unit, original_column,
-                evidence_scope, is_inferred, provenance_json)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                value_resolved, value_normalized, value_number, unit,
+                original_column, evidence_scope, is_inferred, qc_excluded,
+                qc_status, provenance_json)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 fact["fact_id"],
                 fact["source_row_id"],
@@ -1660,6 +1876,11 @@ def copy_source_from_previous(
                 fact["subject_key"],
                 fact["concept"],
                 fact["value_text"],
+                (
+                    fact["value_resolved"]
+                    if "value_resolved" in fact.keys()
+                    else fact["value_text"]
+                ),
                 fact["value_normalized"],
                 fact["value_number"],
                 fact["unit"],
@@ -1668,6 +1889,8 @@ def copy_source_from_previous(
                 if "evidence_scope" in fact.keys()
                 else "patient",
                 fact["is_inferred"] if "is_inferred" in fact.keys() else 0,
+                fact["qc_excluded"] if "qc_excluded" in fact.keys() else 0,
+                fact["qc_status"] if "qc_status" in fact.keys() else "accepted",
                 fact["provenance_json"],
             ),
         )
@@ -1700,6 +1923,7 @@ def copy_nonofficial_previous(
                WHERE source_kind NOT IN
                      ('tcia_clinical_download',
                       'tcia_linked_external_clinical', 'idc_clinical',
+                      'tcia_collection_subject_inheritance',
                       'wordpress_dataset_inference')"""
         ).fetchall()
     except sqlite3.Error:
@@ -2926,16 +3150,10 @@ def ingest_official_bytes(
                 )
                 value = clean_value(record[column])
                 if concept and value:
-                    facts.append(
-                        (
-                            concept,
-                            decode_dataset_concept(
-                                row["short_title"], concept, value
-                            ),
-                            str(column),
-                            None,
-                        )
-                    )
+                    # Preserve official source codes in value_text. Audited
+                    # dataset-specific decoding occurs in the QC layer and is
+                    # recorded separately in value_resolved.
+                    facts.append((concept, value, str(column), None))
             facts.extend(
                 ct_colonography_workbook_facts(
                     row["short_title"],
@@ -4296,6 +4514,699 @@ def import_legacy_seed(
     return counts
 
 
+AGE_CONCEPTS = {
+    "age_at_diagnosis",
+    "age_at_enrollment_years",
+    "age_at_imaging_years",
+    "age_at_treatment_years",
+}
+AGE_MISSING_TOKENS = {"--", "not reported", "not available"}
+CATEGORICAL_MISSING_TOKENS = {"--", "not available"}
+
+CMB_DATASETS = {
+    "cmbaml",
+    "cmbcrc",
+    "cmbgec",
+    "cmblca",
+    "cmbmel",
+    "cmbmml",
+    "cmbpca",
+}
+
+
+def insert_qc_finding(
+    conn: sqlite3.Connection,
+    *,
+    rule_id: str,
+    severity: str,
+    disposition: str,
+    short_title: str,
+    message: str,
+    subject_id: str = "",
+    subject_key: str = "",
+    source_id: str = "",
+    source_row_id: str = "",
+    fact_id: str = "",
+    concept: str = "",
+    original_value: str = "",
+    resolved_value: str = "",
+    unit: str = "",
+    provenance: dict[str, Any] | None = None,
+) -> None:
+    review_status = "open" if disposition == "manual_review" else "accepted"
+    finding_id = stable_id(
+        rule_id,
+        short_title,
+        subject_id,
+        source_row_id,
+        fact_id,
+        original_value,
+    )
+    conn.execute(
+        """INSERT OR REPLACE INTO clinical_qc_findings
+           (finding_id, rule_id, severity, disposition, review_status,
+            short_title, subject_id, subject_key, source_id, source_row_id,
+            fact_id, concept, original_value, resolved_value, unit, message,
+            provenance_json)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            finding_id,
+            rule_id,
+            severity,
+            disposition,
+            review_status,
+            short_title,
+            subject_id or None,
+            subject_key or None,
+            source_id or None,
+            source_row_id or None,
+            fact_id or None,
+            concept or None,
+            original_value or None,
+            resolved_value or None,
+            unit or None,
+            message,
+            json_dumps(provenance or {}),
+        ),
+    )
+
+
+def materialize_clinical_qc(conn: sqlite3.Connection) -> dict[str, int]:
+    """Apply audited clinical QC without changing source text or source rows."""
+    conn.execute("DELETE FROM clinical_qc_findings")
+    conn.execute(
+        """UPDATE clinical_facts
+           SET value_resolved = value_text,
+               qc_excluded = 0,
+               qc_status = 'accepted'"""
+    )
+
+    # Reapply audited dictionaries during QC so incrementally reused facts
+    # receive newly added mappings without rewriting their preserved source
+    # value. This is intentionally dataset-specific: numeric codes do not
+    # have portable meanings across clinical studies.
+    coded_facts = conn.execute(
+        """SELECT * FROM clinical_facts
+           WHERE qc_excluded = 0
+             AND concept IN ('sex_at_birth', 'vital_status')"""
+    ).fetchall()
+    for fact in coded_facts:
+        resolved = decode_dataset_concept(
+            fact["short_title"], fact["concept"], fact["value_text"]
+        )
+        if resolved == fact["value_text"]:
+            continue
+        normalized = normalize_concept_value(fact["concept"], resolved)
+        conn.execute(
+            """UPDATE clinical_facts
+               SET value_resolved = ?, value_normalized = ?,
+                   qc_status = 'normalized_dataset_code'
+               WHERE fact_id = ?""",
+            (resolved, normalized, fact["fact_id"]),
+        )
+        insert_qc_finding(
+            conn,
+            rule_id="dataset_specific_categorical_code",
+            severity="info",
+            disposition="auto_normalize",
+            short_title=fact["short_title"],
+            subject_id=fact["subject_id"],
+            subject_key=fact["subject_key"],
+            source_id=fact["source_id"],
+            source_row_id=fact["source_row_id"],
+            fact_id=fact["fact_id"],
+            concept=fact["concept"],
+            original_value=fact["value_text"],
+            resolved_value=resolved,
+            message=(
+                "Decoded a categorical value using the audited official "
+                "dictionary for this dataset."
+            ),
+        )
+
+    categorical_facts = conn.execute(
+        """SELECT * FROM clinical_facts
+           WHERE qc_excluded = 0
+             AND concept IN ('sex_at_birth', 'race', 'ethnicity',
+                             'vital_status', 'recurrence', 'progression',
+                             'response', 'screening_result')"""
+    ).fetchall()
+    for fact in categorical_facts:
+        if normalize_value(fact["value_resolved"]) not in CATEGORICAL_MISSING_TOKENS:
+            continue
+        conn.execute(
+            """UPDATE clinical_facts
+               SET qc_excluded = 1, qc_status = 'excluded_missing_token'
+               WHERE fact_id = ?""",
+            (fact["fact_id"],),
+        )
+        insert_qc_finding(
+            conn,
+            rule_id="categorical_missing_value_token",
+            severity="info",
+            disposition="auto_exclude",
+            short_title=fact["short_title"],
+            subject_id=fact["subject_id"],
+            subject_key=fact["subject_key"],
+            source_id=fact["source_id"],
+            source_row_id=fact["source_row_id"],
+            fact_id=fact["fact_id"],
+            concept=fact["concept"],
+            original_value=fact["value_text"],
+            message="Normalized an explicit categorical missing-value token to null.",
+        )
+
+    # This workbook sheet contains prose notes. Its header-like Patient ID
+    # must never become a patient, but the raw source row remains auditable.
+    explanatory_rows = conn.execute(
+        """SELECT DISTINCT r.*
+           FROM clinical_rows r
+           WHERE lower(replace(r.short_title, '-', '')) = 'headneckpetct'
+             AND lower(trim(r.subject_id)) = 'explanations'
+             AND r.table_name LIKE '%::Excluded'"""
+    ).fetchall()
+    for row in explanatory_rows:
+        conn.execute(
+            """UPDATE clinical_facts
+               SET qc_excluded = 1, qc_status = 'excluded_non_patient_row'
+               WHERE source_row_id = ?""",
+            (row["source_row_id"],),
+        )
+        insert_qc_finding(
+            conn,
+            rule_id="non_patient_explanatory_row",
+            severity="error",
+            disposition="auto_exclude",
+            short_title=row["short_title"],
+            subject_id=row["subject_id"],
+            subject_key=row["subject_key"],
+            source_id=row["source_id"],
+            source_row_id=row["source_row_id"],
+            message=(
+                "Excluded the Head-Neck-PET-CT workbook Explanations row "
+                "from patient-level facts; the source row remains preserved."
+            ),
+            provenance={"table_name": row["table_name"], "row_number": row["row_number"]},
+        )
+
+    # TCGA-style age_at_diagnosis in this official Crowds-Cure snapshot is
+    # expressed in days. Keep value_text unchanged and resolve in years.
+    crowds_age_facts = conn.execute(
+        """SELECT * FROM clinical_facts
+           WHERE lower(replace(short_title, '-', '')) = 'crowdscure2017'
+             AND source_kind = 'tcia_clinical_download'
+             AND concept = 'age_at_diagnosis'
+             AND lower(replace(original_column, '_', '')) = 'ageatdiagnosis'
+             AND qc_excluded = 0"""
+    ).fetchall()
+    for fact in crowds_age_facts:
+        days = number_value(fact["value_text"])
+        if days is None or not (3650 <= days <= 47580):
+            continue
+        years = days / 365.25
+        resolved = f"{years:.2f}".rstrip("0").rstrip(".")
+        conn.execute(
+            """UPDATE clinical_facts
+               SET value_resolved = ?, value_normalized = ?,
+                   value_number = ?, unit = 'years',
+                   qc_status = 'normalized_age_days_to_years'
+               WHERE fact_id = ?""",
+            (resolved, f"{years:g}", years, fact["fact_id"]),
+        )
+        insert_qc_finding(
+            conn,
+            rule_id="crowds_cure_age_days_to_years",
+            severity="error",
+            disposition="auto_normalize",
+            short_title=fact["short_title"],
+            subject_id=fact["subject_id"],
+            subject_key=fact["subject_key"],
+            source_id=fact["source_id"],
+            source_row_id=fact["source_row_id"],
+            fact_id=fact["fact_id"],
+            concept=fact["concept"],
+            original_value=fact["value_text"],
+            resolved_value=resolved,
+            unit="years",
+            message=(
+                "Converted official Crowds-Cure-2017 age_at_diagnosis "
+                "from days to years using 365.25 days/year."
+            ),
+            provenance={
+                "conversion": "days / 365.25",
+                "original_unit": "days",
+            },
+        )
+
+    age_facts = conn.execute(
+        """SELECT * FROM clinical_facts
+           WHERE concept IN ('age_at_diagnosis', 'age_at_enrollment_years',
+                             'age_at_imaging_years')
+             AND qc_excluded = 0"""
+    ).fetchall()
+    for fact in age_facts:
+        normalized_text = normalize_value(fact["value_text"])
+        if normalized_text in AGE_MISSING_TOKENS:
+            conn.execute(
+                """UPDATE clinical_facts
+                   SET qc_excluded = 1, qc_status = 'excluded_missing_token'
+                   WHERE fact_id = ?""",
+                (fact["fact_id"],),
+            )
+            insert_qc_finding(
+                conn,
+                rule_id="age_missing_value_token",
+                severity="info",
+                disposition="auto_exclude",
+                short_title=fact["short_title"],
+                subject_id=fact["subject_id"],
+                subject_key=fact["subject_key"],
+                source_id=fact["source_id"],
+                source_row_id=fact["source_row_id"],
+                fact_id=fact["fact_id"],
+                concept=fact["concept"],
+                original_value=fact["value_text"],
+                message="Normalized a documented missing-age token to null.",
+            )
+            continue
+
+        numeric = fact["value_number"]
+        if (
+            normalize_name(fact["short_title"]) == "radcure"
+            and fact["concept"] == "age_at_imaging_years"
+            and fact["source_kind"] == "dicom"
+        ):
+            authoritative = conn.execute(
+                """SELECT fact_id, source_id, source_kind, value_resolved,
+                          value_number, unit
+                   FROM clinical_facts
+                   WHERE subject_key = ?
+                     AND concept = 'age_at_imaging_years'
+                     AND source_kind = 'tcia_clinical_download'
+                     AND source_priority > ?
+                     AND value_number > 0
+                     AND value_number <= 120
+                     AND qc_excluded = 0
+                   ORDER BY source_priority DESC, fact_id
+                   LIMIT 1""",
+                (fact["subject_key"], fact["source_priority"]),
+            ).fetchone()
+            if authoritative:
+                conn.execute(
+                    """UPDATE clinical_facts
+                       SET qc_excluded = 1,
+                           qc_status = 'superseded_by_official_radcure_age'
+                       WHERE fact_id = ?""",
+                    (fact["fact_id"],),
+                )
+                insert_qc_finding(
+                    conn,
+                    rule_id="radcure_dicom_age_superseded",
+                    severity="info" if numeric not in {0.0, 999.0} else "warning",
+                    disposition="auto_exclude",
+                    short_title=fact["short_title"],
+                    subject_id=fact["subject_id"],
+                    subject_key=fact["subject_key"],
+                    source_id=fact["source_id"],
+                    source_row_id=fact["source_row_id"],
+                    fact_id=fact["fact_id"],
+                    concept=fact["concept"],
+                    original_value=fact["value_text"],
+                    resolved_value=authoritative["value_resolved"],
+                    unit=authoritative["unit"] or "years",
+                    message=(
+                        "Excluded RADCURE DICOM PatientAge from resolution "
+                        "because the official TCIA clinical workbook provides "
+                        "a valid subject-level age."
+                    ),
+                    provenance={
+                        "authoritative_fact_id": authoritative["fact_id"],
+                        "authoritative_source_id": authoritative["source_id"],
+                        "authoritative_source_kind": authoritative["source_kind"],
+                    },
+                )
+                continue
+        if (
+            normalize_name(fact["short_title"]) == "hncimrt7033"
+            and fact["concept"] == "age_at_imaging_years"
+            and fact["source_kind"] == "dicom"
+            and numeric == 0.0
+        ):
+            conn.execute(
+                """UPDATE clinical_facts
+                   SET qc_excluded = 1,
+                       qc_status = 'excluded_hnc_imrt_zero_age_missing'
+                   WHERE fact_id = ?""",
+                (fact["fact_id"],),
+            )
+            insert_qc_finding(
+                conn,
+                rule_id="hnc_imrt_dicom_zero_age_missing",
+                severity="warning",
+                disposition="auto_exclude",
+                short_title=fact["short_title"],
+                subject_id=fact["subject_id"],
+                subject_key=fact["subject_key"],
+                source_id=fact["source_id"],
+                source_row_id=fact["source_row_id"],
+                fact_id=fact["fact_id"],
+                concept=fact["concept"],
+                original_value=fact["value_text"],
+                unit=fact["unit"] or "years",
+                message=(
+                    "Excluded HNC-IMRT-70-33 DICOM PatientAge=000Y as "
+                    "missing. TCIA publishes no patient-level clinical age "
+                    "alternative for this collection."
+                ),
+                provenance={
+                    "review_basis": (
+                        "adult head-and-neck radiotherapy cohort; nonzero "
+                        "DICOM ages span 30-83 years; CDA age and birth year "
+                        "are absent"
+                    )
+                },
+            )
+            continue
+        dataset_name = normalize_name(fact["short_title"])
+        if (
+            fact["concept"] == "age_at_imaging_years"
+            and fact["source_kind"] == "dicom"
+            and numeric == 0.0
+            and dataset_name in CMB_DATASETS | {"glisrt", "headneckcetuximab"}
+        ):
+            if dataset_name in CMB_DATASETS:
+                rule_id = "cmb_dicom_zero_age_missing"
+                basis = (
+                    "CTDC participant metadata also contains only 000Y or "
+                    "blank patient_age values for these CMB collections"
+                )
+            elif dataset_name == "glisrt":
+                rule_id = "glis_rt_dicom_zero_age_missing"
+                basis = (
+                    "adult glioma radiotherapy cohort; 223 nonzero DICOM "
+                    "ages span 18-85 years and no alternative clinical age "
+                    "source is published"
+                )
+            else:
+                rule_id = "head_neck_cetuximab_dicom_zero_age_missing"
+                basis = (
+                    "stage III/IV head-and-neck trial cohort; 45 nonzero "
+                    "DICOM ages span 42-76 years and no patient-level "
+                    "clinical age table is published"
+                )
+            conn.execute(
+                """UPDATE clinical_facts
+                   SET qc_excluded = 1,
+                       qc_status = 'excluded_dataset_zero_age_missing'
+                   WHERE fact_id = ?""",
+                (fact["fact_id"],),
+            )
+            insert_qc_finding(
+                conn,
+                rule_id=rule_id,
+                severity="warning",
+                disposition="auto_exclude",
+                short_title=fact["short_title"],
+                subject_id=fact["subject_id"],
+                subject_key=fact["subject_key"],
+                source_id=fact["source_id"],
+                source_row_id=fact["source_row_id"],
+                fact_id=fact["fact_id"],
+                concept=fact["concept"],
+                original_value=fact["value_text"],
+                unit=fact["unit"] or "years",
+                message=(
+                    "Excluded DICOM PatientAge=000Y as a source-level "
+                    "missing-value placeholder; the raw fact is preserved."
+                ),
+                provenance={"review_basis": basis},
+            )
+            continue
+        if (
+            dataset_name == "acrinfmisobrain"
+            and fact["concept"] == "age_at_imaging_years"
+            and fact["source_kind"] == "dicom"
+            and numeric == 0.0
+        ):
+            enrollment = conn.execute(
+                """SELECT fact_id, source_id, value_resolved
+                   FROM clinical_facts
+                   WHERE subject_key = ?
+                     AND concept = 'age_at_enrollment_years'
+                     AND source_kind = 'tcia_clinical_download'
+                     AND value_number > 0 AND value_number <= 120
+                     AND qc_excluded = 0
+                   ORDER BY source_priority DESC, fact_id LIMIT 1""",
+                (fact["subject_key"],),
+            ).fetchone()
+            if enrollment:
+                conn.execute(
+                    """UPDATE clinical_facts
+                       SET qc_excluded = 1,
+                           qc_status = 'excluded_zero_age_with_official_enrollment_age'
+                       WHERE fact_id = ?""",
+                    (fact["fact_id"],),
+                )
+                insert_qc_finding(
+                    conn,
+                    rule_id="acrin_fmiso_dicom_zero_age_missing",
+                    severity="warning",
+                    disposition="auto_exclude",
+                    short_title=fact["short_title"],
+                    subject_id=fact["subject_id"],
+                    subject_key=fact["subject_key"],
+                    source_id=fact["source_id"],
+                    source_row_id=fact["source_row_id"],
+                    fact_id=fact["fact_id"],
+                    concept=fact["concept"],
+                    original_value=fact["value_text"],
+                    resolved_value=enrollment["value_resolved"],
+                    unit="years",
+                    message=(
+                        "Excluded DICOM PatientAge=000Y as missing; the "
+                        "official A0.csv provides a valid enrollment age."
+                    ),
+                    provenance={
+                        "official_enrollment_fact_id": enrollment["fact_id"],
+                        "official_source_id": enrollment["source_id"],
+                    },
+                )
+                continue
+        if (
+            fact["concept"] == "age_at_imaging_years"
+            and fact["source_kind"] == "dicom"
+            and numeric in {0.0, 999.0}
+        ):
+            disposition = "auto_exclude" if numeric == 999.0 else "manual_review"
+            status = (
+                "excluded_dicom_999_placeholder"
+                if numeric == 999.0
+                else "excluded_dicom_zero_pending_review"
+            )
+            conn.execute(
+                """UPDATE clinical_facts
+                   SET qc_excluded = 1, qc_status = ?
+                   WHERE fact_id = ?""",
+                (status, fact["fact_id"]),
+            )
+            insert_qc_finding(
+                conn,
+                rule_id=(
+                    "dicom_age_999_placeholder"
+                    if numeric == 999.0
+                    else "dicom_age_zero_review"
+                ),
+                severity="error" if numeric == 999.0 else "warning",
+                disposition=disposition,
+                short_title=fact["short_title"],
+                subject_id=fact["subject_id"],
+                subject_key=fact["subject_key"],
+                source_id=fact["source_id"],
+                source_row_id=fact["source_row_id"],
+                fact_id=fact["fact_id"],
+                concept=fact["concept"],
+                original_value=fact["value_text"],
+                unit=fact["unit"] or "",
+                message=(
+                    "Excluded DICOM PatientAge=999Y as a placeholder."
+                    if numeric == 999.0
+                    else (
+                        "Excluded DICOM PatientAge=000Y pending review; "
+                        "confirm whether the collection can contain neonates."
+                    )
+                ),
+            )
+            continue
+
+        if numeric is not None and (numeric < 0 or numeric > 120):
+            conn.execute(
+                """UPDATE clinical_facts
+                   SET qc_excluded = 1, qc_status = 'excluded_age_outlier_pending_review'
+                   WHERE fact_id = ?""",
+                (fact["fact_id"],),
+            )
+            insert_qc_finding(
+                conn,
+                rule_id="age_outside_plausible_range",
+                severity="error",
+                disposition="manual_review",
+                short_title=fact["short_title"],
+                subject_id=fact["subject_id"],
+                subject_key=fact["subject_key"],
+                source_id=fact["source_id"],
+                source_row_id=fact["source_row_id"],
+                fact_id=fact["fact_id"],
+                concept=fact["concept"],
+                original_value=fact["value_text"],
+                unit=fact["unit"] or "",
+                message="Excluded age outside the provisional 0-120 year range.",
+            )
+
+    radcure_sex_conflicts = conn.execute(
+        """SELECT d.*, o.fact_id AS official_fact_id,
+                  o.source_id AS official_source_id,
+                  o.value_resolved AS official_value
+           FROM clinical_facts d
+           JOIN clinical_facts o
+             ON o.subject_key = d.subject_key
+            AND o.concept = d.concept
+            AND o.source_kind = 'tcia_clinical_download'
+            AND o.source_priority > d.source_priority
+            AND o.qc_excluded = 0
+           WHERE lower(replace(d.short_title, '-', '')) = 'radcure'
+             AND d.concept = 'sex_at_birth'
+             AND d.source_kind = 'dicom'
+             AND d.qc_excluded = 0
+             AND d.value_normalized <> o.value_normalized
+           ORDER BY d.subject_id"""
+    ).fetchall()
+    for fact in radcure_sex_conflicts:
+        insert_qc_finding(
+            conn,
+            rule_id="radcure_sex_source_conflict",
+            severity="warning",
+            disposition="manual_review",
+            short_title=fact["short_title"],
+            subject_id=fact["subject_id"],
+            subject_key=fact["subject_key"],
+            source_id=fact["source_id"],
+            source_row_id=fact["source_row_id"],
+            fact_id=fact["fact_id"],
+            concept=fact["concept"],
+            original_value=fact["value_text"],
+            resolved_value=fact["official_value"],
+            message=(
+                "RADCURE DICOM PatientSex disagrees with the higher-priority "
+                "official TCIA clinical workbook."
+            ),
+            provenance={
+                "official_fact_id": fact["official_fact_id"],
+                "official_source_id": fact["official_source_id"],
+                "official_value": fact["official_value"],
+            },
+        )
+
+    # Promote ingestion coverage warnings into the same auditable QC queue.
+    # Reference/dictionary sheets are expected to lack patient IDs; probable
+    # patient tables and parser failures remain open for targeted follow-up.
+    documentation_markers = (
+        "data dictionary",
+        "_dictionary",
+        "dictionary reviewed",
+        "formdictionary",
+        "form index",
+        "table legend",
+        "cde mapping",
+        "column description",
+        "name glossary",
+        "form element number",
+        "data category",
+    )
+    expected_non_tabular_downloads = {
+        "braintrgammaknife",
+        "dicomsrbreastclinical",
+        "ldctandprojectiondata",
+        "lungctdiagnosis",
+        "midrcricord1a",
+        "midrcricord1c",
+        "nlst",
+        "pdmrtextureanalysis",
+    }
+    coverage_warnings = conn.execute(
+        """SELECT * FROM clinical_build_warnings
+           WHERE warning_type IN ('subject_column_not_found',
+                                  'official_download_failed')"""
+    ).fetchall()
+    for item in coverage_warnings:
+        warning_text = item["warning_text"] or ""
+        dataset_name = normalize_name(item["short_title"])
+        if item["warning_type"] == "subject_column_not_found":
+            expected = any(
+                marker in warning_text.lower() for marker in documentation_markers
+            )
+            rule_id = (
+                "expected_non_patient_reference_table"
+                if expected
+                else "subject_identifier_mapping_required"
+            )
+            disposition = "accepted_skip" if expected else "manual_review"
+            severity = "info" if expected else "warning"
+            message = (
+                "Skipped a reference or dictionary table that is not expected "
+                "to contain patient identifiers."
+                if expected
+                else (
+                    "A probable patient-level table was skipped because no "
+                    "conservative subject identifier mapping is defined."
+                )
+            )
+        else:
+            expected = (
+                dataset_name in expected_non_tabular_downloads
+                and "no supported csv/tsv/xls/xlsx table found"
+                in warning_text.lower()
+            )
+            rule_id = (
+                "expected_unsupported_non_tabular_download"
+                if expected
+                else "official_clinical_download_ingest_failure"
+            )
+            disposition = "accepted_skip" if expected else "manual_review"
+            severity = "info" if expected else "error"
+            message = (
+                "Skipped an official supporting package that is not a "
+                "CSV/TSV/Excel patient table."
+                if expected
+                else (
+                    "An official clinical-looking download could not be "
+                    "ingested and requires parser or source review."
+                )
+            )
+        insert_qc_finding(
+            conn,
+            rule_id=rule_id,
+            severity=severity,
+            disposition=disposition,
+            short_title=item["short_title"] or "",
+            source_id=item["source_id"] or "",
+            original_value=warning_text,
+            message=message,
+            provenance={
+                "warning_id": item["warning_id"],
+                "warning_type": item["warning_type"],
+                "warning_text": warning_text,
+            },
+        )
+
+    return {
+        row["disposition"]: row["count"]
+        for row in conn.execute(
+            """SELECT disposition, COUNT(*) AS count
+               FROM clinical_qc_findings GROUP BY disposition"""
+        )
+    }
+
+
 def materialize_subjects(conn: sqlite3.Connection) -> None:
     conn.execute("DELETE FROM clinical_subjects")
     display_values = canonical_display_map(conn)
@@ -4304,6 +5215,7 @@ def materialize_subjects(conn: sqlite3.Connection) -> None:
            FROM clinical_facts f
            JOIN clinical_sources s USING (source_id)
            JOIN clinical_rows r USING (source_row_id)
+           WHERE f.qc_excluded = 0
            ORDER BY f.subject_key, f.concept, f.source_priority DESC,
                     COALESCE(s.source_date, '') DESC, f.source_id, f.fact_id"""
     )
@@ -4321,7 +5233,7 @@ def materialize_subjects(conn: sqlite3.Connection) -> None:
         for concept, concept_facts in grouped.items():
             winner = concept_facts[0]
             resolved[concept] = display_values.get(
-                (concept, winner["value_normalized"]), winner["value_text"]
+                (concept, winner["value_normalized"]), winner["value_resolved"]
             )
             resolved_sources[concept] = {
                 "source_kind": winner["source_kind"],
@@ -4336,7 +5248,8 @@ def materialize_subjects(conn: sqlite3.Connection) -> None:
                 distinct.setdefault(
                     fact["value_normalized"],
                     {
-                        "value": fact["value_text"],
+                        "value": fact["value_resolved"],
+                        "source_value": fact["value_text"],
                         "source_kind": fact["source_kind"],
                         "source_id": fact["source_id"],
                         "source_lineage": fact["source_lineage"],
@@ -4398,6 +5311,201 @@ def materialize_subjects(conn: sqlite3.Connection) -> None:
         current_key = fact["subject_key"]
         current_facts.append(fact)
     write_subject(current_facts)
+
+
+def inherit_analysis_result_clinical_facts(
+    conn: sqlite3.Connection, snapshot_db: Path
+) -> dict[str, int]:
+    """Inherit source-Collection facts after relationship and ID validation."""
+    conn.execute("DELETE FROM clinical_dataset_relationships")
+    relationships = wordpress_analysis_result_relationships(snapshot_db)
+    totals = {
+        "relationships": len(relationships),
+        "relationships_with_matches": 0,
+        "target_subjects": 0,
+        "matched_subjects": 0,
+        "inherited_facts": 0,
+    }
+    for relationship in relationships:
+        target = relationship["target_short_title"]
+        source = relationship["source_short_title"]
+        candidate_rows = conn.execute(
+            """SELECT subject_id, MAX(has_imaging) AS has_imaging
+               FROM (
+                   SELECT subject_id, 1 AS has_imaging
+                   FROM clinical_imaging_subjects
+                   WHERE short_title = ?
+                   UNION ALL
+                   SELECT r.subject_id, r.has_imaging
+                   FROM clinical_rows r
+                   JOIN clinical_sources s USING (source_id)
+                   WHERE r.short_title = ?
+                     AND s.source_kind NOT IN
+                         ('wordpress_dataset_inference',
+                          'tcia_collection_subject_inheritance')
+               )
+               GROUP BY subject_id ORDER BY subject_id""",
+            (target, target),
+        ).fetchall()
+        target_subjects = {
+            normalize_subject(row["subject_id"]): (
+                row["subject_id"],
+                bool(row["has_imaging"]),
+            )
+            for row in candidate_rows
+            if clean_value(row["subject_id"])
+        }
+        source_subjects = {
+            normalize_subject(row["subject_id"]): row
+            for row in conn.execute(
+                """SELECT * FROM clinical_subjects
+                   WHERE short_title = ? ORDER BY subject_id""",
+                (source,),
+            )
+        }
+        matching_ids = sorted(set(target_subjects) & set(source_subjects))
+        source_id = (
+            "tcia-inheritance:"
+            f"{normalize_name(target)}:{normalize_name(source)}"
+        )
+        inherited_facts = 0
+        if matching_ids:
+            insert_source(
+                conn,
+                source_id=source_id,
+                source_kind="tcia_collection_subject_inheritance",
+                short_title=target,
+                source_signature_value=stable_id(
+                    relationship["relationship_id"],
+                    relationship["relationship_evidence"],
+                ),
+                source_lineage=(
+                    "wordpress-analysis-result-patient-crosswalk:"
+                    f"{normalize_name(target)}:{normalize_name(source)}"
+                ),
+                source_url=relationship["target_url"],
+                provenance=relationship,
+            )
+            for row_number, normalized_id in enumerate(matching_ids, start=1):
+                target_subject_id, target_has_imaging = target_subjects[
+                    normalized_id
+                ]
+                source_subject = source_subjects[normalized_id]
+                values = json.loads(source_subject["resolved_values_json"])
+                resolved_sources = json.loads(
+                    source_subject["resolved_sources_json"]
+                )
+                for concept in sorted(INHERITABLE_PATIENT_CONCEPTS & values.keys()):
+                    value = clean_value(values.get(concept))
+                    if not value:
+                        continue
+                    original_source = resolved_sources.get(concept, {})
+                    original_source_id = clean_value(
+                        original_source.get("source_id")
+                    )
+                    original_facts = [
+                        dict(row)
+                        for row in conn.execute(
+                            """SELECT fact_id, source_row_id, value_text,
+                                      value_resolved, unit
+                               FROM clinical_facts
+                               WHERE subject_key = ? AND concept = ?
+                                 AND source_id = ? AND qc_excluded = 0
+                               ORDER BY fact_id""",
+                            (
+                                source_subject["subject_key"],
+                                concept,
+                                original_source_id,
+                            ),
+                        )
+                    ]
+                    unit = next(
+                        (
+                            clean_value(item["unit"])
+                            for item in original_facts
+                            if clean_value(item["unit"])
+                        ),
+                        "",
+                    )
+                    insert_row_and_facts(
+                        conn,
+                        source_id=source_id,
+                        source_kind="tcia_collection_subject_inheritance",
+                        short_title=target,
+                        subject_id=target_subject_id,
+                        table_name="wordpress.patient_id_crosswalk",
+                        row_number=row_number,
+                        row={
+                            "target_short_title": target,
+                            "target_subject_id": target_subject_id,
+                            "source_short_title": source,
+                            "source_subject_id": source_subject["subject_id"],
+                            "concept": concept,
+                            "value": value,
+                        },
+                        facts=[
+                            (
+                                concept,
+                                value,
+                                f"inherited_from:{source}:{concept}",
+                                unit or None,
+                            )
+                        ],
+                        has_imaging=target_has_imaging,
+                        evidence_scope="patient_inherited",
+                        is_inferred=bool(
+                            original_source.get("is_inferred", False)
+                        ),
+                        fact_provenance={
+                            "relationship_id": relationship["relationship_id"],
+                            "relationship_source": relationship[
+                                "relationship_source"
+                            ],
+                            "relationship_evidence": relationship[
+                                "relationship_evidence"
+                            ],
+                            "inherited_from_short_title": source,
+                            "inherited_from_subject_id": source_subject[
+                                "subject_id"
+                            ],
+                            "original_source": original_source,
+                            "original_facts": original_facts,
+                        },
+                    )
+                    inherited_facts += 1
+        status = (
+            "matched"
+            if matching_ids
+            else (
+                "no_target_subject_ids"
+                if not target_subjects
+                else "no_exact_patient_id_matches"
+            )
+        )
+        conn.execute(
+            """INSERT INTO clinical_dataset_relationships
+               (relationship_id, target_short_title, source_short_title,
+                relationship_source, relationship_evidence, target_subjects,
+                matched_subjects, inherited_facts, status, provenance_json)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                relationship["relationship_id"],
+                target,
+                source,
+                relationship["relationship_source"],
+                relationship["relationship_evidence"],
+                len(target_subjects),
+                len(matching_ids),
+                inherited_facts,
+                status,
+                json_dumps(relationship),
+            ),
+        )
+        totals["target_subjects"] += len(target_subjects)
+        totals["matched_subjects"] += len(matching_ids)
+        totals["inherited_facts"] += inherited_facts
+        totals["relationships_with_matches"] += int(bool(matching_ids))
+    return totals
 
 
 def file_sha256(path: Path) -> str:
@@ -4660,6 +5768,14 @@ def build(args: argparse.Namespace) -> None:
         hungarian_colorectal_result,
     )
     inference_result = apply_wordpress_dataset_inferences(conn, snapshot_db)
+    # Resolve source Collection subjects first, then use WordPress-confirmed
+    # relationships plus exact PatientID matches to backfill Analysis Results.
+    materialize_clinical_qc(conn)
+    materialize_subjects(conn)
+    inheritance_result = inherit_analysis_result_clinical_facts(
+        conn, snapshot_db
+    )
+    qc_result = materialize_clinical_qc(conn)
     materialize_subjects(conn)
     source_fingerprints = [
         tuple(row)
@@ -4702,12 +5818,15 @@ def build(args: argparse.Namespace) -> None:
             "idc_clinical",
             "cda",
             "dicom",
+            "tcia_collection_subject_inheritance",
             "wordpress_dataset_inference",
         ],
     )
     insert_meta(conn, "idc_version", idc_result.get("idc_version", ""))
     insert_meta(conn, "idc_clinical_result", idc_result)
     insert_meta(conn, "wordpress_dataset_inference_result", inference_result)
+    insert_meta(conn, "analysis_result_clinical_inheritance", inheritance_result)
+    insert_meta(conn, "clinical_qc_result", qc_result)
     insert_meta(
         conn,
         "source_signature",
@@ -4732,6 +5851,11 @@ def build(args: argparse.Namespace) -> None:
             "clinical sources, followed by IDC-normalized clinical tables, "
             "CDA, and DICOM. IDC and direct TCIA artifacts share one official-"
             "data lineage. Raw values and conflicts remain available. When no "
+            "direct Analysis Result fact exists, a WordPress-confirmed source "
+            "Collection relationship plus exact PatientID match can supply a "
+            "lower-priority inherited patient fact with crosswalk provenance. "
+            "Program-wide related lists alone never authorize inheritance. "
+            "When no "
             "patient-specific diagnosis or site exists, one non-generic "
             "Collection-level WordPress label is exposed as an explicit "
             "dataset-scope inference. Collections with screen* text, one "
@@ -4768,18 +5892,115 @@ def validate(db_path: Path) -> dict[str, Any]:
         """SELECT source_kind, MIN(source_priority), MAX(source_priority)
            FROM clinical_sources GROUP BY source_kind"""
     ).fetchall() if not missing_tables else []
+    qc_counts = {}
+    semantic_errors = 0
+    relationship_errors = 0
+    if not missing_tables:
+        qc_counts = {
+            row[0]: row[1]
+            for row in conn.execute(
+                """SELECT disposition, COUNT(*)
+                   FROM clinical_qc_findings GROUP BY disposition"""
+            )
+        }
+        semantic_errors = conn.execute(
+            """SELECT COUNT(*) FROM clinical_subjects
+               WHERE CAST(age_at_diagnosis AS REAL) > 120
+                  OR CAST(age_at_diagnosis AS REAL) < 0
+                  OR CAST(age_at_enrollment_years AS REAL) > 120
+                  OR CAST(age_at_enrollment_years AS REAL) < 0
+                  OR CAST(age_at_imaging_years AS REAL) > 120
+                  OR CAST(age_at_imaging_years AS REAL) < 0
+                  OR CAST(age_at_treatment_years AS REAL) > 120
+                  OR CAST(age_at_treatment_years AS REAL) < 0
+                  OR (lower(replace(short_title, '-', '')) = 'headneckpetct'
+                      AND lower(trim(subject_id)) = 'explanations')"""
+        ).fetchone()[0]
+        relationship_errors = conn.execute(
+            """SELECT COUNT(*) FROM clinical_dataset_relationships
+               WHERE matched_subjects > target_subjects
+                  OR (matched_subjects = 0 AND inherited_facts > 0)
+                  OR (status = 'matched' AND matched_subjects = 0)
+                  OR (status <> 'matched' AND inherited_facts > 0)"""
+        ).fetchone()[0]
     conn.close()
     result = {
-        "ok": not missing_tables and not missing_views and integrity == "ok",
+        "ok": (
+            not missing_tables
+            and not missing_views
+            and integrity == "ok"
+            and semantic_errors == 0
+            and relationship_errors == 0
+        ),
         "integrity_check": integrity,
         "missing_tables": missing_tables,
         "missing_views": missing_views,
         "table_counts": counts,
         "source_priorities": precedence,
+        "qc_finding_counts": qc_counts,
+        "semantic_errors": semantic_errors,
+        "relationship_errors": relationship_errors,
     }
     if not result["ok"]:
         raise RuntimeError(json.dumps(result, indent=2))
     return result
+
+
+def export_qc_findings(
+    db_path: Path,
+    out_path: Path,
+    *,
+    include_all: bool = False,
+    short_title: str = "",
+) -> dict[str, Any]:
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    clauses = []
+    parameters: list[Any] = []
+    if not include_all:
+        clauses.append("disposition = 'manual_review'")
+    if short_title:
+        clauses.append("lower(short_title) = lower(?)")
+        parameters.append(short_title)
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    rows = conn.execute(
+        f"""SELECT rule_id, severity, disposition, review_status, short_title,
+                   subject_id, concept, original_value, resolved_value, unit,
+                   message, source_id, source_row_id, fact_id, provenance_json
+            FROM agent_clinical_qc_findings
+            {where}
+            ORDER BY severity DESC, short_title, subject_id, rule_id""",
+        parameters,
+    ).fetchall()
+    conn.close()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    columns = list(rows[0].keys()) if rows else [
+        "rule_id",
+        "severity",
+        "disposition",
+        "review_status",
+        "short_title",
+        "subject_id",
+        "concept",
+        "original_value",
+        "resolved_value",
+        "unit",
+        "message",
+        "source_id",
+        "source_row_id",
+        "fact_id",
+        "provenance_json",
+    ]
+    with out_path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=columns)
+        writer.writeheader()
+        writer.writerows(dict(row) for row in rows)
+    return {
+        "path": str(out_path.resolve()),
+        "rows": len(rows),
+        "scope": "all_findings" if include_all else "manual_review",
+        "short_title": short_title or None,
+    }
 
 
 def release_url(repo: str, tag: str, asset: str) -> str:
@@ -4869,6 +6090,20 @@ def parse_args() -> argparse.Namespace:
     ensure_parser.add_argument(
         "--max-download-bytes", type=int, default=512 * 1024 * 1024
     )
+    qc_parser = subparsers.add_parser(
+        "export-qc", help="Export clinical QC findings to CSV."
+    )
+    qc_parser.add_argument("--db", default=str(DEFAULT_DB_PATH))
+    qc_parser.add_argument("--out", required=True)
+    qc_parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Include accepted automatic findings as well as manual-review rows.",
+    )
+    qc_parser.add_argument(
+        "--collection",
+        help="Limit the export to one exact TCIA Collection short title.",
+    )
     return parser.parse_args()
 
 
@@ -4894,6 +6129,18 @@ def main() -> int:
             print(json.dumps(result, indent=2))
         elif args.command == "ensure":
             ensure(args)
+        elif args.command == "export-qc":
+            print(
+                json.dumps(
+                    export_qc_findings(
+                        Path(args.db),
+                        Path(args.out),
+                        include_all=args.all,
+                        short_title=args.collection or "",
+                    ),
+                    indent=2,
+                )
+            )
     except (RuntimeError, sqlite3.Error, urllib.error.URLError, OSError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1

@@ -388,11 +388,21 @@ TCIA provenance, visibility, and access/license metadata. Important tables:
   `review_reason`, `review_evidence`, and the numbers of subjects backfilled
   or suppressed. Curator-cleared screening matches use
   `review_required = 0` and a `screening_review_resolved_*` reason.
+- `clinical_dataset_relationships`: strong WordPress Analysis Result to
+  Collection relationships plus exact PatientID crosswalk coverage and
+  inherited-fact counts.
 - `clinical_sources`: source kind, priority, lineage, signature, hash, and URL.
 - `clinical_rows`: lossless patient rows, imaging flag, and original `row_json`.
-- `clinical_facts`: long-form normalized concepts from every source.
+- `clinical_facts`: long-form concepts from every source. `value_text` remains
+  source-preserving; `value_resolved`, `qc_excluded`, and `qc_status` describe
+  the QC-adjusted value used for subject resolution.
 - `clinical_subjects`: materialized one-row-per-subject resolution.
 - `clinical_build_warnings`: downloads or tables needing curator review.
+- `clinical_qc_findings`: auditable automatic corrections, exclusions, and
+  open manual-review findings with source row/fact identifiers. Dispositions
+  include `auto_normalize`, `auto_exclude`, `accepted_skip` for reviewed
+  non-patient/unsupported artifacts, and `manual_review` for unresolved
+  anomalies or ingestion coverage gaps.
 
 `clinical_meta.ct_colonography_histology_result` records spreadsheet coverage
 and patient classifications for ACRIN 6664. Its patient-level long-form facts
@@ -458,21 +468,43 @@ Prefer these views:
 - `agent_clinical_dictionary`
 - `agent_clinical_imaging_subjects`
 - `agent_clinical_dataset_inferences`
+- `agent_clinical_dataset_relationships`
+- `agent_clinical_qc_findings`
 
 Resolution is concept-specific and ordered official TCIA clinical download,
 TCIA-linked external clinical source with validated identities, IDC clinical,
-CDA, DICOM, and finally a single-label WordPress Collection fallback for a
-missing diagnosis or site. Direct TCIA and IDC-normalized copies share one
+CDA, DICOM, exact-ID Analysis Result inheritance, and finally a single-label
+WordPress Collection fallback for a missing diagnosis or site. Direct TCIA
+and IDC-normalized copies share one
 official-data lineage. Lower-priority patient facts are retained even when
 they lose resolution. WordPress fallbacks are added only when the concept has
 no patient-level fact. `agent_clinical_subjects` contains only image-linked
 subjects; use `agent_clinical_all_subjects` to audit clinical-only source rows.
 See `references/clinical.md`.
 
+Analysis Result inheritance requires both strong WordPress relationship
+evidence and an exact normalized PatientID match. Program-wide related lists
+are ignored. Direct target-dataset facts always win, unmatched source subjects
+are never copied, and acquisition-specific `age_at_imaging_years` is excluded.
+
+```sql
+SELECT target_short_title, source_short_title, relationship_source,
+       target_subjects, matched_subjects, inherited_facts, status
+FROM agent_clinical_dataset_relationships
+WHERE source_short_title = 'TCGA-GBM'
+ORDER BY target_short_title;
+```
+
 Resolved subject rows expose `primary_diagnosis_is_inferred` and
 `primary_site_is_inferred`. Long-form facts expose `evidence_scope` and
 `is_inferred`; filter to `is_inferred = 0` when an analysis requires
 patient-observed values only.
+
+Age concepts remain context-specific: `age_at_diagnosis`,
+`age_at_enrollment_years`, `age_at_imaging_years`, and
+`age_at_treatment_years` are separate resolved columns. Do not combine them
+without an analysis-specific rule. The raw source value and column remain in
+`agent_clinical_facts` even when QC excludes or normalizes the resolved value.
 
 For screening review:
 

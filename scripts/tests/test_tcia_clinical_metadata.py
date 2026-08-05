@@ -11,6 +11,7 @@ import sys
 import tarfile
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 
 
@@ -22,6 +23,756 @@ SPEC.loader.exec_module(CLINICAL)
 
 
 class ClinicalMetadataTest(unittest.TestCase):
+    def test_tcga_breast_result_prefers_full_bcr_patient_barcode(self) -> None:
+        self.assertEqual(
+            CLINICAL.choose_subject_column(
+                ["patient_id", "bcr_patient_barcode", "vital_status"],
+                "TCGA-Breast-Radiogenomics",
+            ),
+            "bcr_patient_barcode",
+        )
+
+    def test_analysis_result_inherits_collection_facts_by_exact_patient_id(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            snapshot = root / "snapshot.sqlite"
+            snapshot_conn = sqlite3.connect(snapshot)
+            snapshot_conn.executescript(
+                """
+                CREATE TABLE agent_datasets (
+                    source TEXT, short_title TEXT, title TEXT, link TEXT,
+                    hidden INTEGER, source_collections TEXT
+                );
+                INSERT INTO agent_datasets VALUES
+                    ('collections', 'TCGA-GBM', 'TCGA Glioblastoma',
+                     'https://example.test/tcga-gbm', 0, ''),
+                    ('analysis-results', 'GBM-RESULT', 'Derived GBM result',
+                     'https://example.test/gbm-result', 0,
+                     'Original images and patients from TCGA-GBM');
+                CREATE TABLE agent_current_downloads (
+                    short_title TEXT, parent_source TEXT, hidden INTEGER
+                );
+                """
+            )
+            snapshot_conn.close()
+
+            conn = CLINICAL.init_db(root / "clinical.sqlite", replace=True)
+            for source_id, source_kind, short_title in (
+                ("official:gbm", "tcia_clinical_download", "TCGA-GBM"),
+                ("dicom:result", "dicom", "GBM-RESULT"),
+            ):
+                CLINICAL.insert_source(
+                    conn,
+                    source_id=source_id,
+                    source_kind=source_kind,
+                    short_title=short_title,
+                    source_signature_value=source_id,
+                )
+            CLINICAL.insert_row_and_facts(
+                conn,
+                source_id="official:gbm",
+                source_kind="tcia_clinical_download",
+                short_title="TCGA-GBM",
+                subject_id="TCGA-01-0001",
+                table_name="clinical.csv",
+                row_number=1,
+                row={"PatientID": "TCGA-01-0001"},
+                facts=[
+                    ("sex_at_birth", "Female", "sex", None),
+                    ("primary_diagnosis", "Glioblastoma", "diagnosis", None),
+                    ("primary_site", "Brain", "site", None),
+                    (
+                        "age_at_imaging_years",
+                        "55",
+                        "PatientAge",
+                        "years",
+                    ),
+                ],
+                has_imaging=True,
+            )
+            for row_number, subject_id in enumerate(
+                ("TCGA-01-0001", "TCGA-01-9999"), start=1
+            ):
+                CLINICAL.insert_row_and_facts(
+                    conn,
+                    source_id="dicom:result",
+                    source_kind="dicom",
+                    short_title="GBM-RESULT",
+                    subject_id=subject_id,
+                    table_name="legacy.idc_index",
+                    row_number=row_number,
+                    row={"PatientID": subject_id, "PatientSex": "M"},
+                    facts=[("sex_at_birth", "M", "PatientSex", None)],
+                    has_imaging=True,
+                )
+                conn.execute(
+                    """INSERT INTO clinical_imaging_subjects
+                       (subject_key, short_title, subject_id, imaging_source)
+                       VALUES (?, 'GBM-RESULT', ?, 'dicom')""",
+                    (f"gbmresult:{subject_id.lower()}", subject_id),
+                )
+
+            CLINICAL.materialize_clinical_qc(conn)
+            CLINICAL.materialize_subjects(conn)
+            result = CLINICAL.inherit_analysis_result_clinical_facts(
+                conn, snapshot
+            )
+            CLINICAL.materialize_clinical_qc(conn)
+            CLINICAL.materialize_subjects(conn)
+
+            self.assertEqual(result["relationships"], 1)
+            self.assertEqual(result["matched_subjects"], 1)
+            self.assertEqual(result["inherited_facts"], 3)
+            relationship = conn.execute(
+                """SELECT target_short_title, source_short_title,
+                          target_subjects, matched_subjects, inherited_facts,
+                          status
+                   FROM agent_clinical_dataset_relationships"""
+            ).fetchone()
+            self.assertEqual(
+                tuple(relationship),
+                ("GBM-RESULT", "TCGA-GBM", 2, 1, 3, "matched"),
+            )
+            matched = conn.execute(
+                """SELECT sex_at_birth, primary_diagnosis, primary_site,
+                          age_at_imaging_years
+                   FROM agent_clinical_subjects
+                   WHERE short_title = 'GBM-RESULT'
+                     AND subject_id = 'TCGA-01-0001'"""
+            ).fetchone()
+            self.assertEqual(
+                tuple(matched), ("Male", "Glioblastoma", "Brain", None)
+            )
+            unmatched = conn.execute(
+                """SELECT primary_diagnosis, primary_site
+                   FROM agent_clinical_subjects
+                   WHERE short_title = 'GBM-RESULT'
+                     AND subject_id = 'TCGA-01-9999'"""
+            ).fetchone()
+            self.assertEqual(tuple(unmatched), (None, None))
+            inherited = conn.execute(
+                """SELECT evidence_scope, source_priority, provenance_json
+                   FROM clinical_facts
+                   WHERE short_title = 'GBM-RESULT'
+                     AND concept = 'primary_diagnosis'
+                     AND source_kind =
+                         'tcia_collection_subject_inheritance'"""
+            ).fetchone()
+            self.assertEqual(tuple(inherited)[:2], ("patient_inherited", 75))
+            provenance = json.loads(inherited["provenance_json"])
+            self.assertEqual(
+                provenance["inherited_from_short_title"], "TCGA-GBM"
+            )
+            self.assertEqual(
+                provenance["inherited_from_subject_id"], "TCGA-01-0001"
+            )
+            conn.close()
+
+    def test_reviewed_dataset_zero_ages_are_excluded_as_missing(self) -> None:
+        datasets = (
+            "CMB-AML",
+            "CMB-CRC",
+            "CMB-GEC",
+            "CMB-LCA",
+            "CMB-MEL",
+            "CMB-MML",
+            "CMB-PCA",
+            "GLIS-RT",
+            "Head-Neck Cetuximab",
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            conn = CLINICAL.init_db(
+                Path(directory) / "reviewed-zero.sqlite", replace=True
+            )
+            for row_number, short_title in enumerate(datasets, start=1):
+                source_id = f"dicom:{CLINICAL.normalize_name(short_title)}"
+                CLINICAL.insert_source(
+                    conn,
+                    source_id=source_id,
+                    source_kind="dicom",
+                    short_title=short_title,
+                    source_signature_value=source_id,
+                )
+                CLINICAL.insert_row_and_facts(
+                    conn,
+                    source_id=source_id,
+                    source_kind="dicom",
+                    short_title=short_title,
+                    subject_id=f"SUB-{row_number}",
+                    table_name="legacy.idc_index",
+                    row_number=1,
+                    row={"PatientAge": "0"},
+                    facts=[
+                        ("age_at_imaging_years", "0", "PatientAge", "years")
+                    ],
+                    has_imaging=True,
+                )
+
+            counts = CLINICAL.materialize_clinical_qc(conn)
+            self.assertEqual(counts, {"auto_exclude": len(datasets)})
+            self.assertEqual(
+                conn.execute(
+                    """SELECT COUNT(*) FROM clinical_facts
+                       WHERE qc_status = 'excluded_dataset_zero_age_missing'"""
+                ).fetchone()[0],
+                len(datasets),
+            )
+            self.assertEqual(
+                conn.execute(
+                    """SELECT COUNT(*) FROM clinical_qc_findings
+                       WHERE rule_id = 'dicom_age_zero_review'"""
+                ).fetchone()[0],
+                0,
+            )
+            conn.close()
+
+    def test_acrin_fmiso_official_age_resolves_zero_age_review(self) -> None:
+        self.assertEqual(
+            CLINICAL.choose_subject_column(["cn", "entryage"], "ACRIN-FMISO-Brain"),
+            "cn",
+        )
+        self.assertEqual(
+            CLINICAL.normalize_official_subject_id("ACRIN-FMISO-Brain", "36.0"),
+            "ACRIN-FMISO-Brain-036",
+        )
+        self.assertEqual(
+            CLINICAL.concept_for_source_column(
+                "ACRIN-FMISO-Brain", "entryage"
+            ),
+            "age_at_enrollment_years",
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            conn = CLINICAL.init_db(
+                Path(directory) / "acrin-fmiso.sqlite", replace=True
+            )
+            for source_id, source_kind in (
+                ("official:fmiso", "tcia_clinical_download"),
+                ("dicom:fmiso", "dicom"),
+            ):
+                CLINICAL.insert_source(
+                    conn,
+                    source_id=source_id,
+                    source_kind=source_kind,
+                    short_title="ACRIN-FMISO-Brain",
+                    source_signature_value=source_id,
+                )
+            CLINICAL.insert_row_and_facts(
+                conn,
+                source_id="official:fmiso",
+                source_kind="tcia_clinical_download",
+                short_title="ACRIN-FMISO-Brain",
+                subject_id="ACRIN-FMISO-Brain-036",
+                table_name="A0.csv",
+                row_number=1,
+                row={"cn": "36", "entryage": "64"},
+                facts=[
+                    ("age_at_enrollment_years", "64", "entryage", "years")
+                ],
+                has_imaging=True,
+            )
+            CLINICAL.insert_row_and_facts(
+                conn,
+                source_id="dicom:fmiso",
+                source_kind="dicom",
+                short_title="ACRIN-FMISO-Brain",
+                subject_id="ACRIN-FMISO-Brain-036",
+                table_name="legacy.idc_index",
+                row_number=1,
+                row={"PatientAge": "0"},
+                facts=[
+                    ("age_at_imaging_years", "0", "PatientAge", "years")
+                ],
+                has_imaging=True,
+            )
+            counts = CLINICAL.materialize_clinical_qc(conn)
+            CLINICAL.materialize_subjects(conn)
+            self.assertEqual(counts, {"auto_exclude": 1})
+            subject = conn.execute(
+                """SELECT age_at_enrollment_years, age_at_imaging_years
+                   FROM clinical_subjects"""
+            ).fetchone()
+            self.assertEqual(tuple(subject), ("64", None))
+            self.assertEqual(
+                conn.execute(
+                    """SELECT rule_id FROM clinical_qc_findings"""
+                ).fetchone()[0],
+                "acrin_fmiso_dicom_zero_age_missing",
+            )
+            conn.close()
+
+    def test_acrin_fmiso_a0_csv_ingests_cn_and_entryage(self) -> None:
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as archive:
+            archive.writestr("A0.csv", "cn,entryage\n36,64\n44,48\n")
+        with tempfile.TemporaryDirectory() as directory:
+            conn = CLINICAL.init_db(
+                Path(directory) / "acrin-fmiso-ingest.sqlite", replace=True
+            )
+            for subject_id in (
+                "ACRIN-FMISO-Brain-036",
+                "ACRIN-FMISO-Brain-044",
+            ):
+                conn.execute(
+                    """INSERT INTO clinical_imaging_subjects
+                       (subject_key, short_title, subject_id, imaging_source)
+                       VALUES (?, ?, ?, 'dicom')""",
+                    (
+                        f"acrinfmisobrain:{subject_id.lower()}",
+                        "ACRIN-FMISO-Brain",
+                        subject_id,
+                    ),
+                )
+            row = {
+                "short_title": "ACRIN-FMISO-Brain",
+                "download_url": "https://example.test/clinical.zip",
+                "download_title": "ACRIN FMISO clinical data",
+                "date_updated": "2026-01-01",
+                "download_id": "6684",
+                "file_types": "CSV",
+            }
+            loaded_rows, subjects = CLINICAL.ingest_official_bytes(
+                conn,
+                row,
+                source_id="official:fmiso",
+                signature="test",
+                data=buffer.getvalue(),
+            )
+            self.assertEqual((loaded_rows, subjects), (2, 2))
+            self.assertEqual(
+                [tuple(item) for item in conn.execute(
+                    """SELECT subject_id, concept, value_text
+                       FROM clinical_facts ORDER BY subject_id"""
+                )],
+                [
+                    (
+                        "ACRIN-FMISO-Brain-036",
+                        "age_at_enrollment_years",
+                        "64",
+                    ),
+                    (
+                        "ACRIN-FMISO-Brain-044",
+                        "age_at_enrollment_years",
+                        "48",
+                    ),
+                ],
+            )
+            conn.close()
+
+    def test_qc_decodes_audited_codes_and_classifies_ingestion_warnings(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            conn = CLINICAL.init_db(
+                Path(directory) / "codes-warnings.sqlite", replace=True
+            )
+            CLINICAL.insert_source(
+                conn,
+                source_id="official:colorectal",
+                source_kind="tcia_clinical_download",
+                short_title="Colorectal-Liver-Metastases",
+                source_signature_value="official",
+            )
+            CLINICAL.insert_row_and_facts(
+                conn,
+                source_id="official:colorectal",
+                source_kind="tcia_clinical_download",
+                short_title="Colorectal-Liver-Metastases",
+                subject_id="CRLM-1",
+                table_name="Clinical.xlsx",
+                row_number=1,
+                row={"Sex": "2", "Vital status": "1", "Age": "57"},
+                facts=[
+                    ("sex_at_birth", "2", "Sex", None),
+                    ("vital_status", "1", "Vital status", None),
+                    ("age_at_treatment_years", "57", "Age", "years"),
+                ],
+                has_imaging=True,
+            )
+            CLINICAL.warning(
+                conn,
+                "subject_column_not_found",
+                "No subject identifier in Clinical.xlsx::Data Dictionary; "
+                "columns=['Data Category', 'Description']",
+                source_id="official:colorectal",
+                short_title="Colorectal-Liver-Metastases",
+            )
+            CLINICAL.warning(
+                conn,
+                "subject_column_not_found",
+                "No subject identifier in A0.csv; columns=['cn', 'entryage']",
+                source_id="official:colorectal",
+                short_title="Colorectal-Liver-Metastases",
+            )
+
+            counts = CLINICAL.materialize_clinical_qc(conn)
+            CLINICAL.materialize_subjects(conn)
+            self.assertEqual(
+                counts,
+                {"accepted_skip": 1, "auto_normalize": 2, "manual_review": 1},
+            )
+            subject = conn.execute(
+                """SELECT sex_at_birth, vital_status, age_at_treatment_years,
+                          age_at_imaging_years FROM clinical_subjects"""
+            ).fetchone()
+            self.assertEqual(tuple(subject), ("Female", "Dead", "57", None))
+            dispositions = dict(
+                conn.execute(
+                    """SELECT rule_id, disposition FROM clinical_qc_findings
+                       WHERE rule_id LIKE '%table'
+                          OR rule_id = 'subject_identifier_mapping_required'"""
+                )
+            )
+            self.assertEqual(
+                dispositions,
+                {
+                    "expected_non_patient_reference_table": "accepted_skip",
+                    "subject_identifier_mapping_required": "manual_review",
+                },
+            )
+            conn.close()
+
+    def test_hnc_imrt_zero_age_is_preserved_but_excluded_as_missing(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            db_path = Path(directory) / "hnc-imrt.sqlite"
+            conn = CLINICAL.init_db(db_path, replace=True)
+            CLINICAL.insert_source(
+                conn,
+                source_id="dicom:hncimrt7033",
+                source_kind="dicom",
+                short_title="HNC-IMRT-70-33",
+                source_signature_value="dicom",
+            )
+            for row_number, (subject_id, age) in enumerate(
+                (("HNC_001", "0"), ("HNC_002", "55")),
+                start=1,
+            ):
+                CLINICAL.insert_row_and_facts(
+                    conn,
+                    source_id="dicom:hncimrt7033",
+                    source_kind="dicom",
+                    short_title="HNC-IMRT-70-33",
+                    subject_id=subject_id,
+                    table_name="legacy.idc_index",
+                    row_number=row_number,
+                    row={"PatientID": subject_id, "PatientAge": age},
+                    facts=[
+                        ("age_at_imaging_years", age, "PatientAge", "years")
+                    ],
+                    has_imaging=True,
+                )
+
+            counts = CLINICAL.materialize_clinical_qc(conn)
+            CLINICAL.materialize_subjects(conn)
+            conn.commit()
+
+            self.assertEqual(counts, {"auto_exclude": 1})
+            zero = conn.execute(
+                """SELECT value_text, qc_excluded, qc_status
+                   FROM clinical_facts WHERE subject_id = 'HNC_001'"""
+            ).fetchone()
+            self.assertEqual(
+                tuple(zero),
+                ("0", 1, "excluded_hnc_imrt_zero_age_missing"),
+            )
+            self.assertIsNone(
+                conn.execute(
+                    """SELECT age_at_imaging_years FROM clinical_subjects
+                       WHERE subject_id = 'HNC_001'"""
+                ).fetchone()
+            )
+            self.assertEqual(
+                conn.execute(
+                    """SELECT age_at_imaging_years FROM clinical_subjects
+                       WHERE subject_id = 'HNC_002'"""
+                ).fetchone()[0],
+                "55",
+            )
+            finding = conn.execute(
+                """SELECT rule_id, disposition FROM clinical_qc_findings"""
+            ).fetchone()
+            self.assertEqual(
+                tuple(finding),
+                ("hnc_imrt_dicom_zero_age_missing", "auto_exclude"),
+            )
+            conn.close()
+
+    def test_radcure_qc_prefers_official_age_and_flags_sex_conflict(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            db_path = Path(directory) / "radcure.sqlite"
+            conn = CLINICAL.init_db(db_path, replace=True)
+            CLINICAL.insert_source(
+                conn,
+                source_id="official:radcure",
+                source_kind="tcia_clinical_download",
+                short_title="RADCURE",
+                source_signature_value="official",
+            )
+            CLINICAL.insert_source(
+                conn,
+                source_id="dicom:radcure",
+                source_kind="dicom",
+                short_title="RADCURE",
+                source_signature_value="dicom",
+            )
+            for row_number, (subject_id, official_age, dicom_age) in enumerate(
+                (("RADCURE-1", "72.3", "0"), ("RADCURE-2", "60.1", "60")),
+                start=1,
+            ):
+                CLINICAL.insert_row_and_facts(
+                    conn,
+                    source_id="official:radcure",
+                    source_kind="tcia_clinical_download",
+                    short_title="RADCURE",
+                    subject_id=subject_id,
+                    table_name="RADCURE_Clinical.xlsx",
+                    row_number=row_number,
+                    row={
+                        "PatientID": subject_id,
+                        "Age": official_age,
+                        "Sex": "Female",
+                    },
+                    facts=[
+                        ("age_at_imaging_years", official_age, "Age", None),
+                        ("sex_at_birth", "Female", "Sex", None),
+                    ],
+                    has_imaging=True,
+                )
+                CLINICAL.insert_row_and_facts(
+                    conn,
+                    source_id="dicom:radcure",
+                    source_kind="dicom",
+                    short_title="RADCURE",
+                    subject_id=subject_id,
+                    table_name="legacy.idc_index",
+                    row_number=row_number,
+                    row={
+                        "PatientID": subject_id,
+                        "PatientAge": dicom_age,
+                        "PatientSex": "M" if row_number == 1 else "F",
+                    },
+                    facts=[
+                        (
+                            "age_at_imaging_years",
+                            dicom_age,
+                            "PatientAge",
+                            "years",
+                        ),
+                        (
+                            "sex_at_birth",
+                            "M" if row_number == 1 else "F",
+                            "PatientSex",
+                            None,
+                        ),
+                    ],
+                    has_imaging=True,
+                )
+
+            counts = CLINICAL.materialize_clinical_qc(conn)
+            CLINICAL.materialize_subjects(conn)
+            conn.commit()
+
+            self.assertEqual(counts, {"auto_exclude": 2, "manual_review": 1})
+            subjects = conn.execute(
+                """SELECT subject_id, age_at_imaging_years, sex_at_birth
+                   FROM clinical_subjects ORDER BY subject_id"""
+            ).fetchall()
+            self.assertEqual(
+                [tuple(row) for row in subjects],
+                [
+                    ("RADCURE-1", "72.3", "Female"),
+                    ("RADCURE-2", "60.1", "Female"),
+                ],
+            )
+            excluded = conn.execute(
+                """SELECT COUNT(*) FROM clinical_facts
+                   WHERE source_kind = 'dicom'
+                     AND concept = 'age_at_imaging_years'
+                     AND qc_excluded = 1
+                     AND qc_status = 'superseded_by_official_radcure_age'"""
+            ).fetchone()[0]
+            self.assertEqual(excluded, 2)
+            findings = conn.execute(
+                """SELECT rule_id, disposition, original_value, resolved_value
+                   FROM clinical_qc_findings ORDER BY rule_id, original_value"""
+            ).fetchall()
+            self.assertEqual(
+                [tuple(row) for row in findings],
+                [
+                    (
+                        "radcure_dicom_age_superseded",
+                        "auto_exclude",
+                        "0",
+                        "72.3",
+                    ),
+                    (
+                        "radcure_dicom_age_superseded",
+                        "auto_exclude",
+                        "60",
+                        "60.1",
+                    ),
+                    (
+                        "radcure_sex_source_conflict",
+                        "manual_review",
+                        "M",
+                        "Female",
+                    ),
+                ],
+            )
+            self.assertEqual(
+                conn.execute(
+                    """SELECT COUNT(*) FROM agent_clinical_conflicts
+                       WHERE concept = 'age_at_imaging_years'"""
+                ).fetchone()[0],
+                0,
+            )
+            review_csv = Path(directory) / "radcure-review.csv"
+            exported = CLINICAL.export_qc_findings(
+                db_path, review_csv, short_title="RADCURE"
+            )
+            self.assertEqual(exported["rows"], 1)
+            self.assertIn(
+                "radcure_sex_source_conflict", review_csv.read_text()
+            )
+            conn.close()
+
+    def test_age_qc_preserves_source_values_and_cleans_resolved_subjects(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            db_path = root / "clinical.sqlite"
+            conn = CLINICAL.init_db(db_path, replace=True)
+            CLINICAL.insert_source(
+                conn,
+                source_id="official:crowds",
+                source_kind="tcia_clinical_download",
+                short_title="Crowds-Cure-2017",
+                source_signature_value="crowds",
+            )
+            CLINICAL.insert_row_and_facts(
+                conn,
+                source_id="official:crowds",
+                source_kind="tcia_clinical_download",
+                short_title="Crowds-Cure-2017",
+                subject_id="TCGA-TEST",
+                table_name="ccc2017clinical.csv",
+                row_number=1,
+                row={"PatientID": "TCGA-TEST", "age_at_diagnosis": "32364"},
+                facts=[
+                    ("age_at_diagnosis", "32364", "age_at_diagnosis", None)
+                ],
+            )
+            CLINICAL.insert_row_and_facts(
+                conn,
+                source_id="official:crowds",
+                source_kind="tcia_clinical_download",
+                short_title="Crowds-Cure-2017",
+                subject_id="TCGA-MISSING",
+                table_name="ccc2017clinical.csv",
+                row_number=2,
+                row={"PatientID": "TCGA-MISSING", "age_at_diagnosis": "--"},
+                facts=[("age_at_diagnosis", "--", "age_at_diagnosis", None)],
+            )
+            CLINICAL.insert_source(
+                conn,
+                source_id="dicom:headneck",
+                source_kind="dicom",
+                short_title="Head-Neck-PET-CT",
+                source_signature_value="dicom",
+            )
+            for row_number, (subject_id, value) in enumerate(
+                (("PLACEHOLDER", "999"), ("ZERO", "0"), ("VALID", "45")),
+                start=1,
+            ):
+                CLINICAL.insert_row_and_facts(
+                    conn,
+                    source_id="dicom:headneck",
+                    source_kind="dicom",
+                    short_title="Head-Neck-PET-CT",
+                    subject_id=subject_id,
+                    table_name="legacy.idc_index",
+                    row_number=row_number,
+                    row={"PatientID": subject_id, "PatientAge": value},
+                    facts=[
+                        ("age_at_imaging_years", value, "PatientAge", "years")
+                    ],
+                    has_imaging=True,
+                )
+            CLINICAL.insert_row_and_facts(
+                conn,
+                source_id="dicom:headneck",
+                source_kind="dicom",
+                short_title="Head-Neck-PET-CT",
+                subject_id="Explanations",
+                table_name="clinical.xlsx::Excluded",
+                row_number=12,
+                row={"Patient #": "Explanations", "Sex": "curation note"},
+                facts=[("sex_at_birth", "curation note", "Sex", None)],
+            )
+
+            counts = CLINICAL.materialize_clinical_qc(conn)
+            CLINICAL.materialize_subjects(conn)
+            conn.commit()
+
+            crowds = conn.execute(
+                """SELECT value_text, value_resolved, value_number, unit,
+                          qc_excluded, qc_status
+                   FROM clinical_facts
+                   WHERE subject_id = 'TCGA-TEST'"""
+            ).fetchone()
+            self.assertEqual(crowds["value_text"], "32364")
+            self.assertEqual(crowds["value_resolved"], "88.61")
+            self.assertAlmostEqual(crowds["value_number"], 32364 / 365.25)
+            self.assertEqual(crowds["unit"], "years")
+            self.assertEqual(crowds["qc_excluded"], 0)
+            self.assertEqual(
+                crowds["qc_status"], "normalized_age_days_to_years"
+            )
+            self.assertEqual(
+                conn.execute(
+                    """SELECT age_at_diagnosis FROM clinical_subjects
+                       WHERE subject_id = 'TCGA-TEST'"""
+                ).fetchone()[0],
+                "88.61",
+            )
+            self.assertEqual(
+                conn.execute(
+                    """SELECT age_at_imaging_years FROM clinical_subjects
+                       WHERE subject_id = 'VALID'"""
+                ).fetchone()[0],
+                "45",
+            )
+            excluded_subjects = {
+                row[0]
+                for row in conn.execute(
+                    """SELECT subject_id FROM clinical_subjects
+                       WHERE subject_id IN
+                           ('TCGA-MISSING', 'PLACEHOLDER', 'ZERO',
+                            'Explanations')"""
+                )
+            }
+            self.assertEqual(excluded_subjects, set())
+            self.assertEqual(counts["manual_review"], 1)
+            self.assertEqual(
+                conn.execute(
+                    """SELECT COUNT(*) FROM clinical_qc_findings
+                       WHERE disposition = 'auto_normalize'"""
+                ).fetchone()[0],
+                1,
+            )
+
+            csv_path = root / "manual-review.csv"
+            exported = CLINICAL.export_qc_findings(db_path, csv_path)
+            self.assertEqual(exported["rows"], 1)
+            self.assertIn("dicom_age_zero_review", csv_path.read_text())
+            conn.close()
+
     def test_sex_codes_follow_dataset_specific_dictionaries(self) -> None:
         self.assertEqual(
             CLINICAL.decode_dataset_concept(

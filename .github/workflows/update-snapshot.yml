@@ -154,6 +154,9 @@ jobs:
         run: |
           python scripts/tcia_clinical_metadata.py validate \
             --db dist/clinical_metadata.sqlite
+          python scripts/tcia_clinical_metadata.py export-qc \
+            --db dist/clinical_metadata.sqlite \
+            --out dist/clinical_qc_manual_review.csv
 
       - name: Install Aspera CLI
         if: github.event_name == 'workflow_dispatch' && inputs.refresh_pathology_inventory == 'true'
@@ -439,6 +442,7 @@ jobs:
           gh release upload "$tag" \
             dist/clinical_metadata.sqlite.gz \
             dist/clinical_metadata_manifest.json \
+            dist/clinical_qc_manual_review.csv \
             --clobber
 
       - name: Publish changed pathology metadata

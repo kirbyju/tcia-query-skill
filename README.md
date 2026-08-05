@@ -192,7 +192,7 @@ Optional direct release URLs:
 - `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/clinical_metadata.sqlite.gz`
 - `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/clinical_metadata_manifest.json`
 
-The base snapshot, controlled-access metadata, and clinical metadata are checked by the scheduled workflow. Each run writes a SQLite additions/removals report to the GitHub Actions job summary and emits warning annotations for new additions or clinical review flags. Clinical refreshes reuse unchanged direct official artifacts, fetch small TCIA-linked external clinical sources such as Allen IvyGAP and FDA DIDSR VICTRE lesion ground truth on every run, reuse IDC clinical tables while the IDC version is unchanged, fully rebuild those small tables on an IDC version change, and carry the existing strict CDA/DICOM seed forward. Pathology metadata can include a more expensive Aspera package inventory and is refreshed by maintainers when that workflow is dispatched with pathology inventory enabled. NIfTI metadata is maintained as an optional on-demand asset, with scheduled drift checks warning maintainers when it may need refresh.
+The base snapshot, controlled-access metadata, and clinical metadata are checked by the scheduled workflow. Each run writes a SQLite additions/removals report to the GitHub Actions job summary and emits warning annotations for new additions or clinical review flags. Clinical refreshes reuse unchanged direct official artifacts, fetch small TCIA-linked external clinical sources such as Allen IvyGAP and FDA DIDSR VICTRE lesion ground truth on every run, reuse IDC clinical tables while the IDC version is unchanged, fully rebuild those small tables on an IDC version change, and carry the existing strict CDA/DICOM seed forward. They also recompute Analysis Result-to-Collection clinical inheritance from current WordPress relationship evidence and exact PatientID matches; inherited facts are a lower-priority fallback and never replace direct result-dataset facts. Pathology metadata can include a more expensive Aspera package inventory and is refreshed by maintainers when that workflow is dispatched with pathology inventory enabled. NIfTI metadata is maintained as an optional on-demand asset, with scheduled drift checks warning maintainers when it may need refresh.
 
 These optional SQLite files are **not** downloaded during skill install and are **not** downloaded by `python scripts/tcia_snapshot.py ensure`. They expose `agent_*` views for routine use. Users who need NIfTI file-level metadata can fetch it on demand:
 
@@ -257,6 +257,8 @@ python scripts/tcia_controlled_access_metadata.py downloads --collection CMB-MEL
 python scripts/tcia_controlled_access_metadata.py files --collection CMB-MEL --limit 10
 python scripts/tcia_clinical_metadata.py ensure
 python scripts/tcia_clinical_metadata.py info
+python scripts/tcia_clinical_metadata.py export-qc \\
+  --out clinical_qc_manual_review.csv
 python scripts/tcia_wordpress_search.py --query breast --limit 10
 python scripts/tcia_wordpress_search.py --short-title EAY131 --json
 python scripts/tcia_wordpress_search.py --short-title 4D-Lung --json
@@ -312,6 +314,9 @@ python scripts/tcia_clinical_metadata.py build \
   --manifest-out dist/clinical_metadata_manifest.json \
   --replace
 python scripts/tcia_clinical_metadata.py validate --db dist/clinical_metadata.sqlite
+python scripts/tcia_clinical_metadata.py export-qc \\
+  --db dist/clinical_metadata.sqlite \\
+  --out dist/clinical_qc_manual_review.csv
 ```
 
 After those assets are uploaded once, scheduled runs carry strict CDA/DICOM

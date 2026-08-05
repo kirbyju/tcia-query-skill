@@ -40,6 +40,72 @@ Dataset-specific official dictionaries take precedence; EA1141, for example,
 defines sex code `1` as Female, whereas several ACRIN datasets define `1` as
 Male. Unmapped codes remain visible for review.
 
+## Quality control and manual review
+
+Clinical QC never overwrites source evidence. `clinical_rows.row_json` and
+`clinical_facts.value_text` retain the ingested values.
+`clinical_facts.value_resolved` contains the value eligible for subject
+resolution, while `qc_excluded` and `qc_status` explain why a fact was withheld.
+`clinical_qc_findings` and `agent_clinical_qc_findings` provide the rule,
+severity, disposition, source row/fact identifiers, original and resolved
+values, and review status.
+
+The reviewed QC rules:
+
+- convert the official `Crowds-Cure-2017` TCGA-style
+  `age_at_diagnosis` field from days to years;
+- exclude `Not Reported`, `not available`, and `--` from resolved ages;
+- exclude DICOM `PatientAge=999Y` as a placeholder;
+- exclude DICOM `PatientAge=000Y` pending dataset review, because a zero can be
+  valid for a neonate but is usually a missing-value placeholder in adult
+  cancer collections;
+- suppress all RADCURE DICOM ages when the official TCIA clinical workbook
+  provides a valid subject-level age; the raw DICOM value remains preserved;
+- send RADCURE DICOM-versus-official sex disagreements to manual review while
+  continuing to resolve to the official clinical value;
+- treat HNC-IMRT-70-33 DICOM `PatientAge=000Y` as missing after confirming
+  that TCIA publishes no patient-level clinical age alternative, CDA has no
+  age or birth year, and the collection's nonzero DICOM ages span 30-83 years;
+- treat DICOM `PatientAge=000Y` as a missing placeholder for the seven CMB
+  collections after confirming that public CTDC participant metadata also
+  contains only `000Y` or blank ages;
+- treat the seven GLIS-RT and fifteen Head-Neck Cetuximab zero ages as missing
+  after collection-specific cohort/range review and confirmation that TCIA
+  publishes no alternative patient-level age table;
+- ingest ACRIN-FMISO-Brain `A0.csv` by its `cn` identifier, retain `entryage`
+  as `age_at_enrollment_years`, and exclude a DICOM zero imaging age only when
+  that subject has a valid official enrollment age;
+- retain Colorectal-Liver-Metastases `Age` as
+  `age_at_treatment_years` because its official dictionary defines the field
+  as age at operation, rather than relabeling it as imaging age;
+- decode sex and vital-status values only for collections with an audited
+  source dictionary, including `0=Alive` and `1=Dead` for
+  Colorectal-Liver-Metastases and HistologyHSI-BC-Recurrence;
+- normalize explicit categorical `--`/`not available` tokens to null;
+- classify identifier warnings from dictionary/reference sheets as expected
+  skips, while keeping probable patient tables without a safe ID mapping and
+  genuine official-download parser failures in the manual-review queue;
+- hold remaining ages outside 0–120 years for manual review; and
+- exclude the known `Head-Neck-PET-CT` workbook `Explanations` row from
+  patient resolution while preserving its source row.
+
+Export the open manual-review queue with:
+
+```bash
+python scripts/tcia_clinical_metadata.py export-qc \\
+  --db cache/clinical_metadata.sqlite \\
+  --out clinical_qc_manual_review.csv
+```
+
+Add `--all` to include accepted automatic normalizations and exclusions.
+Use `--collection RADCURE` (or another exact Collection short title) to
+produce a dataset-specific review queue.
+Scheduled release builds publish `clinical_qc_manual_review.csv` beside the
+clinical SQLite and manifest whenever the clinical release changes.
+Use `--all` when auditing accepted automatic findings, including
+`accepted_skip` coverage classifications; the default export contains only
+open `manual_review` findings.
+
 Treat a direct TCIA artifact and the IDC table derived from it as one official
 clinical-data lineage, not two independent confirmations. Prefer the direct
 artifact on conflict. Use IDC as the operational parser/delivery route when the
@@ -263,9 +329,13 @@ stored in `clinical_meta.idc_clinical_result` under `victre`.
 - `agent_clinical_dataset_inferences`: Collection-label eligibility, rejection
   reason, screening signal, review flag/reason, candidate-subject count, and
   applied- and suppressed-subject counts.
+- `agent_clinical_dataset_relationships`: WordPress-confirmed Analysis Result
+  to source Collection relationships, target-ID coverage, exact PatientID
+  matches, inherited-fact counts, evidence, and status.
 
 The resolved subject views include common concepts such as sex, race,
-ethnicity, age at diagnosis, age at enrollment, age at imaging, diagnosis,
+ethnicity, age at diagnosis, age at enrollment, age at imaging, age at
+treatment/operation, diagnosis,
 primary site, stage, grade, vital status, survival intervals, recurrence,
 progression, response, and screening result. Dataset-specific columns that are
 not mapped remain in `clinical_rows.row_json`.
@@ -278,6 +348,12 @@ fields are decoded from the official dictionaries. Lesion outcome, detailed
 pathology, and grade codes remain available as long-form facts in addition to
 the resolved diagnosis/site/grade fields. Every original CSV column remains
 losslessly available in `clinical_rows.row_json`.
+For ACRIN-FMISO-Brain, official `A0.csv` case number `cn` is expanded to the
+zero-padded TCIA PatientID and `entryage` is stored as
+`age_at_enrollment_years`.
+For Colorectal-Liver-Metastases, official `Age` is stored as
+`age_at_treatment_years` because the source dictionary labels it age at
+operation; sex and vital-status codes are decoded from that same dictionary.
 For `Hungarian-Colorectal-Screening`, `Age` is stored as
 `age_at_imaging_years`, and the original locally extended ICD-10 value remains
 available in both `icd10_code` and `clinical_rows.row_json`.
@@ -290,9 +366,30 @@ resolved subject views to distinguish dataset-scope fallbacks. Long-form facts
 also expose `evidence_scope = 'dataset'` and `is_inferred = 1`; patient-level
 facts use `evidence_scope = 'patient'` and `is_inferred = 0`.
 
-Subject identity is scoped by `(short_title, subject_id)`. Do not join subjects
-across collections merely because their identifiers look alike. Review
-`agent_clinical_conflicts` before analysis.
+Subject identity remains scoped by `(short_title, subject_id)`. An Analysis
+Result can inherit stable patient facts from a source Collection only when
+both of these gates pass:
+
+1. WordPress explicitly names that Collection in the Analysis Result's
+   `source_collections` prose or scopes one of the result's own downloads to
+   the Collection short title; and
+2. the normalized PatientID matches exactly in the Analysis Result and source
+   Collection.
+
+Program-wide related-Collection lists, title similarity, and cohort-level
+subject counts do not authorize inheritance. Only matching target subjects are
+backfilled; unmatched source-cohort patients are never copied. Direct target
+facts from official files, IDC, CDA, or DICOM outrank inherited facts.
+Inherited facts use `evidence_scope = 'patient_inherited'` and retain the
+relationship, source Collection/PatientID, original source, and original fact
+IDs in provenance. `age_at_imaging_years` is not inherited because it belongs
+to a particular acquisition. Review `agent_clinical_dataset_relationships`
+and `agent_clinical_conflicts` before analysis.
+
+`TCGA-Breast-Radiogenomics` uses the official row's full
+`bcr_patient_barcode` as its subject identifier rather than the abbreviated
+four-character `patient_id`; this permits exact, auditable matches to
+`TCGA-BRCA` while leaving blank or unmatched rows uninherited.
 
 CDA rows are imported only when both their dataset short title matches a
 visible current TCIA dataset and their subject identifier is present in the
