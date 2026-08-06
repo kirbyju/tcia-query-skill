@@ -40,7 +40,8 @@ NIfTI, pathology, PathDB, Aspera inventory, and patient-level clinical metadata.
 - Controlled access: `find_controlled_access_datasets`,
   `get_controlled_access_files`.
 - NIfTI: `find_nifti_datasets`, `get_nifti_files`,
-  `get_nifti_derived_objects`, `get_nifti_package_files`.
+  `get_nifti_derived_objects`, `get_nifti_characteristics`,
+  `find_nifti_review_issues`, `get_nifti_package_files`.
 - Pathology/Aspera: `find_pathology_datasets`, `get_pathology_downloads`,
   `get_pathology_package_files`, `get_pathology_file_objects`,
   `get_pathology_disparities`.

@@ -55,6 +55,9 @@ python scripts/tcia_nifti_metadata.py info
 python scripts/tcia_nifti_metadata.py datasets --limit 20
 python scripts/tcia_nifti_metadata.py files --collection UCSF-PDGM --limit 10
 python scripts/tcia_nifti_metadata.py files --collection CT-ORG --modality CT
+python scripts/tcia_nifti_metadata.py characteristics --collection CT-ORG --limit 10
+python scripts/tcia_nifti_metadata.py characteristics --collection BCBM-RadioGenomics --limit 10
+python scripts/tcia_nifti_metadata.py characteristics --collection Vestibular-Schwannoma-MC-RC2 --limit 10
 python scripts/tcia_nifti_metadata.py derived --collection BCBM-RadioGenomics --with-sources
 ```
 
@@ -83,7 +86,10 @@ Prefer the `agent_*` views for routine querying:
 | `agent_nifti_downloads` | WordPress NIfTI download provenance with `download_label` fallback text when a source title is missing. |
 | `agent_nifti_dataset_summary` | Dataset summary across all NIfTI downloads, including datasets whose files do not collapse into `radiology_series` rows. |
 | `agent_nifti_files` | Canonical one-row-per-NIfTI logical radiology file/series table with lower-snake-case UID aliases. |
-| `agent_nifti_derived_objects` | Probable NIfTI segmentation objects and best-effort source-image references. |
+| `agent_nifti_derived_objects` | Probable NIfTI segmentations, annotations, and transformed images with best-effort source-image references. |
+| `agent_nifti_characteristics` | Reviewed object role, associated imaging modality, preferred source NIfTI volume, total source-reference count, source dataset/access level/DICOM UIDs, alternate DICOM SEG representation, WordPress-label provenance, and canonical study grouping. It covers every current NIfTI dataset in the release. |
+| `agent_nifti_characteristics_summary` | Unambiguous source-image, segmentation, transformed-image, and fiducial counts for datasets processed through the reviewed characteristics layer. |
+| `agent_nifti_review_issues` | One row per unresolved dataset-level QC question, with affected-file count, severity, status, description, and evidence. |
 
 | Table | Use |
 | --- | --- |
@@ -97,7 +103,10 @@ Prefer the `agent_*` views for routine querying:
 | `radiology_series` | Preferred canonical one-row-per-NIfTI logical radiology file/series table. |
 | `radiology_mr`, `radiology_ct`, `radiology_pet`, `radiology_contrast` | Modality-specific extension tables. |
 | `derived_objects` | Probable NIfTI segmentation objects. |
-| `derived_object_references` | Best-effort source-image links for derived objects. |
+| `derived_object_references` | Best-effort provenance links with separate source NIfTI volume identifiers, source dataset/DICOM identifiers, and role-specific related-DICOM identifiers. |
+| `nifti_classification_rules` | One reviewed rule per dataset/download classification, including file patterns, provenance, confidence, and WordPress download linkage. |
+| `nifti_file_characteristics` | Compact per-file assignments to a reviewed classification rule, with object role and associated imaging modality. |
+| `nifti_dataset_review_issues` | Compact dataset-level manual-review queue; issues are not repeated in every file row. |
 | `metadata_quality_flags` | Preserved source-row flags for known bad/missing rows. |
 
 ## Common Queries
@@ -142,6 +151,30 @@ ORDER BY short_title, file_name
 LIMIT 20;
 ```
 
+Find reviewed CT source images without mixing in CT-associated segmentations:
+
+```sql
+SELECT short_title, subject_id, file_name, associated_imaging_modality,
+       study_id, study_id_source, classification_source
+FROM agent_nifti_characteristics
+WHERE associated_imaging_modality = 'CT'
+  AND object_role = 'source_image'
+ORDER BY short_title, subject_id, file_name;
+```
+
+Find non-DICOM segmentations associated with CT source images:
+
+```sql
+SELECT short_title, subject_id, file_name,
+       segmentation_representation, source_nifti_volume_file_name,
+       source_dicom_series_instance_uid,
+       reference_confidence
+FROM agent_nifti_characteristics
+WHERE associated_imaging_modality = 'CT'
+  AND object_role = 'segmentation'
+ORDER BY short_title, subject_id, file_name;
+```
+
 Find segmentations and their source files:
 
 ```sql
@@ -149,14 +182,15 @@ SELECT
   d.short_title,
   d.file_name AS derived_file,
   d.segmentation_representation,
-  dor.referenced_file_name AS source_file,
+  dor.source_nifti_volume_file_name,
+  dor.source_dicom_series_instance_uid,
   dor.confidence,
   dor.inference_method
 FROM derived_objects d
 LEFT JOIN derived_object_references dor
   ON dor.derived_object_id = d.derived_object_id
 WHERE d.short_title = 'BCBM-RadioGenomics'
-ORDER BY d.file_name, dor.referenced_file_name
+ORDER BY d.file_name, dor.source_nifti_volume_file_name
 LIMIT 20;
 ```
 
@@ -192,13 +226,46 @@ Some NIfTI downloads contain segmentations, masks, radiomic features, or package
 
 `agent_nifti_files.subject_id` / `radiology_series.subject_id` prefer a submitter-provided `PatientID` from parsed companion metadata. When no submitter `PatientID` exists, refreshed releases may fill a conservative path-derived identifier from common NIfTI package layouts. These inferred IDs are intended as file grouping keys, not clinical truth; inspect `metadata_sources` for `path_patient_id:*` provenance before relying on them.
 
-`derived_objects.derived_object_type` is normalized to `segmentation` for current NIfTI-derived rows. Use `segmentation_representation` for the representation hint:
+`derived_objects.derived_object_type` distinguishes segmentations, annotations, and transformed images when the package supplies enough evidence. Use `segmentation_representation` for the current representation hint:
 
 - `binary_mask`: usually one ROI/class per file.
 - `labelmap`: usually one image where integer values encode labels/classes.
 - `segmentation_file`: generic segmentation object, often from filenames such as `*-seg.nii.gz`.
 
 `derived_object_references` is heuristic unless `inference_method` indicates an explicit source identifier. The current harvest mostly uses filename/path rules and records `confidence`, `inference_method`, and `evidence_json` so downstream users can decide how much to trust each link.
+
+One derived file can reference multiple source volumes. `derived_object_references` preserves every supported link. `agent_nifti_characteristics` remains one row per reviewed file: it exposes a preferred source only when the highest-confidence candidate is unique and reports the full number in `source_reference_count`. A null preferred source with a count greater than one means the relationship is genuinely multi-source, not missing.
+
+WordPress `file_type`, `data_type`, and `download_type` labels remain distinct. `NIfTI` stays at download grain in `nifti_downloads`; it is implicit for reviewed NIfTI files and is not repeated in every file or classification-rule row. `CT`/`MR`/`PT` populate `associated_imaging_modality`, while generic `Segmentation` is a format-independent content type. DICOM-specific values such as `SEG` or `RTSTRUCT` must not be assigned to NIfTI objects.
+
+For a derived NIfTI object, `source_nifti_volume_id` and `source_nifti_volume_file_name` identify the related NIfTI image volume when that volume is represented in this SQLite. Explicit provenance to original DICOM is stored separately in `source_dicom_series_instance_uid` and `source_dicom_study_instance_uid`; synthetic NIfTI identifiers must never be placed in those UID fields. `associated_imaging_modality` applies regardless of whether the source representation is NIfTI or DICOM, so no second DICOM-modality field is used.
+
+When source imaging is external to the NIfTI package, `source_dataset_short_title` records the TCIA source dataset, `source_access_level` records whether that source is open or controlled, and the source DICOM UID fields identify the exact source image when available. Source access is independent of the NIfTI download's access: an open derived file can legitimately reference a controlled source image. A DICOM SEG version of the same segmentation is not a source image: it is stored as a separate `alternate_dicom_segmentation_representation` relationship and exposed as `alternate_dicom_seg_series_instance_uid` / `alternate_dicom_seg_study_instance_uid`. This prevents a DICOM SEG UID from being mistaken for the CT or MR series analyzed to create the segmentation.
+
+CT-ORG is the first dataset processed through `nifti_classification_rules` and `nifti_file_characteristics`. Its WordPress NIfTI download declares `CT` and `Segmentation`; `volume-N.nii.gz` rows are reviewed as CT `source_image` objects, while `labels-N.nii.gz` rows are NIfTI `segmentation` objects associated with their paired CT source images. CT-ORG uses one canonical synthetic `study_id` per subject pair, with `study_id_source = 'synthetic_from_subject_id'`. The earlier parent-directory ID was a generated modeling error rather than source metadata and is not retained.
+
+BCBM-RadioGenomics is the second reviewed dataset. Its WordPress download declares `MR`, `Segmentation`, and `NIfTI`; `*_image_ss_n4.nii.gz` rows are reviewed as MR `source_image` objects and `*_mask_*.nii.gz` rows as MR-associated binary-mask segmentations. Every reviewed mask must have exactly one high-confidence `mask_prefix_same_folder` source link. Unlike CT-ORG, BCBM's parent directories distinguish scan/session instances: the current 223 subjects have 268 image sessions, so the existing `synthetic_from_parent_path` study IDs are retained rather than collapsed to subject grain.
+
+Vestibular-Schwannoma-MC-RC2 is the third reviewed dataset and introduces longitudinal study grouping. Its filenames encode subject, scan date, and acquisition type (`T1`, `T1C`, or `T2`); `T1C_seg` files reference the same subject/date `T1C` source NIfTI volume. The dataset has 190 subjects but 621 subject/date imaging sessions, so canonical synthetic study IDs use both subject and scan date. T1, T1C, T2, and segmentation files from one visit share a study; different dates for the same subject do not.
+
+NLST-New-lesion-LongCT is the fourth reviewed dataset and introduces two additional distinctions. Its WordPress download declares `CT`, `Fiducial`, and `NIfTI`, so `point_N.nii.gz` files are `fiducial_annotation` objects rather than segmentations. The current package inventory contains 750 NIfTI files: 242 source CT volumes, 241 resampled CT volumes, 122 longitudinal registered CT volumes, and 145 point-fiducial volumes. A transfer-list spreadsheet also names 998 historical/intermediate paths, including 242 lung masks, but those paths are retained only as metadata and crosswalk evidence when they are absent from the current package inventory. The reviewed counts therefore do not double-count them or mislabel the lung masks as the advertised point annotations. Source CT rows are crosswalked to the spreadsheet's DICOM Study/Series Instance UIDs; resampled and point volumes link to one source CT, while registered volumes preserve both longitudinal source links.
+
+Radiomic-Feature-Standards is the fifth reviewed dataset and is segmentation-only at NIfTI grain. Its 10 LIDC-IDRI and 3 DRO phantom NIfTI segmentations have no source NIfTI volumes in the package. The Analysis Result's two “Collections used” manifests provide 13 CT Series Instance UIDs and 13 DICOM SEG Series Instance UIDs. IDC DICOMweb metadata verifies an exact PatientID and StudyInstanceUID match for every pair. The reviewed layer therefore associates each NIfTI segmentation with its source CT dataset/series and separately records the DICOM SEG as an alternate representation. Phantom PatientIDs are recovered from the `SEG-Phantom-*` filenames, producing 13 subjects and 13 source studies rather than collapsing the three root-level phantom files into one synthetic study.
+
+Healthy-Total-Body-CTs is the sixth reviewed dataset and introduces mixed-access provenance. The open download contains 30 automatic MOOSE whole-body NIfTI segmentations derived from the controlled collection's 90-minute CT timepoint. Twenty-six filename subject IDs match controlled metadata exactly and receive explicit source CT Series/Study Instance UIDs. Four NIfTI IDs (`014`, `016`, `019`, and `029`) do not match a controlled subject ID; they retain a controlled dataset-level source relationship and a manual-review flag, but no UID or renumbering is guessed. The result has 30 segmentation rows and 30 studies: 26 use explicit source Study Instance UIDs and four use subject-based synthetic study IDs. `source_access_level = 'controlled'` describes the source CT relationship and does not change the open status of the NIfTI download.
+
+For longitudinal queries, `agent_nifti_characteristics` exposes `study_date`, `series_date`, `series_description`, and `file_metadata_sources`. In this dataset the dates and acquisition descriptions are parsed from filenames, so inspect `file_metadata_sources` rather than treating them as DICOM-header metadata.
+
+The reviewed characteristics layer covers all current NIfTI datasets. The remaining dataset rules add multimodal MR/CT/radiotherapy packages, segmentation-only packages, quantitative and processed imaging volumes, challenge identifiers, filename-encoded longitudinal visits, and exact source relationships recovered from preserved support tables. Use `agent_nifti_review_issues` for the intentionally unresolved remainder rather than inferring missing links.
+
+List open manual-review issues:
+
+```sql
+SELECT short_title, issue_code, affected_files, description
+FROM agent_nifti_review_issues
+WHERE status = 'manual_review'
+ORDER BY lower(short_title), issue_code;
+```
 
 For packages where TCIA published only segmentation NIfTI files and not the source images as NIfTI, source-image linkage may require DICOM/IDC/NBIA metadata outside this NIfTI SQLite.
 

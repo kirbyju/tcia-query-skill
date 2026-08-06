@@ -31,8 +31,9 @@ from typing import Any, Iterable, Optional
 
 
 SKILL_ROOT = Path(__file__).resolve().parents[1]
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 4
 DEFAULT_SOURCE_DB = SKILL_ROOT / "cache" / "tcia_snapshot.sqlite"
+DEFAULT_CONTROLLED_ACCESS_DB = SKILL_ROOT / "cache" / "controlled_access_metadata.sqlite"
 DEFAULT_OUT_DIR = SKILL_ROOT / "outputs" / "nifti_metadata"
 DEFAULT_OUT_DB = DEFAULT_OUT_DIR / "nifti_metadata.sqlite"
 USER_AGENT = "tcia-nifti-metadata-harvest/0.1"
@@ -40,6 +41,45 @@ SPREADSHEET_EXTENSIONS = {".csv", ".tsv", ".xlsx"}
 ZIP_EXTENSIONS = {".zip"}
 NIFTI_EXTENSIONS = {".nii", ".nii.gz"}
 NON_FILE_NIFTI_VALUES = {"directory", "dir", "folder", "file", "symbolic_link", "symlink"}
+REMAINING_REVIEWED_DATASET_MODALITIES = {
+    "Brain-Mets-Lung-MRI-Path-Segs": "MR",
+    "BraTS-Africa": "MR",
+    "BraTS-PEDs": "MR",
+    "BraTS-TCGA-GBM": "MR",
+    "BraTS-TCGA-LGG": "MR",
+    "BreastDCEDL_ISPY2": "MR",
+    "CFB-GBM": "MR",
+    "CT Images in COVID-19": "CT",
+    "CT Lymph Nodes": "CT",
+    "DFCI-BCH-BWH-PEDs-HGG": "MR",
+    "DRO-Toolkit": "CT",
+    "ISPY1-Tumor-SEG-Radiomics": "MR",
+    "IvyGAP-Radiomics": "MR",
+    "LUAD-CT-Survival": "CT",
+    "MU-Glioma-Post": "MR",
+    "Pancreas-CT": "CT",
+    "PleThora": "CT",
+    "Pretreat-MetsToBrain-Masks": "MR",
+    "RHUH-GBM": "MR",
+    "RSNA-ASNR-MICCAI-BraTS-2021": "MR",
+    "SAROS": "CT",
+    "Spinal-Multiple-Myeloma-SEG": "CT",
+    "UCSD-PTGBM": "MR",
+    "UCSD-VS-Longitudinal": "MR",
+    "UCSF-PDGM": "MR",
+    "UPENN-GBM": "MR",
+    "UTSW-Glioma": "MR",
+    "Vestibular-Schwannoma-MC-RC": "MR",
+    "Yale-Brain-Mets-Longitudinal": "MR",
+}
+SEGMENTATION_ONLY_SOURCE_DATASETS = {
+    "CT Lymph Nodes": "CT Lymph Nodes",
+    "LUAD-CT-Survival": "LungCT-Diagnosis",
+    "Pancreas-CT": "Pancreas-CT",
+    "PleThora": "NSCLC-Radiomics",
+    "Spinal-Multiple-Myeloma-SEG": "Spinal-Multiple-Myeloma-SEG",
+    "Vestibular-Schwannoma-MC-RC": "Vestibular-Schwannoma-MC-RC",
+}
 LOCAL_EXTRACTED_PACKAGE_SPECS = (
     {
         "short_title": "BraTS-TCGA-GBM",
@@ -51,6 +91,21 @@ LOCAL_EXTRACTED_PACKAGE_SPECS = (
     },
 )
 PANCREAS_CT_MANIFEST_FILE = "Pancreas-CT-20200910.tcia"
+RADIOMIC_FEATURE_STANDARDS_DICOM_MAP = {
+    "LIDC-IDRI-0314": ("LIDC-IDRI", "1.3.6.1.4.1.14519.5.2.1.6279.6001.265704884949271879044145982159", "1.3.6.1.4.1.14519.5.2.1.6279.6001.154677396354641150280013275227", "1.2.276.0.7230010.3.1.3.0.13921.1415374214.73271"),
+    "LIDC-IDRI-0325": ("LIDC-IDRI", "1.3.6.1.4.1.14519.5.2.1.6279.6001.815399168774050638734383723372", "1.3.6.1.4.1.14519.5.2.1.6279.6001.725023183844147505748475581290", "1.2.276.0.7230010.3.1.3.0.14144.1415374490.69074"),
+    "LIDC-IDRI-0580": ("LIDC-IDRI", "1.3.6.1.4.1.14519.5.2.1.6279.6001.173480979711457247360986415860", "1.3.6.1.4.1.14519.5.2.1.6279.6001.237215747217294006286437405216", "1.2.276.0.7230010.3.1.3.0.14429.1415374771.709289"),
+    "LIDC-IDRI-0766": ("LIDC-IDRI", "1.3.6.1.4.1.14519.5.2.1.6279.6001.267013157670921984098319605661", "1.3.6.1.4.1.14519.5.2.1.6279.6001.104562737760173137525888934217", "1.2.276.0.7230010.3.1.3.0.14678.1415375094.24440"),
+    "LIDC-IDRI-0771": ("LIDC-IDRI", "1.3.6.1.4.1.14519.5.2.1.6279.6001.721161755719965069770622927051", "1.3.6.1.4.1.14519.5.2.1.6279.6001.141069661700670042960678408762", "1.2.276.0.7230010.3.1.3.0.14926.1415375403.402571"),
+    "LIDC-IDRI-0811": ("LIDC-IDRI", "1.3.6.1.4.1.14519.5.2.1.6279.6001.694589790483267758352592215517", "1.3.6.1.4.1.14519.5.2.1.6279.6001.220596530836092324070084384692", "1.2.276.0.7230010.3.1.3.0.15592.1415375763.86285"),
+    "LIDC-IDRI-0905": ("LIDC-IDRI", "1.3.6.1.4.1.14519.5.2.1.6279.6001.135354380632609557236443907760", "1.3.6.1.4.1.14519.5.2.1.6279.6001.259227883564429312164962953756", "1.2.276.0.7230010.3.1.3.0.15819.1415376130.690769"),
+    "LIDC-IDRI-0963": ("LIDC-IDRI", "1.3.6.1.4.1.14519.5.2.1.6279.6001.732422099119935556160069769037", "1.3.6.1.4.1.14519.5.2.1.6279.6001.177785764461425908755977367558", "1.2.276.0.7230010.3.1.3.0.16036.1415376454.650517"),
+    "LIDC-IDRI-0965": ("LIDC-IDRI", "1.3.6.1.4.1.14519.5.2.1.6279.6001.283747814329309197645868691560", "1.3.6.1.4.1.14519.5.2.1.6279.6001.106719103982792863757268101375", "1.2.276.0.7230010.3.1.3.0.16318.1415376849.165487"),
+    "LIDC-IDRI-1012": ("LIDC-IDRI", "1.3.6.1.4.1.14519.5.2.1.6279.6001.676549258486738448212921834668", "1.3.6.1.4.1.14519.5.2.1.6279.6001.153646219551578201092527860224", "1.2.276.0.7230010.3.1.3.0.16528.1415377119.292873"),
+    "Phantom-100.0-1.0-1.0-1.0-9.0-0.0-100.0-10.0-0.0-0.0": ("DRO-Toolkit", "1.3.6.1.4.1.14519.5.2.1.4334.1100.227778435442610900403510215258", "1.3.6.1.4.1.14519.5.2.1.4334.1100.149287153529999184294928933250", "1.3.6.1.4.1.14519.5.2.1.4334.1100.461167523602813353571962949272"),
+    "Phantom-100.0-1.0-1.0-1.0-9.0-0.0-100.0-10.0-50.0-0.0": ("DRO-Toolkit", "1.3.6.1.4.1.14519.5.2.1.4334.1100.270261185151025244554438766872", "1.3.6.1.4.1.14519.5.2.1.4334.1100.331544964786227339924437941922", "1.3.6.1.4.1.14519.5.2.1.4334.1100.223774426813399237701666802434"),
+    "Phantom-100.0-1.0-1.0-1.0-9.0-0.2-100.0-10.0-0.0-0.0": ("DRO-Toolkit", "1.3.6.1.4.1.14519.5.2.1.4334.1100.309931845237522492905811484795", "1.3.6.1.4.1.14519.5.2.1.4334.1100.104684655350720526439699797538", "1.3.6.1.4.1.14519.5.2.1.4334.1100.281108012237003726426673221068"),
+}
 METADATA_NAME_HINTS = (
     "acquisition",
     "clinical",
@@ -491,7 +546,75 @@ def open_output(path: Path, replace: bool = False) -> sqlite3.Connection:
     return conn
 
 
+def reset_reviewed_characteristics_schema_if_needed(conn: sqlite3.Connection) -> None:
+    expected_columns = {
+        "radiology_id",
+        "classification_rule_id",
+        "object_role",
+        "associated_imaging_modality",
+        "imaging_modality_relationship",
+        "classification_confidence",
+    }
+    existing_columns = {
+        row["name"] for row in conn.execute("PRAGMA table_info(nifti_file_characteristics)")
+    }
+    if existing_columns and existing_columns != expected_columns:
+        conn.execute("DROP VIEW IF EXISTS agent_nifti_characteristics_summary")
+        conn.execute("DROP VIEW IF EXISTS agent_nifti_characteristics")
+        conn.execute("DROP TABLE nifti_file_characteristics")
+    expected_rule_columns = {
+        "classification_rule_id",
+        "short_title",
+        "download_row_id",
+        "rule_version",
+        "imaging_modality",
+        "source_image_pattern",
+        "segmentation_pattern",
+        "pairing_rule",
+        "classification_source",
+        "classification_confidence",
+        "evidence_json",
+    }
+    existing_rule_columns = {
+        row["name"] for row in conn.execute("PRAGMA table_info(nifti_classification_rules)")
+    }
+    if existing_rule_columns and existing_rule_columns != expected_rule_columns:
+        conn.execute("DROP VIEW IF EXISTS agent_nifti_characteristics_summary")
+        conn.execute("DROP VIEW IF EXISTS agent_nifti_characteristics")
+        conn.execute("DROP TABLE nifti_classification_rules")
+
+
+def reset_derived_reference_schema_if_needed(conn: sqlite3.Connection) -> None:
+    derived_columns = {
+        row["name"] for row in conn.execute("PRAGMA table_info(derived_objects)")
+    }
+    reference_columns = {
+        row["name"] for row in conn.execute("PRAGMA table_info(derived_object_references)")
+    }
+    needs_reset = (
+        "referenced_radiology_id" in derived_columns
+        or "referenced_series_id" in derived_columns
+        or "referenced_radiology_id" in reference_columns
+        or "referenced_series_id" in reference_columns
+    )
+    if not needs_reset:
+        return
+    for view_name in (
+        "agent_nifti_characteristics_summary",
+        "agent_nifti_characteristics",
+        "agent_nifti_dataset_summary",
+        "agent_nifti_derived_objects",
+    ):
+        conn.execute(f"DROP VIEW IF EXISTS {view_name}")
+    conn.execute("DROP TABLE IF EXISTS derived_object_references")
+    conn.execute("DROP TABLE IF EXISTS derived_objects")
+
+
 def create_output_schema(conn: sqlite3.Connection) -> None:
+    reset_reviewed_characteristics_schema_if_needed(conn)
+    reset_derived_reference_schema_if_needed(conn)
+    conn.execute("DROP VIEW IF EXISTS agent_nifti_characteristics_summary")
+    conn.execute("DROP VIEW IF EXISTS agent_nifti_characteristics")
     normalized_sql = ",\n            ".join(f'"{name}" TEXT' for name in NORMALIZED_COLUMNS)
     conn.executescript(
         f"""
@@ -809,8 +932,9 @@ def create_output_schema(conn: sqlite3.Connection) -> None:
             package_path TEXT,
             file_ext TEXT,
             analysis_result_id TEXT,
-            referenced_radiology_id TEXT,
-            referenced_series_id TEXT,
+            source_nifti_volume_id TEXT,
+            source_dicom_series_instance_uid TEXT,
+            source_dicom_study_instance_uid TEXT,
             derived_object_type TEXT,
             segmentation_representation TEXT,
             segmentation_type TEXT,
@@ -832,14 +956,54 @@ def create_output_schema(conn: sqlite3.Connection) -> None:
             derived_object_id TEXT,
             derived_non_dicom_file_id TEXT,
             derived_radiology_id TEXT,
-            referenced_non_dicom_file_id TEXT,
-            referenced_radiology_id TEXT,
-            referenced_series_id TEXT,
-            referenced_file_name TEXT,
-            referenced_package_path TEXT,
+            source_non_dicom_file_id TEXT,
+            source_nifti_volume_id TEXT,
+            source_nifti_volume_file_name TEXT,
+            source_nifti_volume_package_path TEXT,
+            source_dataset_short_title TEXT,
+            source_access_level TEXT,
+            source_dicom_series_instance_uid TEXT,
+            source_dicom_study_instance_uid TEXT,
+            related_dicom_series_instance_uid TEXT,
+            related_dicom_study_instance_uid TEXT,
             reference_role TEXT,
             inference_method TEXT,
             confidence TEXT,
+            evidence_json TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS nifti_classification_rules (
+            classification_rule_id TEXT PRIMARY KEY,
+            short_title TEXT NOT NULL,
+            download_row_id INTEGER NOT NULL,
+            rule_version TEXT NOT NULL,
+            imaging_modality TEXT,
+            source_image_pattern TEXT,
+            segmentation_pattern TEXT,
+            pairing_rule TEXT,
+            classification_source TEXT,
+            classification_confidence TEXT,
+            evidence_json TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS nifti_file_characteristics (
+            radiology_id TEXT PRIMARY KEY,
+            classification_rule_id TEXT NOT NULL,
+            object_role TEXT NOT NULL,
+            associated_imaging_modality TEXT,
+            imaging_modality_relationship TEXT,
+            classification_confidence TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS nifti_dataset_review_issues (
+            review_issue_id TEXT PRIMARY KEY,
+            short_title TEXT NOT NULL,
+            issue_code TEXT NOT NULL,
+            severity TEXT NOT NULL,
+            status TEXT NOT NULL,
+            affected_files INTEGER NOT NULL DEFAULT 0,
+            review_scope TEXT,
+            description TEXT,
             evidence_json TEXT
         );
 
@@ -900,7 +1064,13 @@ def create_output_schema(conn: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_derived_object_refs_object
           ON derived_object_references(derived_object_id);
         CREATE INDEX IF NOT EXISTS idx_derived_object_refs_source
-          ON derived_object_references(referenced_non_dicom_file_id);
+          ON derived_object_references(source_non_dicom_file_id);
+        CREATE INDEX IF NOT EXISTS idx_nifti_characteristics_dataset
+          ON nifti_file_characteristics(classification_rule_id);
+        CREATE INDEX IF NOT EXISTS idx_nifti_characteristics_query
+          ON nifti_file_characteristics(associated_imaging_modality, object_role);
+        CREATE INDEX IF NOT EXISTS idx_nifti_review_issues_dataset
+          ON nifti_dataset_review_issues(short_title, status, severity);
 
         CREATE VIEW IF NOT EXISTS agent_nifti_downloads AS
         SELECT
@@ -1068,17 +1238,22 @@ def create_output_schema(conn: sqlite3.Connection) -> None:
             d.file_name,
             d.package_path,
             d.file_ext,
-            d.referenced_radiology_id,
-            d.referenced_series_id,
+            d.source_nifti_volume_id,
+            d.source_dicom_series_instance_uid,
+            d.source_dicom_study_instance_uid,
             d.derived_object_type,
             d.segmentation_representation,
             d.segmentation_type,
             d.total_segments,
             d.algorithm_type,
             d.algorithm_name,
-            dor.referenced_non_dicom_file_id,
-            dor.referenced_file_name,
-            dor.referenced_package_path,
+            dor.source_non_dicom_file_id,
+            dor.source_nifti_volume_file_name,
+            dor.source_nifti_volume_package_path,
+            dor.source_dataset_short_title,
+            dor.source_access_level,
+            dor.related_dicom_series_instance_uid,
+            dor.related_dicom_study_instance_uid,
             dor.reference_role,
             dor.inference_method,
             dor.confidence,
@@ -1086,9 +1261,153 @@ def create_output_schema(conn: sqlite3.Connection) -> None:
         FROM derived_objects d
         LEFT JOIN derived_object_references dor
           ON dor.derived_object_id = d.derived_object_id;
+
+        CREATE VIEW IF NOT EXISTS agent_nifti_characteristics AS
+        WITH scored_references AS (
+            SELECT
+                dor.*,
+                CASE dor.confidence
+                  WHEN 'explicit' THEN 4
+                  WHEN 'high' THEN 3
+                  WHEN 'medium' THEN 2
+                  WHEN 'low' THEN 1
+                  ELSE 0
+                END AS confidence_rank
+            FROM derived_object_references dor
+            WHERE dor.reference_role IN ('source_image', 'source_image_dataset')
+        ),
+        ranked_references AS (
+            SELECT
+                sr.*,
+                DENSE_RANK() OVER (
+                    PARTITION BY sr.derived_object_id
+                    ORDER BY sr.confidence_rank DESC
+                ) AS preference_rank,
+                COUNT(*) OVER (
+                    PARTITION BY sr.derived_object_id, sr.confidence_rank
+                ) AS references_at_confidence
+            FROM scored_references sr
+        ),
+        preferred_references AS (
+            SELECT *
+            FROM ranked_references
+            WHERE preference_rank = 1
+              AND references_at_confidence = 1
+        ),
+        reference_counts AS (
+            SELECT derived_object_id, COUNT(*) AS source_reference_count
+            FROM derived_object_references
+            WHERE reference_role IN ('source_image', 'source_image_dataset')
+            GROUP BY derived_object_id
+        ),
+        alternate_dicom_references AS (
+            SELECT
+                derived_object_id,
+                MAX(related_dicom_series_instance_uid) AS alternate_dicom_seg_series_instance_uid,
+                MAX(related_dicom_study_instance_uid) AS alternate_dicom_seg_study_instance_uid,
+                COUNT(*) AS alternate_dicom_representation_count
+            FROM derived_object_references
+            WHERE reference_role = 'alternate_dicom_segmentation_representation'
+            GROUP BY derived_object_id
+        )
+        SELECT
+            r.radiology_id,
+            r.short_title,
+            r.dataset_type,
+            r.download_ids,
+            r.subject_id,
+            r.file_name,
+            r.package_path,
+            c.object_role,
+            c.associated_imaging_modality,
+            c.imaging_modality_relationship,
+            r.study_id,
+            r.study_id_source,
+            r.study_date,
+            r.series_date,
+            r.series_id,
+            r.series_description,
+            f.metadata_sources AS file_metadata_sources,
+            d.segmentation_representation,
+            dor.source_nifti_volume_file_name,
+            dor.source_nifti_volume_id,
+            dor.source_dataset_short_title,
+            dor.source_access_level,
+            dor.source_dicom_series_instance_uid,
+            dor.source_dicom_study_instance_uid,
+            adr.alternate_dicom_seg_series_instance_uid,
+            adr.alternate_dicom_seg_study_instance_uid,
+            COALESCE(adr.alternate_dicom_representation_count, 0)
+              AS alternate_dicom_representation_count,
+            dor.inference_method AS reference_inference_method,
+            dor.confidence AS reference_confidence,
+            COALESCE(rc.source_reference_count, 0) AS source_reference_count,
+            rule.classification_rule_id,
+            rule.rule_version,
+            rule.classification_source,
+            c.classification_confidence,
+            nd.download_id AS wordpress_download_id,
+            nd.download_types AS wordpress_download_types,
+            nd.data_types AS wordpress_data_types,
+            nd.file_types AS wordpress_file_types,
+            rule.evidence_json AS classification_rule_evidence_json
+        FROM nifti_file_characteristics c
+        JOIN radiology_series r ON r.radiology_id = c.radiology_id
+        JOIN nifti_classification_rules rule
+          ON rule.classification_rule_id = c.classification_rule_id
+        JOIN nifti_downloads nd ON nd.download_row_id = rule.download_row_id
+        LEFT JOIN non_dicom_files f ON f.non_dicom_file_id = r.non_dicom_file_id
+        LEFT JOIN derived_objects d ON d.radiology_id = r.radiology_id
+        LEFT JOIN preferred_references dor
+          ON dor.derived_object_id = d.derived_object_id
+        LEFT JOIN reference_counts rc
+          ON rc.derived_object_id = d.derived_object_id
+        LEFT JOIN alternate_dicom_references adr
+          ON adr.derived_object_id = d.derived_object_id;
+
+        CREATE VIEW IF NOT EXISTS agent_nifti_characteristics_summary AS
+        SELECT
+            short_title,
+            COUNT(*) AS characterized_files,
+            SUM(CASE WHEN object_role = 'source_image' THEN 1 ELSE 0 END)
+              AS source_image_files,
+            SUM(CASE WHEN object_role = 'segmentation' THEN 1 ELSE 0 END)
+              AS segmentation_files,
+            SUM(CASE WHEN object_role = 'derived_image' THEN 1 ELSE 0 END)
+              AS derived_image_files,
+            SUM(CASE WHEN object_role = 'fiducial_annotation' THEN 1 ELSE 0 END)
+              AS fiducial_annotation_files,
+            SUM(CASE
+                  WHEN associated_imaging_modality = 'CT' AND object_role = 'source_image' THEN 1
+                  ELSE 0
+                END) AS ct_source_image_files,
+            SUM(CASE
+                  WHEN associated_imaging_modality = 'CT' AND object_role = 'segmentation' THEN 1
+                  ELSE 0
+                END) AS ct_associated_segmentations,
+            SUM(CASE
+                  WHEN associated_imaging_modality = 'MR' AND object_role = 'source_image' THEN 1
+                  ELSE 0
+                END) AS mr_source_image_files,
+            SUM(CASE
+                  WHEN associated_imaging_modality = 'MR' AND object_role = 'segmentation' THEN 1
+                  ELSE 0
+                END) AS mr_associated_segmentations,
+            COUNT(DISTINCT NULLIF(study_id, '')) AS study_ids
+        FROM agent_nifti_characteristics
+        GROUP BY short_title;
+
+        CREATE VIEW IF NOT EXISTS agent_nifti_review_issues AS
+        SELECT review_issue_id, short_title, issue_code, severity, status,
+               affected_files, review_scope, description, evidence_json
+        FROM nifti_dataset_review_issues;
         """
     )
     ensure_column(conn, "derived_objects", "segmentation_representation", "TEXT")
+    ensure_column(conn, "derived_object_references", "source_dataset_short_title", "TEXT")
+    ensure_column(conn, "derived_object_references", "source_access_level", "TEXT")
+    ensure_column(conn, "derived_object_references", "related_dicom_series_instance_uid", "TEXT")
+    ensure_column(conn, "derived_object_references", "related_dicom_study_instance_uid", "TEXT")
     conn.commit()
 
 
@@ -2808,6 +3127,14 @@ def infer_derived_object_type(row: sqlite3.Row, context: dict[str, Any]) -> tupl
         )
     ).lower()
     data_types = {str(item).lower() for item in context["data_types"]}
+    package_path = clean_package_path(row["package_path"] or "").lower()
+    if row["short_title"] == "NLST-New-lesion-LongCT":
+        if re.fullmatch(r"point_\d+\.nii(?:\.gz)?", row["file_name"] or "", re.IGNORECASE):
+            return "annotation", "fiducial_point_volume", "point filename and Fiducial data type"
+        if "/resampled/" in package_path:
+            return "derived_image", "resampled_volume", "resampled package path"
+        if "/register_" in package_path:
+            return "derived_image", "registered_volume", "registration package path"
     if row["SegmentationType"] or "segmentation" in data_types:
         if re.search(r"(^|[_\-.])seg($|[_\-.])|segmentation|segment", text):
             return "segmentation", "segmentation_file", "segmentation metadata or filename"
@@ -2830,7 +3157,71 @@ def infer_derived_object_type(row: sqlite3.Row, context: dict[str, Any]) -> tupl
 
 def infer_study_id(row: sqlite3.Row) -> tuple[str, str]:
     if row["StudyInstanceUID"]:
+        if row["short_title"] == "Healthy-Total-Body-CTs":
+            return row["StudyInstanceUID"], "associated_source_dicom_study_instance_uid"
+        if row["short_title"] == "Radiomic-Feature-Standards":
+            return row["StudyInstanceUID"], "associated_source_dicom_study_instance_uid"
+        if row["short_title"] == "NLST-New-lesion-LongCT" and "package_files" in parse_json_list(
+            row["inventory_sources"] or "[]"
+        ):
+            if (row["SeriesDescription"] or "") == "CT source volume":
+                return row["StudyInstanceUID"], "source_metadata_crosswalk"
+            return row["StudyInstanceUID"], "associated_source_dicom_study_instance_uid"
         return row["StudyInstanceUID"], "source_metadata"
+    if row["short_title"] == "CT-ORG" and row["PatientID"]:
+        return (
+            stable_hash_id("study", row["short_title"], row["PatientID"]),
+            "synthetic_from_subject_id",
+        )
+    if row["short_title"] == "Radiomic-Feature-Standards" and row["PatientID"]:
+        return (
+            stable_hash_id("study", row["short_title"], row["PatientID"]),
+            "synthetic_from_subject_id",
+        )
+    if row["short_title"] == "Healthy-Total-Body-CTs" and row["PatientID"]:
+        return (
+            stable_hash_id("study", row["short_title"], row["PatientID"]),
+            "synthetic_from_subject_id",
+        )
+    if row["short_title"] in {
+        "CT Images in COVID-19",
+        "DRO-Toolkit",
+        "ISPY1-Tumor-SEG-Radiomics",
+        "LUAD-CT-Survival",
+        "Pancreas-CT",
+        "PleThora",
+        "RSNA-ASNR-MICCAI-BraTS-2021",
+    } and row["PatientID"]:
+        return (
+            stable_hash_id("study", row["short_title"], row["PatientID"]),
+            "synthetic_from_subject_id",
+        )
+    if row["short_title"] in {
+        "BreastDCEDL_ISPY2",
+        "Spinal-Multiple-Myeloma-SEG",
+        "UCSF-PDGM",
+        "UPENN-GBM",
+    } and row["PatientID"]:
+        return (
+            stable_hash_id(
+                "study", row["short_title"], row["PatientID"], row["StudyDescription"] or ""
+            ),
+            "synthetic_from_subject_id_and_visit",
+        )
+    if row["short_title"] == "IvyGAP-Radiomics" and row["PatientID"] and row["StudyDate"]:
+        return (
+            stable_hash_id("study", row["short_title"], row["PatientID"], row["StudyDate"]),
+            "synthetic_from_subject_id_and_study_date",
+        )
+    if (
+        row["short_title"] == "Vestibular-Schwannoma-MC-RC2"
+        and row["PatientID"]
+        and row["StudyDate"]
+    ):
+        return (
+            stable_hash_id("study", row["short_title"], row["PatientID"], row["StudyDate"]),
+            "synthetic_from_subject_id_and_study_date",
+        )
     parent = clean_package_path(str(Path(row["package_path"] or "").parent))
     if parent:
         return stable_hash_id("study", row["short_title"], parent), "synthetic_from_parent_path"
@@ -2879,11 +3270,18 @@ def add_reference_candidates(
             "derived_object_id": derived["derived_object_id"],
             "derived_non_dicom_file_id": derived["non_dicom_file_id"],
             "derived_radiology_id": derived["radiology_id"],
-            "referenced_non_dicom_file_id": source["non_dicom_file_id"],
-            "referenced_radiology_id": source["radiology_id"],
-            "referenced_series_id": source["series_id"],
-            "referenced_file_name": source["file_name"],
-            "referenced_package_path": source["package_path"],
+            "source_non_dicom_file_id": source["non_dicom_file_id"],
+            "source_nifti_volume_id": source["radiology_id"],
+            "source_nifti_volume_file_name": source["file_name"],
+            "source_nifti_volume_package_path": source["package_path"],
+            "source_dataset_short_title": "",
+            "source_access_level": "",
+            "source_dicom_series_instance_uid": (
+                source["series_id"] if source["series_id_source"] == "source_metadata" else ""
+            ),
+            "source_dicom_study_instance_uid": (
+                source["study_id"] if source["study_id_source"] == "source_metadata" else ""
+            ),
             "reference_role": reference_role,
             "inference_method": inference_method,
             "confidence": confidence,
@@ -2928,15 +3326,15 @@ def infer_reference_candidates(
     same_parent = sources_by_parent.get((short_title, parent), [])
     dataset_sources = sources_by_dataset.get(short_title, [])
 
-    referenced_series_id = derived["referenced_series_id"] or ""
-    if referenced_series_id:
+    source_dicom_series_instance_uid = derived["source_dicom_series_instance_uid"] or ""
+    if source_dicom_series_instance_uid:
         add_reference_candidates(
             candidates,
             derived,
-            sources_by_series_id.get((short_title, referenced_series_id), []),
-            "explicit_referenced_series_id",
+            sources_by_series_id.get((short_title, source_dicom_series_instance_uid), []),
+            "explicit_source_dicom_series_instance_uid",
             "explicit",
-            {"referenced_series_id": referenced_series_id},
+            {"source_dicom_series_instance_uid": source_dicom_series_instance_uid},
         )
 
     label_match = re.fullmatch(r"labels[-_](.+)", stem_lower)
@@ -2980,6 +3378,56 @@ def infer_reference_candidates(
             {"series_stem_from_parent": series_stem, "study_root": study_root},
         )
 
+    if short_title == "NLST-New-lesion-LongCT":
+        if re.fullmatch(r"point_\d+", stem_lower):
+            matches = [
+                source
+                for source in same_parent
+                if "package_files" in parse_json_list(source.get("inventory_sources", "[]"))
+            ]
+            add_reference_candidates(
+                candidates,
+                derived,
+                matches,
+                "nlst_point_same_acquisition_ct",
+                "high",
+                {"parent_path": parent, "same_parent_ct_count": len(matches)},
+            )
+        elif "/resampled/" in package_path_lower:
+            source_parent = path_parent_text(parent)
+            matches = [
+                source
+                for source in sources_by_parent.get((short_title, source_parent), [])
+                if lower_file_stem(source["file_name"]) == stem_lower
+                and "package_files" in parse_json_list(source.get("inventory_sources", "[]"))
+            ]
+            add_reference_candidates(
+                candidates,
+                derived,
+                matches,
+                "nlst_resampled_same_acquisition_ct",
+                "high",
+                {"source_parent": source_parent, "source_stem": stem},
+            )
+        elif "/register_" in package_path_lower:
+            target_stems = [item for item in stem.split("_") if re.fullmatch(r"\d+-\d+", item)]
+            subject_id = str(derived["package_path"] or "").split("/register_", 1)[0].rstrip("/").split("/")[-1]
+            matches = [
+                source
+                for source in dataset_sources
+                if source.get("subject_id") == subject_id
+                and lower_file_stem(source["file_name"]) in {item.lower() for item in target_stems}
+                and "/resampled/" not in (source["package_path"] or "").lower()
+                and "package_files" in parse_json_list(source.get("inventory_sources", "[]"))
+            ]
+            add_reference_candidates(
+                candidates,
+                derived,
+                matches,
+                "nlst_registered_filename_source_pair",
+                "high",
+                {"subject_id": subject_id, "source_stems": target_stems},
+            )
     seg_target_match = re.fullmatch(r"(.+?)_seg[_-]?(.+)", stem, flags=re.IGNORECASE)
     if seg_target_match:
         base, target = seg_target_match.groups()
@@ -3084,6 +3532,59 @@ def infer_reference_candidates(
             {"derived_stem": stem, "source_prefix": prefix, "same_parent_source_count": len(matches)},
         )
 
+    if short_title == "DRO-Toolkit" and stem_lower.startswith("seg-"):
+        target = "series-" + stem[4:]
+        matches = exact_stem_matches(dataset_sources, [target])
+        add_reference_candidates(
+            candidates,
+            derived,
+            matches,
+            "dro_seg_series_exact_configuration_pair",
+            "high",
+            {"derived_stem": stem, "target_stem": target},
+        )
+
+    if short_title == "ISPY1-Tumor-SEG-Radiomics" and "/masks_" in package_path_lower:
+        match = re.match(r"^(ISPY1_\d+)", stem, re.IGNORECASE)
+        subject_id = match.group(1) if match else ""
+        matches = [source for source in dataset_sources if source.get("subject_id") == subject_id]
+        add_reference_candidates(
+            candidates,
+            derived,
+            matches,
+            "ispy1_mask_subject_dce_phases",
+            "high",
+            {"subject_id": subject_id, "dce_phase_count": len(matches)},
+        )
+
+    if short_title == "UPENN-GBM" and "segm" in stem_lower:
+        match = re.match(r"^(UPENN-GBM-\d{5}_\d{2})_", stem, re.IGNORECASE)
+        prefix = match.group(1) if match else ""
+        matches = [
+            source
+            for source in dataset_sources
+            if lower_file_stem(source["file_name"]).startswith(prefix.lower() + "_")
+        ]
+        add_reference_candidates(
+            candidates,
+            derived,
+            matches,
+            "upenn_segmentation_same_subject_visit",
+            "high",
+            {"subject_visit_prefix": prefix, "source_count": len(matches)},
+        )
+
+    if short_title == "UTSW-Glioma" and "tumorseg" in stem_lower:
+        matches = [source for source in same_parent if lower_file_stem(source["file_name"]).endswith("_ants")]
+        add_reference_candidates(
+            candidates,
+            derived,
+            matches,
+            "utsw_segmentation_registered_anatomic_inputs",
+            "high",
+            {"parent_path": parent, "registered_anatomic_source_count": len(matches)},
+        )
+
     brats_peds_match = re.fullmatch(
         r"(BraTS-PED-\d{5}-\d{3})-seg",
         stem,
@@ -3115,8 +3616,8 @@ def infer_reference_candidates(
         candidates.values(),
         key=lambda item: (
             -reference_confidence_rank(item["confidence"]),
-            item["referenced_package_path"],
-            item["referenced_file_name"],
+            item["source_nifti_volume_package_path"],
+            item["source_nifti_volume_file_name"],
         ),
     )
 
@@ -3127,9 +3628,11 @@ def link_derived_object_references(conn: sqlite3.Connection) -> None:
         dict(row)
         for row in conn.execute(
             """
-            SELECT radiology_id, non_dicom_file_id, short_title, file_name,
-                   package_path, series_id
-            FROM radiology_series
+            SELECT r.radiology_id, r.non_dicom_file_id, r.short_title, r.subject_id,
+                   r.file_name, r.package_path, r.series_id, r.series_id_source,
+                   r.study_id, r.study_id_source, f.inventory_sources
+            FROM radiology_series r
+            JOIN non_dicom_files f USING (non_dicom_file_id)
             WHERE is_derived_object = 0
             """
         )
@@ -3158,17 +3661,20 @@ def link_derived_object_references(conn: sqlite3.Connection) -> None:
                     stable_hash_id(
                         "dor",
                         candidate["derived_object_id"],
-                        candidate["referenced_non_dicom_file_id"],
+                        candidate["source_non_dicom_file_id"],
                         candidate["inference_method"],
                     ),
                     candidate["derived_object_id"],
                     candidate["derived_non_dicom_file_id"],
                     candidate["derived_radiology_id"],
-                    candidate["referenced_non_dicom_file_id"],
-                    candidate["referenced_radiology_id"],
-                    candidate["referenced_series_id"],
-                    candidate["referenced_file_name"],
-                    candidate["referenced_package_path"],
+                    candidate["source_non_dicom_file_id"],
+                    candidate["source_nifti_volume_id"],
+                    candidate["source_nifti_volume_file_name"],
+                    candidate["source_nifti_volume_package_path"],
+                    candidate["source_dataset_short_title"],
+                    candidate["source_access_level"],
+                    candidate["source_dicom_series_instance_uid"],
+                    candidate["source_dicom_study_instance_uid"],
                     candidate["reference_role"],
                     candidate["inference_method"],
                     candidate["confidence"],
@@ -3186,8 +3692,9 @@ def link_derived_object_references(conn: sqlite3.Connection) -> None:
                 best = best_candidates[0]
                 best_reference_updates.append(
                     (
-                        best["referenced_radiology_id"],
-                        best["referenced_series_id"],
+                        best["source_nifti_volume_id"],
+                        best["source_dicom_series_instance_uid"],
+                        best["source_dicom_study_instance_uid"],
                         derived["derived_object_id"],
                     )
                 )
@@ -3196,17 +3703,27 @@ def link_derived_object_references(conn: sqlite3.Connection) -> None:
         """
         INSERT OR REPLACE INTO derived_object_references
         (derived_object_reference_id, derived_object_id, derived_non_dicom_file_id,
-         derived_radiology_id, referenced_non_dicom_file_id, referenced_radiology_id,
-         referenced_series_id, referenced_file_name, referenced_package_path, reference_role,
-         inference_method, confidence, evidence_json)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         derived_radiology_id, source_non_dicom_file_id, source_nifti_volume_id,
+         source_nifti_volume_file_name, source_nifti_volume_package_path,
+         source_dataset_short_title, source_access_level,
+         source_dicom_series_instance_uid, source_dicom_study_instance_uid,
+         reference_role, inference_method, confidence, evidence_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         reference_records,
     )
     conn.executemany(
         """
         UPDATE derived_objects
-        SET referenced_radiology_id = ?, referenced_series_id = ?
+        SET source_nifti_volume_id = ?,
+            source_dicom_series_instance_uid = CASE
+              WHEN COALESCE(source_dicom_series_instance_uid, '') = '' THEN ?
+              ELSE source_dicom_series_instance_uid
+            END,
+            source_dicom_study_instance_uid = CASE
+              WHEN COALESCE(source_dicom_study_instance_uid, '') = '' THEN ?
+              ELSE source_dicom_study_instance_uid
+            END
         WHERE derived_object_id = ?
         """,
         best_reference_updates,
@@ -3304,6 +3821,8 @@ def insert_non_dicom_file_records(conn: sqlite3.Connection) -> None:
 
 def build_canonical_non_dicom_layer(conn: sqlite3.Connection) -> None:
     for table in (
+        "nifti_file_characteristics",
+        "nifti_classification_rules",
         "annotation_groups",
         "derived_object_references",
         "derived_objects",
@@ -3487,6 +4006,7 @@ def build_canonical_non_dicom_layer(conn: sqlite3.Connection) -> None:
                     row["analysis_result_id"],
                     "",
                     row["segmented_SeriesInstanceUID"],
+                    "",
                     derived_type,
                     segmentation_representation,
                     row["SegmentationType"],
@@ -3567,18 +4087,937 @@ def build_canonical_non_dicom_layer(conn: sqlite3.Connection) -> None:
         """
         INSERT INTO derived_objects
         (derived_object_id, non_dicom_file_id, radiology_id, short_title, dataset_type,
-         file_name, package_path, file_ext, analysis_result_id, referenced_radiology_id,
-         referenced_series_id, derived_object_type, segmentation_representation,
+         file_name, package_path, file_ext, analysis_result_id, source_nifti_volume_id,
+         source_dicom_series_instance_uid, source_dicom_study_instance_uid,
+         derived_object_type, segmentation_representation,
          segmentation_type, total_segments, algorithm_type, algorithm_name,
          segmented_property_category, segmented_property_type, anatomic_region, roi_names,
          roi_generation_algorithms, rt_roi_interpreted_types, annotation_coordinate_type,
          derivation_basis)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         derived_records,
     )
     link_derived_object_references(conn)
     conn.commit()
+
+
+def build_reviewed_file_characteristics(
+    conn: sqlite3.Connection,
+    *,
+    classification_rule_id: str,
+    short_title: str,
+    imaging_modality: str,
+    source_image_pattern: str,
+    source_image_regex: str,
+    segmentation_pattern: str,
+    segmentation_regex: str,
+    pairing_rule: str,
+    require_single_high_confidence_reference: bool = False,
+    required_data_types: Iterable[str] | None = None,
+) -> int:
+    """Apply one reviewed dataset rule without changing mined source rows."""
+    rule_imaging_modality = imaging_modality
+    conn.execute(
+        "DELETE FROM nifti_file_characteristics WHERE classification_rule_id = ?",
+        (classification_rule_id,),
+    )
+    conn.execute(
+        "DELETE FROM nifti_classification_rules WHERE classification_rule_id = ?",
+        (classification_rule_id,),
+    )
+    dataset_files = conn.execute(
+        "SELECT COUNT(*) FROM radiology_series WHERE short_title = ?", (short_title,)
+    ).fetchone()[0]
+    if not dataset_files:
+        conn.commit()
+        return 0
+    if require_single_high_confidence_reference:
+        invalid_references = conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM (
+              SELECT d.derived_object_id
+              FROM derived_objects d
+              LEFT JOIN derived_object_references dor USING (derived_object_id)
+              WHERE d.short_title = ?
+                AND d.derived_object_type = 'segmentation'
+              GROUP BY d.derived_object_id
+              HAVING COUNT(dor.derived_object_reference_id) <> 1
+                 OR MIN(COALESCE(dor.confidence, '')) <> 'high'
+                 OR MAX(COALESCE(dor.confidence, '')) <> 'high'
+            )
+            """,
+            (short_title,),
+        ).fetchone()[0]
+        if invalid_references:
+            raise RuntimeError(
+                f"{short_title} has {invalid_references} segmentations without exactly one "
+                "high-confidence source reference"
+            )
+
+    required_data_type_set = set(required_data_types or (imaging_modality, "Segmentation"))
+    download = None
+    for candidate in conn.execute(
+        "SELECT * FROM nifti_downloads WHERE short_title = ? ORDER BY download_row_id",
+        (short_title,),
+    ):
+        data_types = {str(item) for item in parse_json_list(candidate["data_types"] or "[]")}
+        file_types = {str(item) for item in parse_json_list(candidate["file_types"] or "[]")}
+        if required_data_type_set.issubset(data_types) and "NIfTI" in file_types:
+            download = candidate
+            break
+    if download is None:
+        raise RuntimeError(
+            f"{short_title} characteristics require a WordPress download labeled "
+            f"{', '.join(sorted(required_data_type_set))}, and NIfTI"
+        )
+
+    rule_evidence = {
+        "review_basis": "linked WordPress download labels, filename patterns, and source pairing",
+        "wordpress_semantics": {
+            **{
+                value: ("imaging modality" if value == imaging_modality else "non-DICOM content type")
+                for value in sorted(required_data_type_set)
+            },
+            "NIfTI": "file format",
+        },
+    }
+    conn.execute(
+        """
+        INSERT INTO nifti_classification_rules
+        (classification_rule_id, short_title, download_row_id, rule_version,
+         imaging_modality, source_image_pattern, segmentation_pattern,
+         pairing_rule, classification_source, classification_confidence, evidence_json)
+        VALUES (?, ?, ?, '1', ?, ?, ?, ?,
+                'wordpress_download+filename+source_reference', 'high', ?)
+        """,
+        (
+            classification_rule_id,
+            short_title,
+            download["download_row_id"],
+            imaging_modality,
+            source_image_pattern,
+            segmentation_pattern,
+            pairing_rule,
+            json_dumps(rule_evidence),
+        ),
+    )
+
+    source_rows = {
+        row["radiology_id"]: row
+        for row in conn.execute(
+            "SELECT radiology_id, modality, file_name FROM radiology_series WHERE short_title = ?",
+            (short_title,),
+        )
+    }
+    derived_by_radiology = {
+        row["radiology_id"]: row
+        for row in conn.execute(
+            """
+            SELECT radiology_id, derived_object_id, derived_object_type,
+                   segmentation_representation, source_nifti_volume_id
+            FROM derived_objects
+            WHERE short_title = ?
+            """,
+            (short_title,),
+        )
+    }
+    reference_by_derived = {}
+    for row in conn.execute(
+        """
+        SELECT dor.*
+        FROM derived_object_references dor
+        JOIN derived_objects d USING (derived_object_id)
+        WHERE d.short_title = ?
+        ORDER BY
+          CASE dor.confidence
+            WHEN 'explicit' THEN 4 WHEN 'high' THEN 3 WHEN 'medium' THEN 2 ELSE 1
+          END DESC,
+          dor.derived_object_reference_id
+        """,
+        (short_title,),
+    ):
+        reference_by_derived.setdefault(row["derived_object_id"], row)
+
+    records = []
+    for row in conn.execute(
+        "SELECT * FROM radiology_series WHERE short_title = ? ORDER BY package_path",
+        (short_title,),
+    ):
+        derived = derived_by_radiology.get(row["radiology_id"])
+        reference = reference_by_derived.get(derived["derived_object_id"]) if derived else None
+        referenced = (
+            source_rows.get(reference["source_nifti_volume_id"])
+            if reference and reference["source_nifti_volume_id"]
+            else None
+        )
+
+        if derived and derived["derived_object_type"] == "segmentation":
+            if not re.search(segmentation_regex, row["file_name"] or "", flags=re.IGNORECASE):
+                raise RuntimeError(
+                    f"{short_title} segmentation filename falls outside reviewed rule: "
+                    f"{row['file_name']}"
+                )
+            object_role = "segmentation"
+            file_imaging_modality = (referenced["modality"] if referenced else "") or row["modality"]
+            if referenced:
+                modality_relationship = "associated_with_source_nifti_volume"
+            elif reference and reference["source_dicom_series_instance_uid"]:
+                modality_relationship = "associated_with_source_dicom_series"
+            else:
+                modality_relationship = "download_context"
+            confidence = reference["confidence"] if reference else "medium"
+        else:
+            if derived:
+                raise RuntimeError(
+                    f"{short_title} has an unsupported reviewed derived-object type: "
+                    f"{derived['derived_object_type']}"
+                )
+            if not re.search(source_image_regex, row["file_name"] or "", flags=re.IGNORECASE):
+                raise RuntimeError(
+                    f"{short_title} source filename falls outside reviewed rule: {row['file_name']}"
+                )
+            object_role = "source_image"
+            file_imaging_modality = row["modality"]
+            modality_relationship = "direct"
+            confidence = "high" if file_imaging_modality == rule_imaging_modality else "medium"
+        records.append(
+            (
+                row["radiology_id"],
+                classification_rule_id,
+                object_role,
+                file_imaging_modality,
+                modality_relationship,
+                confidence,
+            )
+        )
+
+    conn.executemany(
+        """
+        INSERT INTO nifti_file_characteristics
+        (radiology_id, classification_rule_id, object_role, associated_imaging_modality,
+         imaging_modality_relationship, classification_confidence)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        records,
+    )
+    conn.commit()
+    return len(records)
+
+
+def build_ct_org_file_characteristics(conn: sqlite3.Connection) -> int:
+    return build_reviewed_file_characteristics(
+        conn,
+        classification_rule_id="ct_org_v1",
+        short_title="CT-ORG",
+        imaging_modality="CT",
+        source_image_pattern="volume-N.nii.gz",
+        source_image_regex=r"^volume-\d+\.nii\.gz$",
+        segmentation_pattern="labels-N.nii.gz",
+        segmentation_regex=r"^labels-\d+\.nii\.gz$",
+        pairing_rule="matching case number",
+        require_single_high_confidence_reference=True,
+    )
+
+
+def build_bcbm_radiogenomics_file_characteristics(conn: sqlite3.Connection) -> int:
+    return build_reviewed_file_characteristics(
+        conn,
+        classification_rule_id="bcbm_radiogenomics_v1",
+        short_title="BCBM-RadioGenomics",
+        imaging_modality="MR",
+        source_image_pattern="*_image_ss_n4.nii.gz",
+        source_image_regex=r"^.+_image_ss_n4\.nii\.gz$",
+        segmentation_pattern="*_mask_*.nii.gz",
+        segmentation_regex=r"^.+_mask_.+\.nii\.gz$",
+        pairing_rule="mask prefix and same folder",
+        require_single_high_confidence_reference=True,
+    )
+
+
+def build_vs_mc_rc2_file_characteristics(conn: sqlite3.Connection) -> int:
+    return build_reviewed_file_characteristics(
+        conn,
+        classification_rule_id="vestibular_schwannoma_mc_rc2_v1",
+        short_title="Vestibular-Schwannoma-MC-RC2",
+        imaging_modality="MR",
+        source_image_pattern="VS_MC_RC2_NNN_YYYY-MM-DD_{T1,T1C,T2}.nii.gz",
+        source_image_regex=(
+            r"^VS_MC_RC2_\d{3}_\d{4}-\d{2}-\d{2}_(?:T1|T1C|T2)\.nii\.gz$"
+        ),
+        segmentation_pattern="VS_MC_RC2_NNN_YYYY-MM-DD_T1C_seg.nii.gz",
+        segmentation_regex=(
+            r"^VS_MC_RC2_\d{3}_\d{4}-\d{2}-\d{2}_T1C_seg\.nii\.gz$"
+        ),
+        pairing_rule="remove trailing _seg from the same subject/date T1C filename",
+        require_single_high_confidence_reference=True,
+    )
+
+
+def build_nlst_new_lesion_longct_file_characteristics(conn: sqlite3.Connection) -> int:
+    short_title = "NLST-New-lesion-LongCT"
+    classification_rule_id = "nlst_new_lesion_longct_v1"
+    conn.execute(
+        "DELETE FROM nifti_file_characteristics WHERE classification_rule_id = ?",
+        (classification_rule_id,),
+    )
+    conn.execute(
+        "DELETE FROM nifti_classification_rules WHERE classification_rule_id = ?",
+        (classification_rule_id,),
+    )
+    download = None
+    for candidate in conn.execute(
+        "SELECT * FROM nifti_downloads WHERE short_title = ? ORDER BY download_row_id",
+        (short_title,),
+    ):
+        data_types = set(parse_json_list(candidate["data_types"] or "[]"))
+        file_types = set(parse_json_list(candidate["file_types"] or "[]"))
+        if {"CT", "Fiducial"}.issubset(data_types) and "NIfTI" in file_types:
+            download = candidate
+            break
+    if download is None:
+        return 0
+
+    evidence = {
+        "review_basis": "WordPress labels, authoritative package inventory, path roles, and transfer-list crosswalk",
+        "wordpress_semantics": {
+            "CT": "associated imaging modality",
+            "Fiducial": "non-DICOM annotation content type",
+            "NIfTI": "file format",
+        },
+        "inventory_scope": "rows present in package_files",
+        "excluded_from_reviewed_file_counts": (
+            "transfer-list-only paths retained as raw metadata/crosswalk evidence but absent from "
+            "the current downloadable package inventory"
+        ),
+    }
+    conn.execute(
+        """
+        INSERT INTO nifti_classification_rules
+        (classification_rule_id, short_title, download_row_id, rule_version,
+         imaging_modality, source_image_pattern, segmentation_pattern,
+         pairing_rule, classification_source, classification_confidence, evidence_json)
+        VALUES (?, ?, ?, '1', 'CT', ?, '', ?,
+                'wordpress_download+package_inventory+path_role+source_reference', 'high', ?)
+        """,
+        (
+            classification_rule_id,
+            short_title,
+            download["download_row_id"],
+            "acquisition-folder CT volumes excluding point_*.nii.gz",
+            "point annotations and transformed volumes link to acquisition CT volumes",
+            json_dumps(evidence),
+        ),
+    )
+
+    records = []
+    for row in conn.execute(
+        """
+        SELECT r.*, d.derived_object_id, d.derived_object_type,
+               COALESCE(refs.reference_count, 0) AS reference_count
+        FROM radiology_series r
+        JOIN non_dicom_files f USING (non_dicom_file_id)
+        LEFT JOIN derived_objects d ON d.radiology_id = r.radiology_id
+        LEFT JOIN (
+            SELECT derived_object_id, COUNT(*) AS reference_count
+            FROM derived_object_references
+            GROUP BY derived_object_id
+        ) refs ON refs.derived_object_id = d.derived_object_id
+        WHERE r.short_title = ?
+          AND EXISTS (
+              SELECT 1 FROM json_each(COALESCE(f.inventory_sources, '[]'))
+              WHERE value = 'package_files'
+          )
+        ORDER BY r.package_path
+        """,
+        (short_title,),
+    ):
+        lower_path = (row["package_path"] or "").lower()
+        if re.fullmatch(r"point_\d+\.nii(?:\.gz)?", row["file_name"] or "", re.IGNORECASE):
+            object_role = "fiducial_annotation"
+        elif "/resampled/" in lower_path or "/register_" in lower_path:
+            object_role = "derived_image"
+        else:
+            object_role = "source_image"
+        reference_count = int(row["reference_count"] or 0)
+        if object_role == "source_image":
+            relationship = "direct"
+            confidence = "high"
+        elif reference_count == 1:
+            relationship = "associated_with_source_nifti_volume"
+            confidence = "high"
+        elif reference_count > 1:
+            relationship = "associated_with_multiple_source_nifti_volumes"
+            confidence = "high"
+        else:
+            relationship = "download_context"
+            confidence = "medium"
+        records.append(
+            (
+                row["radiology_id"],
+                classification_rule_id,
+                object_role,
+                "CT",
+                relationship,
+                confidence,
+            )
+        )
+    conn.executemany(
+        """
+        INSERT INTO nifti_file_characteristics
+        (radiology_id, classification_rule_id, object_role, associated_imaging_modality,
+         imaging_modality_relationship, classification_confidence)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        records,
+    )
+    conn.commit()
+    return len(records)
+
+
+def build_radiomic_feature_standards_file_characteristics(conn: sqlite3.Connection) -> int:
+    short_title = "Radiomic-Feature-Standards"
+    classification_rule_id = "radiomic_feature_standards_v1"
+    conn.execute(
+        "DELETE FROM nifti_file_characteristics WHERE classification_rule_id = ?",
+        (classification_rule_id,),
+    )
+    conn.execute(
+        "DELETE FROM nifti_classification_rules WHERE classification_rule_id = ?",
+        (classification_rule_id,),
+    )
+    download = None
+    for candidate in conn.execute(
+        "SELECT * FROM nifti_downloads WHERE short_title = ? ORDER BY download_row_id",
+        (short_title,),
+    ):
+        if "Segmentation" in parse_json_list(candidate["data_types"] or "[]") and "NIfTI" in parse_json_list(
+            candidate["file_types"] or "[]"
+        ):
+            download = candidate
+            break
+    if download is None:
+        return 0
+
+    invalid = conn.execute(
+        """
+        SELECT COUNT(*)
+        FROM derived_objects d
+        LEFT JOIN derived_object_references dor
+          ON dor.derived_object_id = d.derived_object_id
+         AND dor.reference_role = 'source_image'
+        WHERE d.short_title = ?
+        GROUP BY d.derived_object_id
+        HAVING COUNT(dor.derived_object_reference_id) <> 1
+           OR MIN(COALESCE(dor.source_dataset_short_title, '')) NOT IN ('LIDC-IDRI', 'DRO-Toolkit')
+           OR MIN(COALESCE(dor.confidence, '')) <> 'explicit'
+        """,
+        (short_title,),
+    ).fetchall()
+    if invalid:
+        raise RuntimeError(
+            f"{short_title} has {len(invalid)} segmentations without one explicit source CT reference"
+        )
+
+    evidence = {
+        "review_basis": "WordPress segmentation download plus TCIA CT/SEG manifests and IDC UID metadata",
+        "wordpress_semantics": {
+            "Segmentation": "non-DICOM content type",
+            "NIfTI": "file format",
+            "CT": "associated source-imaging modality stated in the Analysis Result description",
+        },
+        "source_relationship": {
+            "LIDC-IDRI subjects": "LIDC-IDRI source CT dataset",
+            "Phantom subjects": "DRO-Toolkit source CT dataset",
+        },
+        "uid_policy": "source CT and alternate DICOM SEG UIDs are matched by exact PatientID and StudyInstanceUID",
+    }
+    conn.execute(
+        """
+        INSERT INTO nifti_classification_rules
+        (classification_rule_id, short_title, download_row_id, rule_version,
+         imaging_modality, source_image_pattern, segmentation_pattern,
+         pairing_rule, classification_source, classification_confidence, evidence_json)
+        VALUES (?, ?, ?, '1', 'CT', '', '*.nii', ?,
+                'wordpress_download+source_dataset+filename_subject', 'high', ?)
+        """,
+        (
+            classification_rule_id,
+            short_title,
+            download["download_row_id"],
+            "subject ID maps to the WordPress-identified source CT dataset; exact source series is unresolved",
+            json_dumps(evidence),
+        ),
+    )
+    rows = conn.execute(
+        """
+        SELECT r.radiology_id
+        FROM radiology_series r
+        JOIN derived_objects d ON d.radiology_id = r.radiology_id
+        WHERE r.short_title = ?
+          AND d.derived_object_type = 'segmentation'
+        ORDER BY r.package_path
+        """,
+        (short_title,),
+    ).fetchall()
+    conn.executemany(
+        """
+        INSERT INTO nifti_file_characteristics
+        (radiology_id, classification_rule_id, object_role, associated_imaging_modality,
+         imaging_modality_relationship, classification_confidence)
+        VALUES (?, ?, 'segmentation', 'CT', 'associated_with_source_dicom_series', 'high')
+        """,
+        [(row["radiology_id"], classification_rule_id) for row in rows],
+    )
+    conn.commit()
+    return len(rows)
+
+
+def build_healthy_total_body_cts_file_characteristics(conn: sqlite3.Connection) -> int:
+    short_title = "Healthy-Total-Body-CTs"
+    classification_rule_id = "healthy_total_body_cts_v1"
+    conn.execute(
+        "DELETE FROM nifti_file_characteristics WHERE classification_rule_id = ?",
+        (classification_rule_id,),
+    )
+    conn.execute(
+        "DELETE FROM nifti_classification_rules WHERE classification_rule_id = ?",
+        (classification_rule_id,),
+    )
+    download = None
+    for candidate in conn.execute(
+        "SELECT * FROM nifti_downloads WHERE short_title = ? ORDER BY download_row_id",
+        (short_title,),
+    ):
+        if "Segmentation" in parse_json_list(candidate["data_types"] or "[]") and "NIfTI" in parse_json_list(
+            candidate["file_types"] or "[]"
+        ):
+            download = candidate
+            break
+    if download is None:
+        return 0
+
+    source_rows = {
+        row["radiology_id"]: row
+        for row in conn.execute(
+            """
+            SELECT d.radiology_id, dor.*
+            FROM derived_objects d
+            JOIN derived_object_references dor USING (derived_object_id)
+            WHERE d.short_title = ?
+              AND dor.reference_role IN ('source_image', 'source_image_dataset')
+            """,
+            (short_title,),
+        )
+    }
+    dataset_rows = conn.execute(
+        "SELECT radiology_id, subject_id FROM radiology_series WHERE short_title = ?",
+        (short_title,),
+    ).fetchall()
+    if len(source_rows) != len(dataset_rows):
+        raise RuntimeError(f"{short_title} does not have one source relationship per segmentation")
+    unmatched = sorted(
+        row["subject_id"]
+        for row in dataset_rows
+        if not source_rows[row["radiology_id"]]["source_dicom_series_instance_uid"]
+    )
+    evidence = {
+        "review_basis": "open NIfTI download plus Collection description and public controlled metadata",
+        "wordpress_semantics": {
+            "Segmentation": "open non-DICOM content type",
+            "NIfTI": "open file format",
+            "CT": "controlled source-imaging modality",
+        },
+        "source_selection": "the Collection states MOOSE segmentations were generated from the 90min CT",
+        "source_download_id": "42739",
+        "source_access_level": "controlled",
+        "exact_source_links": len(dataset_rows) - len(unmatched),
+        "manual_review_subjects": unmatched,
+    }
+    conn.execute(
+        """
+        INSERT INTO nifti_classification_rules
+        (classification_rule_id, short_title, download_row_id, rule_version,
+         imaging_modality, source_image_pattern, segmentation_pattern,
+         pairing_rule, classification_source, classification_confidence, evidence_json)
+        VALUES (?, ?, ?, '1', 'CT', '', 'Healthy-Total-Body-CTs-NNN.nii.gz', ?,
+                'wordpress_download+controlled_metadata+filename_subject', 'high', ?)
+        """,
+        (
+            classification_rule_id,
+            short_title,
+            download["download_row_id"],
+            "exact PatientID to controlled 90min CT when available; unresolved IDs remain dataset-level",
+            json_dumps(evidence),
+        ),
+    )
+    records = []
+    for row in dataset_rows:
+        source = source_rows[row["radiology_id"]]
+        exact = bool(source["source_dicom_series_instance_uid"])
+        records.append(
+            (
+                row["radiology_id"],
+                classification_rule_id,
+                "segmentation",
+                "CT",
+                (
+                    "associated_with_source_dicom_series"
+                    if exact
+                    else "associated_with_controlled_source_dataset"
+                ),
+                "high" if exact else "medium",
+            )
+        )
+    conn.executemany(
+        """
+        INSERT INTO nifti_file_characteristics
+        (radiology_id, classification_rule_id, object_role, associated_imaging_modality,
+         imaging_modality_relationship, classification_confidence)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        records,
+    )
+    conn.commit()
+    return len(records)
+
+
+def build_remaining_reviewed_file_characteristics(conn: sqlite3.Connection) -> int:
+    """Create one auditable reviewed rule and one characteristic row per remaining file."""
+    total = 0
+    for short_title, default_modality in REMAINING_REVIEWED_DATASET_MODALITIES.items():
+        rule_id = re.sub(r"[^a-z0-9]+", "_", short_title.lower()).strip("_") + "_v1"
+        conn.execute(
+            "DELETE FROM nifti_file_characteristics WHERE classification_rule_id = ?", (rule_id,)
+        )
+        conn.execute("DELETE FROM nifti_classification_rules WHERE classification_rule_id = ?", (rule_id,))
+        download = conn.execute(
+            """
+            SELECT * FROM nifti_downloads
+            WHERE short_title = ? AND file_types LIKE '%NIfTI%'
+            ORDER BY download_row_id LIMIT 1
+            """,
+            (short_title,),
+        ).fetchone()
+        if download is None:
+            continue
+        rows = list(
+            conn.execute(
+                """
+                SELECT r.*, d.derived_object_id, d.derived_object_type,
+                       d.segmentation_representation,
+                       COALESCE(refs.reference_count, 0) AS reference_count,
+                       COALESCE(refs.nifti_reference_count, 0) AS nifti_reference_count,
+                       COALESCE(refs.dicom_reference_count, 0) AS dicom_reference_count,
+                       COALESCE(refs.dataset_reference_count, 0) AS dataset_reference_count
+                FROM radiology_series r
+                LEFT JOIN derived_objects d ON d.radiology_id = r.radiology_id
+                LEFT JOIN (
+                    SELECT derived_object_id,
+                           COUNT(*) AS reference_count,
+                           SUM(CASE WHEN COALESCE(source_nifti_volume_id, '') <> '' THEN 1 ELSE 0 END)
+                             AS nifti_reference_count,
+                           SUM(CASE WHEN COALESCE(source_dicom_series_instance_uid, '') <> '' THEN 1 ELSE 0 END)
+                             AS dicom_reference_count,
+                           SUM(CASE WHEN reference_role = 'source_image_dataset' THEN 1 ELSE 0 END)
+                             AS dataset_reference_count
+                    FROM derived_object_references
+                    WHERE reference_role IN ('source_image', 'source_image_dataset')
+                    GROUP BY derived_object_id
+                ) refs ON refs.derived_object_id = d.derived_object_id
+                WHERE r.short_title = ?
+                ORDER BY r.package_path
+                """,
+                (short_title,),
+            )
+        )
+        if not rows:
+            continue
+        role_counts: dict[str, int] = {}
+        records = []
+        for row in rows:
+            derived_type = row["derived_object_type"] or ""
+            if derived_type == "segmentation":
+                role = "segmentation"
+            elif derived_type == "annotation":
+                role = "annotation"
+            elif derived_type == "derived_image":
+                role = "derived_image"
+            elif short_title == "CFB-GBM" and "_rtdose.nii" in (row["file_name"] or "").lower():
+                role = "dose_volume"
+            else:
+                role = "source_image"
+            role_counts[role] = role_counts.get(role, 0) + 1
+
+            modality = row["modality"] if row["modality"] in {"CT", "MR", "PT"} else default_modality
+            reference_count = int(row["reference_count"] or 0)
+            if role == "source_image":
+                relationship = "direct"
+                confidence = "high"
+            elif role == "dose_volume":
+                modality = "CT"
+                relationship = "associated_with_radiotherapy_planning_images"
+                confidence = "high"
+            elif int(row["nifti_reference_count"] or 0) > 1:
+                relationship = "associated_with_multiple_source_nifti_volumes"
+                confidence = "high"
+            elif int(row["nifti_reference_count"] or 0) == 1:
+                relationship = "associated_with_source_nifti_volume"
+                confidence = "high"
+            elif int(row["dicom_reference_count"] or 0) > 0:
+                relationship = "associated_with_source_dicom_series"
+                confidence = "high"
+            elif int(row["dataset_reference_count"] or 0) > 0:
+                relationship = "associated_with_source_dataset"
+                confidence = "medium"
+            elif reference_count > 1:
+                relationship = "associated_with_multiple_source_volumes"
+                confidence = "medium"
+            else:
+                relationship = "download_context"
+                confidence = "medium" if role != "source_image" else "high"
+            records.append((row["radiology_id"], rule_id, role, modality, relationship, confidence))
+
+        evidence = {
+            "review_basis": "WordPress download labels plus dataset-specific filename, path, support-table, and source-reference checks",
+            "wordpress_download_id": download["download_id"],
+            "wordpress_data_types": parse_json_list(download["data_types"] or "[]"),
+            "wordpress_file_types": parse_json_list(download["file_types"] or "[]"),
+            "associated_imaging_modality": default_modality,
+            "reviewed_files": len(rows),
+            "object_role_counts": role_counts,
+        }
+        conn.execute(
+            """
+            INSERT INTO nifti_classification_rules
+            (classification_rule_id, short_title, download_row_id, rule_version,
+             imaging_modality, source_image_pattern, segmentation_pattern,
+             pairing_rule, classification_source, classification_confidence, evidence_json)
+            VALUES (?, ?, ?, '1', ?, 'dataset-specific reviewed image paths',
+                    'dataset-specific reviewed segmentation paths',
+                    'dataset-specific filename/path/support-metadata relationships',
+                    'wordpress_download+dataset_specific_inventory_review', 'high', ?)
+            """,
+            (rule_id, short_title, download["download_row_id"], default_modality, json_dumps(evidence)),
+        )
+        conn.executemany(
+            """
+            INSERT INTO nifti_file_characteristics
+            (radiology_id, classification_rule_id, object_role, associated_imaging_modality,
+             imaging_modality_relationship, classification_confidence)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            records,
+        )
+        total += len(records)
+    conn.commit()
+    return total
+
+
+def build_nifti_dataset_review_issues(conn: sqlite3.Connection) -> int:
+    """Store review questions once at dataset grain rather than repeating them per file."""
+    conn.execute("DELETE FROM nifti_dataset_review_issues")
+    issues: list[tuple[Any, ...]] = []
+
+    def add(
+        short_title: str,
+        code: str,
+        affected_files: int,
+        description: str,
+        *,
+        severity: str = "warning",
+        status: str = "manual_review",
+        scope: str = "dataset",
+        evidence: dict[str, Any] | None = None,
+    ) -> None:
+        if affected_files <= 0:
+            return
+        issues.append(
+            (
+                stable_hash_id("nifti_review", short_title, code),
+                short_title,
+                code,
+                severity,
+                status,
+                affected_files,
+                scope,
+                description,
+                json_dumps(evidence or {}),
+            )
+        )
+
+    healthy_unmatched = conn.execute(
+        """SELECT COUNT(*) FROM radiology_series
+           WHERE short_title = 'Healthy-Total-Body-CTs'
+             AND quality_flag_json LIKE '%unmatched_controlled_source_subject%'"""
+    ).fetchone()[0]
+    add(
+        "Healthy-Total-Body-CTs",
+        "unmatched_controlled_source_subject",
+        healthy_unmatched,
+        "NIfTI subject IDs do not exactly match a controlled 90-minute CT subject; no UID was guessed.",
+        evidence={"subject_ids": ["Healthy-Total-Body-CTs-014", "Healthy-Total-Body-CTs-016", "Healthy-Total-Body-CTs-019", "Healthy-Total-Body-CTs-029"]},
+    )
+    breast_files = conn.execute(
+        "SELECT COUNT(*) FROM radiology_series WHERE short_title = 'BreastDCEDL_ISPY2'"
+    ).fetchone()[0]
+    breast_segmentations = conn.execute(
+        "SELECT COUNT(*) FROM derived_objects WHERE short_title = 'BreastDCEDL_ISPY2' AND derived_object_type = 'segmentation'"
+    ).fetchone()[0]
+    if breast_files and not breast_segmentations:
+        add(
+            "BreastDCEDL_ISPY2",
+            "wordpress_segmentation_label_without_segmentation_files",
+            breast_files,
+            "The NIfTI download is labeled MR and Segmentation, but all inventoried NIfTIs follow the DCE AQC image-volume convention.",
+        )
+    cfb_gtv = conn.execute(
+        "SELECT COUNT(*) FROM radiology_series WHERE short_title = 'CFB-GBM' AND lower(file_name) LIKE '%_gtv.nii%'"
+    ).fetchone()[0]
+    add(
+        "CFB-GBM",
+        "gtv_source_modality_ambiguous",
+        cfb_gtv,
+        "GTV NIfTIs are clear segmentation objects, but filenames alone do not establish whether MR or planning CT is the primary source volume.",
+    )
+    covid_overlap = conn.execute(
+        """SELECT COALESCE(SUM(file_count - 1), 0) FROM (
+               SELECT subject_id, COUNT(*) AS file_count FROM radiology_series
+               WHERE short_title = 'CT Images in COVID-19'
+               GROUP BY subject_id HAVING COUNT(*) > 1)"""
+    ).fetchone()[0]
+    add(
+        "CT Images in COVID-19",
+        "subject_volume_overlap_between_downloads",
+        covid_overlap,
+        "The two NIfTI downloads contain repeated filename-derived subject identifiers; confirm whether these are duplicate or intentionally revised volumes.",
+    )
+    ispy_masks = conn.execute(
+        "SELECT COUNT(*) FROM derived_objects WHERE short_title = 'ISPY1-Tumor-SEG-Radiomics' AND derived_object_type = 'segmentation'"
+    ).fetchone()[0]
+    add(
+        "ISPY1-Tumor-SEG-Radiomics",
+        "mask_source_dce_phase_not_explicit",
+        ispy_masks,
+        "Each tumor mask is linked to the subject's six processed DCE volumes across two preprocessing variants; the package paths do not identify one preferred source volume.",
+    )
+    ivy_blank = conn.execute(
+        "SELECT COUNT(*) FROM radiology_series WHERE short_title = 'IvyGAP-Radiomics' AND subject_id = ''"
+    ).fetchone()[0]
+    add(
+        "IvyGAP-Radiomics",
+        "atlas_file_subject_unresolved",
+        ivy_blank,
+        "Generic atlas/template filenames do not encode a subject identifier.",
+    )
+    luad_r = conn.execute(
+        "SELECT COUNT(*) FROM radiology_series WHERE short_title = 'LUAD-CT-Survival' AND file_name GLOB 'R_*.nii'"
+    ).fetchone()[0]
+    add(
+        "LUAD-CT-Survival",
+        "source_patient_crosswalk_unresolved",
+        luad_r,
+        "R_NNN segmentation identifiers are preserved but have not been crosswalked to exact source DICOM PatientIDs or Series Instance UIDs.",
+    )
+    pancreas_count = conn.execute(
+        "SELECT COUNT(*) FROM radiology_series WHERE short_title = 'Pancreas-CT'"
+    ).fetchone()[0]
+    add(
+        "Pancreas-CT",
+        "published_scan_count_exceeds_nifti_masks",
+        max(0, 82 - pancreas_count),
+        "The Collection describes 82 CT scans, while the current NIfTI mask inventory contains 80 files.",
+        scope="coverage",
+        evidence={"published_ct_scans": 82, "nifti_masks": pancreas_count},
+    )
+    rsna_files = conn.execute(
+        "SELECT COUNT(*) FROM radiology_series WHERE short_title = 'RSNA-ASNR-MICCAI-BraTS-2021'"
+    ).fetchone()[0]
+    rsna_tcia_ids = conn.execute(
+        """SELECT COUNT(*)
+           FROM radiology_series r
+           JOIN non_dicom_files f USING (non_dicom_file_id)
+           WHERE r.short_title = 'RSNA-ASNR-MICCAI-BraTS-2021'
+             AND f.metadata_sources LIKE '%BraTS2021_MappingToTCIA%'"""
+    ).fetchone()[0]
+    if rsna_files and not rsna_tcia_ids:
+        add(
+            "RSNA-ASNR-MICCAI-BraTS-2021",
+            "brats_to_tcia_subject_crosswalk_unavailable",
+            rsna_files,
+            "BraTS challenge identifiers were recovered from filenames, but the BraTS-to-TCIA mapping spreadsheet was not present in the reusable metadata cache.",
+        )
+    saros_regions = conn.execute(
+        "SELECT COUNT(*) FROM radiology_series WHERE short_title = 'SAROS' AND lower(file_name) = 'body-regions.nii.gz'"
+    ).fetchone()[0]
+    saros_parts = conn.execute(
+        "SELECT COUNT(*) FROM radiology_series WHERE short_title = 'SAROS' AND lower(file_name) = 'body-parts.nii.gz'"
+    ).fetchone()[0]
+    add(
+        "SAROS",
+        "body_part_segmentation_absent_for_some_cases",
+        max(0, saros_regions - saros_parts),
+        "Some SAROS cases contain body-regions.nii.gz without a paired body-parts.nii.gz file; confirm that this is intentional package coverage.",
+        scope="coverage",
+        evidence={"body_region_files": saros_regions, "body_part_files": saros_parts},
+    )
+    vs_missing = conn.execute(
+        """SELECT COUNT(*) FROM agent_nifti_characteristics
+           WHERE short_title = 'Vestibular-Schwannoma-MC-RC'
+             AND COALESCE(source_dicom_series_instance_uid, '') = ''"""
+    ).fetchone()[0]
+    add(
+        "Vestibular-Schwannoma-MC-RC",
+        "source_dicom_series_uid_unresolved",
+        vs_missing,
+        "Segmentation visits without an exact source DICOM Series Instance UID retain MR association from dataset context only.",
+    )
+    for row in conn.execute(
+        """
+        SELECT short_title, COUNT(*) AS error_rows
+        FROM harvested_files
+        WHERE status = 'error' AND source_kind = 'aspera_browse'
+        GROUP BY short_title
+        ORDER BY lower(short_title)
+        """
+    ):
+        add(
+            row["short_title"],
+            "aspera_listing_refresh_needed",
+            int(row["error_rows"]),
+            "The preserved file inventory is usable, but the cached Aspera browse listing was unavailable during post-processing; refresh it before claiming a newly verified live package listing.",
+            severity="info",
+            scope="harvest",
+        )
+    yale_confirmed_missing = conn.execute(
+        """
+        SELECT COUNT(*) FROM metadata_quality_flags
+        WHERE short_title = 'Yale-Brain-Mets-Longitudinal'
+          AND issue_type = 'confirmed_missing_package_file'
+        """
+    ).fetchone()[0]
+    add(
+        "Yale-Brain-Mets-Longitudinal",
+        "confirmed_missing_package_file",
+        yale_confirmed_missing,
+        "A previously listed file was manually confirmed absent from the Aspera package and is excluded from the current file inventory.",
+        severity="info",
+        status="resolved",
+        scope="coverage",
+    )
+
+    conn.executemany(
+        """
+        INSERT INTO nifti_dataset_review_issues
+        (review_issue_id, short_title, issue_code, severity, status, affected_files,
+         review_scope, description, evidence_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        issues,
+    )
+    conn.commit()
+    return len(issues)
 
 
 def append_json_list_value(value: str, item: str) -> str:
@@ -3744,6 +5183,226 @@ def update_nifti_series_fields(
         f"UPDATE nifti_file_series SET {assignments} WHERE nifti_file_series_id = ?",
         (*updates.values(), nifti_file_series_id),
     )
+
+
+def preserved_tabular_rows(
+    conn: sqlite3.Connection, short_title: str, source_file_name: str
+) -> list[dict[str, str]]:
+    """Read already-preserved support rows without requiring the source file again."""
+    rows: list[dict[str, str]] = []
+    for row in conn.execute(
+        """
+        SELECT t.row_json
+        FROM tabular_rows t
+        JOIN harvested_files h USING (file_id)
+        WHERE t.short_title = ? AND h.file_name = ?
+        ORDER BY t.row_number
+        """,
+        (short_title, source_file_name),
+    ):
+        try:
+            parsed = json.loads(row["row_json"] or "{}")
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, dict):
+            rows.append({str(key): "" if value is None else str(value) for key, value in parsed.items()})
+    return rows
+
+
+def apply_remaining_dataset_mappings(conn: sqlite3.Connection) -> int:
+    """Normalize identities and obvious file roles for the remaining reviewed datasets."""
+    saros_map = {
+        row.get("id", ""): row
+        for row in preserved_tabular_rows(conn, "SAROS", "Segmentation-Info_09-29-2023.csv")
+        if row.get("id")
+    }
+    spinal_map = {
+        row.get("Patient ID", ""): row
+        for row in preserved_tabular_rows(
+            conn,
+            "Spinal-Multiple-Myeloma-SEG",
+            "Spinal-Multiple-Myeloma-SEG_Table_of_image_data_description.tsv",
+        )
+        if row.get("Patient ID")
+    }
+    updates = 0
+    remaining_titles = tuple(REMAINING_REVIEWED_DATASET_MODALITIES)
+    placeholders = ",".join("?" for _ in remaining_titles)
+    for row in conn.execute(
+        f"""
+        SELECT nifti_file_series_id, short_title, file_name, package_path, PatientID
+        FROM nifti_file_series
+        WHERE short_title IN ({placeholders})
+        """,
+        remaining_titles,
+    ):
+        title = row["short_title"] or ""
+        file_name = row["file_name"] or ""
+        package_path = clean_package_path(row["package_path"] or "")
+        lower_name = file_name.lower()
+        lower_path = package_path.lower()
+        fields: dict[str, str] = {}
+
+        if title == "BreastDCEDL_ISPY2":
+            match = re.match(r"^((?:ACRIN-6698|ISPY2)-\d+)_spy2_vis(\d+)_dce_aqc_(\d+)", file_name, re.I)
+            if match:
+                fields.update(
+                    PatientID=match.group(1),
+                    StudyDescription=f"visit_{match.group(2)}",
+                    SeriesDescription=f"DCE AQC temporal volume {int(match.group(3))}",
+                    Modality="MR",
+                    BodyPartExamined="BREAST",
+                )
+        elif title == "CT Images in COVID-19":
+            match = re.match(r"^(volume-covid19-[A-Za-z]-\d+)", file_name, re.I)
+            if match:
+                fields.update(PatientID=match.group(1), Modality="CT", BodyPartExamined="CHEST")
+        elif title == "DRO-Toolkit":
+            match = re.match(r"^(SEG|SERIES)-(Phantom-.+)\.nii(?:\.gz)?$", file_name, re.I)
+            if match:
+                fields.update(
+                    PatientID=match.group(2),
+                    Modality="CT",
+                    BodyPartExamined="PHANTOM",
+                    StudyDescription="Digital reference object configuration",
+                )
+                if match.group(1).upper() == "SEG":
+                    fields.update(
+                        SegmentationType="labelmap",
+                        SeriesDescription="Digital reference object segmentation",
+                    )
+                else:
+                    fields["SeriesDescription"] = "Digital reference object CT volume"
+        elif title == "ISPY1-Tumor-SEG-Radiomics":
+            match = re.match(r"^(ISPY1_\d+)", file_name, re.I)
+            if match:
+                fields.update(
+                    PatientID=match.group(1),
+                    StudyDescription="processed DCE MRI",
+                    Modality="MR",
+                    BodyPartExamined="BREAST",
+                )
+                if "/masks_" in lower_path:
+                    if "/masks_stv_manual/" in lower_path:
+                        mask_description = "manual spatial tumor volume mask"
+                    elif "/masks_stv_resunet/" in lower_path:
+                        mask_description = "ResUNet spatial tumor volume mask"
+                    else:
+                        mask_description = "functional tumor volume mask"
+                    fields.update(
+                        SegmentationType="binary_mask",
+                        SeriesDescription=mask_description,
+                    )
+                else:
+                    phase = re.search(r"_DCE_(\d+)", file_name, re.I)
+                    fields["SeriesDescription"] = (
+                        f"bias-corrected DCE phase {int(phase.group(1))}" if phase else "bias-corrected DCE MRI"
+                    )
+        elif title == "IvyGAP-Radiomics":
+            match = re.match(r"^(W\d+)(?:_(\d{4})\.(\d{2})\.(\d{2}))?", file_name, re.I)
+            if match:
+                fields["PatientID"] = match.group(1)
+                if match.group(2):
+                    fields["StudyDate"] = f"{match.group(2)}-{match.group(3)}-{match.group(4)}"
+                    fields["SeriesDate"] = fields["StudyDate"]
+                fields.update(Modality="MR", BodyPartExamined="BRAIN")
+        elif title == "LUAD-CT-Survival":
+            fields.update(
+                PatientID=strip_known_file_suffix(file_name),
+                BodyPartExamined="CHEST",
+                SegmentationType="segmentation_file",
+                SeriesDescription="lung adenocarcinoma tumor segmentation",
+            )
+        elif title == "Pancreas-CT":
+            match = re.match(r"^label(\d{4})\.nii(?:\.gz)?$", file_name, re.I)
+            if match:
+                fields.update(
+                    PatientID=f"PANCREAS_{int(match.group(1)):04d}",
+                    BodyPartExamined="PANCREAS",
+                    SegmentationType="labelmap",
+                    SeriesDescription="manual pancreas segmentation",
+                )
+        elif title == "RSNA-ASNR-MICCAI-BraTS-2021":
+            match = re.search(r"(BraTS2021_\d{5})", file_name, re.I)
+            if match:
+                fields.update(PatientID=match.group(1), Modality="MR", BodyPartExamined="BRAIN")
+        elif title == "RHUH-GBM" and not row["PatientID"]:
+            match = re.search(r"(RHUH-\d+)", package_path, re.I)
+            if match:
+                fields["PatientID"] = match.group(1)
+        elif title == "SAROS":
+            match = re.search(r"(case_\d{3})", package_path, re.I)
+            source = saros_map.get(match.group(1) if match else "")
+            if source:
+                fields.update(
+                    PatientID=source.get("tcia_case_id", ""),
+                    StudyInstanceUID=source.get("tcia_study_instance_uid", ""),
+                    segmented_SeriesInstanceUID=source.get("tcia_series_instance_uid", ""),
+                    PatientSex=source.get("gender", ""),
+                    BodyPartExamined=source.get("anatomic_region", ""),
+                    SegmentationType="labelmap",
+                    SeriesDescription=("body region segmentation" if "regions" in lower_name else "body part segmentation"),
+                )
+            elif match:
+                fields.update(PatientID=match.group(1), SegmentationType="labelmap")
+        elif title == "Spinal-Multiple-Myeloma-SEG":
+            match = re.match(r"^(Myel_\d{3}(?:_[ab])?)_(?:lesions|spine)_segmentation", file_name, re.I)
+            if match:
+                scan_id = match.group(1)
+                base_subject = re.match(r"^(Myel_\d{3})", scan_id, re.I).group(1)
+                source = spinal_map.get(scan_id, {})
+                fields.update(
+                    PatientID=base_subject,
+                    StudyDescription=f"scan_{scan_id[len(base_subject):].lstrip('_') or 'primary'}",
+                    BodyPartExamined="SPINE",
+                    SegmentationType="labelmap",
+                    segmented_SeriesInstanceUID=source.get("Conventional CT Series Instance UID", ""),
+                    SeriesDescription=("multiple myeloma lesion segmentation" if "lesions" in lower_name else "vertebral spine segmentation"),
+                )
+        elif title == "UCSF-PDGM":
+            match = re.match(r"^(UCSF-PDGM-\d{4})(?:_(FU\d+d))?_", file_name, re.I)
+            if match:
+                fields.update(
+                    PatientID=match.group(1),
+                    StudyDescription=match.group(2) or "baseline",
+                    Modality="MR",
+                    BodyPartExamined="BRAIN",
+                )
+        elif title == "UPENN-GBM":
+            match = re.match(r"^(UPENN-GBM-\d{5})_(\d{2})_(.+?)\.nii(?:\.gz)?$", file_name, re.I)
+            if match:
+                fields.update(
+                    PatientID=match.group(1),
+                    StudyDescription=f"visit_{match.group(2)}",
+                    Modality="MR",
+                    BodyPartExamined="BRAIN",
+                )
+                if "segm" in match.group(3).lower():
+                    fields.update(SegmentationType="labelmap", SeriesDescription=match.group(3))
+        elif title == "UTSW-Glioma" and "tumorseg" in lower_name:
+            fields.update(
+                SegmentationType="labelmap",
+                SeriesDescription=("manually corrected tumor segmentation" if "manual" in lower_name else "FeTS tumor segmentation"),
+            )
+        elif title == "CFB-GBM":
+            if re.search(r"_(?:brain_mask|gtv)\.nii(?:\.gz)?$", file_name, re.I):
+                fields.update(SegmentationType="binary_mask", SeriesDescription=("brain mask" if "brain_mask" in lower_name else "gross tumor volume"))
+            if "_ct.nii" in lower_name:
+                fields["Modality"] = "CT"
+            elif "_rtdose.nii" in lower_name:
+                fields.update(Modality="RTDOSE", SeriesDescription="radiotherapy dose volume")
+            elif "_brain_mask" not in lower_name and "_gtv" not in lower_name:
+                fields.setdefault("Modality", "MR")
+
+        if fields:
+            update_nifti_series_fields(
+                conn,
+                row["nifti_file_series_id"],
+                fields,
+                f"dataset_specific:{title}_reviewed_filename_and_support_metadata",
+            )
+            updates += 1
+    return updates
 
 
 def apply_rsna_brats2021_mapping(conn: sqlite3.Connection, files_dir: Path) -> int:
@@ -4126,6 +5785,221 @@ def apply_vs_mc_rc2_mapping(conn: sqlite3.Connection) -> int:
     return updates
 
 
+def nlst_acquisition_folder(package_path: str) -> str:
+    for component in Path(clean_package_path(package_path or "")).parts:
+        if re.fullmatch(
+            r"\d{2}-\d{2}-\d{4}-NLST-(?:LSS|ACRIN)-\d+", component, re.IGNORECASE
+        ):
+            return component
+    return ""
+
+
+def apply_nlst_new_lesion_longct_mapping(conn: sqlite3.Connection) -> int:
+    """Crosswalk the current package inventory to its transfer-list metadata."""
+    rows = list(
+        conn.execute(
+            """
+            SELECT *
+            FROM nifti_file_series
+            WHERE short_title = 'NLST-New-lesion-LongCT'
+            """
+        )
+    )
+    source_by_acquisition: dict[tuple[str, str], sqlite3.Row] = {}
+    for row in rows:
+        if "package_files" in parse_json_list(row["inventory_sources"] or "[]"):
+            continue
+        acquisition = nlst_acquisition_folder(row["package_path"] or "")
+        if not acquisition or not row["StudyInstanceUID"] or not row["SeriesInstanceUID"]:
+            continue
+        source_by_acquisition[(row["PatientID"] or "", acquisition)] = row
+
+    updates = 0
+    for row in rows:
+        if "package_files" not in parse_json_list(row["inventory_sources"] or "[]"):
+            continue
+        package_path = clean_package_path(row["package_path"] or "")
+        lower_path = package_path.lower()
+        acquisition = nlst_acquisition_folder(package_path)
+        field_updates: dict[str, str] = {
+            "BodyPartExamined": "CHEST",
+            "Modality": "CT",
+        }
+        source = source_by_acquisition.get((row["PatientID"] or "", acquisition))
+        if acquisition:
+            date_prefix = acquisition[:10]
+            try:
+                iso_date = dt.datetime.strptime(date_prefix, "%m-%d-%Y").date().isoformat()
+            except ValueError:
+                iso_date = ""
+            if iso_date:
+                field_updates.update({"StudyDate": iso_date, "SeriesDate": iso_date})
+        if re.fullmatch(r"point_\d+\.nii(?:\.gz)?", row["file_name"] or "", re.IGNORECASE):
+            field_updates["SeriesDescription"] = "Point fiducial annotation"
+            if source:
+                field_updates["StudyInstanceUID"] = source["StudyInstanceUID"]
+        elif "/resampled/" in lower_path:
+            field_updates["SeriesDescription"] = "Resampled CT volume"
+            if source:
+                field_updates["StudyInstanceUID"] = source["StudyInstanceUID"]
+        elif "/register_" in lower_path:
+            field_updates["SeriesDescription"] = "Longitudinal registered CT volume"
+        else:
+            field_updates["SeriesDescription"] = "CT source volume"
+            if source:
+                field_updates.update(
+                    {
+                        "StudyInstanceUID": source["StudyInstanceUID"],
+                        "SeriesInstanceUID": source["SeriesInstanceUID"],
+                    }
+                )
+        update_nifti_series_fields(
+            conn,
+            row["nifti_file_series_id"],
+            field_updates,
+            "dataset_specific:NLST-New-lesion-LongCT_package_transferlist_crosswalk",
+        )
+        updates += 1
+    return updates
+
+
+def apply_radiomic_feature_standards_mapping(conn: sqlite3.Connection) -> int:
+    updates = 0
+    for row in conn.execute(
+        """
+        SELECT nifti_file_series_id, file_name, PatientID
+        FROM nifti_file_series
+        WHERE short_title = 'Radiomic-Feature-Standards'
+        """
+    ):
+        file_name = row["file_name"] or ""
+        field_updates: dict[str, str] = {"BodyPartExamined": "CHEST"}
+        lidc_match = re.fullmatch(
+            r"(LIDC_IDRI_\d+)_alg(\d+)_run(\d+)\.nii(?:\.gz)?",
+            file_name,
+            flags=re.IGNORECASE,
+        )
+        phantom_match = re.fullmatch(r"SEG-(Phantom-.+)\.nii(?:\.gz)?", file_name, re.IGNORECASE)
+        if lidc_match:
+            patient_token, algorithm, run = lidc_match.groups()
+            subject_id = patient_token.replace("_", "-")
+            field_updates.update(
+                {
+                    "PatientID": subject_id,
+                    "SeriesDescription": f"Lesion segmentation algorithm {int(algorithm)} run {int(run)}",
+                }
+            )
+        elif phantom_match:
+            subject_id = phantom_match.group(1)
+            field_updates.update(
+                {
+                    "PatientID": subject_id,
+                    "SeriesDescription": "Digital reference object VOI segmentation",
+                }
+            )
+        else:
+            continue
+        mapping = RADIOMIC_FEATURE_STANDARDS_DICOM_MAP.get(subject_id)
+        if mapping:
+            field_updates["StudyInstanceUID"] = mapping[1]
+        update_nifti_series_fields(
+            conn,
+            row["nifti_file_series_id"],
+            field_updates,
+            "dataset_specific:Radiomic-Feature-Standards_filename_and_wordpress_description",
+        )
+        updates += 1
+    return updates
+
+
+def healthy_total_body_90min_sources(
+    controlled_db_path: Path = DEFAULT_CONTROLLED_ACCESS_DB,
+) -> dict[str, dict[str, str]]:
+    if not controlled_db_path.exists():
+        return {}
+    source_conn = sqlite3.connect(f"file:{controlled_db_path}?mode=ro", uri=True)
+    source_conn.row_factory = sqlite3.Row
+    try:
+        rows = source_conn.execute(
+            """
+            SELECT patient_id, study_instance_uid, series_instance_uid,
+                   series_description
+            FROM agent_controlled_files
+            WHERE short_title = 'Healthy-Total-Body-CTs'
+              AND lower(series_description) LIKE '%90min%'
+            ORDER BY patient_id, series_instance_uid
+            """
+        ).fetchall()
+    finally:
+        source_conn.close()
+    grouped: dict[str, list[sqlite3.Row]] = {}
+    for row in rows:
+        grouped.setdefault(row["patient_id"] or "", []).append(row)
+    return {
+        patient_id: dict(patient_rows[0])
+        for patient_id, patient_rows in grouped.items()
+        if patient_id and len(patient_rows) == 1
+    }
+
+
+def apply_healthy_total_body_cts_mapping(
+    conn: sqlite3.Connection,
+    controlled_db_path: Path = DEFAULT_CONTROLLED_ACCESS_DB,
+) -> int:
+    source_map = healthy_total_body_90min_sources(controlled_db_path)
+    updates = 0
+    pattern = re.compile(r"^(Healthy-Total-Body-CTs-\d{3})\.nii(?:\.gz)?$", re.IGNORECASE)
+    for row in conn.execute(
+        """
+        SELECT nifti_file_series_id, file_name
+        FROM nifti_file_series
+        WHERE short_title = 'Healthy-Total-Body-CTs'
+        """
+    ):
+        match = pattern.match(row["file_name"] or "")
+        if not match:
+            continue
+        subject_id = match.group(1)
+        source = source_map.get(subject_id)
+        field_updates = {
+            "PatientID": subject_id,
+            "BodyPartExamined": "WHOLEBODY",
+            "SeriesDescription": "MOOSE whole-body tissue segmentation at 90min",
+            "SegmentationType": "segmentation_file",
+            "AlgorithmType": "AUTOMATIC",
+            "AlgorithmName": "MOOSE",
+        }
+        if source:
+            field_updates["StudyInstanceUID"] = source["study_instance_uid"]
+        update_nifti_series_fields(
+            conn,
+            row["nifti_file_series_id"],
+            field_updates,
+            "dataset_specific:Healthy-Total-Body-CTs_filename_wordpress_controlled_90min",
+        )
+        if not source:
+            conn.execute(
+                """
+                UPDATE nifti_file_series
+                SET quality_flag_json = ?
+                WHERE nifti_file_series_id = ?
+                """,
+                (
+                    json_dumps(
+                        {
+                            "flag": "unmatched_controlled_source_subject",
+                            "status": "manual_review",
+                            "subject_id": subject_id,
+                            "expected_source": "one controlled 90min CT series",
+                        }
+                    ),
+                    row["nifti_file_series_id"],
+                ),
+            )
+        updates += 1
+    return updates
+
+
 def apply_dataset_specific_nifti_enrichment(
     conn: sqlite3.Connection, files_dir: Path
 ) -> dict[str, int]:
@@ -4139,6 +6013,10 @@ def apply_dataset_specific_nifti_enrichment(
         "brats_peds_rows": apply_brats_peds_mapping(conn),
         "plethora_rows": apply_plethora_mapping(conn),
         "vestibular_schwannoma_mc_rc2_rows": apply_vs_mc_rc2_mapping(conn),
+        "nlst_new_lesion_longct_rows": apply_nlst_new_lesion_longct_mapping(conn),
+        "radiomic_feature_standards_rows": apply_radiomic_feature_standards_mapping(conn),
+        "healthy_total_body_cts_rows": apply_healthy_total_body_cts_mapping(conn),
+        "remaining_reviewed_dataset_rows": apply_remaining_dataset_mappings(conn),
     }
     conn.commit()
     write_meta(conn, "dataset_specific_enrichment_rows", counts)
@@ -4146,6 +6024,11 @@ def apply_dataset_specific_nifti_enrichment(
 
 
 def apply_saros_external_source_references(conn: sqlite3.Connection) -> int:
+    source_dataset_by_series = {
+        row.get("tcia_series_instance_uid", ""): row.get("tcia_collection", "")
+        for row in preserved_tabular_rows(conn, "SAROS", "Segmentation-Info_09-29-2023.csv")
+        if row.get("tcia_series_instance_uid")
+    }
     records = []
     for row in conn.execute(
         """
@@ -4153,36 +6036,40 @@ def apply_saros_external_source_references(conn: sqlite3.Connection) -> int:
             d.derived_object_id,
             d.non_dicom_file_id,
             d.radiology_id,
-            d.referenced_series_id,
+            d.source_dicom_series_instance_uid,
             d.package_path,
             r.study_id,
+            r.study_id_source,
             r.subject_id
         FROM derived_objects d
         JOIN radiology_series r
           ON r.radiology_id = d.radiology_id
         WHERE d.short_title = 'SAROS'
-          AND NULLIF(d.referenced_series_id, '') IS NOT NULL
+          AND NULLIF(d.source_dicom_series_instance_uid, '') IS NOT NULL
         """
     ):
         evidence = {
             "source": "Segmentation-Info_09-29-2023.csv",
             "tcia_case_id": row["subject_id"],
             "tcia_study_instance_uid": row["study_id"],
-            "tcia_series_instance_uid": row["referenced_series_id"],
+            "tcia_series_instance_uid": row["source_dicom_series_instance_uid"],
             "derived_package_path": row["package_path"],
         }
         records.append(
             (
-                stable_hash_id("dor", row["derived_object_id"], row["referenced_series_id"], "saros_csv_source_series"),
+                stable_hash_id("dor", row["derived_object_id"], row["source_dicom_series_instance_uid"], "saros_csv_source_series"),
                 row["derived_object_id"],
                 row["non_dicom_file_id"],
                 row["radiology_id"],
                 "",
                 "",
-                row["referenced_series_id"],
                 "",
                 "",
-                "source_image_series",
+                source_dataset_by_series.get(row["source_dicom_series_instance_uid"], ""),
+                "open",
+                row["source_dicom_series_instance_uid"],
+                row["study_id"] if row["study_id_source"] == "source_metadata" else "",
+                "source_image",
                 "saros_csv_source_series",
                 "high",
                 json_dumps(evidence),
@@ -4193,14 +6080,213 @@ def apply_saros_external_source_references(conn: sqlite3.Connection) -> int:
             """
             INSERT OR REPLACE INTO derived_object_references
             (derived_object_reference_id, derived_object_id, derived_non_dicom_file_id,
-             derived_radiology_id, referenced_non_dicom_file_id, referenced_radiology_id,
-             referenced_series_id, referenced_file_name, referenced_package_path,
+             derived_radiology_id, source_non_dicom_file_id, source_nifti_volume_id,
+             source_nifti_volume_file_name, source_nifti_volume_package_path,
+             source_dataset_short_title, source_access_level,
+             source_dicom_series_instance_uid, source_dicom_study_instance_uid,
              reference_role, inference_method, confidence, evidence_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             records,
         )
         conn.commit()
+    return len(records)
+
+
+def apply_radiomic_feature_standards_external_source_references(
+    conn: sqlite3.Connection,
+) -> int:
+    records = []
+    source_updates = []
+    for row in conn.execute(
+        """
+        SELECT d.derived_object_id, d.non_dicom_file_id, d.radiology_id,
+               d.file_name, d.package_path, r.subject_id
+        FROM derived_objects d
+        JOIN radiology_series r ON r.radiology_id = d.radiology_id
+        WHERE d.short_title = 'Radiomic-Feature-Standards'
+          AND d.derived_object_type = 'segmentation'
+        """
+    ):
+        mapping = RADIOMIC_FEATURE_STANDARDS_DICOM_MAP.get(row["subject_id"] or "")
+        if not mapping:
+            continue
+        source_dataset, study_uid, ct_series_uid, seg_series_uid = mapping
+        ct_evidence = {
+            "source": "TCIA source CT manifest plus IDC public DICOMweb metadata",
+            "manifest_url": "https://www.cancerimagingarchive.net/wp-content/uploads/Standardization-in-Quantitative-Imaging-DICOM-CTs-3-Subjects-DRO-Toolkit-10-Subjects-QIN.tcia",
+            "derived_subject_id": row["subject_id"],
+            "source_dataset_short_title": source_dataset,
+            "source_dicom_study_instance_uid": study_uid,
+            "source_dicom_series_instance_uid": ct_series_uid,
+        }
+        records.append(
+            (
+                stable_hash_id(
+                    "dor", row["derived_object_id"], ct_series_uid, "radiomic_feature_standards_source_ct"
+                ),
+                row["derived_object_id"],
+                row["non_dicom_file_id"],
+                row["radiology_id"],
+                "",
+                "",
+                "",
+                "",
+                source_dataset,
+                ct_series_uid,
+                study_uid,
+                "",
+                "",
+                "source_image",
+                "tcia_manifest_uid_idc_patient_match",
+                "explicit",
+                json_dumps(ct_evidence),
+            )
+        )
+        alternate_dataset = "QIN-LungCT-Seg" if source_dataset == "LIDC-IDRI" else "DRO-Toolkit"
+        seg_evidence = {
+            "source": "TCIA DICOM SEG manifest plus IDC public DICOMweb metadata",
+            "manifest_url": "https://www.cancerimagingarchive.net/wp-content/uploads/Standardization-in-Quatitative-Imaging-DICOM-Segs-3-Subjects-DRO-Toolkit-10-Subjects-QIN.tcia",
+            "derived_subject_id": row["subject_id"],
+            "related_dataset_short_title": alternate_dataset,
+            "related_dicom_study_instance_uid": study_uid,
+            "related_dicom_seg_series_instance_uid": seg_series_uid,
+        }
+        records.append(
+            (
+                stable_hash_id(
+                    "dor", row["derived_object_id"], seg_series_uid, "radiomic_feature_standards_alternate_seg"
+                ),
+                row["derived_object_id"],
+                row["non_dicom_file_id"],
+                row["radiology_id"],
+                "",
+                "",
+                "",
+                "",
+                alternate_dataset,
+                "",
+                "",
+                seg_series_uid,
+                study_uid,
+                "alternate_dicom_segmentation_representation",
+                "tcia_manifest_uid_idc_patient_match",
+                "explicit",
+                json_dumps(seg_evidence),
+            )
+        )
+        source_updates.append((ct_series_uid, study_uid, row["derived_object_id"]))
+    conn.executemany(
+        """
+        INSERT OR REPLACE INTO derived_object_references
+        (derived_object_reference_id, derived_object_id, derived_non_dicom_file_id,
+         derived_radiology_id, source_non_dicom_file_id, source_nifti_volume_id,
+         source_nifti_volume_file_name, source_nifti_volume_package_path,
+         source_dataset_short_title, source_dicom_series_instance_uid,
+         source_dicom_study_instance_uid, related_dicom_series_instance_uid,
+         related_dicom_study_instance_uid, reference_role, inference_method,
+         confidence, evidence_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        records,
+    )
+    conn.executemany(
+        """
+        UPDATE derived_objects
+        SET source_dicom_series_instance_uid = ?,
+            source_dicom_study_instance_uid = ?
+        WHERE derived_object_id = ?
+        """,
+        source_updates,
+    )
+    conn.commit()
+    return len(records)
+
+
+def apply_healthy_total_body_cts_external_source_references(
+    conn: sqlite3.Connection,
+    controlled_db_path: Path = DEFAULT_CONTROLLED_ACCESS_DB,
+) -> int:
+    source_map = healthy_total_body_90min_sources(controlled_db_path)
+    records = []
+    source_updates = []
+    for row in conn.execute(
+        """
+        SELECT d.derived_object_id, d.non_dicom_file_id, d.radiology_id,
+               d.file_name, d.package_path, r.subject_id
+        FROM derived_objects d
+        JOIN radiology_series r ON r.radiology_id = d.radiology_id
+        WHERE d.short_title = 'Healthy-Total-Body-CTs'
+          AND d.derived_object_type = 'segmentation'
+        """
+    ):
+        source = source_map.get(row["subject_id"] or "")
+        series_uid = source["series_instance_uid"] if source else ""
+        study_uid = source["study_instance_uid"] if source else ""
+        reference_role = "source_image" if source else "source_image_dataset"
+        inference_method = (
+            "controlled_manifest_exact_patient_90min_series"
+            if source
+            else "wordpress_controlled_source_dataset_unmatched_patient"
+        )
+        confidence = "explicit" if source else "medium"
+        evidence = {
+            "source": "public WordPress controlled manifest/digest metadata",
+            "source_download_id": "42739",
+            "source_dataset_short_title": "Healthy-Total-Body-CTs",
+            "source_access_level": "controlled",
+            "controlled_access_policy_url": "https://www.cancerimagingarchive.net/nih-controlled-data-access-policy/",
+            "derived_subject_id": row["subject_id"],
+            "expected_series_description_contains": "90min",
+            "exact_patient_match": bool(source),
+        }
+        records.append(
+            (
+                stable_hash_id(
+                    "dor", row["derived_object_id"], series_uid or row["subject_id"], inference_method
+                ),
+                row["derived_object_id"],
+                row["non_dicom_file_id"],
+                row["radiology_id"],
+                "",
+                "",
+                "",
+                "",
+                "Healthy-Total-Body-CTs",
+                "controlled",
+                series_uid,
+                study_uid,
+                reference_role,
+                inference_method,
+                confidence,
+                json_dumps(evidence),
+            )
+        )
+        if source:
+            source_updates.append((series_uid, study_uid, row["derived_object_id"]))
+    conn.executemany(
+        """
+        INSERT OR REPLACE INTO derived_object_references
+        (derived_object_reference_id, derived_object_id, derived_non_dicom_file_id,
+         derived_radiology_id, source_non_dicom_file_id, source_nifti_volume_id,
+         source_nifti_volume_file_name, source_nifti_volume_package_path,
+         source_dataset_short_title, source_access_level,
+         source_dicom_series_instance_uid, source_dicom_study_instance_uid,
+         reference_role, inference_method, confidence, evidence_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        records,
+    )
+    conn.executemany(
+        """
+        UPDATE derived_objects
+        SET source_dicom_series_instance_uid = ?,
+            source_dicom_study_instance_uid = ?
+        WHERE derived_object_id = ?
+        """,
+        source_updates,
+    )
+    conn.commit()
     return len(records)
 
 
@@ -4213,22 +6299,23 @@ def apply_pancreas_ct_external_source_references(conn: sqlite3.Connection) -> in
             d.non_dicom_file_id,
             d.radiology_id,
             d.file_name,
-            d.referenced_series_id,
+            d.source_dicom_series_instance_uid,
             d.package_path,
             r.study_id,
+            r.study_id_source,
             r.subject_id
         FROM derived_objects d
         JOIN radiology_series r
           ON r.radiology_id = d.radiology_id
         WHERE d.short_title = 'Pancreas-CT'
-          AND NULLIF(d.referenced_series_id, '') IS NOT NULL
+          AND NULLIF(d.source_dicom_series_instance_uid, '') IS NOT NULL
         """
     ):
         evidence = {
             "source": f"{PANCREAS_CT_MANIFEST_FILE} plus IDC index",
             "tcia_patient_id": row["subject_id"],
             "tcia_study_instance_uid": row["study_id"],
-            "tcia_series_instance_uid": row["referenced_series_id"],
+            "tcia_series_instance_uid": row["source_dicom_series_instance_uid"],
             "derived_file_name": row["file_name"],
             "derived_package_path": row["package_path"],
         }
@@ -4237,7 +6324,7 @@ def apply_pancreas_ct_external_source_references(conn: sqlite3.Connection) -> in
                 stable_hash_id(
                     "dor",
                     row["derived_object_id"],
-                    row["referenced_series_id"],
+                    row["source_dicom_series_instance_uid"],
                     "pancreas_ct_manifest_idc_patient_suffix",
                 ),
                 row["derived_object_id"],
@@ -4245,10 +6332,13 @@ def apply_pancreas_ct_external_source_references(conn: sqlite3.Connection) -> in
                 row["radiology_id"],
                 "",
                 "",
-                row["referenced_series_id"],
                 "",
                 "",
-                "source_image_series",
+                "Pancreas-CT",
+                "open",
+                row["source_dicom_series_instance_uid"],
+                row["study_id"] if row["study_id_source"] == "source_metadata" else "",
+                "source_image",
                 "pancreas_ct_manifest_idc_patient_suffix",
                 "high",
                 json_dumps(evidence),
@@ -4259,14 +6349,95 @@ def apply_pancreas_ct_external_source_references(conn: sqlite3.Connection) -> in
             """
             INSERT OR REPLACE INTO derived_object_references
             (derived_object_reference_id, derived_object_id, derived_non_dicom_file_id,
-             derived_radiology_id, referenced_non_dicom_file_id, referenced_radiology_id,
-             referenced_series_id, referenced_file_name, referenced_package_path,
+             derived_radiology_id, source_non_dicom_file_id, source_nifti_volume_id,
+             source_nifti_volume_file_name, source_nifti_volume_package_path,
+             source_dataset_short_title, source_access_level,
+             source_dicom_series_instance_uid, source_dicom_study_instance_uid,
              reference_role, inference_method, confidence, evidence_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             records,
         )
         conn.commit()
+    return len(records)
+
+
+def apply_segmentation_only_dataset_references(conn: sqlite3.Connection) -> int:
+    """Record one compact source-dataset relationship when source NIfTIs are absent."""
+    records = []
+    for short_title, source_dataset in SEGMENTATION_ONLY_SOURCE_DATASETS.items():
+        for row in conn.execute(
+            """
+            SELECT d.derived_object_id, d.non_dicom_file_id, d.radiology_id,
+                   d.file_name, d.package_path, d.source_dicom_series_instance_uid,
+                   d.source_dicom_study_instance_uid, r.subject_id,
+                   r.series_id, r.series_id_source, r.study_id, r.study_id_source
+            FROM derived_objects d
+            JOIN radiology_series r ON r.radiology_id = d.radiology_id
+            WHERE d.short_title = ? AND d.derived_object_type = 'segmentation'
+              AND NOT EXISTS (
+                  SELECT 1 FROM derived_object_references dor
+                  WHERE dor.derived_object_id = d.derived_object_id
+                    AND dor.reference_role IN ('source_image', 'source_image_dataset')
+              )
+            """,
+            (short_title,),
+        ):
+            series_uid = row["source_dicom_series_instance_uid"] or (
+                row["series_id"] if row["series_id_source"] == "source_metadata" else ""
+            )
+            study_uid = row["source_dicom_study_instance_uid"] or (
+                row["study_id"] if row["study_id_source"] == "source_metadata" else ""
+            )
+            has_exact_series = bool(series_uid)
+            method = (
+                "support_metadata_exact_source_series"
+                if has_exact_series
+                else "wordpress_source_dataset_and_filename_subject"
+            )
+            evidence = {
+                "derived_subject_id": row["subject_id"],
+                "derived_file_name": row["file_name"],
+                "source_dataset_short_title": source_dataset,
+                "source_nifti_present": False,
+                "exact_source_series_uid": has_exact_series,
+            }
+            records.append(
+                (
+                    stable_hash_id(
+                        "dor", row["derived_object_id"], series_uid or source_dataset, method
+                    ),
+                    row["derived_object_id"],
+                    row["non_dicom_file_id"],
+                    row["radiology_id"],
+                    "",
+                    "",
+                    "",
+                    "",
+                    source_dataset,
+                    "open",
+                    series_uid,
+                    study_uid,
+                    "source_image" if has_exact_series else "source_image_dataset",
+                    method,
+                    "explicit" if has_exact_series else "medium",
+                    json_dumps(evidence),
+                )
+            )
+    conn.executemany(
+        """
+        INSERT OR REPLACE INTO derived_object_references
+        (derived_object_reference_id, derived_object_id, derived_non_dicom_file_id,
+         derived_radiology_id, source_non_dicom_file_id, source_nifti_volume_id,
+         source_nifti_volume_file_name, source_nifti_volume_package_path,
+         source_dataset_short_title, source_access_level,
+         source_dicom_series_instance_uid, source_dicom_study_instance_uid,
+         reference_role, inference_method, confidence, evidence_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        records,
+    )
+    conn.commit()
     return len(records)
 
 
@@ -4281,6 +6452,9 @@ def write_canonical_layer_counts(conn: sqlite3.Connection) -> None:
         "radiology_contrast",
         "derived_objects",
         "derived_object_references",
+        "nifti_classification_rules",
+        "nifti_file_characteristics",
+        "nifti_dataset_review_issues",
         "annotation_groups",
     ):
         write_meta(
@@ -4301,10 +6475,40 @@ def postprocess_nifti_metadata(conn: sqlite3.Connection, files_dir: Path) -> dic
     build_nifti_file_series(conn)
     counts.update(apply_dataset_specific_nifti_enrichment(conn, files_dir))
     build_canonical_non_dicom_layer(conn)
+    counts["radiomic_feature_standards_external_source_references"] = (
+        apply_radiomic_feature_standards_external_source_references(conn)
+    )
+    counts["healthy_total_body_cts_external_source_references"] = (
+        apply_healthy_total_body_cts_external_source_references(conn)
+    )
     counts["saros_external_source_references"] = apply_saros_external_source_references(conn)
     counts["pancreas_ct_external_source_references"] = apply_pancreas_ct_external_source_references(
         conn
     )
+    counts["segmentation_only_dataset_references"] = (
+        apply_segmentation_only_dataset_references(conn)
+    )
+    counts["ct_org_characteristics_rows"] = build_ct_org_file_characteristics(conn)
+    counts["bcbm_radiogenomics_characteristics_rows"] = (
+        build_bcbm_radiogenomics_file_characteristics(conn)
+    )
+    counts["vestibular_schwannoma_mc_rc2_characteristics_rows"] = (
+        build_vs_mc_rc2_file_characteristics(conn)
+    )
+    counts["nlst_new_lesion_longct_characteristics_rows"] = (
+        build_nlst_new_lesion_longct_file_characteristics(conn)
+    )
+    counts["radiomic_feature_standards_characteristics_rows"] = (
+        build_radiomic_feature_standards_file_characteristics(conn)
+    )
+    counts["healthy_total_body_cts_characteristics_rows"] = (
+        build_healthy_total_body_cts_file_characteristics(conn)
+    )
+    counts["remaining_reviewed_characteristics_rows"] = (
+        build_remaining_reviewed_file_characteristics(conn)
+    )
+    counts["nifti_dataset_review_issues"] = build_nifti_dataset_review_issues(conn)
+    write_meta(conn, "schema_version", SCHEMA_VERSION)
     write_meta(conn, "postprocess_nifti_metadata_counts", counts)
     write_canonical_layer_counts(conn)
     return counts
@@ -4427,6 +6631,9 @@ def summary(db_path: Path) -> dict[str, Any]:
             "radiology_contrast",
             "derived_objects",
             "derived_object_references",
+            "nifti_classification_rules",
+            "nifti_file_characteristics",
+            "nifti_dataset_review_issues",
             "annotation_groups",
         ]
     }

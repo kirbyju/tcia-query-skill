@@ -41,6 +41,8 @@ Optional sidecar tools:
 - `find_nifti_datasets`
 - `get_nifti_files`
 - `get_nifti_derived_objects`
+- `get_nifti_characteristics`
+- `find_nifti_review_issues`
 - `get_nifti_package_files`
 - `find_pathology_datasets`
 - `get_pathology_downloads`

@@ -78,7 +78,8 @@ Recommended workflow:
 7. Use the clinical tools for patient-level resolved values, sourced facts, and
    conflicts. Subject identity is scoped by `(short_title, subject_id)`; retain
    source provenance and distinguish dataset-scope inferred values.
-8. Use the NIfTI tools for public non-DICOM NIfTI file-grain metadata.
+8. Use `get_nifti_characteristics` for reviewed NIfTI object roles and source
+   relationships, and `find_nifti_review_issues` for unresolved dataset-level QC.
 9. Use the pathology tools for PathDB/Aspera metadata. PathDB is optimized for
    metadata/viewers and may use converted files; Aspera packages are the
    original submitter-provided route.
@@ -435,6 +436,50 @@ def get_nifti_derived_objects(
         linked_only=linked_only,
         file_name_contains=file_name_contains,
         confidence=confidence,
+        limit=limit,
+    )
+
+
+@mcp.tool()
+@guard
+def get_nifti_characteristics(
+    short_title: str,
+    object_roles: list[str] | None = None,
+    associated_imaging_modalities: list[str] | None = None,
+    source_access_levels: list[str] | None = None,
+    subject_id: str | None = None,
+    file_name_contains: str | None = None,
+    has_source_reference: bool | None = None,
+    limit: int = 50,
+) -> dict:
+    """Return reviewed NIfTI object roles, imaging context, and source relationships."""
+
+    return service().get_nifti_characteristics(
+        short_title=short_title,
+        object_roles=object_roles,
+        associated_imaging_modalities=associated_imaging_modalities,
+        source_access_levels=source_access_levels,
+        subject_id=subject_id,
+        file_name_contains=file_name_contains,
+        has_source_reference=has_source_reference,
+        limit=limit,
+    )
+
+
+@mcp.tool()
+@guard
+def find_nifti_review_issues(
+    short_titles: list[str] | None = None,
+    statuses: list[str] | None = None,
+    severities: list[str] | None = None,
+    limit: int = 50,
+) -> dict:
+    """Find dataset-level NIfTI QC questions; defaults to open manual-review items."""
+
+    return service().find_nifti_review_issues(
+        short_titles=short_titles,
+        statuses=statuses,
+        severities=severities,
         limit=limit,
     )
 

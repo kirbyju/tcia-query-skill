@@ -251,6 +251,42 @@ def create_app(service: TciaQueryService | None = None) -> FastAPI:
             limit=limit,
         )
 
+    @app.get(f"{API_PREFIX}/nifti/{{short_title}}/characteristics")
+    def get_nifti_characteristics(
+        short_title: str,
+        object_roles: Annotated[list[str] | None, Query()] = None,
+        associated_imaging_modalities: Annotated[list[str] | None, Query()] = None,
+        source_access_levels: Annotated[list[str] | None, Query()] = None,
+        subject_id: str | None = None,
+        file_name_contains: str | None = None,
+        has_source_reference: bool | None = None,
+        limit: int = Query(default=50, ge=1, le=500),
+    ) -> dict[str, Any]:
+        return S().get_nifti_characteristics(
+            short_title=short_title,
+            object_roles=object_roles,
+            associated_imaging_modalities=associated_imaging_modalities,
+            source_access_levels=source_access_levels,
+            subject_id=subject_id,
+            file_name_contains=file_name_contains,
+            has_source_reference=has_source_reference,
+            limit=limit,
+        )
+
+    @app.get(f"{API_PREFIX}/nifti/review-issues")
+    def find_nifti_review_issues(
+        short_titles: Annotated[list[str] | None, Query()] = None,
+        statuses: Annotated[list[str] | None, Query()] = None,
+        severities: Annotated[list[str] | None, Query()] = None,
+        limit: int = Query(default=50, ge=1, le=500),
+    ) -> dict[str, Any]:
+        return S().find_nifti_review_issues(
+            short_titles=short_titles,
+            statuses=statuses,
+            severities=severities,
+            limit=limit,
+        )
+
     @app.get(f"{API_PREFIX}/nifti/{{short_title}}/package-files")
     def get_nifti_package_files(
         short_title: str,

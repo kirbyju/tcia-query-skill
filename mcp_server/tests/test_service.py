@@ -255,12 +255,39 @@ def create_nifti_db(path: Path) -> None:
                 quality_flag_json TEXT
             );
             CREATE TABLE agent_nifti_derived_objects (
+                derived_object_id TEXT, non_dicom_file_id TEXT, radiology_id TEXT,
                 short_title TEXT, dataset_type TEXT, file_name TEXT, package_path TEXT,
-                file_ext TEXT, referenced_series_id TEXT, derived_object_type TEXT,
+                file_ext TEXT, source_nifti_volume_id TEXT,
+                source_dicom_series_instance_uid TEXT, source_dicom_study_instance_uid TEXT,
+                derived_object_type TEXT,
                 segmentation_representation TEXT, segmentation_type TEXT, total_segments INTEGER,
-                algorithm_type TEXT, algorithm_name TEXT, referenced_file_name TEXT,
-                referenced_package_path TEXT, reference_role TEXT, inference_method TEXT,
-                confidence TEXT, evidence_json TEXT
+                algorithm_type TEXT, algorithm_name TEXT, source_non_dicom_file_id TEXT,
+                source_nifti_volume_file_name TEXT, source_nifti_volume_package_path TEXT,
+                reference_role TEXT, inference_method TEXT, confidence TEXT, evidence_json TEXT
+            );
+            CREATE TABLE agent_nifti_characteristics (
+                short_title TEXT, dataset_type TEXT, download_ids TEXT, subject_id TEXT,
+                file_name TEXT, package_path TEXT, object_role TEXT,
+                associated_imaging_modality TEXT, imaging_modality_relationship TEXT,
+                study_id TEXT, study_id_source TEXT, study_date TEXT, series_date TEXT,
+                series_id TEXT, series_description TEXT, file_metadata_sources TEXT,
+                segmentation_representation TEXT, source_nifti_volume_file_name TEXT,
+                source_nifti_volume_id TEXT, source_dataset_short_title TEXT,
+                source_access_level TEXT, source_dicom_series_instance_uid TEXT,
+                source_dicom_study_instance_uid TEXT,
+                alternate_dicom_seg_series_instance_uid TEXT,
+                alternate_dicom_seg_study_instance_uid TEXT,
+                alternate_dicom_representation_count INTEGER,
+                reference_inference_method TEXT, reference_confidence TEXT,
+                source_reference_count INTEGER, classification_source TEXT,
+                classification_confidence TEXT, wordpress_download_id TEXT,
+                wordpress_download_types TEXT, wordpress_data_types TEXT,
+                wordpress_file_types TEXT
+            );
+            CREATE TABLE agent_nifti_review_issues (
+                review_issue_id TEXT, short_title TEXT, issue_code TEXT, severity TEXT,
+                status TEXT, affected_files INTEGER, review_scope TEXT,
+                description TEXT, evidence_json TEXT
             );
             CREATE TABLE package_files (
                 short_title TEXT, download_id TEXT, download_title TEXT, package_path TEXT,
@@ -275,9 +302,24 @@ def create_nifti_db(path: Path) -> None:
                'source_metadata', '10.7937/nifti', 'MR', 'BRAIN', '', '', '', '',
                '', '', '', '', '', '', 10, 10, 20, 1, 1.0, 1.0, 2.0, 2.0, '', 0, 0, '{}');
             INSERT INTO agent_nifti_derived_objects VALUES
-              ('BCBM-RadioGenomics', 'Collection', 'mask.nii.gz', 'sub/mask.nii.gz', 'gz',
-               'Series1', 'segmentation', 'labelmap', 'tumor', 1, 'manual', 'test',
-               'image.nii.gz', 'sub/image.nii.gz', 'source', 'filename', 'medium', '{}');
+              ('derived-1', 'file-mask', 'rad-mask', 'BCBM-RadioGenomics', 'Collection',
+               'mask.nii.gz', 'sub/mask.nii.gz', 'gz', 'rad-image', '', '',
+               'segmentation', 'labelmap', 'tumor', 1, 'manual', 'test', 'file-image',
+               'image.nii.gz', 'sub/image.nii.gz', 'source_image', 'filename', 'medium', '{}');
+            INSERT INTO agent_nifti_characteristics VALUES
+              ('BCBM-RadioGenomics', 'Collection', '7', 'S1', 'mask.nii.gz',
+               'sub/mask.nii.gz', 'segmentation', 'MR',
+               'associated_with_source_nifti_volume', 'Study1', 'source_metadata', '', '',
+               'SeriesMask', 'Tumor mask', 'source_metadata', 'labelmap', 'image.nii.gz',
+               'rad-image', 'BCBM-RadioGenomics', 'open', '', '', '', '', 0,
+               'filename', 'medium', 1, 'dataset_review', 'high', '7',
+               'Image Annotations', 'MR; Segmentation', 'NIfTI');
+            INSERT INTO agent_nifti_review_issues VALUES
+              ('review-1', 'BCBM-RadioGenomics', 'confirm_source', 'warning',
+               'manual_review', 1, 'source_relationship', 'Confirm source volume.', '{}');
+            INSERT INTO agent_nifti_review_issues VALUES
+              ('review-2', 'BCBM-RadioGenomics', 'old_issue', 'info',
+               'resolved', 1, 'inventory', 'Previously resolved.', '{}');
             INSERT INTO package_files VALUES
               ('BCBM-RadioGenomics', '7', 'NIfTI package', 'sub/image.nii.gz',
                'image.nii.gz', 'gz', 100, '', '', '', 0);
@@ -494,6 +536,23 @@ class TciaQueryServiceTests(unittest.TestCase):
         self.assertEqual(files["files"][0]["series_instance_uid"], "3.4")
         derived = self.service.get_nifti_derived_objects("BCBM-RadioGenomics", linked_only=True)
         self.assertEqual(derived["count"], 1)
+        self.assertEqual(
+            derived["derived_objects"][0]["source_nifti_volume_file_name"],
+            "image.nii.gz",
+        )
+        characteristics = self.service.get_nifti_characteristics(
+            "BCBM-RadioGenomics",
+            object_roles=["segmentation"],
+            associated_imaging_modalities=["MR"],
+            has_source_reference=True,
+        )
+        self.assertEqual(characteristics["count"], 1)
+        self.assertEqual(characteristics["characteristics"][0]["source_access_level"], "open")
+        review = self.service.find_nifti_review_issues(short_titles=["BCBM-RadioGenomics"])
+        self.assertEqual(review["count"], 1)
+        self.assertEqual(review["review_issues"][0]["status"], "manual_review")
+        resolved = self.service.find_nifti_review_issues(statuses=["resolved"])
+        self.assertEqual(resolved["count"], 1)
         package_files = self.service.get_nifti_package_files("BCBM-RadioGenomics", file_exts=["gz"])
         self.assertEqual(package_files["count"], 1)
 

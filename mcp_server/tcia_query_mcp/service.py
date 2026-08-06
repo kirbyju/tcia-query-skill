@@ -381,13 +381,77 @@ def compact_nifti_derived(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
         "total_segments": data.get("total_segments"),
         "algorithm_type": data.get("algorithm_type"),
         "algorithm_name": data.get("algorithm_name"),
-        "referenced_series_id": data.get("referenced_series_id"),
-        "referenced_non_dicom_file_id": data.get("referenced_non_dicom_file_id"),
-        "referenced_file_name": data.get("referenced_file_name"),
-        "referenced_package_path": data.get("referenced_package_path"),
+        "source_non_dicom_file_id": data.get("source_non_dicom_file_id"),
+        "source_nifti_volume_id": data.get("source_nifti_volume_id"),
+        "source_nifti_volume_file_name": data.get("source_nifti_volume_file_name"),
+        "source_nifti_volume_package_path": data.get("source_nifti_volume_package_path"),
+        "source_dicom_series_instance_uid": data.get("source_dicom_series_instance_uid"),
+        "source_dicom_study_instance_uid": data.get("source_dicom_study_instance_uid"),
         "reference_role": data.get("reference_role"),
         "inference_method": data.get("inference_method"),
         "confidence": data.get("confidence"),
+        "evidence_json": data.get("evidence_json"),
+    }
+
+
+def compact_nifti_characteristic(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
+    data = normalize_row(row)
+    return {
+        "short_title": data.get("short_title"),
+        "dataset_type": data.get("dataset_type"),
+        "download_ids": data.get("download_ids"),
+        "subject_id": data.get("subject_id"),
+        "file_name": data.get("file_name"),
+        "package_path": data.get("package_path"),
+        "object_role": data.get("object_role"),
+        "associated_imaging_modality": data.get("associated_imaging_modality"),
+        "imaging_modality_relationship": data.get("imaging_modality_relationship"),
+        "study_id": data.get("study_id"),
+        "study_id_source": data.get("study_id_source"),
+        "study_date": data.get("study_date"),
+        "series_date": data.get("series_date"),
+        "series_id": data.get("series_id"),
+        "series_description": data.get("series_description"),
+        "segmentation_representation": data.get("segmentation_representation"),
+        "source_nifti_volume_id": data.get("source_nifti_volume_id"),
+        "source_nifti_volume_file_name": data.get("source_nifti_volume_file_name"),
+        "source_dataset_short_title": data.get("source_dataset_short_title"),
+        "source_access_level": data.get("source_access_level"),
+        "source_dicom_series_instance_uid": data.get("source_dicom_series_instance_uid"),
+        "source_dicom_study_instance_uid": data.get("source_dicom_study_instance_uid"),
+        "alternate_dicom_seg_series_instance_uid": data.get(
+            "alternate_dicom_seg_series_instance_uid"
+        ),
+        "alternate_dicom_seg_study_instance_uid": data.get(
+            "alternate_dicom_seg_study_instance_uid"
+        ),
+        "alternate_dicom_representation_count": data.get(
+            "alternate_dicom_representation_count"
+        ),
+        "source_reference_count": data.get("source_reference_count"),
+        "reference_inference_method": data.get("reference_inference_method"),
+        "reference_confidence": data.get("reference_confidence"),
+        "classification_source": data.get("classification_source"),
+        "classification_confidence": data.get("classification_confidence"),
+        "wordpress_download_id": data.get("wordpress_download_id"),
+        "wordpress_download_types": data.get("wordpress_download_types"),
+        "wordpress_data_types": data.get("wordpress_data_types"),
+        "wordpress_file_types": data.get("wordpress_file_types"),
+        "file_metadata_sources": data.get("file_metadata_sources"),
+    }
+
+
+def compact_nifti_review_issue(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
+    data = normalize_row(row)
+    return {
+        "review_issue_id": data.get("review_issue_id"),
+        "short_title": data.get("short_title"),
+        "issue_code": data.get("issue_code"),
+        "severity": data.get("severity"),
+        "status": data.get("status"),
+        "affected_files": data.get("affected_files"),
+        "review_scope": data.get("review_scope"),
+        "description": data.get("description"),
         "evidence_json": data.get("evidence_json"),
     }
 
@@ -1383,30 +1447,29 @@ class TciaQueryService:
         file_name_contains = str(filters.get("file_name_contains") or "").strip().lower()
         confidence = str(filters.get("confidence") or "").strip().lower()
         with self._connect_nifti() as conn:
-            if self._object_exists(conn, "agent_nifti_derived_objects"):
-                sql = "SELECT * FROM agent_nifti_derived_objects WHERE lower(short_title) = ?"
-                linked_clause = " AND COALESCE(referenced_file_name, referenced_series_id, '') <> ''"
-            else:
-                sql = """
-                SELECT d.*, dor.referenced_non_dicom_file_id, dor.referenced_file_name,
-                       dor.referenced_package_path, dor.reference_role,
-                       dor.inference_method, dor.confidence, dor.evidence_json
-                FROM derived_objects d
-                LEFT JOIN derived_object_references dor
-                  ON dor.derived_object_id = d.derived_object_id
-                WHERE lower(d.short_title) = ?
-                """
-                linked_clause = " AND COALESCE(dor.referenced_file_name, d.referenced_series_id, '') <> ''"
+            if not self._object_exists(conn, "agent_nifti_derived_objects"):
+                raise TciaServiceError(
+                    "The NIfTI sidecar does not provide agent_nifti_derived_objects. "
+                    "Refresh it with `python scripts/tcia_nifti_metadata.py ensure`."
+                )
+            sql = "SELECT * FROM agent_nifti_derived_objects WHERE lower(short_title) = ?"
             params: list[Any] = [title]
             if linked_only:
-                sql += linked_clause
+                sql += """
+                  AND COALESCE(
+                    source_nifti_volume_id,
+                    source_dicom_series_instance_uid,
+                    source_dicom_study_instance_uid,
+                    ''
+                  ) <> ''
+                """
             if confidence:
                 sql += " AND lower(COALESCE(confidence, '')) = ?"
                 params.append(confidence)
             if file_name_contains:
                 sql += " AND lower(COALESCE(file_name, '')) LIKE ?"
                 params.append(f"%{file_name_contains}%")
-            sql += " ORDER BY file_name, referenced_file_name LIMIT ?"
+            sql += " ORDER BY file_name, source_nifti_volume_file_name LIMIT ?"
             params.append(limit)
             rows = [compact_nifti_derived(row) for row in conn.execute(sql, params).fetchall()]
         return {
@@ -1416,6 +1479,96 @@ class TciaQueryService:
             "limit": limit,
             "note": "Derived-object source links are heuristic unless the inference method records an explicit source identifier.",
         }
+
+    def get_nifti_characteristics(self, short_title: str, **filters: Any) -> dict[str, Any]:
+        title = short_title.strip().lower()
+        if not title:
+            raise TciaServiceError("short_title is required")
+        limit = coerce_limit(filters.get("limit"), default=50, maximum=500)
+        object_roles = [item.lower() for item in as_list(filters.get("object_roles"))]
+        modalities = [
+            item.upper() for item in as_list(filters.get("associated_imaging_modalities"))
+        ]
+        source_access_levels = [
+            item.lower() for item in as_list(filters.get("source_access_levels"))
+        ]
+        subject_id = str(filters.get("subject_id") or "").strip().lower()
+        file_name_contains = str(filters.get("file_name_contains") or "").strip().lower()
+        has_source_reference = filters.get("has_source_reference")
+        with self._connect_nifti() as conn:
+            if not self._object_exists(conn, "agent_nifti_characteristics"):
+                raise TciaServiceError(
+                    "The NIfTI sidecar does not provide agent_nifti_characteristics. "
+                    "Refresh it with `python scripts/tcia_nifti_metadata.py ensure`."
+                )
+            sql = "SELECT * FROM agent_nifti_characteristics WHERE lower(short_title) = ?"
+            params: list[Any] = [title]
+            if object_roles:
+                sql += f" AND lower(object_role) IN ({','.join('?' for _ in object_roles)})"
+                params.extend(object_roles)
+            if modalities:
+                sql += (
+                    " AND upper(associated_imaging_modality) IN "
+                    f"({','.join('?' for _ in modalities)})"
+                )
+                params.extend(modalities)
+            if source_access_levels:
+                sql += (
+                    " AND lower(source_access_level) IN "
+                    f"({','.join('?' for _ in source_access_levels)})"
+                )
+                params.extend(source_access_levels)
+            if subject_id:
+                sql += " AND lower(COALESCE(subject_id, '')) = ?"
+                params.append(subject_id)
+            if file_name_contains:
+                sql += " AND lower(COALESCE(file_name, '')) LIKE ?"
+                params.append(f"%{file_name_contains}%")
+            if has_source_reference is not None:
+                operator = ">" if is_truthy(has_source_reference) else "="
+                sql += f" AND COALESCE(source_reference_count, 0) {operator} 0"
+            sql += " ORDER BY subject_id, study_id, package_path, file_name LIMIT ?"
+            params.append(limit)
+            rows = [compact_nifti_characteristic(row) for row in conn.execute(sql, params)]
+        return {
+            "short_title": short_title,
+            "characteristics": rows,
+            "count": len(rows),
+            "limit": limit,
+            "note": (
+                "Associated imaging modality describes the image context, not the NIfTI file "
+                "format. Source-image access can differ from derived-download access."
+            ),
+        }
+
+    def find_nifti_review_issues(self, **filters: Any) -> dict[str, Any]:
+        limit = coerce_limit(filters.get("limit"), default=50, maximum=500)
+        short_titles = [item.lower() for item in as_list(filters.get("short_titles"))]
+        statuses = [item.lower() for item in as_list(filters.get("statuses"))]
+        severities = [item.lower() for item in as_list(filters.get("severities"))]
+        if not statuses:
+            statuses = ["manual_review"]
+        with self._connect_nifti() as conn:
+            if not self._object_exists(conn, "agent_nifti_review_issues"):
+                raise TciaServiceError(
+                    "The NIfTI sidecar does not provide agent_nifti_review_issues. "
+                    "Refresh it with `python scripts/tcia_nifti_metadata.py ensure`."
+                )
+            sql = "SELECT * FROM agent_nifti_review_issues WHERE 1 = 1"
+            params: list[Any] = []
+            if short_titles:
+                sql += f" AND lower(short_title) IN ({','.join('?' for _ in short_titles)})"
+                params.extend(short_titles)
+            if statuses:
+                sql += f" AND lower(status) IN ({','.join('?' for _ in statuses)})"
+                params.extend(statuses)
+            if severities:
+                sql += f" AND lower(severity) IN ({','.join('?' for _ in severities)})"
+                params.extend(severities)
+            sql += " ORDER BY lower(short_title), issue_code LIMIT ?"
+            params.append(limit)
+            rows = [compact_nifti_review_issue(row) for row in conn.execute(sql, params)]
+        return {"review_issues": rows, "count": len(rows), "limit": limit}
 
     def get_nifti_package_files(self, short_title: str, **filters: Any) -> dict[str, Any]:
         title = short_title.strip().lower()

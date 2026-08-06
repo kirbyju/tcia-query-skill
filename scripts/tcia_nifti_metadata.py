@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 4
 DEFAULT_REPO = "kirbyju/tcia-query-skill"
 DEFAULT_RELEASE_TAG = "tcia-snapshot-latest"
 NIFTI_ASSET = "nifti_metadata.sqlite.gz"
@@ -50,6 +50,9 @@ REQUIRED_TABLES = [
     "radiology_contrast",
     "derived_objects",
     "derived_object_references",
+    "nifti_classification_rules",
+    "nifti_file_characteristics",
+    "nifti_dataset_review_issues",
     "annotation_groups",
 ]
 
@@ -58,6 +61,9 @@ REQUIRED_VIEWS = [
     "agent_nifti_dataset_summary",
     "agent_nifti_files",
     "agent_nifti_derived_objects",
+    "agent_nifti_characteristics",
+    "agent_nifti_characteristics_summary",
+    "agent_nifti_review_issues",
 ]
 
 NIFTI_DOWNLOAD_SIGNATURE_COLUMNS = [
@@ -327,8 +333,396 @@ def validate_db(path: Path) -> dict[str, Any]:
     missing = [table for table in required if table not in tables]
     integrity = conn.execute("PRAGMA integrity_check").fetchone()[0]
     counts = table_counts(conn)
+    semantic_errors: list[str] = []
+    ct_org_files = conn.execute(
+        "SELECT COUNT(*) FROM radiology_series WHERE short_title = 'CT-ORG'"
+    ).fetchone()[0]
+    if ct_org_files and {
+        "nifti_file_characteristics",
+        "agent_nifti_characteristics_summary",
+    }.issubset(tables):
+        ct_org_characteristics = conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM nifti_file_characteristics c
+            JOIN nifti_classification_rules rule USING (classification_rule_id)
+            WHERE rule.short_title = 'CT-ORG'
+            """
+        ).fetchone()[0]
+        if ct_org_characteristics != ct_org_files:
+            semantic_errors.append(
+                f"CT-ORG characteristics coverage is {ct_org_characteristics}/{ct_org_files}"
+            )
+        summary = conn.execute(
+            "SELECT * FROM agent_nifti_characteristics_summary WHERE short_title = 'CT-ORG'"
+        ).fetchone()
+        ct_org_subjects = conn.execute(
+            """
+            SELECT COUNT(DISTINCT NULLIF(subject_id, ''))
+            FROM radiology_series
+            WHERE short_title = 'CT-ORG'
+            """
+        ).fetchone()[0]
+        if not summary or (
+            summary["ct_source_image_files"],
+            summary["ct_associated_segmentations"],
+            summary["study_ids"],
+        ) != (ct_org_subjects, ct_org_subjects, ct_org_subjects):
+            semantic_errors.append(
+                "CT-ORG expected one CT image, one segmentation, and one canonical study per subject"
+            )
+    bcbm_files = conn.execute(
+        "SELECT COUNT(*) FROM radiology_series WHERE short_title = 'BCBM-RadioGenomics'"
+    ).fetchone()[0]
+    if bcbm_files and {
+        "nifti_file_characteristics",
+        "agent_nifti_characteristics_summary",
+    }.issubset(tables):
+        bcbm_characteristics = conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM nifti_file_characteristics c
+            JOIN nifti_classification_rules rule USING (classification_rule_id)
+            WHERE rule.short_title = 'BCBM-RadioGenomics'
+            """
+        ).fetchone()[0]
+        if bcbm_characteristics != bcbm_files:
+            semantic_errors.append(
+                "BCBM-RadioGenomics characteristics coverage is "
+                f"{bcbm_characteristics}/{bcbm_files}"
+            )
+        expected = conn.execute(
+            """
+            SELECT
+              SUM(CASE WHEN is_derived_object = 0 THEN 1 ELSE 0 END) AS source_images,
+              SUM(CASE WHEN object_type = 'segmentation' THEN 1 ELSE 0 END) AS segmentations,
+              COUNT(DISTINCT NULLIF(study_id, '')) AS studies
+            FROM radiology_series
+            WHERE short_title = 'BCBM-RadioGenomics'
+            """
+        ).fetchone()
+        summary = conn.execute(
+            """
+            SELECT * FROM agent_nifti_characteristics_summary
+            WHERE short_title = 'BCBM-RadioGenomics'
+            """
+        ).fetchone()
+        unlinked_segmentations = conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM agent_nifti_characteristics
+            WHERE short_title = 'BCBM-RadioGenomics'
+              AND object_role = 'segmentation'
+              AND source_nifti_volume_id IS NULL
+            """
+        ).fetchone()[0]
+        if not summary or (
+            summary["mr_source_image_files"],
+            summary["mr_associated_segmentations"],
+            summary["study_ids"],
+        ) != (expected["source_images"], expected["segmentations"], expected["studies"]):
+            semantic_errors.append(
+                "BCBM-RadioGenomics reviewed MR image, segmentation, or study counts do not match"
+            )
+        if unlinked_segmentations:
+            semantic_errors.append(
+                f"BCBM-RadioGenomics has {unlinked_segmentations} unlinked reviewed segmentations"
+            )
+    vs_title = "Vestibular-Schwannoma-MC-RC2"
+    vs_files = conn.execute(
+        "SELECT COUNT(*) FROM radiology_series WHERE short_title = ?", (vs_title,)
+    ).fetchone()[0]
+    if vs_files and {
+        "nifti_file_characteristics",
+        "agent_nifti_characteristics_summary",
+    }.issubset(tables):
+        vs_characteristics = conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM nifti_file_characteristics c
+            JOIN nifti_classification_rules rule USING (classification_rule_id)
+            WHERE rule.short_title = ?
+            """,
+            (vs_title,),
+        ).fetchone()[0]
+        if vs_characteristics != vs_files:
+            semantic_errors.append(
+                f"{vs_title} characteristics coverage is {vs_characteristics}/{vs_files}"
+            )
+        expected = conn.execute(
+            """
+            SELECT
+              SUM(CASE WHEN is_derived_object = 0 THEN 1 ELSE 0 END) AS source_images,
+              SUM(CASE WHEN object_type = 'segmentation' THEN 1 ELSE 0 END) AS segmentations,
+              COUNT(DISTINCT NULLIF(subject_id || '|' || study_date, '|')) AS subject_dates,
+              COUNT(DISTINCT NULLIF(study_id, '')) AS studies
+            FROM radiology_series
+            WHERE short_title = ?
+            """,
+            (vs_title,),
+        ).fetchone()
+        summary = conn.execute(
+            """
+            SELECT * FROM agent_nifti_characteristics_summary
+            WHERE short_title = ?
+            """,
+            (vs_title,),
+        ).fetchone()
+        cross_study_links = conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM derived_object_references dor
+            JOIN radiology_series derived
+              ON derived.radiology_id = dor.derived_radiology_id
+            JOIN radiology_series source
+              ON source.radiology_id = dor.source_nifti_volume_id
+            WHERE derived.short_title = ?
+              AND derived.study_id <> source.study_id
+            """,
+            (vs_title,),
+        ).fetchone()[0]
+        if not summary or (
+            summary["mr_source_image_files"],
+            summary["mr_associated_segmentations"],
+            summary["study_ids"],
+        ) != (expected["source_images"], expected["segmentations"], expected["studies"]):
+            semantic_errors.append(
+                f"{vs_title} reviewed MR image, segmentation, or study counts do not match"
+            )
+        if expected["studies"] != expected["subject_dates"]:
+            semantic_errors.append(
+                f"{vs_title} expected one canonical study per subject/date imaging session"
+            )
+        if cross_study_links:
+            semantic_errors.append(
+                f"{vs_title} has {cross_study_links} segmentation links crossing study sessions"
+            )
+    nlst_title = "NLST-New-lesion-LongCT"
+    nlst_package_files = conn.execute(
+        """
+        SELECT COUNT(*)
+        FROM radiology_series r
+        JOIN non_dicom_files f USING (non_dicom_file_id)
+        WHERE r.short_title = ?
+          AND EXISTS (
+              SELECT 1 FROM json_each(COALESCE(f.inventory_sources, '[]'))
+              WHERE value = 'package_files'
+          )
+        """,
+        (nlst_title,),
+    ).fetchone()[0]
+    if nlst_package_files and "agent_nifti_characteristics" in tables:
+        summary = conn.execute(
+            "SELECT * FROM agent_nifti_characteristics_summary WHERE short_title = ?",
+            (nlst_title,),
+        ).fetchone()
+        expected_roles = conn.execute(
+            """
+            SELECT
+              SUM(CASE WHEN object_role = 'source_image' THEN 1 ELSE 0 END),
+              SUM(CASE WHEN object_role = 'derived_image' THEN 1 ELSE 0 END),
+              SUM(CASE WHEN object_role = 'fiducial_annotation' THEN 1 ELSE 0 END)
+            FROM agent_nifti_characteristics
+            WHERE short_title = ?
+            """,
+            (nlst_title,),
+        ).fetchone()
+        if not summary or summary["characterized_files"] != nlst_package_files:
+            semantic_errors.append(
+                f"{nlst_title} reviewed coverage does not match the current package inventory"
+            )
+        elif tuple(expected_roles) != (242, 363, 145):
+            semantic_errors.append(
+                f"{nlst_title} expected 242 source CT, 363 transformed CT, and 145 fiducial files"
+            )
+        bad_references = conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM agent_nifti_characteristics
+            WHERE short_title = ?
+              AND (
+                (object_role = 'fiducial_annotation' AND source_reference_count <> 1)
+                OR (series_description = 'Resampled CT volume' AND source_reference_count <> 1)
+                OR (series_description = 'Longitudinal registered CT volume'
+                    AND (source_reference_count <> 2 OR source_nifti_volume_id IS NOT NULL))
+              )
+            """,
+            (nlst_title,),
+        ).fetchone()[0]
+        if bad_references:
+            semantic_errors.append(
+                f"{nlst_title} has {bad_references} reviewed files with unexpected source links"
+            )
+    rfs_title = "Radiomic-Feature-Standards"
+    rfs_files = conn.execute(
+        "SELECT COUNT(*) FROM radiology_series WHERE short_title = ?", (rfs_title,)
+    ).fetchone()[0]
+    if rfs_files and "agent_nifti_characteristics" in tables:
+        summary = conn.execute(
+            "SELECT * FROM agent_nifti_characteristics_summary WHERE short_title = ?",
+            (rfs_title,),
+        ).fetchone()
+        bad_rows = conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM agent_nifti_characteristics
+            WHERE short_title = ?
+              AND (
+                object_role <> 'segmentation'
+                OR associated_imaging_modality <> 'CT'
+                OR imaging_modality_relationship <> 'associated_with_source_dicom_series'
+                OR source_reference_count <> 1
+                OR source_dataset_short_title NOT IN ('LIDC-IDRI', 'DRO-Toolkit')
+                OR COALESCE(source_dicom_series_instance_uid, '') = ''
+                OR COALESCE(source_dicom_study_instance_uid, '') = ''
+                OR alternate_dicom_representation_count <> 1
+                OR COALESCE(alternate_dicom_seg_series_instance_uid, '') = ''
+                OR alternate_dicom_seg_study_instance_uid <> source_dicom_study_instance_uid
+              )
+            """,
+            (rfs_title,),
+        ).fetchone()[0]
+        if not summary or (
+            summary["characterized_files"],
+            summary["segmentation_files"],
+            summary["ct_associated_segmentations"],
+            summary["study_ids"],
+        ) != (13, 13, 13, 13):
+            semantic_errors.append(
+                f"{rfs_title} expected 13 CT-associated NIfTI segmentations in 13 source studies"
+            )
+        if bad_rows:
+            semantic_errors.append(
+                f"{rfs_title} has {bad_rows} rows without exact CT-source and alternate-SEG provenance"
+            )
+    healthy_title = "Healthy-Total-Body-CTs"
+    healthy_files = conn.execute(
+        "SELECT COUNT(*) FROM radiology_series WHERE short_title = ?", (healthy_title,)
+    ).fetchone()[0]
+    if healthy_files and "agent_nifti_characteristics" in tables:
+        summary = conn.execute(
+            "SELECT * FROM agent_nifti_characteristics_summary WHERE short_title = ?",
+            (healthy_title,),
+        ).fetchone()
+        provenance = conn.execute(
+            """
+            SELECT
+              SUM(CASE WHEN COALESCE(source_dicom_series_instance_uid, '') <> '' THEN 1 ELSE 0 END)
+                AS exact_sources,
+              SUM(CASE WHEN COALESCE(source_dicom_series_instance_uid, '') = '' THEN 1 ELSE 0 END)
+                AS unresolved_sources,
+              SUM(CASE WHEN source_access_level = 'controlled' THEN 1 ELSE 0 END)
+                AS controlled_sources,
+              SUM(CASE WHEN source_reference_count = 1 THEN 1 ELSE 0 END)
+                AS one_source_relationship
+            FROM agent_nifti_characteristics
+            WHERE short_title = ?
+            """,
+            (healthy_title,),
+        ).fetchone()
+        manual_flags = conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM radiology_series
+            WHERE short_title = ?
+              AND quality_flag_json LIKE '%unmatched_controlled_source_subject%'
+            """,
+            (healthy_title,),
+        ).fetchone()[0]
+        if not summary or (
+            summary["characterized_files"],
+            summary["segmentation_files"],
+            summary["ct_associated_segmentations"],
+            summary["study_ids"],
+        ) != (30, 30, 30, 30):
+            semantic_errors.append(
+                f"{healthy_title} expected 30 CT-associated NIfTI segmentations in 30 studies"
+            )
+        if tuple(provenance) != (26, 4, 30, 30) or manual_flags != 4:
+            semantic_errors.append(
+                f"{healthy_title} expected 26 exact controlled CT links and 4 manual-review links"
+            )
+    if {"agent_nifti_characteristics", "nifti_classification_rules"}.issubset(tables):
+        dataset_coverage = conn.execute(
+            """
+            SELECT
+              (SELECT COUNT(DISTINCT short_title) FROM radiology_series) AS datasets,
+              (SELECT COUNT(DISTINCT short_title) FROM nifti_classification_rules) AS reviewed_datasets,
+              (SELECT COUNT(*) FROM nifti_classification_rules) AS rules
+            """
+        ).fetchone()
+        expected_characteristics = conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM radiology_series r
+            JOIN non_dicom_files f USING (non_dicom_file_id)
+            WHERE r.short_title <> 'NLST-New-lesion-LongCT'
+               OR EXISTS (
+                   SELECT 1 FROM json_each(COALESCE(f.inventory_sources, '[]'))
+                   WHERE value = 'package_files'
+               )
+            """
+        ).fetchone()[0]
+        actual_characteristics = conn.execute(
+            "SELECT COUNT(*) FROM nifti_file_characteristics"
+        ).fetchone()[0]
+        missing_reviewed_datasets = [
+            row[0]
+            for row in conn.execute(
+                """
+                SELECT DISTINCT r.short_title
+                FROM radiology_series r
+                LEFT JOIN nifti_classification_rules rule ON rule.short_title = r.short_title
+                WHERE rule.short_title IS NULL
+                ORDER BY lower(r.short_title)
+                """
+            )
+        ]
+        invalid_characteristics = conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM nifti_file_characteristics
+            WHERE COALESCE(object_role, '') = ''
+               OR COALESCE(associated_imaging_modality, '') = ''
+               OR associated_imaging_modality IN ('SEG', 'RTSTRUCT', 'RTDOSE', 'NIfTI')
+            """
+        ).fetchone()[0]
+        if dataset_coverage and (
+            dataset_coverage["datasets"] != dataset_coverage["reviewed_datasets"]
+            or dataset_coverage["reviewed_datasets"] != dataset_coverage["rules"]
+            or missing_reviewed_datasets
+        ):
+            semantic_errors.append(
+                "reviewed characteristics do not have exactly one rule for every NIfTI dataset: "
+                + ", ".join(missing_reviewed_datasets)
+            )
+        if actual_characteristics != expected_characteristics:
+            semantic_errors.append(
+                f"reviewed characteristics coverage is {actual_characteristics}/{expected_characteristics} current files"
+            )
+        if invalid_characteristics:
+            semantic_errors.append(
+                f"reviewed characteristics contain {invalid_characteristics} blank or DICOM/file-format modalities"
+            )
+    if "nifti_dataset_review_issues" in tables:
+        invalid_issues = conn.execute(
+            """
+            SELECT COUNT(*) FROM nifti_dataset_review_issues
+            WHERE COALESCE(short_title, '') = ''
+               OR COALESCE(issue_code, '') = ''
+               OR status NOT IN ('manual_review', 'accepted', 'resolved')
+               OR affected_files < 0
+            """
+        ).fetchone()[0]
+        if invalid_issues:
+            semantic_errors.append(f"nifti review-issues table contains {invalid_issues} invalid rows")
     conn.close()
-    return {"integrity_check": integrity, "missing_tables": missing, "table_counts": counts}
+    return {
+        "integrity_check": integrity,
+        "missing_tables": missing,
+        "semantic_errors": semantic_errors,
+        "table_counts": counts,
+    }
 
 
 def print_table(rows: list[dict[str, Any]], columns: list[str]) -> None:
@@ -465,27 +859,30 @@ def command_derived(args: argparse.Namespace) -> int:
     if args.with_sources:
         sql = f"""
             SELECT d.short_title, d.file_name AS derived_file,
-                   d.segmentation_representation, dor.referenced_file_name,
+                   d.segmentation_representation, dor.source_nifti_volume_file_name,
+                   dor.source_dicom_series_instance_uid,
                    dor.confidence, dor.inference_method
             FROM derived_objects d
             LEFT JOIN derived_object_references dor
               ON dor.derived_object_id = d.derived_object_id
             WHERE {' AND '.join(where)}
-            ORDER BY lower(d.short_title), d.file_name, dor.referenced_file_name
+            ORDER BY lower(d.short_title), d.file_name, dor.source_nifti_volume_file_name
             LIMIT ?
         """
         columns = [
             "short_title",
             "derived_file",
             "segmentation_representation",
-            "referenced_file_name",
+            "source_nifti_volume_file_name",
+            "source_dicom_series_instance_uid",
             "confidence",
             "inference_method",
         ]
     else:
         sql = f"""
             SELECT d.short_title, d.file_name, d.derived_object_type,
-                   d.segmentation_representation, d.referenced_series_id
+                   d.segmentation_representation, d.source_nifti_volume_id,
+                   d.source_dicom_series_instance_uid
             FROM derived_objects d
             WHERE {' AND '.join(where)}
             ORDER BY lower(d.short_title), d.file_name
@@ -496,7 +893,8 @@ def command_derived(args: argparse.Namespace) -> int:
             "file_name",
             "derived_object_type",
             "segmentation_representation",
-            "referenced_series_id",
+            "source_nifti_volume_id",
+            "source_dicom_series_instance_uid",
         ]
     rows = rows_as_dicts(conn, sql, tuple(params))
     conn.close()
@@ -504,6 +902,67 @@ def command_derived(args: argparse.Namespace) -> int:
         print(json.dumps(rows, indent=2, sort_keys=True))
     else:
         print_table(rows, columns)
+    return 0
+
+
+def command_characteristics(args: argparse.Namespace) -> int:
+    conn = connect(args.db)
+    where = ["1 = 1"]
+    params: list[Any] = []
+    if args.collection:
+        where.append("short_title = ?")
+        params.append(args.collection)
+    if args.modality:
+        where.append("associated_imaging_modality = ?")
+        params.append(args.modality)
+    if args.role:
+        where.append("object_role = ?")
+        params.append(args.role)
+    params.append(args.limit)
+    rows = rows_as_dicts(
+        conn,
+        f"""
+        SELECT short_title, subject_id, file_name, object_role,
+               associated_imaging_modality, imaging_modality_relationship,
+               study_id, study_id_source, study_date, series_description,
+               file_metadata_sources,
+               segmentation_representation,
+               source_nifti_volume_id, source_nifti_volume_file_name,
+               source_dataset_short_title, source_access_level,
+               source_dicom_series_instance_uid, source_dicom_study_instance_uid,
+               source_reference_count,
+               alternate_dicom_seg_series_instance_uid,
+               alternate_dicom_seg_study_instance_uid,
+               alternate_dicom_representation_count,
+               classification_source,
+               classification_confidence
+        FROM agent_nifti_characteristics
+        WHERE {' AND '.join(where)}
+        ORDER BY lower(short_title), subject_id, object_role DESC, file_name
+        LIMIT ?
+        """,
+        tuple(params),
+    )
+    conn.close()
+    if args.json:
+        print(json.dumps(rows, indent=2, sort_keys=True))
+    else:
+        print_table(
+            rows,
+            [
+                "short_title",
+                "subject_id",
+                "file_name",
+                "object_role",
+                "associated_imaging_modality",
+                "study_id",
+                "study_date",
+                "series_description",
+                "source_nifti_volume_file_name",
+                "source_dicom_series_instance_uid",
+                "classification_confidence",
+            ],
+        )
     return 0
 
 
@@ -597,6 +1056,18 @@ def main(argv: Optional[list[str]] = None) -> int:
     derived.add_argument("--limit", type=int, default=20, help="Maximum rows.")
     derived.add_argument("--json", action="store_true", help="Emit JSON.")
 
+    characteristics = subparsers.add_parser(
+        "characteristics", help="List reviewed query-facing NIfTI file characteristics."
+    )
+    characteristics.add_argument("--db", default=str(DEFAULT_DB_PATH), help="SQLite path.")
+    characteristics.add_argument("--collection", help="Filter by TCIA short title.")
+    characteristics.add_argument("--modality", help="Filter by associated imaging modality.")
+    characteristics.add_argument(
+        "--role", choices=("source_image", "segmentation"), help="Filter by object role."
+    )
+    characteristics.add_argument("--limit", type=int, default=20, help="Maximum rows.")
+    characteristics.add_argument("--json", action="store_true", help="Emit JSON.")
+
     args = parser.parse_args(argv)
 
     if args.command == "ensure":
@@ -625,7 +1096,14 @@ def main(argv: Optional[list[str]] = None) -> int:
         else:
             print(f"integrity_check: {payload['integrity_check']}")
             print(f"missing_tables: {', '.join(payload['missing_tables']) or 'none'}")
-        return 0 if payload["integrity_check"] == "ok" and not payload["missing_tables"] else 1
+            print(f"semantic_errors: {', '.join(payload['semantic_errors']) or 'none'}")
+        return (
+            0
+            if payload["integrity_check"] == "ok"
+            and not payload["missing_tables"]
+            and not payload["semantic_errors"]
+            else 1
+        )
     if args.command == "drift-check":
         return command_drift_check(args)
     if args.command == "datasets":
@@ -634,6 +1112,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         return command_files(args)
     if args.command == "derived":
         return command_derived(args)
+    if args.command == "characteristics":
+        return command_characteristics(args)
     return 1
 
 

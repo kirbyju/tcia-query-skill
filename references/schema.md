@@ -562,7 +562,10 @@ Use `cache/nifti_metadata.sqlite` only after the base snapshot has confirmed TCI
 - `agent_nifti_downloads`: WordPress NIfTI download provenance with `download_label` fallback text.
 - `agent_nifti_dataset_summary`: all NIfTI download scope plus file/radiology/derived-object counts.
 - `agent_nifti_files`: canonical radiology file/series rows with lower-snake-case aliases such as `series_instance_uid` and `study_instance_uid` when source UIDs exist.
-- `agent_nifti_derived_objects`: segmentation/derived object rows and best-effort source references.
+- `agent_nifti_derived_objects`: segmentation, annotation, and transformed-image rows with best-effort source references.
+- `agent_nifti_characteristics`: dataset-by-dataset reviewed object role, associated imaging modality, preferred source NIfTI volume, `source_reference_count`, source dataset/access level/DICOM UIDs, alternate DICOM SEG representation, download-level WordPress provenance, and canonical study grouping. It stays one row per reviewed file even when a derived image has multiple source volumes. `NIfTI` remains implicit at file grain and WordPress labels are joined from `nifti_downloads`. `source_access_level` describes the related source image and can therefore be `controlled` even when the NIfTI download is open. It covers every current NIfTI dataset in the release.
+- `agent_nifti_characteristics_summary`: unambiguous source-image, associated-segmentation, transformed-image, and fiducial-annotation counts for reviewed datasets.
+- `agent_nifti_review_issues`: one row per unresolved dataset-level issue. Filter `status = 'manual_review'` for the active queue; affected-file counts and evidence remain compact at dataset grain.
 
 Common NIfTI summary:
 
@@ -571,6 +574,50 @@ SELECT short_title, nifti_downloads, nifti_files,
        radiology_series_rows, mr_files, ct_files
 FROM agent_nifti_dataset_summary
 ORDER BY lower(short_title);
+```
+
+Reviewed CT-ORG characteristics:
+
+```sql
+SELECT subject_id, file_name, object_role, associated_imaging_modality,
+       study_id, study_id_source, source_nifti_volume_file_name,
+       source_dicom_series_instance_uid, classification_confidence
+FROM agent_nifti_characteristics
+WHERE short_title = 'CT-ORG'
+ORDER BY subject_id, object_role, file_name;
+```
+
+Reviewed Healthy-Total-Body-CTs source linkage:
+
+```sql
+SELECT subject_id, file_name, object_role, associated_imaging_modality,
+       study_id, study_id_source, source_dataset_short_title,
+       source_access_level, source_dicom_series_instance_uid,
+       source_dicom_study_instance_uid, reference_confidence
+FROM agent_nifti_characteristics
+WHERE short_title = 'Healthy-Total-Body-CTs'
+ORDER BY subject_id;
+```
+
+Reviewed BCBM-RadioGenomics characteristics:
+
+```sql
+SELECT subject_id, study_id, file_name, object_role, associated_imaging_modality,
+       segmentation_representation, source_nifti_volume_file_name,
+       source_dicom_series_instance_uid,
+       classification_confidence
+FROM agent_nifti_characteristics
+WHERE short_title = 'BCBM-RadioGenomics'
+ORDER BY subject_id, study_id, object_role, file_name;
+```
+
+Open NIfTI review issues:
+
+```sql
+SELECT short_title, issue_code, affected_files, description
+FROM agent_nifti_review_issues
+WHERE status = 'manual_review'
+ORDER BY lower(short_title), issue_code;
 ```
 
 ## Common Joins
