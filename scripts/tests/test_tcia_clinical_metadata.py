@@ -23,6 +23,256 @@ SPEC.loader.exec_module(CLINICAL)
 
 
 class ClinicalMetadataTest(unittest.TestCase):
+    def test_reviewed_bare_id_mappings_are_dataset_scoped_and_auditable(
+        self,
+    ) -> None:
+        self.assertIsNone(CLINICAL.choose_subject_column(["ID", "Age"]))
+        for short_title in (
+            "HEAD-NECK-RADIOMICS-HN1",
+            "TOMPEI-CMMD",
+            "UCSD-PTGBM",
+            "UCSD-VS-Longitudinal",
+            "UCSF-PDGM",
+            "UPENN-GBM",
+        ):
+            self.assertEqual(
+                CLINICAL.choose_subject_column(["ID", "Age"], short_title),
+                "ID",
+            )
+        self.assertEqual(
+            CLINICAL.choose_subject_column(
+                ["ID1", "classification"], "TOMPEI-CMMD"
+            ),
+            "ID1",
+        )
+
+        mappings = {
+            ("UCSF-PDGM", "UCSF-PDGM-004"): (
+                "UCSF-PDGM-0004",
+                "zero_pad_4_strip_followup_suffix",
+            ),
+            ("UCSF-PDGM", "UCSF-PDGM-0391_FU016d"): (
+                "UCSF-PDGM-0391",
+                "zero_pad_4_strip_followup_suffix",
+            ),
+            ("UPENN-GBM", "UPENN-GBM-00001_11"): (
+                "UPENN-GBM-00001",
+                "strip_scan_suffix",
+            ),
+            ("UCSD-PTGBM", "UCSD-PTGBM-0001_02"): (
+                "UCSD-PTGBM-0001",
+                "strip_scan_suffix",
+            ),
+            ("UCSD-VS-Longitudinal", "VS_0001_03"): (
+                "VS_0001",
+                "strip_visit_suffix",
+            ),
+            ("HEAD-NECK-RADIOMICS-HN1", "HN1004"): (
+                "HN1004",
+                "dataset_specific_exact_id",
+            ),
+        }
+        for (short_title, source_id), expected in mappings.items():
+            self.assertEqual(
+                CLINICAL.official_subject_id_mapping(short_title, source_id),
+                expected,
+            )
+
+        self.assertEqual(
+            CLINICAL.concept_for_source_column("UCSF-PDGM", "Age at MRI"),
+            "age_at_imaging_years",
+        )
+        self.assertEqual(
+            CLINICAL.concept_for_source_column(
+                "UPENN-GBM", "Survival_from_surgery_days_UPDATED"
+            ),
+            "overall_survival_days",
+        )
+
+    def test_official_scan_id_ingest_preserves_raw_id_and_mapping_provenance(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            conn = CLINICAL.init_db(
+                Path(directory) / "clinical.sqlite", replace=True
+            )
+            source_row = conn.execute(
+                """SELECT 'UPENN-GBM' AS short_title,
+                          'Collection' AS dataset_type,
+                          'test' AS download_id,
+                          'Clinical Data' AS download_title,
+                          'https://example.test/upenn.csv' AS download_url,
+                          '2026-08-07' AS date_updated,
+                          '[\"CSV\"]' AS file_types,
+                          '[\"Clinical Data\"]' AS download_types,
+                          '[\"Demographic\"]' AS data_types,
+                          'open' AS access_level,
+                          0 AS controlled_access"""
+            ).fetchone()
+            csv_bytes = (
+                "ID,Gender,Age_at_scan_years,MGMT\n"
+                "UPENN-GBM-00001_11,F,63,Methylated\n"
+                "UPENN-GBM-00001_21,F,64,Methylated\n"
+            ).encode("utf-8")
+            rows, subjects = CLINICAL.ingest_official_bytes(
+                conn,
+                source_row,
+                source_id="tcia-download:upenn:test",
+                signature="test",
+                data=csv_bytes,
+            )
+            self.assertEqual((rows, subjects), (2, 1))
+            stored = conn.execute(
+                """SELECT subject_id, row_json FROM clinical_rows
+                   ORDER BY row_number LIMIT 1"""
+            ).fetchone()
+            self.assertEqual(stored["subject_id"], "UPENN-GBM-00001")
+            self.assertEqual(
+                json.loads(stored["row_json"])["ID"],
+                "UPENN-GBM-00001_11",
+            )
+            fact = conn.execute(
+                """SELECT f.provenance_json FROM clinical_facts f
+                   JOIN clinical_rows r USING (source_row_id)
+                   WHERE f.concept = 'age_at_imaging_years'
+                   ORDER BY r.row_number LIMIT 1"""
+            ).fetchone()
+            provenance = json.loads(fact["provenance_json"])
+            self.assertEqual(
+                provenance["source_subject_id"], "UPENN-GBM-00001_11"
+            )
+            self.assertEqual(
+                provenance["subject_id_mapping_method"], "strip_scan_suffix"
+            )
+            conn.close()
+
+    def test_reviewed_official_cohort_promotes_only_exact_published_count(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            snapshot = root / "snapshot.sqlite"
+            snapshot_conn = sqlite3.connect(snapshot)
+            snapshot_conn.execute(
+                """CREATE TABLE agent_datasets (
+                       short_title TEXT, subjects TEXT, hidden INTEGER,
+                       dataset_type TEXT
+                   )"""
+            )
+            snapshot_conn.execute(
+                """INSERT INTO agent_datasets VALUES
+                   ('UCSD-VS-Longitudinal', '2', 0, 'Collection')"""
+            )
+            snapshot_conn.commit()
+            snapshot_conn.close()
+
+            conn = CLINICAL.init_db(root / "clinical.sqlite", replace=True)
+            CLINICAL.insert_source(
+                conn,
+                source_id="official:vs",
+                source_kind="tcia_clinical_download",
+                short_title="UCSD-VS-Longitudinal",
+                source_signature_value="test",
+            )
+            for row_number, subject_id in enumerate(("VS_0001", "VS_0002"), 1):
+                CLINICAL.insert_row_and_facts(
+                    conn,
+                    source_id="official:vs",
+                    source_kind="tcia_clinical_download",
+                    short_title="UCSD-VS-Longitudinal",
+                    subject_id=subject_id,
+                    table_name="clinical.tsv",
+                    row_number=row_number,
+                    row={"ID": f"{subject_id}_01"},
+                    facts=[("sex_at_birth", "F", "Sex at birth", None)],
+                )
+            result = CLINICAL.promote_reviewed_official_id_cohorts(
+                conn, snapshot
+            )["UCSD-VS-Longitudinal"]
+            self.assertEqual(result["status"], "promoted")
+            self.assertEqual(result["promoted_imaging_subjects"], 2)
+            self.assertEqual(
+                conn.execute(
+                    """SELECT COUNT(*) FROM clinical_rows
+                       WHERE has_imaging = 1"""
+                ).fetchone()[0],
+                2,
+            )
+            conn.close()
+
+    def test_tompei_package_crosswalk_promotes_only_package_ids(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            snapshot = root / "snapshot.sqlite"
+            snapshot_conn = sqlite3.connect(snapshot)
+            snapshot_conn.executescript(
+                """
+                CREATE TABLE agent_datasets (
+                    short_title TEXT, subjects TEXT, hidden INTEGER,
+                    dataset_type TEXT
+                );
+                INSERT INTO agent_datasets VALUES
+                    ('TOMPEI-CMMD', '3', 0, 'Analysis Result');
+                CREATE TABLE agent_current_downloads (
+                    short_title TEXT, hidden INTEGER, download_id TEXT,
+                    download_url TEXT, subjects TEXT, file_types TEXT,
+                    data_types TEXT
+                );
+                INSERT INTO agent_current_downloads VALUES
+                    ('TOMPEI-CMMD', 0, 'package',
+                     'https://example.test/tompei.zip', '3',
+                     '["ZIP","JSON"]', '["Segmentation"]');
+                """
+            )
+            snapshot_conn.close()
+
+            conn = CLINICAL.init_db(root / "clinical.sqlite", replace=True)
+            CLINICAL.insert_source(
+                conn,
+                source_id="official:tompei",
+                source_kind="tcia_clinical_download",
+                short_title="TOMPEI-CMMD",
+                source_signature_value="test",
+            )
+            for row_number, subject_id in enumerate(
+                ("D1-0001", "D1-0002", "D2-0001", "D2-0002"), 1
+            ):
+                CLINICAL.insert_row_and_facts(
+                    conn,
+                    source_id="official:tompei",
+                    source_kind="tcia_clinical_download",
+                    short_title="TOMPEI-CMMD",
+                    subject_id=subject_id,
+                    table_name="clinical.xlsx",
+                    row_number=row_number,
+                    row={"ID": subject_id},
+                    facts=[("screening_result", "Benign", "classification", None)],
+                )
+            archive_bytes = io.BytesIO()
+            with zipfile.ZipFile(archive_bytes, "w") as archive:
+                for subject_id in ("D1-0001", "D1-0002", "D2-0001"):
+                    archive.writestr(
+                        f"TOMPEI/{subject_id}_MLO_L_AnnotationFile.json",
+                        "{}",
+                    )
+            original_fetch = CLINICAL.fetch_url
+            CLINICAL.fetch_url = lambda *args, **kwargs: archive_bytes.getvalue()
+            try:
+                result = CLINICAL.promote_tompei_cmmd_package_cohort(
+                    conn,
+                    snapshot,
+                    no_fetch=False,
+                    timeout=5,
+                    max_bytes=1_000_000,
+                )
+            finally:
+                CLINICAL.fetch_url = original_fetch
+            self.assertEqual(result["status"], "promoted")
+            self.assertEqual(result["package_subjects"], 3)
+            self.assertEqual(result["clinical_ids_outside_package"], 1)
+            self.assertEqual(result["promoted_imaging_subjects"], 3)
+            conn.close()
+
     def test_tcga_breast_result_prefers_full_bcr_patient_barcode(self) -> None:
         self.assertEqual(
             CLINICAL.choose_subject_column(
@@ -2459,12 +2709,18 @@ W22,file-2
             )
 
     def _run(self, *arguments: str) -> None:
-        subprocess.run(
-            [sys.executable, str(SCRIPT), *arguments],
-            check=True,
-            text=True,
-            capture_output=True,
-        )
+        try:
+            subprocess.run(
+                [sys.executable, str(SCRIPT), *arguments],
+                check=True,
+                text=True,
+                capture_output=True,
+            )
+        except subprocess.CalledProcessError as exc:
+            self.fail(
+                f"command failed with {exc.returncode}: "
+                f"stdout={exc.stdout!r} stderr={exc.stderr!r}"
+            )
 
     @staticmethod
     def _make_snapshot(path: Path, url: str) -> None:

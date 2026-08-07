@@ -103,6 +103,9 @@ DATASET_SPECIFIC_CONCEPT_CODES = {
     "ea1141": {
         "sex_at_birth": {"1": "Female"},
     },
+    "ucsfpdgm": {
+        "vital_status": {"0": "Alive", "1": "Dead"},
+    },
 }
 
 CANONICAL_DISPLAY_VALUES = {
@@ -288,6 +291,38 @@ SOURCE_COLUMN_CONCEPT_OVERRIDES = {
     ("hnscc", "daystolastfu"): "days_to_last_followup",
     ("hnscc", "aliveordead"): "vital_status",
     ("hnscc", "site"): "primary_site",
+    # Reviewed bare-ID clinical tables. Preserve every original column/value;
+    # these aliases expose the most useful patient-level concepts consistently.
+    ("headneckradiomicshn1", "performancestatusecog"): "performance_status",
+    ("headneckradiomicshn1", "overallsurvivalindays"): "overall_survival_days",
+    ("tompeicmmd", "classification"): "screening_result",
+    ("tompeicmmd", "breastdensity"): "breast_density",
+    ("tompeicmmd", "biradscategory"): "birads_category",
+    ("ucsdptgbm", "who2021diagnosis"): "primary_diagnosis",
+    ("ucsdptgbm", "nonwho2021diagnosis"): "primary_diagnosis",
+    ("ucsdptgbm", "mgmt"): "mgmt_status",
+    ("ucsdptgbm", "idh"): "idh_status",
+    ("ucsdptgbm", "1p19q"): "chromosomal_1p19q_status",
+    ("ucsdptgbm", "atrx"): "atrx_status",
+    ("ucsfpdgm", "ageatmri"): "age_at_imaging_years",
+    ("ucsfpdgm", "whocnsgrade"): "grade",
+    ("ucsfpdgm", "finalpathologicdiagnosiswho2021"): "primary_diagnosis",
+    ("ucsfpdgm", "mgmtstatus"): "mgmt_status",
+    ("ucsfpdgm", "mgmtindex"): "mgmt_index",
+    ("ucsfpdgm", "1p19q"): "chromosomal_1p19q_status",
+    ("ucsfpdgm", "idh"): "idh_status",
+    ("ucsfpdgm", "1dead0alive"): "vital_status",
+    ("ucsfpdgm", "os"): "overall_survival_days",
+    ("ucsfpdgm", "eor"): "extent_of_resection",
+    ("ucsfpdgm", "biopsypriortoimaging"): "biopsy_prior_to_imaging",
+    ("upenngbm", "ageatscanyears"): "age_at_imaging_years",
+    ("upenngbm", "survivalfromsurgerydaysupdated"): "overall_survival_days",
+    ("upenngbm", "idh1"): "idh_status",
+    ("upenngbm", "mgmt"): "mgmt_status",
+    ("upenngbm", "kps"): "performance_status",
+    ("upenngbm", "gtrover90percent"): "extent_of_resection",
+    ("upenngbm", "timesincebaselinepreop"): "days_from_baseline_preop",
+    ("upenngbm", "psptpscore"): "pseudoprogression_true_progression_score",
 }
 
 CURATED_SCREENING_DIAGNOSIS_RESOLUTIONS = {
@@ -427,6 +462,35 @@ SUBJECT_COLUMN_OVERRIDES = {
     # This official file has one row for each of the 200 PathDB patients and
     # identifies them with the otherwise-too-generic column name "ID".
     "hungariancolorectalscreening": {"id"},
+    # These official tables use a bare ID column. Each mapping is scoped to
+    # one reviewed dataset because ID is too ambiguous to accept globally.
+    "headneckradiomicshn1": {"id"},
+    "tompeicmmd": {"id", "id1"},
+    "ucsdptgbm": {"id"},
+    "ucsdvslongitudinal": {"id"},
+    "ucsfpdgm": {"id"},
+    "upenngbm": {"id"},
+}
+
+# Increment only the affected official downloads when a reviewed identifier
+# mapping changes. This prevents a same-schema incremental build from reusing
+# an older no_patient_rows result without forcing every official source to be
+# downloaded again.
+OFFICIAL_SOURCE_TRANSFORM_VERSIONS = {
+    "headneckradiomicshn1": 1,
+    "tompeicmmd": 1,
+    "ucsdptgbm": 1,
+    "ucsdvslongitudinal": 1,
+    "ucsfpdgm": 1,
+    "upenngbm": 1,
+}
+
+REVIEWED_OFFICIAL_COHORT_PATTERNS = {
+    "HEAD-NECK-RADIOMICS-HN1": r"HN\d{4}",
+    "UCSD-PTGBM": r"UCSD-PTGBM-\d{4}",
+    "UCSD-VS-Longitudinal": r"VS_\d{4}",
+    "UCSF-PDGM": r"UCSF-PDGM-\d{4}",
+    "UPENN-GBM": r"UPENN-GBM-\d{5}",
 }
 
 HUNGARIAN_COLORECTAL_ICD10 = {
@@ -1085,18 +1149,76 @@ def choose_subject_column(
     return max(scored)[2] if scored else None
 
 
-def normalize_official_subject_id(short_title: str, subject_id: str) -> str:
-    """Map official spreadsheet IDs to the corresponding TCIA PatientID."""
+def prepare_official_table(
+    short_title: str, table_name: str, frame: Any
+) -> Any:
+    """Normalize a reviewed multi-row header without altering source cells."""
     if (
-        normalize_name(short_title) == "ea1141"
-        and re.fullmatch(r"\d+", subject_id)
+        normalize_name(short_title) == "tompeicmmd"
+        and "lesiondetailssheet" in normalize_name(table_name)
+        and len(frame.index) >= 3
     ):
-        return f"ea1141-{subject_id}"
-    if normalize_name(short_title) == "acrinfmisobrain":
+        header_row = frame.iloc[1]
+        headers: list[str] = []
+        counts: dict[str, int] = {}
+        for index, value in enumerate(header_row):
+            header = clean_value(value) or f"column_{index + 1}"
+            normalized = normalize_name(header) or f"column{index + 1}"
+            counts[normalized] = counts.get(normalized, 0) + 1
+            if counts[normalized] > 1:
+                header = f"{header}_{counts[normalized]}"
+            headers.append(header)
+        prepared = frame.iloc[2:].copy()
+        prepared.columns = headers
+        return prepared.reset_index(drop=True)
+    return frame
+
+
+def official_subject_id_mapping(
+    short_title: str, subject_id: str
+) -> tuple[str, str]:
+    """Map a reviewed official row identifier to TCIA patient identity.
+
+    The returned method is stored in fact provenance. Raw source identifiers
+    remain unchanged in ``clinical_rows.row_json``.
+    """
+    dataset = normalize_name(short_title)
+    if dataset == "ea1141" and re.fullmatch(r"\d+", subject_id):
+        return f"ea1141-{subject_id}", "dataset_prefix"
+    if dataset == "acrinfmisobrain":
         match = re.fullmatch(r"(\d+)(?:\.0+)?", subject_id)
         if match:
-            return f"ACRIN-FMISO-Brain-{int(match.group(1)):03d}"
-    return subject_id
+            return (
+                f"ACRIN-FMISO-Brain-{int(match.group(1)):03d}",
+                "dataset_prefix_zero_pad_3",
+            )
+    if dataset == "ucsfpdgm":
+        match = re.fullmatch(r"UCSF-PDGM-(\d{3,4})(?:_FU\d+d)?", subject_id)
+        if match:
+            return (
+                f"UCSF-PDGM-{int(match.group(1)):04d}",
+                "zero_pad_4_strip_followup_suffix",
+            )
+    if dataset == "upenngbm":
+        match = re.fullmatch(r"(UPENN-GBM-\d{5})_\d+", subject_id)
+        if match:
+            return match.group(1), "strip_scan_suffix"
+    if dataset == "ucsdptgbm":
+        match = re.fullmatch(r"(UCSD-PTGBM-\d{4})_\d+", subject_id)
+        if match:
+            return match.group(1), "strip_scan_suffix"
+    if dataset == "ucsdvslongitudinal":
+        match = re.fullmatch(r"(VS_\d{4})_\d+", subject_id)
+        if match:
+            return match.group(1), "strip_visit_suffix"
+    if dataset in SUBJECT_COLUMN_OVERRIDES:
+        return subject_id, "dataset_specific_exact_id"
+    return subject_id, "identity"
+
+
+def normalize_official_subject_id(short_title: str, subject_id: str) -> str:
+    """Map official spreadsheet IDs to the corresponding TCIA PatientID."""
+    return official_subject_id_mapping(short_title, subject_id)[0]
 
 
 def source_signature(row: sqlite3.Row) -> str:
@@ -1113,6 +1235,11 @@ def source_signature(row: sqlite3.Row) -> str:
         row["access_level"],
         row["controlled_access"],
     ]
+    transform_version = OFFICIAL_SOURCE_TRANSFORM_VERSIONS.get(
+        normalize_name(row["short_title"]), 0
+    )
+    if transform_version:
+        fields.append(f"official_transform_v{transform_version}")
     return stable_id(*fields)
 
 
@@ -2508,6 +2635,79 @@ def ingest_idc_clinical(
         "status": "disabled" if no_fetch else "pending",
     }
     if no_fetch:
+        previous_version = (
+            previous_meta(previous_db, "idc_version")
+            if previous_db and previous_db.exists()
+            else None
+        )
+        can_reuse_offline = bool(
+            previous_db
+            and previous_db.exists()
+            and previous_meta(previous_db, "schema_version") == SCHEMA_VERSION
+            and previous_version
+            and previous_meta(previous_db, "visible_tcia_short_title_count")
+            == len(allowed_short_titles)
+        )
+        if can_reuse_offline:
+            reused = copy_idc_previous(
+                conn, previous_db, allowed_short_titles  # type: ignore[arg-type]
+            )
+            if reused:
+                previous_idc_result = previous_meta(
+                    previous_db, "idc_clinical_result"  # type: ignore[arg-type]
+                )
+                previous_victre = (
+                    previous_idc_result.get("victre", {})
+                    if isinstance(previous_idc_result, dict)
+                    else {}
+                )
+                victre_reused = 0
+                if "VICTRE" in allowed_short_titles:
+                    previous = sqlite3.connect(previous_db)  # type: ignore[arg-type]
+                    victre_sources = previous.execute(
+                        """SELECT source_id FROM clinical_sources
+                           WHERE source_kind = 'tcia_linked_external_clinical'
+                             AND short_title = 'VICTRE'"""
+                    ).fetchall()
+                    previous.close()
+                    for source in victre_sources:
+                        victre_reused += int(
+                            copy_source_from_previous(
+                                conn, previous_db, source[0]  # type: ignore[arg-type]
+                            )
+                        )
+                if previous_victre and victre_reused:
+                    previous_victre = dict(previous_victre)
+                    previous_victre["reuse_status"] = "reused_offline"
+                result.update(
+                    {
+                        "idc_version": previous_version,
+                        "sources_reused": reused,
+                        "tables": conn.execute(
+                            "SELECT COUNT(*) FROM clinical_idc_tables"
+                        ).fetchone()[0],
+                        "rows": conn.execute(
+                            "SELECT COALESCE(SUM(row_count), 0) FROM clinical_idc_tables"
+                        ).fetchone()[0],
+                        "subjects": conn.execute(
+                            """SELECT COUNT(DISTINCT subject_key)
+                               FROM clinical_rows r
+                               JOIN clinical_sources s USING (source_id)
+                               WHERE s.source_kind = 'idc_clinical'"""
+                        ).fetchone()[0],
+                        "subjects_with_imaging": conn.execute(
+                            """SELECT COUNT(DISTINCT subject_key)
+                               FROM clinical_rows r
+                               JOIN clinical_sources s USING (source_id)
+                               WHERE s.source_kind = 'idc_clinical'
+                                 AND r.has_imaging = 1"""
+                        ).fetchone()[0],
+                        "status": "reused_offline",
+                        "victre": previous_victre
+                        if victre_reused
+                        else {"status": "not_applicable"},
+                    }
+                )
         return result
     if client is None:
         try:
@@ -3100,6 +3300,14 @@ def ingest_official_bytes(
             "download_id": row["download_id"],
             "download_title": row["download_title"],
             "file_types": row["file_types"],
+            "subject_column_overrides": sorted(
+                SUBJECT_COLUMN_OVERRIDES.get(
+                    normalize_name(row["short_title"]), set()
+                )
+            ),
+            "transform_version": OFFICIAL_SOURCE_TRANSFORM_VERSIONS.get(
+                normalize_name(row["short_title"]), 0
+            ),
         },
     )
     loaded_rows = 0
@@ -3110,6 +3318,7 @@ def ingest_official_bytes(
     for table_name, frame in tables:
         if frame is None or frame.empty:
             continue
+        frame = prepare_official_table(row["short_title"], table_name, frame)
         subject_column = choose_subject_column(
             frame.columns, row["short_title"]
         )
@@ -3127,11 +3336,11 @@ def ingest_official_bytes(
             continue
         for index, record in frame.iterrows():
             values = {str(column): record[column] for column in frame.columns}
-            subject_id = clean_value(record[subject_column])
-            if not subject_id:
+            source_subject_id = clean_value(record[subject_column])
+            if not source_subject_id:
                 continue
-            subject_id = normalize_official_subject_id(
-                row["short_title"], subject_id
+            subject_id, subject_id_mapping_method = official_subject_id_mapping(
+                row["short_title"], source_subject_id
             )
             facts: list[tuple[str, str, str, str | None]] = []
             for column in frame.columns:
@@ -3190,6 +3399,11 @@ def ingest_official_bytes(
                 row=values,
                 facts=facts,
                 has_imaging=has_imaging,
+                fact_provenance={
+                    "source_subject_column": str(subject_column),
+                    "source_subject_id": source_subject_id,
+                    "subject_id_mapping_method": subject_id_mapping_method,
+                },
             ):
                 loaded_rows += 1
                 subjects.add(normalize_subject(subject_id))
@@ -3945,6 +4159,238 @@ def promote_and_audit_hungarian_colorectal_cohort(
                 "inference."
             ),
             short_title="Hungarian-Colorectal-Screening",
+        )
+    return result
+
+
+def declared_subject_count(snapshot_db: Path, short_title: str) -> int:
+    snapshot = sqlite3.connect(snapshot_db)
+    try:
+        try:
+            row = snapshot.execute(
+                """SELECT subjects FROM agent_datasets
+                   WHERE hidden = 0 AND lower(short_title) = lower(?)
+                   ORDER BY CASE dataset_type WHEN 'Collection' THEN 0 ELSE 1 END
+                   LIMIT 1""",
+                (short_title,),
+            ).fetchone()
+        except sqlite3.Error:
+            row = None
+    finally:
+        snapshot.close()
+    value = clean_value(row[0]) if row else ""
+    return int(value) if re.fullmatch(r"\d+", value) else 0
+
+
+def official_subject_ids(
+    conn: sqlite3.Connection, short_title: str
+) -> set[str]:
+    return {
+        clean_value(row[0])
+        for row in conn.execute(
+            """SELECT DISTINCT r.subject_id
+               FROM clinical_rows r
+               JOIN clinical_sources s USING (source_id)
+               WHERE lower(r.short_title) = lower(?)
+                 AND s.source_kind = 'tcia_clinical_download'
+               ORDER BY r.subject_id""",
+            (short_title,),
+        )
+        if clean_value(row[0])
+    }
+
+
+def promote_imaging_subject_ids(
+    conn: sqlite3.Connection,
+    short_title: str,
+    subject_ids: Iterable[str],
+    imaging_source: str,
+) -> int:
+    promoted = 0
+    for subject_id in sorted(set(subject_ids)):
+        subject_key = (
+            f"{normalize_name(short_title)}:{normalize_subject(subject_id)}"
+        )
+        conn.execute(
+            """INSERT OR REPLACE INTO clinical_imaging_subjects
+               (subject_key, short_title, subject_id, imaging_source)
+               VALUES (?, ?, ?, ?)""",
+            (subject_key, short_title, subject_id, imaging_source),
+        )
+        promoted += 1
+    conn.execute(
+        """UPDATE clinical_rows SET has_imaging = 1
+           WHERE subject_key IN (
+               SELECT subject_key FROM clinical_imaging_subjects
+               WHERE lower(short_title) = lower(?)
+           )""",
+        (short_title,),
+    )
+    return promoted
+
+
+def promote_reviewed_official_id_cohorts(
+    conn: sqlite3.Connection, snapshot_db: Path
+) -> dict[str, Any]:
+    """Promote reviewed official IDs only when they equal the published cohort.
+
+    This is the durable equivalent of an exact clinical-to-package crosswalk
+    for collections whose official table encodes visit/scan IDs or padding
+    differently from the patient identifier.
+    """
+    results: dict[str, Any] = {}
+    for short_title, pattern in REVIEWED_OFFICIAL_COHORT_PATTERNS.items():
+        official_ids = official_subject_ids(conn, short_title)
+        cohort_ids = {
+            subject_id
+            for subject_id in official_ids
+            if re.fullmatch(pattern, subject_id)
+        }
+        expected = declared_subject_count(snapshot_db, short_title)
+        exact = bool(
+            expected
+            and len(cohort_ids) == expected
+            and cohort_ids == official_ids
+        )
+        promoted = 0
+        if exact:
+            promoted = promote_imaging_subject_ids(
+                conn,
+                short_title,
+                cohort_ids,
+                "tcia_official_clinical_exact_cohort",
+            )
+        else:
+            warning(
+                conn,
+                "reviewed_official_cohort_mismatch",
+                (
+                    f"{short_title} official IDs did not equal the current "
+                    f"published cohort: expected={expected}, "
+                    f"official={len(official_ids)}, pattern={len(cohort_ids)}"
+                ),
+                short_title=short_title,
+            )
+        results[short_title] = {
+            "expected_subjects": expected,
+            "official_subjects": len(official_ids),
+            "pattern_subjects": len(cohort_ids),
+            "nonmatching_ids": sorted(official_ids - cohort_ids),
+            "promoted_imaging_subjects": promoted,
+            "status": "promoted" if exact else "manual_review",
+        }
+    return results
+
+
+def promote_tompei_cmmd_package_cohort(
+    conn: sqlite3.Connection,
+    snapshot_db: Path,
+    *,
+    no_fetch: bool,
+    timeout: int,
+    max_bytes: int,
+) -> dict[str, Any]:
+    """Crosswalk TOMPEI-CMMD clinical IDs to its annotation package."""
+    result: dict[str, Any] = {
+        "expected_subjects": declared_subject_count(snapshot_db, "TOMPEI-CMMD"),
+        "official_subjects": len(official_subject_ids(conn, "TOMPEI-CMMD")),
+        "package_subjects": 0,
+        "promoted_imaging_subjects": 0,
+        "status": "not_attempted",
+    }
+    snapshot = sqlite3.connect(snapshot_db)
+    snapshot.row_factory = sqlite3.Row
+    try:
+        package = snapshot.execute(
+            """SELECT download_id, download_url
+               FROM agent_current_downloads
+               WHERE hidden = 0 AND lower(short_title) = 'tompei-cmmd'
+                 AND lower(file_types) LIKE '%zip%'
+                 AND lower(data_types) LIKE '%segmentation%'
+               ORDER BY download_id LIMIT 1"""
+        ).fetchone()
+    except sqlite3.Error:
+        package = None
+    snapshot.close()
+    if not package or not clean_value(package["download_url"]):
+        result["status"] = "package_not_found"
+        warning(
+            conn,
+            "tompei_cmmd_package_not_found",
+            "No visible TOMPEI-CMMD segmentation ZIP was available for patient crosswalk.",
+            short_title="TOMPEI-CMMD",
+        )
+        return result
+    result.update(
+        {
+            "download_id": clean_value(package["download_id"]),
+            "download_url": clean_value(package["download_url"]),
+        }
+    )
+    if no_fetch:
+        result["status"] = "fetch_disabled"
+        return result
+    try:
+        data = fetch_url(
+            result["download_url"], timeout=timeout, max_bytes=max_bytes
+        )
+        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            package_ids = {
+                match.group(1)
+                for name in archive.namelist()
+                if not name.startswith("__MACOSX/")
+                for match in [
+                    re.fullmatch(
+                        r"(D[12]-\d{4})_MLO_[LR]_AnnotationFile\.json",
+                        Path(name).name,
+                    )
+                ]
+                if match
+            }
+        official_ids = official_subject_ids(conn, "TOMPEI-CMMD")
+        expected = result["expected_subjects"]
+        exact = bool(
+            expected
+            and len(package_ids) == expected
+            and package_ids.issubset(official_ids)
+        )
+        result.update(
+            {
+                "artifact_bytes": len(data),
+                "artifact_sha256": sha256_bytes(data),
+                "package_subjects": len(package_ids),
+                "package_ids_missing_clinical": sorted(package_ids - official_ids),
+                "clinical_ids_outside_package": len(official_ids - package_ids),
+            }
+        )
+        if exact:
+            result["promoted_imaging_subjects"] = promote_imaging_subject_ids(
+                conn,
+                "TOMPEI-CMMD",
+                package_ids,
+                "tcia_analysis_result_package_exact_id",
+            )
+            result["status"] = "promoted"
+        else:
+            result["status"] = "manual_review"
+            warning(
+                conn,
+                "tompei_cmmd_package_cohort_mismatch",
+                (
+                    "TOMPEI-CMMD package IDs did not exactly support the "
+                    f"published cohort: expected={expected}, "
+                    f"package={len(package_ids)}, official={len(official_ids)}"
+                ),
+                short_title="TOMPEI-CMMD",
+            )
+    except Exception as exc:
+        result["status"] = "failed"
+        result["error"] = str(exc)
+        warning(
+            conn,
+            "tompei_cmmd_package_crosswalk_failed",
+            str(exc),
+            short_title="TOMPEI-CMMD",
         )
     return result
 
@@ -5110,6 +5556,7 @@ def materialize_clinical_qc(conn: sqlite3.Connection) -> dict[str, int]:
     # Reference/dictionary sheets are expected to lack patient IDs; probable
     # patient tables and parser failures remain open for targeted follow-up.
     documentation_markers = (
+        "about this excel file",
         "data dictionary",
         "_dictionary",
         "dictionary reviewed",
@@ -5767,6 +6214,22 @@ def build(args: argparse.Namespace) -> None:
         "hungarian_colorectal_icd10_result",
         hungarian_colorectal_result,
     )
+    reviewed_id_cohort_result = promote_reviewed_official_id_cohorts(
+        conn, snapshot_db
+    )
+    insert_meta(
+        conn,
+        "reviewed_official_id_cohort_result",
+        reviewed_id_cohort_result,
+    )
+    tompei_cmmd_result = promote_tompei_cmmd_package_cohort(
+        conn,
+        snapshot_db,
+        no_fetch=args.no_fetch_official,
+        timeout=args.timeout,
+        max_bytes=args.max_artifact_bytes,
+    )
+    insert_meta(conn, "tompei_cmmd_package_cohort_result", tompei_cmmd_result)
     inference_result = apply_wordpress_dataset_inferences(conn, snapshot_db)
     # Resolve source Collection subjects first, then use WordPress-confirmed
     # relationships plus exact PatientID matches to backfill Analysis Results.
