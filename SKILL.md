@@ -19,8 +19,9 @@ When a downstream record is derived from a TCIA DOI but is not itself listed in 
 
 ## Quick Workflow
 
-0. Use the local SQLite metadata snapshot for routine discovery, release-history, and access/license metadata. Prefer the agent-facing views in `references/schema.md`: `agent_datasets`, `agent_current_downloads`, `agent_dataset_access_summary`, `agent_dataset_versions`, `agent_dataset_v1_releases`, `agent_pathdb_slides`, and `agent_datacite_dois`. Load `references/snapshots.md` for refresh behavior and `references/schema.md` for SQL details. If the environment cannot execute scripts or query SQLite, use the web-friendly release exports described in `references/mcp-and-web-llms.md`; do not switch to live WordPress API discovery.
-1. Choose the starting source.
+0. Verify freshness before discovery. From the skill root, run `python scripts/tcia_freshness.py ensure`. This must confirm that the installed `SKILL.md`, references, scripts, and agent metadata match the version/hash manifest on GitHub `main`, then refresh the base SQLite from the latest checksum-verified release. When a query needs an optional sidecar, pass `--sidecar clinical`, `--sidecar controlled`, `--sidecar nifti`, or `--sidecar pathology`; use `--installed-sidecars` to refresh every sidecar already present locally. If the command reports `update_required`, stop and tell the user to update the installed skill; never overwrite skill code automatically. If network verification fails, do not claim current results: ask whether to continue with the unverified local snapshot and report its manifest `generated_at_utc`. Web-only environments must follow `references/mcp-and-web-llms.md` and fetch the current GitHub skill manifest plus release manifest before using remote JSON/JSONL assets.
+1. Use the refreshed local SQLite metadata snapshot for routine discovery, release-history, and access/license metadata. Prefer the agent-facing views in `references/schema.md`: `agent_datasets`, `agent_current_downloads`, `agent_dataset_access_summary`, `agent_dataset_versions`, `agent_dataset_v1_releases`, `agent_pathdb_slides`, and `agent_datacite_dois`. Load `references/snapshots.md` for refresh behavior and `references/schema.md` for SQL details. If the environment cannot execute scripts or query SQLite, use the web-friendly release exports described in `references/mcp-and-web-llms.md`; do not switch to live WordPress API discovery.
+2. Choose the starting source.
    - For peer-reviewed publications or manuscripts about TCIA data, use TCIA's EndNote XML export, not DataCite. Prefer `scripts/tcia_publications.py`, and load `references/publications.md`.
    - For DOI, citation, or version questions, start with DataCite metadata from the snapshot. Prefer `scripts/datacite_tcia_dois.py` for TCIA DOI prefix records.
    - For TCIA dataset release timelines, first-release dates, or version-history questions, use `agent_dataset_versions` and `agent_dataset_v1_releases` from the snapshot. These views are derived from the WordPress `/api/v2/versions` endpoint and match related datasets by exact short title plus a normalized punctuation/case-insensitive key. For v1 timelines, prefer `v1_release_date_source` values from the versions endpoint; treat `current_record_still_v1_date_updated` as a fallback only for datasets that are still version 1.
@@ -30,20 +31,28 @@ When a downstream record is derived from a TCIA DOI but is not itself listed in 
    - For controlled-access file, manifest, `drs_uri`, modality, or series-level metadata, confirm controlled status through the normal snapshot first, then load `references/controlled-access.md` and use the optional controlled-access SQLite release when file-grain public metadata are needed. Prefer `agent_controlled_dataset_summary`, `agent_controlled_downloads`, and `agent_controlled_files`.
    - For all other discovery and access questions, search WordPress snapshot records first for Collections and Analysis Results.
    - Prefer `scripts/tcia_wordpress_search.py` for lightweight snapshot searches.
-   - If the snapshot is missing, run or tell the user to run `python scripts/tcia_snapshot.py ensure` from the skill root.
-   - If a specific dataset appears absent after refreshing, say the snapshot may not include the newest TCIA metadata yet. The GitHub Action builds release snapshots at 7:17 AM and 7:17 PM America/New_York; ask the user to try again after the next scheduled run has had time to finish, then rerun `python scripts/tcia_snapshot.py ensure`.
+   - If the snapshot is missing, run or tell the user to run `python scripts/tcia_freshness.py ensure` from the skill root.
+   - If a specific dataset appears absent after refreshing, say the snapshot may not include the newest TCIA metadata yet. The GitHub Action builds release snapshots at 7:17 AM and 7:17 PM America/New_York; ask the user to try again after the next scheduled run has had time to finish, then rerun `python scripts/tcia_freshness.py ensure`.
    - Use `--include-hidden` only for explicit TCIA staff requests that ask for hidden/staged/retired records.
-2. Filter out `hide_from_browse_table = "1"` records unless the explicit TCIA staff exception applies.
-3. Filter candidates by the user's criteria: cancer type, body site, modality, species, data type, access/license, DOI, program, supporting data, segmentations/annotations, or download need. For modality, file format, download-route, and access/license questions, prefer download-level metadata over top-level Collection or Analysis Result `data_types`; mixed datasets can have modality labels such as MR only on individual download records. For public DICOM series/file details after TCIA provenance and access are established, use IDC/idc-index rather than querying live WordPress.
+3. Filter out `hide_from_browse_table = "1"` records unless the explicit TCIA staff exception applies.
+4. Filter candidates by the user's criteria: cancer type, body site, modality, species, data type, access/license, DOI, program, supporting data, segmentations/annotations, or download need. For modality, file format, download-route, and access/license questions, prefer download-level metadata over top-level Collection or Analysis Result `data_types`; mixed datasets can have modality labels such as MR only on individual download records. For public DICOM series/file details after TCIA provenance and access are established, use IDC/idc-index rather than querying live WordPress.
    - Before saying a Collection has no ground truth, segmentations, annotations, labels, or classifications, also search visible WordPress Analysis Results that are related to that Collection. TCIA often publishes annotations as separate Analysis Results, not as current downloads on the source Collection. Check `references/schema.md` for the related-Analysis-Result SQL pattern. Use strong relationship evidence first: Analysis Result `source_collections`, result short titles that start with the collection short title (for example `EAY131-Tumor-Annotations`), result titles that name the collection, and scoped result download/search URLs such as `CollectionCriteria=<short_title>` or manifest filenames containing the short title. Do not rely on broad `raw_json LIKE '%short_title%'` scans alone because program metadata can list many loosely related datasets and create false positives.
-4. Use `collection_short_title` or `result_short_title` as the cross-system key whenever possible.
-5. For external-resource questions, use the top-level Collection or Analysis Result `external_resources` labels. For download questions, inspect `agent_current_downloads` plus WordPress `download_type`, `data_type`, and `file_type` together. These download labels are multi-select labels, not a strict one-parent tree.
-6. Route access with the matrix below.
-7. Decide open versus controlled access from WordPress license metadata, not from collection/page accessibility fields. Creative Commons licenses mean open access; Creative Commons NonCommercial licenses are open access with a noncommercial-use restriction. If license text indicates NIH Controlled Data Access, TCIA Restricted, or another controlled/restricted license, alert the user that the dataset is not open access and link to the TCIA NIH Controlled Data Access Policy before giving download/API-key/Data Retriever guidance.
-8. If `agent_dataset_access_summary.resolved_access_level = 'mixed'`, split open/noncontrolled downloads from controlled downloads. Do not imply that all files in a mixed dataset are open.
-9. For visualization questions, decide open versus controlled access first. Controlled-access data cannot be previewed in a browser before download; open-access data should be returned as clickable viewer links, not opened by the agent.
-10. For open-access download requests, ask whether the user wants the agent to download files directly in the current environment or create a portable TCIA Data Retriever CSV manifest when the requested data can be represented by DICOM Series Instance UIDs, direct `imageUrl` values, or `drs_uri` values. Do not directly download controlled data; for controlled data, provide the TCIA policy link and portable manifest guidance only.
-11. Include citations and access caveats before recommending downloads or downstream analysis.
+5. Use `collection_short_title` or `result_short_title` as the cross-system key whenever possible.
+6. For external-resource questions, use the top-level Collection or Analysis Result `external_resources` labels. For download questions, inspect `agent_current_downloads` plus WordPress `download_type`, `data_type`, and `file_type` together. These download labels are multi-select labels, not a strict one-parent tree.
+7. Route access with the matrix below.
+8. Decide open versus controlled access from WordPress license metadata, not from collection/page accessibility fields. Creative Commons licenses mean open access; Creative Commons NonCommercial licenses are open access with a noncommercial-use restriction. If license text indicates NIH Controlled Data Access, TCIA Restricted, or another controlled/restricted license, alert the user that the dataset is not open access and link to the TCIA NIH Controlled Data Access Policy before giving download/API-key/Data Retriever guidance.
+9. If `agent_dataset_access_summary.resolved_access_level = 'mixed'`, split open/noncontrolled downloads from controlled downloads. Do not imply that all files in a mixed dataset are open.
+10. For visualization questions, decide open versus controlled access first. Controlled-access data cannot be previewed in a browser before download; open-access data should be returned as clickable viewer links, not opened by the agent.
+11. For open-access download requests, ask whether the user wants the agent to download files directly in the current environment or create a portable TCIA Data Retriever CSV manifest when the requested data can be represented by DICOM Series Instance UIDs, direct `imageUrl` values, or `drs_uri` values. Do not directly download controlled data; for controlled data, provide the TCIA policy link and portable manifest guidance only.
+12. Include citations and access caveats before recommending downloads or downstream analysis.
+
+## Recency Requests
+
+Treat `newest`, `latest`, and `most recent` as ambiguous unless the user explicitly says first release, version 1, newly published, recently updated, latest version, or both. Ask one concise question before ranking: “Do you mean newly published datasets, datasets updated recently, or both? I recommend both, shown separately.” Do not ask when the user already specifies the date concept. If interaction is unavailable or the user asks to proceed without clarification, return both views in separate sections; never silently interpret `newest` as first release only.
+
+- For newly published datasets, rank `agent_dataset_v1_releases` by `v1_release_date` and retain `v1_release_date_source`.
+- For recently updated datasets, rank visible `agent_datasets` by `date_updated`, then inspect `agent_dataset_versions` and `agent_current_downloads` before saying what changed. `date_updated` establishes recency but does not by itself prove that imaging files, subject counts, clinical tables, or annotations changed.
+- For both, use separate tables rather than merging first-release and update dates into one ranking.
 
 ## Access Routing
 
@@ -144,6 +153,8 @@ Run scripts from the skill root.
 | --- | --- |
 | `scripts/tcia_wordpress_search.py` | Search local SQLite TCIA WordPress Collection and Analysis Result snapshot metadata, with text or JSON output. |
 | `scripts/tcia_snapshot.py` | Build, inspect, validate, or download the local SQLite metadata snapshot, and export web-friendly release files. |
+| `scripts/tcia_freshness.py` | Verify installed skill files against GitHub, then refresh the base snapshot and requested optional sidecars. |
+| `scripts/tcia_skill_version.py` | Generate or validate the committed version/hash manifest for operational skill files. |
 | `scripts/tcia_nifti_metadata.py` | Download, validate, summarize, and query the optional release SQLite for visible non-controlled TCIA NIfTI file-grain metadata. |
 | `scripts/tcia_controlled_access_metadata.py` | Build/download, validate, summarize, and query the optional release SQLite for public controlled-access WordPress manifests, metadata spreadsheets, `drs_uri` rows, and IDC-shaped radiology indexes. |
 | `scripts/tcia_clinical_metadata.py` | Build/download and validate the optional patient-level clinical SQLite from official TCIA artifacts, IDC collection clinical tables, strict TCIA-matched CDA rows, and DICOM fallback. |
@@ -160,6 +171,9 @@ Run scripts from the skill root.
 Examples:
 
 ```bash
+python scripts/tcia_freshness.py ensure
+python scripts/tcia_freshness.py ensure --sidecar clinical
+python scripts/tcia_freshness.py ensure --installed-sidecars
 python scripts/tcia_snapshot.py ensure
 python scripts/tcia_snapshot.py info
 python scripts/tcia_snapshot.py build --out cache/tcia_snapshot.sqlite --gzip-out dist/tcia_snapshot.sqlite.gz --manifest-out dist/tcia_snapshot_manifest.json --exports-dir dist
@@ -261,6 +275,10 @@ For discovery requests, prefer a compact ranked table:
 | --- | --- | --- | --- | --- | --- | --- |
 
 Include the TCIA page link, WordPress short title, and any caveats about controlled access, license, or external derived records. For download requests, estimate size/counts when available and recommend a small test download before bulk transfer.
+
+For recency discovery, label the date concept explicitly. Include first-release date, last-updated date, current version, and date provenance when available. Describe `current_record_still_v1_date_updated` as a fallback estimate rather than a confirmed historical release date. When returning both newly published and recently updated datasets, use two separately ranked tables.
+
+For freshness-sensitive answers, state the verified `skill_version` and base release manifest `generated_at_utc`. If freshness could not be verified, label the answer offline/unverified and report the local manifest timestamp instead of implying current status.
 
 ## Guardrails
 

@@ -194,7 +194,13 @@ Optional direct release URLs:
 
 The base snapshot, controlled-access metadata, and clinical metadata are checked by the scheduled workflow. Each run writes a SQLite additions/removals report to the GitHub Actions job summary and emits warning annotations for new additions or clinical review flags. Clinical refreshes reuse unchanged direct official artifacts, fetch small TCIA-linked external clinical sources such as Allen IvyGAP and FDA DIDSR VICTRE lesion ground truth on every run, reuse IDC clinical tables while the IDC version is unchanged, fully rebuild those small tables on an IDC version change, and carry the existing strict CDA/DICOM seed forward. They also recompute Analysis Result-to-Collection clinical inheritance from current WordPress relationship evidence and exact PatientID matches; inherited facts are a lower-priority fallback and never replace direct result-dataset facts. Pathology metadata can include a more expensive Aspera package inventory and is refreshed by maintainers when that workflow is dispatched with pathology inventory enabled. NIfTI metadata is maintained as an optional on-demand asset, with scheduled drift checks warning maintainers when it may need refresh.
 
-These optional SQLite files are **not** downloaded during skill install and are **not** downloaded by `python scripts/tcia_snapshot.py ensure`. They expose `agent_*` views for routine use. Users who need NIfTI file-level metadata can fetch it on demand:
+These optional SQLite files are **not** downloaded during skill install and are **not** downloaded by the base snapshot refresh. They expose `agent_*` views for routine use. Start each discovery task with the combined skill/artifact freshness check:
+
+```bash
+python scripts/tcia_freshness.py ensure
+```
+
+Add `--sidecar nifti`, `--sidecar pathology`, `--sidecar controlled`, or `--sidecar clinical` only when that file-grain layer is needed. The command verifies the installed operational files against GitHub `main`, then refreshes checksum-verified release artifacts. It reports an update requirement instead of silently overwriting old skill code. Users who need NIfTI file-level metadata can also fetch it directly on demand:
 
 ```bash
 python scripts/tcia_nifti_metadata.py ensure
@@ -229,16 +235,16 @@ See [references/clinical.md](./references/clinical.md) for source precedence, sc
 After installing or cloning the skill, refresh local metadata from the latest release:
 
 ```bash
-python scripts/tcia_snapshot.py ensure
+python scripts/tcia_freshness.py ensure
 ```
 
-This updates `cache/tcia_snapshot.sqlite` only when the published snapshot data or schema changed. End users do **not** need to reinstall the skill just to get newer metadata; reinstall or update the skill only when the instructions or scripts changed.
+This first verifies the installed operational files against GitHub `main`, then updates `cache/tcia_snapshot.sqlite` only when the published snapshot data or schema changed. End users do **not** need to reinstall the skill just to get newer metadata; the command reports when the instructions or scripts themselves require an update.
 
-If a dataset appears to be missing, the snapshot may not include the newest TCIA metadata yet. Try again after the next scheduled snapshot run has had time to finish, then rerun `python scripts/tcia_snapshot.py ensure`.
+If a dataset appears to be missing, the snapshot may not include the newest TCIA metadata yet. Try again after the next scheduled snapshot run has had time to finish, then rerun `python scripts/tcia_freshness.py ensure`.
 
 ## Helper Scripts
 
-Most routine helper scripts use Python's standard library. Discovery scripts query the local SQLite snapshot and ask you to run `scripts/tcia_snapshot.py ensure` if the snapshot is missing. Optional metadata build commands may need the packages listed below.
+Most routine helper scripts use Python's standard library. Start discovery with `scripts/tcia_freshness.py ensure`; lower-level query scripts use the local SQLite snapshot. Optional metadata build commands may need the packages listed below.
 
 ```bash
 python scripts/tcia_snapshot.py ensure

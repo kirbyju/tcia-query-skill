@@ -1,7 +1,7 @@
 interface:
   display_name: "TCIA Query Skill"
   short_description: "Query TCIA datasets and verified TCIA-based publications"
-  default_prompt: "Use $tcia-query-skill to find TCIA-published datasets from the SQLite snapshot or release exports, use TCIA Publications EndNote XML for verified manuscripts, prefer IDC/idc-index for public DICOM, use the optional clinical SQLite with direct TCIA > manifest-validated linked external > IDC clinical > CDA > DICOM precedence, hold screen-flagged dataset-scope diagnosis/site fallback for review, and explain access, citations, viewers, and download routes."
+  default_prompt: "Use $tcia-query-skill to verify skill and artifact freshness before querying TCIA-published datasets, clarify whether ambiguous recency means newly published, recently updated, or both, use TCIA Publications EndNote XML for verified manuscripts, prefer IDC/idc-index for public DICOM, preserve clinical provenance and review flags, and explain access, citations, viewers, and download routes."
 
 policy:
   allow_implicit_invocation: true

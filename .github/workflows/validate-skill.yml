@@ -1,0 +1,34 @@
+name: Validate TCIA query skill
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Validate skill version manifest
+        run: python scripts/tcia_skill_version.py check
+
+      - name: Compile freshness helpers
+        run: |
+          python -m py_compile \
+            scripts/tcia_freshness.py \
+            scripts/tcia_skill_version.py
+
+      - name: Test skill version manifest behavior
+        run: python -m unittest scripts.tests.test_tcia_skill_version

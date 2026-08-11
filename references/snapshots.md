@@ -152,10 +152,24 @@ End users do not need to reinstall the skill just to receive newer TCIA metadata
 - Refresh metadata by updating the local SQLite snapshot:
 
 ```bash
-python scripts/tcia_snapshot.py ensure
+python scripts/tcia_freshness.py ensure
 ```
 
-By default, `ensure` downloads release assets from `kirbyju/tcia-query-skill`. Use `--repo owner/name` only when testing a fork or alternate release source. The helper compares content hashes and schema versions, then replaces `cache/tcia_snapshot.sqlite` only when the published snapshot data or schema changed.
+The freshness helper first fetches `skill_version.json` from GitHub `main` and compares its version plus per-file hashes with the installed `SKILL.md`, agent metadata, references, scripts, and MCP files. If code differs, it exits with `update_required` and does not overwrite the installed skill. This deliberate stop prevents an old script from silently operating against a newer artifact schema and preserves the user's authority over skill installation or replacement.
+
+When the skill is current, the helper runs the normal base `ensure`. It compares the remote release manifest with SQLite metadata, verifies gzip and SQLite SHA-256 values, and replaces `cache/tcia_snapshot.sqlite` only when published content or schema changed. Run this preflight at the start of each discovery task; having a local database is not evidence that it is still the newest published artifact.
+
+Refresh only optional sidecars needed for the task:
+
+```bash
+python scripts/tcia_freshness.py ensure --sidecar clinical
+python scripts/tcia_freshness.py ensure --sidecar controlled --sidecar nifti
+python scripts/tcia_freshness.py ensure --installed-sidecars
+```
+
+`--installed-sidecars` checks every optional SQLite already present under `cache/`. It does not install sidecars that are absent. The individual `python scripts/tcia_snapshot.py ensure` and sidecar `ensure` commands remain available for maintainers and troubleshooting, but routine skill use should start with `tcia_freshness.py` so skill-code and artifact freshness are checked together.
+
+If GitHub cannot be reached, freshness is unverified. Do not claim that cached results are current. Report the local manifest's `generated_at_utc` and ask whether the user wants to continue offline with potentially outdated metadata.
 
 For NIfTI file-grain metadata, use the separate on-demand helper:
 
@@ -189,6 +203,17 @@ python scripts/tcia_clinical_metadata.py ensure
 
 This downloads and verifies only the optional clinical release assets. It is
 not run by the base snapshot refresh command.
+
+## Skill Code Versioning
+
+`skill_version.json` is the machine-readable code/instruction manifest. It includes a human-readable skill version, update timestamp, and SHA-256 hash for each operational skill file. After changing `SKILL.md`, agent metadata, references, scripts, or MCP files, bump and regenerate it:
+
+```bash
+python scripts/tcia_skill_version.py generate --version YYYY.MM.DD.N
+python scripts/tcia_skill_version.py check
+```
+
+The validation workflow checks this manifest on pushes and pull requests. A mismatch catches partial installations and repository changes made without regenerating the manifest. Maintainers should still bump the human-readable version for every operational change. Installed copies compare their local manifest with the current GitHub `main` manifest; they report an update requirement but never modify themselves automatically.
 
 ## Build A Snapshot
 

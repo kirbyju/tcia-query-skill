@@ -15,6 +15,14 @@ Use these sources in order:
 3. The GitHub Release JSONL exports, if the environment can fetch and inspect line-delimited JSON but cannot run SQLite. Use plain `.jsonl` for web browse tools that cannot decompress gzip, or `.jsonl.gz` for tools that can.
 4. Live source APIs only for maintainers building or debugging the snapshot, not for normal dataset discovery.
 
+Before using any surface, verify freshness:
+
+1. Fetch `https://api.github.com/repos/kirbyju/tcia-query-skill/contents/skill_version.json?ref=main` and compare its `skill_version` with the installed/local `skill_version.json`. If it differs, load the current skill from GitHub or ask the user to update it before proceeding.
+2. Fetch the current release record from `https://api.github.com/repos/kirbyju/tcia-query-skill/releases/tags/tcia-snapshot-latest` and then fetch `tcia_snapshot_manifest.json` from the asset URL returned by that record.
+3. Select SQLite or JSON/JSONL assets from that same release record. For downloaded SQLite, verify the manifest SHA-256. For JSON/JSONL, compare the selected asset's hash with the entry under `web_exports` when the environment supports hashing.
+
+Do not treat a previously downloaded SQLite or JSON/JSONL file as current merely because it exists. Do not silently continue when the skill version or release manifest cannot be checked; identify the results as unverified and ask whether offline use is acceptable.
+
 The release assets are:
 
 - `tcia_snapshot.sqlite.gz`: authoritative snapshot for local SQL and MCP backends.
@@ -53,7 +61,7 @@ The JSONL exports are generic table exports, not prompt-specific precomputed ans
 
 JSONL usage pattern:
 
-1. Fetch the direct URLs rather than browsing the GitHub release HTML page.
+1. Resolve the current release and manifest as described above; fetch fresh asset URLs for each task instead of reusing saved JSONL files.
 2. Prefer plain `.jsonl` in web browse tools. Use `.jsonl.gz` only when the host can decompress gzip.
 3. Parse one JSON object per line.
 4. Treat `short_title` as the join key between dataset, current download, and version export rows.
