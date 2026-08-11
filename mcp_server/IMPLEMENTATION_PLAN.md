@@ -56,7 +56,9 @@ NIfTI, pathology, PathDB, Aspera inventory, and patient-level clinical metadata.
   authority.
 - Use download-level labels for modality, file type, and access routing.
 - Split mixed-access datasets and never imply that all files are open.
-- Do not directly download controlled data.
+- Keep this MCP server read-only; it does not transfer controlled payloads. Client
+  agents may use official TCIA Data Retriever manifests after an authorized user
+  supplies their JSON-key path, following the skill's controlled-access guidance.
 - Use optional SQLite sidecars only as public metadata surfaces; they do not
   grant authorization.
 - Scope clinical identities by `(short_title, subject_id)`, retain source

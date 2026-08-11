@@ -95,6 +95,7 @@ Controlled-access face datasets:
 - Route to General Commons only when WordPress or GC metadata indicate that route.
 - When using GC, scope queries to `phs004225` and match WordPress short title to GC `study_acronym`.
 - Do not imply unauthenticated download.
+- If the authorized user explicitly requests the transfer and supplies their JSON-key path, use the official manifest with TCIA Data Retriever as described in `controlled-access.md`.
 
 Controlled-access NCTN trials or Biobank data:
 
@@ -104,6 +105,7 @@ Controlled-access NCTN trials or Biobank data:
 - For Biobank controlled-access face data, use CTDC manifests and download/view links from the current WordPress pages and instruct users to request dbGaP study `phs002192`.
 - Use the optional controlled-access SQLite when WordPress identifies a controlled download route and file-grain public metadata are needed.
 - For NCTN trials and other controlled datasets, use WordPress license metadata and dataset pages unless WordPress identifies a downstream route.
+- If WordPress provides an official CRDC manifest and the authorized user supplies their JSON-key path, invoke TCIA Data Retriever according to `controlled-access.md`.
 
 CDA subject enrichment:
 
@@ -198,7 +200,7 @@ For exact dataset questions, give a short prose summary first, then a table of a
 - WordPress metadata can contain HTML; strip tags before quoting or matching.
 - WordPress `hide_from_browse_table = "1"` means hidden. Treat hidden records as out of scope for public user-facing discovery unless the explicit TCIA staff exception applies.
 - The snapshot is built from verbose WordPress source metadata. If a very recent field is absent, ask the user to try again after the next scheduled snapshot run and refresh with `python scripts/tcia_snapshot.py ensure`.
-- Controlled-access metadata can be visible even when file downloads require approval. Determine controlled status from license metadata, then link to the TCIA NIH Controlled Data Access Policy for current request, JSON API key, and TCIA Data Retriever configuration steps.
+- Controlled-access metadata can be visible even when file downloads require approval. Determine controlled status from license metadata, then link to the TCIA NIH Controlled Data Access Policy for current request, dbGaP approval, JSON API key, and TCIA Data Retriever configuration steps. An authorized agent-run transfer requires an explicit user request, an official CRDC manifest, and the path to the user's own key.
 - Controlled-access data cannot be previewed through public browser viewers before download. Report metadata and access guidance instead of constructing OHIF, SliM, VolView, IDC, NBIA, PathDB, or other public viewer URLs.
 - Visualization answers should provide links for users to open in their own browser. Do not install Playwright or other browser automation just to demonstrate viewer links.
 - For open-access/public DICOM downloads, prefer IDC/idc-index. Existing TCIA `.tcia` manifests can be parsed for Series Instance UID allowlists, but NBIA should be fallback-only for public DICOM. New portable Data Retriever manifests should be CSV/TSV/XLSX-compatible, not `.tcia`, unless the user explicitly asks for the legacy NBIA-era format. If NBIA fallback is needed, use the NBIA v4 API documented by `https://cbiit.github.io/NBIA-TCIA/nbia-api.yaml`. For controlled-access DICOM, use WordPress license metadata plus the downstream route identified by current WordPress metadata, such as CTDC for Biobank controlled-access face data or General Commons for non-Biobank face data routed there; do not imply public IDC/NBIA download.

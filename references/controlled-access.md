@@ -28,9 +28,42 @@ Before download/API instructions, say clearly that:
 - The decision came from license metadata, not the deprecated collection/page accessibility field.
 - Metadata may be visible even when files cannot be downloaded without authorization.
 - The user should review the TCIA NIH Controlled Data Access Policy page for current request, approval, API key, and TCIA Data Retriever configuration instructions.
-- The agent should not directly download controlled data. Provide policy guidance and, when useful, a portable manifest for later authorized use with TCIA Data Retriever.
+- Possession of a manifest does not grant access. The user must obtain the required dbGaP authorization and manually create their own JSON API key through the process linked from the policy page.
+- An agent may invoke TCIA Data Retriever for the user only after the user explicitly requests the controlled download and specifies the readable filesystem path to their own valid JSON key.
 
 Do not invent approval requirements, timelines, or eligibility rules. Link to the policy page and summarize only what has been verified from current TCIA pages or WordPress metadata.
+
+## Authorized Agent Download
+
+Use this workflow when the user asks the agent to download controlled TCIA data:
+
+1. Confirm TCIA provenance and controlled status from current WordPress snapshot license/download metadata.
+2. Link `https://www.cancerimagingarchive.net/nih-controlled-data-access-policy/` and state that the user must request permission through dbGaP or the access process specified there.
+3. Require the user to explicitly state the path to a JSON API-key file they created manually after approval. Do not solicit the key value in chat.
+4. Confirm the credential file exists, is readable, parses as a JSON object, and contains a non-empty `api_key`. A `key_id` may also be present. Report only validation status and key names; never print values.
+5. Warn if the credential file is broadly readable. Recommend restrictive permissions such as `chmod 600 /path/to/credentials.json` on Unix-like systems, but do not change permissions outside the task scope without authorization.
+6. Use an official current WordPress/CRDC manifest. Controlled CSV manifests use `drs_uri`, `File ID`, or `file_id`; keep the original manifest as provenance. If the user asks for a subset, filter by explicit participant, file, or series identifiers and preserve the header and selected source rows in a new scoped manifest.
+7. Confirm the exact manifest scope and destination from the request. For a clearly specified small subset and workspace destination, proceed without re-asking. Estimate published size when available.
+8. Locate or install the official TCIA Data Retriever only with user approval. Verify CLI support with the installed build or current official documentation.
+9. Invoke the CLI by passing the credential **path**, never the key value. Do not copy the credential into the workspace, generated manifests, scripts, logs, environment variables, shell history, or response text.
+10. Run the transfer only against the route encoded by the official manifest. Never send the credential to IDC, NBIA, Aspera, arbitrary DRS hosts, or URLs constructed by the agent.
+11. Report destination, selected identifiers, counts/sizes, command exit status, and failures without exposing credentials. Preserve partial downloads for resume unless the user asks to remove them.
+
+Current official CLI pattern:
+
+```bash
+TCIA_Data_Retriever --cli \
+  --input /path/to/official-or-scoped-manifest.csv \
+  --output /path/to/destination \
+  --auth /path/to/credentials.json \
+  --skip-existing
+```
+
+The short options `-i` and `-o` are also supported. Use `--server-friendly` for a conservative transfer, `--directory-mode classic` when predictable Collection/Patient/Study/Series folders are useful, and `--verbose` for status. Do not add `--accept-data-policy` unless the user has explicitly asked to accept the policy non-interactively after reviewing it. Avoid `--debug` or persistent logs when they are unnecessary for the task.
+
+The Linux notebook [`TCIA_Linux_Data_Retriever_App.ipynb`](https://github.com/kirbyju/TCIA_Notebooks/blob/main/TCIA_Linux_Data_Retriever_App.ipynb), section 5, demonstrates the same pattern: obtain dbGaP access, download an official CRDC CSV manifest, create a JSON API key manually, and pass its path with `--auth`.
+
+If the user has not supplied a valid credential path, prepare or identify the official manifest and give the policy/CLI steps without attempting the payload transfer. Authentication or authorization failure does not prove the key is malformed; it may be expired, unauthorized for that dbGaP study, or rejected by the routed CRDC service.
 
 ## Optional Controlled-Access SQLite
 

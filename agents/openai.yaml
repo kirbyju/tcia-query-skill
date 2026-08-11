@@ -1,7 +1,7 @@
 interface:
   display_name: "TCIA Query Skill"
   short_description: "Query TCIA datasets and verified TCIA-based publications"
-  default_prompt: "Use $tcia-query-skill to verify skill and artifact freshness before querying TCIA-published datasets, clarify whether ambiguous recency means newly published, recently updated, or both, use TCIA Publications EndNote XML for verified manuscripts, prefer IDC/idc-index for public DICOM, preserve clinical provenance and review flags, and explain access, citations, viewers, and download routes."
+  default_prompt: "Use $tcia-query-skill to verify TCIA provenance and freshness, find datasets or publications, explain access and citations, route public DICOM through IDC, and help authorized users run controlled downloads with official TCIA Data Retriever manifests and their own JSON-key path."
 
 policy:
   allow_implicit_invocation: true

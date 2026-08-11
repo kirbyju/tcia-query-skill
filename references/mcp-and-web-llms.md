@@ -106,7 +106,7 @@ The MCP response should include short title, title, dataset type, DOI, TCIA page
 
 For public DICOM metadata and series-level details, route through IDC/idc-index after TCIA provenance and access/license status are confirmed by the snapshot. Do not ask hosted LLMs to query live WordPress for DICOM series/file details.
 
-For controlled-access DICOM, do not generate public IDC/NBIA download or viewer routes. Return TCIA controlled-access policy guidance and, when useful, Data Retriever manifest guidance for later authorized use. If file-grain public metadata are needed and the host can query SQLite, use `controlled_access_metadata.sqlite.gz`.
+For controlled-access DICOM, do not generate public IDC/NBIA download or viewer routes. Return TCIA controlled-access policy and Data Retriever manifest guidance. A web LLM may invoke an authorized download only when its host can securely run the official TCIA Data Retriever and the user explicitly supplies a readable JSON-key path; follow `controlled-access.md`. If the host cannot execute local tools or protect credential files, stop at manifest guidance. If file-grain public metadata are needed and the host can query SQLite, use `controlled_access_metadata.sqlite.gz`.
 
 For patient-level clinical queries, confirm the dataset in the base snapshot first, then use `clinical_metadata.sqlite.gz`. Scope identities by `(short_title, subject_id)`, preserve source provenance and conflicts, and distinguish dataset-scope inferred diagnosis/site values from patient-level evidence.
 

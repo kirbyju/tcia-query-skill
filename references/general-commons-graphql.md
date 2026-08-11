@@ -81,7 +81,7 @@ Variables:
 }
 ```
 
-Use these metadata rows to report controlled status, modality, file type, file IDs, DRS URIs from `filesInList`, and approximate sizes. Do not imply that controlled files can be downloaded without authorization, and do not directly download controlled data for the user. Provide DRS/manifest guidance for later authorized use when useful.
+Use these metadata rows to report controlled status, modality, file type, file IDs, DRS URIs from `filesInList`, and approximate sizes. Do not imply that controlled files can be downloaded without authorization. Provide DRS/manifest guidance when the user has not supplied an authorized key path; when they have, follow `controlled-access.md` and use TCIA Data Retriever rather than constructing a custom authenticated downloader.
 
 ## Count Queries
 
@@ -146,4 +146,4 @@ Most require `phs_accession: "phs004225"`. Some support additional filters, such
 
 ## Access Guidance
 
-General Commons hosts both open and controlled-access data. For TCIA controlled-access DICOM/face datasets, focus on metadata discovery and direct users to dbGaP/DAC authorization and SB-CGC access where controlled access applies. Do not claim that controlled files can be downloaded without authorization, and do not directly download controlled data. Prefer the WordPress-derived controlled-access SQLite for manifest/spreadsheet metadata that TCIA publishes publicly; use direct GraphQL only for metadata gaps or explicit source-system checks.
+General Commons hosts both open and controlled-access data. For TCIA controlled-access DICOM/face datasets, direct users to dbGaP/DAC authorization and the current TCIA policy. Do not claim that controlled files can be downloaded without authorization. Prefer the WordPress-derived controlled-access SQLite for manifest/spreadsheet metadata that TCIA publishes publicly; use direct GraphQL only for metadata gaps or explicit source-system checks. For an authorized agent-run download, use the official manifest and TCIA Data Retriever with the user-specified JSON-key path as described in `controlled-access.md`.

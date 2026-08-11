@@ -400,7 +400,7 @@ https://www.cancerimagingarchive.net/nih-controlled-data-access-policy/
 
 That page explains how to request access, create a JSON API key after approval, and configure TCIA Data Retriever to use that key.
 
-Agents should not directly download controlled data. For controlled data, provide the policy link and, when useful, portable TCIA Data Retriever manifest guidance for later authorized use.
+Agents may assist with an authorized controlled-data download through the official TCIA Data Retriever. The user must first follow the policy/dbGaP process, manually create a JSON API key, explicitly request the transfer, and specify the path to that key. The agent should use an official WordPress/CRDC manifest and pass only the credential path with `--auth`; it must never print, copy, embed, upload, or log credential values. If those prerequisites are not met, provide the policy link and portable-manifest guidance only.
 
 Biobank controlled-access face data are now available through CTDC using the manifests and download/view links on the relevant WordPress pages. Users must request access to dbGaP study `phs002192` for these images. Use the optional controlled-access SQLite for public CTDC/General Commons manifest and metadata spreadsheet rows when file-grain metadata are needed.
 

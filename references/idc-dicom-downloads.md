@@ -8,7 +8,7 @@ Prefer IDC and `idc-index` for open-access/public DICOM downloads. TCIA is phasi
 
 For public DICOM series/file details, use IDC/idc-index after TCIA provenance and access/license status have been confirmed from the SQLite snapshot or release exports. Do not query live WordPress APIs to discover DICOM series, modality, annotation, or file details during normal end-user tasks.
 
-Controlled-access DICOM is different: do not route it to IDC or NBIA fallback for public download, and do not directly download controlled data. Use WordPress license metadata as the access-status trigger, then follow the downstream route identified by current WordPress metadata. Biobank controlled-access face data now route through CTDC from the relevant WordPress manifests/download/view links and require dbGaP access to `phs002192`; non-Biobank face data may still route through General Commons under `phs004225` when WordPress or GC metadata indicate that path. For controlled data, provide policy guidance and portable TCIA Data Retriever manifests for later authorized use when appropriate.
+Controlled-access DICOM is different: do not route it to IDC or NBIA fallback for public download. Use WordPress license metadata as the access-status trigger, then follow the downstream route identified by current WordPress metadata. Biobank controlled-access face data now route through CTDC from the relevant WordPress manifests/download/view links and require dbGaP access to `phs002192`; non-Biobank face data may still route through General Commons under `phs004225` when WordPress or GC metadata indicate that path. After an authorized user explicitly supplies the path to their own JSON API key, an agent may invoke the official TCIA Data Retriever against the official CRDC manifest by following `references/controlled-access.md`.
 
 If an IDC skill is available, use it for IDC-specific query, visualization, license, citation, and download mechanics. The TCIA skill should establish TCIA provenance through WordPress, identify the relevant WordPress download records or manifest, and provide IDC allowlist inputs such as the TCIA short title, DOI, or Series Instance UIDs.
 
@@ -34,7 +34,7 @@ Do not silently install packages. If package installation is not allowed, explai
 1. Confirm the dataset is a visible TCIA WordPress Collection or Analysis Result.
 2. Check WordPress license metadata before giving download commands.
 3. Identify DICOM download candidates from snapshot `file_type = DICOM`, existing `.tcia` manifest URLs, CSV/TSV/XLSX manifest URLs, or DICOM-specific `data_type` values such as CT, MR, PT, RTSTRUCT, SEG, SR, DX, MG, CR, NM, RTDOSE, RTPLAN, RTIMAGE, REG, KO, PR, RWV, OT, US, XA, RF, and SC.
-4. For open/public data only, before downloading, ask the user whether they want direct agent download in the current environment or a portable TCIA Data Retriever CSV manifest.
+4. For open/public data, before downloading, ask whether the user wants direct agent download in the current environment or a portable TCIA Data Retriever CSV manifest. For controlled data, require the policy/dbGaP/API-key workflow in `references/controlled-access.md`.
 5. Prefer IDC/idc-index for direct agent downloads:
    - Match by TCIA DOI, short title, IDC `collection_id`, IDC `analysis_result_id`, or Series Instance UID.
    - For existing `.tcia` manifest records, extract Series Instance UIDs and use them as the most precise allowlist.
@@ -87,7 +87,7 @@ TCIA Data Retriever accepts spreadsheets (`.csv`, `.tsv`, `.xlsx`) as manifests.
 - For PathDB/direct public file workflows, use an `imageUrl` column.
 - For DRS/controlled-access workflows from official WordPress, CTDC, or General Commons manifests, use a `drs_uri` column and remind users that authorization may be required.
 - Explain that a CSV manifest can be saved, opened with TCIA Data Retriever on another computer, or shared with a collaborator.
-- For controlled-access datasets, do not directly download files. Remind users that authorization and TCIA Data Retriever API-key configuration are required before they use a controlled manifest.
+- For controlled-access datasets, require authorization and a user-specified TCIA Data Retriever JSON-key path before downloading. If those prerequisites are absent, provide the controlled manifest and policy guidance without attempting the payload transfer.
 
 Example:
 
@@ -129,7 +129,7 @@ When giving DICOM download guidance, say explicitly:
 
 - IDC/idc-index is the preferred route for public DICOM because TCIA is phasing out NBIA.
 - WordPress remains the TCIA provenance and license source.
-- For open/public data, ask whether the user wants direct agent download or a portable TCIA Data Retriever CSV manifest. For controlled data, provide manifest guidance only.
+- For open/public data, ask whether the user wants direct agent download or a portable TCIA Data Retriever CSV manifest. For controlled data, explain the authorization steps; if the user explicitly requests the transfer and supplies their JSON-key path, use the official CRDC manifest with TCIA Data Retriever.
 - CSV manifests are useful as Series Instance UID allowlists and as portable Data Retriever inputs, while `.tcia` is legacy. Downloading through NBIA APIs should be fallback-only for public DICOM.
 - If NBIA fallback is required, use the NBIA v4 API documented by `https://cbiit.github.io/NBIA-TCIA/nbia-api.yaml`.
 - Controlled-access DICOM metadata should be handled through WordPress plus the downstream route identified by current WordPress metadata, such as CTDC for Biobank controlled-access face data or General Commons under `phs004225` for non-Biobank face data routed there; follow TCIA controlled-access guidance and do not imply public download.

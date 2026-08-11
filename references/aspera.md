@@ -5,7 +5,7 @@ Some TCIA non-DICOM data are distributed through IBM Aspera Faspex package links
 ## Core Rules
 
 - Do not reconstruct package URLs. Use the exact Faspex link exposed by the TCIA dataset page or WordPress download metadata.
-- Do not directly download controlled-access packages. Use this guidance only after WordPress license/access metadata confirms the relevant download is open/non-controlled.
+- Do not use Aspera to bypass a controlled-access route. Use this Aspera guidance only after WordPress license/access metadata confirms the relevant Faspex download is open/non-controlled. When WordPress identifies a controlled CRDC manifest, follow `controlled-access.md` and use TCIA Data Retriever with the authorized user's JSON-key path instead.
 - Browse before transferring large packages. A package inventory is often enough to answer file-count, filename, and folder-layout questions.
 - Preserve browse output as a local CSV when doing metadata work. Future refreshes can reuse successful listings until the WordPress download ID, URL, date, or size changes.
 - Treat Aspera package listings as file inventory, not rich metadata. Look for companion spreadsheets/TSVs/XLSX files and root `.sums` files before recursively scanning a huge package.

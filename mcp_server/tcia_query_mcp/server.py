@@ -46,8 +46,10 @@ Work this way:
 4. Use the optional sidecar tools only after confirming TCIA provenance in the
    base snapshot: patient-level clinical metadata, controlled-access files,
    public NIfTI metadata, and pathology Aspera/PathDB metadata.
-5. Do not directly download controlled data. Return policy and manifest/DRS
-   guidance only.
+5. This MCP server is a read-only metadata service and does not transfer payloads.
+   Return policy and manifest/DRS guidance. A capable client agent may invoke the
+   official TCIA Data Retriever after the user supplies their authorized JSON-key
+   path, following the skill's controlled-access guidance.
 """
 
 GUIDE = f"""\

@@ -98,7 +98,7 @@ Mixed access rule:
 - `resolved_access_level = 'mixed'` means some current downloads are controlled and others are not.
 - Do not imply the whole dataset is open.
 - Separate open/noncontrolled downloads from controlled downloads in the answer.
-- Do not directly download controlled data. For controlled downloads, provide the TCIA NIH Controlled Data Access Policy link and, when useful, portable TCIA Data Retriever manifest guidance only.
+- For controlled downloads, provide the TCIA NIH Controlled Data Access Policy link and explain dbGaP authorization. If the user explicitly requests a transfer and supplies their valid JSON-key path, use the official CRDC manifest with TCIA Data Retriever as described in `controlled-access.md`; otherwise provide manifest guidance only.
 
 Inspect a mixed dataset:
 
