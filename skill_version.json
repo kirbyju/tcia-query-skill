@@ -1,6 +1,6 @@
 {
   "files": {
-    "README.md": "1e2ce28edcc63f31178c0c3aa133a90f8b3310ee73a192e0df655eb775aa66af",
+    "README.md": "f6ed7f11af58aaf6430c0e50fa1fc17e3dfbdd2578957d87d0ba6f756bb221e2",
     "SKILL.md": "6754d654d4ab3622b86b60de13bf28b613563076cbae65a31cac3e8337da1664",
     "agents/openai.yaml": "cb402f844c6528ad862af318e03e78c9d355b0410c631f2f01aec84a1f610014",
     "mcp_server/DEPLOYMENT.md": "73f35ad54c28209f600f713e50bd753e0eb7d7ade93af6a719ea84b4767ef6e0",
@@ -59,6 +59,6 @@
     "scripts/tests/test_tcia_snapshot.py": "35dbe7b25518c09a6160cda5981cc5fd0a5e13e66c544dc19364f04bef059641"
   },
   "schema_version": 1,
-  "skill_version": "2026.08.11.1",
-  "updated_at_utc": "2026-08-11T19:21:16.854905+00:00"
+  "skill_version": "2026.08.12.1",
+  "updated_at_utc": "2026-08-12T19:29:52.957241+00:00"
 }
