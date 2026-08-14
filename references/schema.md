@@ -19,12 +19,18 @@ Automated decisions use `decision_status='accepted_automated'` and record
 `human_reviewed=false` in provenance; they require complete, unambiguous
 download coverage. Partial candidates remain in the review-issues view.
 
-Public non-DICOM schema v3 represents participant cardinality in
+Public non-DICOM schema v4 represents participant cardinality in
 `public_non_dicom_asset_participants` and exposes
 `agent_public_non_dicom_asset_participants`. Query that junction for file-level
 Participant Explorer drill-downs, including shared assets such as HANCOCK whole
 TMA block slides. The scalar asset `subject_id` remains a convenience for
 one-participant files and is intentionally empty for multi-participant assets.
+`represented_file_count` and the agent-view `represented_files` totals support
+compact participant/modality summaries when retaining every source file as an
+asset row would be wasteful. The initial use is the reviewed BraTS 2021 public
+DICOM trees that are available through Aspera but absent from IDC; these rows
+remain distinguishable with `file_format='DICOM'` and
+`source_system='tcia_aspera'`.
 
 The optional pathology Aspera SQLite is also separate from `cache/tcia_snapshot.sqlite`. It is downloaded only when needed with `python scripts/tcia_pathology_metadata.py ensure`, defaults to `cache/pathology_metadata.sqlite`, and is documented in `references/pathology.md`.
 

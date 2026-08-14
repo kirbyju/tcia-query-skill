@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
-"""Build and query the TCIA public non-DICOM imaging metadata sidecar.
+"""Build and query the TCIA public non-IDC imaging metadata sidecar.
 
 The builder preserves logical assets separately from their delivery/viewing
 locations. It treats PathDB, Aspera, WordPress attachments, and AWS Open Data
-as managed systems, not as mutually exclusive data categories.
+as managed systems, not as mutually exclusive data categories. The historical
+artifact name remains ``public_non_dicom_metadata``; narrowly scoped public
+DICOM holdings that are distributed by TCIA but absent from IDC are retained
+as explicit exceptions.
 """
 
 from __future__ import annotations
@@ -104,6 +107,7 @@ CREATE TABLE public_non_dicom_assets (
     imaging_domain TEXT NOT NULL,
     modality TEXT,
     object_role TEXT NOT NULL,
+    represented_file_count INTEGER,
     size_bytes INTEGER,
     checksum TEXT,
     checksum_algorithm TEXT,
@@ -266,6 +270,8 @@ SELECT
     a.short_title,
     COUNT(*) AS asset_rows,
     SUM(CASE WHEN asset_granularity = 'file' THEN 1 ELSE 0 END) AS file_assets,
+    SUM(CASE WHEN asset_granularity IN ('file', 'participant_modality')
+             THEN COALESCE(represented_file_count, 1) ELSE 0 END) AS represented_files,
     SUM(CASE WHEN asset_granularity = 'download' THEN 1 ELSE 0 END) AS download_assets,
     (SELECT COUNT(DISTINCT ap.subject_id)
        FROM public_non_dicom_asset_participants ap
@@ -284,20 +290,25 @@ CREATE VIEW agent_public_non_dicom_participant_summary AS
 SELECT
     a.dataset_type,
     a.short_title,
+    a.source_system,
     ap.subject_id,
     ap.subject_id_namespace,
     ap.link_status AS participant_link_status,
     COUNT(*) AS asset_rows,
     SUM(CASE WHEN a.asset_granularity = 'file' THEN 1 ELSE 0 END) AS file_assets,
+    SUM(CASE WHEN a.asset_granularity IN ('file', 'participant_modality')
+             THEN COALESCE(a.represented_file_count, 1) ELSE 0 END) AS represented_files,
     group_concat(DISTINCT a.file_format) AS file_formats,
     group_concat(DISTINCT a.media_kind) AS media_kinds,
     group_concat(DISTINCT a.imaging_domain) AS imaging_domains,
     group_concat(DISTINCT a.modality) AS modalities,
     group_concat(DISTINCT a.object_role) AS object_roles,
+    MAX(NULLIF(a.source_url, '')) AS access_route,
     SUM(COALESCE(a.size_bytes, 0)) AS known_size_bytes
 FROM public_non_dicom_asset_participants ap
 JOIN public_non_dicom_assets a USING (asset_id)
-GROUP BY a.dataset_type, a.short_title, ap.subject_id, ap.subject_id_namespace, ap.link_status;
+GROUP BY a.dataset_type, a.short_title, a.source_system,
+         ap.subject_id, ap.subject_id_namespace, ap.link_status;
 
 CREATE VIEW agent_public_non_dicom_review_issues AS
 SELECT * FROM public_non_dicom_review_issues;
@@ -634,6 +645,13 @@ def ingest_nifti(conn: sqlite3.Connection, nifti_db: Path) -> int:
             asset_id = stable_id("asset", "nifti", row["short_title"], row["radiology_id"])
             derived = bool(row["is_derived_object"])
             role = "segmentation" if derived else "source_image"
+            representation = default_representation_class(system)
+            if (
+                str(row["short_title"]).casefold()
+                == "rsna-asnr-miccai-brats-2021".casefold()
+                and re.search(r"/BraTS2021_(?:Training|Validation)Set/", package_path)
+            ):
+                representation = "standardized_representation"
             insert_asset(
                 conn,
                 {
@@ -657,10 +675,11 @@ def ingest_nifti(conn: sqlite3.Connection, nifti_db: Path) -> int:
                     "imaging_domain": "radiology",
                     "modality": row["modality"] or "",
                     "object_role": role,
+                    "represented_file_count": 1,
                     "size_bytes": None,
                     "checksum": "",
                     "checksum_algorithm": "",
-                    "representation_provenance_class": default_representation_class(system),
+                    "representation_provenance_class": representation,
                     "source_system": system,
                     "source_record_id": row["radiology_id"],
                     "source_url": url,
@@ -672,6 +691,169 @@ def ingest_nifti(conn: sqlite3.Connection, nifti_db: Path) -> int:
             insert_location(conn, location_values(asset_id, url, provenance={"source_artifact": "nifti_metadata"}))
             count += 1
     return count
+
+
+BRATS_DICOM_PATH = re.compile(
+    r"^(?P<root>.+/BraTS2021_(?P<cohort>Training|Validation)Set_dcm/"
+    r"(?P<source_group>[^/]+)/(?P<raw_subject_id>\d{5})/(?P<modality>[^/]+))/"
+    r"(?P<file_name>[^/]+\.dcm)$",
+    re.IGNORECASE,
+)
+
+
+def ingest_aspera_public_dicom_exceptions(
+    conn: sqlite3.Connection, nifti_db: Path
+) -> int:
+    """Import compact participant/modality summaries for public DICOM absent from IDC.
+
+    The legacy NIfTI sidecar intentionally retains every row from package-level
+    ``.sums`` inventories. BraTS 2021 uses that inventory for parallel NIfTI and
+    DICOM trees, including nine participants that occur only in the DICOM tree.
+    Store one logical asset per participant/modality rather than duplicating
+    hundreds of thousands of DICOM-instance rows.
+    """
+    if not nifti_db.exists():
+        return 0
+    with connect(nifti_db) as source:
+        if not table_exists(source, "aspera_root_sums_inventory"):
+            return 0
+        downloads: dict[tuple[str, str], str] = {}
+        if table_exists(source, "agent_nifti_downloads"):
+            for row in source.execute(
+                "SELECT short_title, download_id, download_url FROM agent_nifti_downloads"
+            ):
+                downloads[(str(row["short_title"]), str(row["download_id"] or ""))] = str(
+                    row["download_url"] or ""
+                )
+        grouped: dict[tuple[str, ...], dict[str, Any]] = {}
+        for row in source.execute(
+            """
+            SELECT dataset_type, short_title, download_id, package_path
+            FROM aspera_root_sums_inventory
+            WHERE lower(short_title) = lower('RSNA-ASNR-MICCAI-BraTS-2021')
+              AND lower(ltrim(file_ext, '.')) = 'dcm'
+            ORDER BY line_number
+            """
+        ):
+            package_path = str(row["package_path"] or "")
+            match = BRATS_DICOM_PATH.match(package_path)
+            if not match:
+                continue
+            raw_subject_id = match.group("raw_subject_id")
+            subject_id = f"BraTS2021_{raw_subject_id}"
+            key = (
+                str(row["dataset_type"] or "Analysis Result"),
+                str(row["short_title"]),
+                str(row["download_id"] or ""),
+                match.group("cohort").title(),
+                match.group("source_group"),
+                raw_subject_id,
+                match.group("modality"),
+                match.group("root"),
+            )
+            item = grouped.setdefault(
+                key,
+                {
+                    "subject_id": subject_id,
+                    "file_count": 0,
+                },
+            )
+            item["file_count"] += 1
+
+        for key, item in grouped.items():
+            (
+                dataset_type,
+                short_title,
+                download_id,
+                cohort,
+                source_group,
+                raw_subject_id,
+                modality,
+                package_root,
+            ) = key
+            subject_id = str(item["subject_id"])
+            file_count = int(item["file_count"])
+            url = downloads.get((short_title, download_id), "")
+            asset_id = stable_id(
+                "asset",
+                "aspera_public_dicom_exception",
+                short_title,
+                cohort,
+                source_group,
+                raw_subject_id,
+                modality,
+            )
+            insert_asset(
+                conn,
+                {
+                    "asset_id": asset_id,
+                    "dataset_type": dataset_type,
+                    "short_title": short_title,
+                    "download_row_id": None,
+                    "download_id": download_id,
+                    "subject_id": subject_id,
+                    "subject_id_namespace": f"tcia_dataset:{short_title}",
+                    "participant_link_status": "dataset_scoped_source_identifier",
+                    "asset_granularity": "participant_modality",
+                    "asset_name": f"{subject_id} {modality} DICOM instances",
+                    "file_name": "",
+                    "package_path": package_root,
+                    "file_format": "DICOM",
+                    "container_format": "",
+                    "media_kind": "dicom_instance_collection",
+                    "spatial_dimensionality": "unknown",
+                    "temporal_dimensionality": "unknown",
+                    "imaging_domain": "radiology",
+                    "modality": modality,
+                    "object_role": "source_image",
+                    "represented_file_count": file_count,
+                    "size_bytes": None,
+                    "checksum": "",
+                    "checksum_algorithm": "",
+                    "representation_provenance_class": "submitted_original",
+                    "source_system": "tcia_aspera",
+                    "source_record_id": (
+                        f"{download_id}:BraTS2021_{cohort}Set_dcm:"
+                        f"{source_group}:{raw_subject_id}:{modality}"
+                    ),
+                    "source_url": url,
+                    "raw_values_json": json_dumps(
+                        {
+                            "challenge_cohort": cohort,
+                            "source_group": source_group,
+                            "raw_subject_folder": raw_subject_id,
+                            "represented_dicom_instances": file_count,
+                        }
+                    ),
+                    "provenance_json": json_dumps(
+                        {
+                            "source_artifact": "nifti_metadata",
+                            "source_table": "aspera_root_sums_inventory",
+                            "inventory_scope": "public_aspera_dicom_not_in_idc",
+                            "identifier_method": "BraTS DICOM folder normalized to challenge ID",
+                        }
+                    ),
+                    "quality_flag_json": json_dumps(
+                        {
+                            "idc_availability": "not_observed",
+                            "file_detail_pointer": "aspera_root_sums_inventory",
+                        }
+                    ),
+                },
+            )
+            insert_location(
+                conn,
+                location_values(
+                    asset_id,
+                    url,
+                    representation_class="submitted_original",
+                    provenance={
+                        "source_artifact": "nifti_metadata",
+                        "source_table": "aspera_root_sums_inventory",
+                    },
+                ),
+            )
+    return len(grouped)
 
 
 def ingest_pathology_packages(conn: sqlite3.Connection, pathology_db: Path) -> int:
@@ -1289,6 +1471,9 @@ def build_database(
         counts = {
             "wordpress_download_assets": ingest_wordpress(conn, snapshot_db),
             "nifti_file_assets": ingest_nifti(conn, nifti_db) if nifti_db else 0,
+            "aspera_public_dicom_exception_assets": (
+                ingest_aspera_public_dicom_exceptions(conn, nifti_db) if nifti_db else 0
+            ),
             "pathology_package_assets": ingest_pathology_packages(conn, pathology_db) if pathology_db else 0,
             "pathdb_file_assets": ingest_pathdb(conn, snapshot_db, include_pathdb_files),
         }

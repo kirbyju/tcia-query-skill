@@ -12,7 +12,7 @@ installation audience differ. Compose them through the Participant Inventory.
 | --- | --- | --- |
 | Base TCIA snapshot | WordPress publication identity, downloads, licenses, and routes | Required |
 | IDC | Authoritative public DICOM metadata and access | Query/project only; do not duplicate file metadata |
-| Public non-DICOM metadata | Public imaging and imaging-derived objects not represented by IDC | Optional detail artifact |
+| Public non-DICOM metadata | Public imaging and imaging-derived objects not represented by IDC; the historical artifact name also carries narrowly scoped Aspera-only public-DICOM exceptions | Optional detail artifact |
 | Controlled-access metadata | Public metadata describing GC/CTDC controlled DICOM and non-DICOM holdings | Optional detail artifact |
 | Clinical metadata | Raw, normalized, harmonized, inferred, and resolved participant facts | Optional enrichment |
 | Participant Inventory | Compact dataset-scoped participant availability across the above sources | Participant Explorer integration artifact |
@@ -105,6 +105,17 @@ The initial builder imports current visible public non-DICOM download
 declarations from WordPress, file-level NIfTI rows from the legacy NIfTI
 artifact, original package-file inventories from the pathology artifact, and
 PathDB file rows in full release mode.
+
+Public DICOM normally remains an IDC query concern and is not duplicated here.
+When a TCIA-published public DICOM representation is distributed through an
+Aspera package but is absent from IDC, retain a compact exception in the same
+physical detail artifact with `file_format='DICOM'`,
+`source_system='tcia_aspera'`, and participant/modality-level represented-file
+counts. This keeps the Participant Inventory complete without implying IDC
+availability or copying hundreds of thousands of instance rows. The BraTS 2021
+parallel `*Set_dcm` trees are the initial reviewed exception; their companion
+NIfTI trees are marked `standardized_representation`, while the package DICOM
+trees are marked `submitted_original`.
 
 Retain `participant_link_status='dataset_only'` when a download is known but no
 source-supported participant-to-file crosswalk exists. Never spread a

@@ -9,7 +9,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 MANAGED_SYSTEMS = {
     "tcia_wordpress",

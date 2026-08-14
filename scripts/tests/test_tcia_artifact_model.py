@@ -95,6 +95,7 @@ class BuilderTests(unittest.TestCase):
               camicroscope_url TEXT, wsiimage_url TEXT, data_format TEXT,
               modality TEXT, protocol TEXT, magnification TEXT
             );
+            CREATE TABLE agent_datasets (dataset_type TEXT, short_title TEXT);
             """
         )
         rows = [
@@ -113,6 +114,10 @@ class BuilderTests(unittest.TestCase):
              '["Radiology Images"]', '["CT"]', '["DICOM"]', 0, 0),
         ]
         conn.executemany("INSERT INTO agent_current_downloads VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
+        conn.executemany(
+            "INSERT INTO agent_datasets VALUES (?, ?)",
+            [(row[1], row[2]) for row in rows],
+        )
         conn.commit()
         conn.close()
 
@@ -158,6 +163,144 @@ class BuilderTests(unittest.TestCase):
             participants.participant_key("Collection", "Dataset-A", "001"),
             participants.participant_key("Collection", "Dataset-B", "001"),
         )
+
+    def test_brats_aspera_dicom_exception_recovers_dicom_only_participants(self):
+        import sqlite3
+
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            snapshot = base / "snapshot.sqlite"
+            nifti = base / "nifti.sqlite"
+            public_db = base / "public.sqlite"
+            participant_db = base / "participants.sqlite"
+            self.build_snapshot(snapshot)
+
+            conn = sqlite3.connect(snapshot)
+            conn.execute(
+                "INSERT INTO agent_current_downloads VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    5, "Analysis Result", "RSNA-ASNR-MICCAI-BraTS-2021", "46595",
+                    "Challenge data both tasks", "BraTS 2021", "https://faspex.example/package",
+                    "1", "tb", '["Radiology Images"]', '["MR"]',
+                    '["DICOM","NIfTI"]', 0, 0,
+                ),
+            )
+            conn.execute(
+                "INSERT INTO agent_datasets VALUES (?, ?)",
+                ("Analysis Result", "RSNA-ASNR-MICCAI-BraTS-2021"),
+            )
+            conn.commit()
+            conn.close()
+
+            conn = sqlite3.connect(nifti)
+            conn.executescript(
+                """
+                CREATE TABLE agent_nifti_files (short_title TEXT, package_path TEXT);
+                CREATE TABLE agent_nifti_downloads (
+                  short_title TEXT, download_id TEXT, download_url TEXT
+                );
+                CREATE TABLE aspera_root_sums_inventory (
+                  dataset_type TEXT, short_title TEXT, download_id TEXT,
+                  package_path TEXT, file_ext TEXT, line_number INTEGER
+                );
+                """
+            )
+            conn.execute(
+                "INSERT INTO agent_nifti_downloads VALUES (?,?,?)",
+                (
+                    "RSNA-ASNR-MICCAI-BraTS-2021", "46595",
+                    "https://faspex.example/package",
+                ),
+            )
+            paths = [
+                "RSNA-ASNR-MICCAI-BraTS-2021/BraTS2021_TrainingSet_dcm/"
+                "new-not-previously-in-TCIA/00794/T2w/Image-1.dcm",
+                "RSNA-ASNR-MICCAI-BraTS-2021/BraTS2021_TrainingSet_dcm/"
+                "new-not-previously-in-TCIA/00794/T2w/Image-2.dcm",
+                "RSNA-ASNR-MICCAI-BraTS-2021/BraTS2021_TrainingSet_dcm/"
+                "new-not-previously-in-TCIA/00794/FLAIR/Image-1.dcm",
+                "RSNA-ASNR-MICCAI-BraTS-2021/BraTS2021_ValidationSet_dcm/"
+                "new-not-previously-in-TCIA/00393/T1w/Image-1.dcm",
+            ]
+            conn.executemany(
+                "INSERT INTO aspera_root_sums_inventory VALUES (?,?,?,?,?,?)",
+                [
+                    (
+                        "Analysis Result", "RSNA-ASNR-MICCAI-BraTS-2021", "46595",
+                        path, "dcm", index,
+                    )
+                    for index, path in enumerate(paths, 1)
+                ],
+            )
+            conn.commit()
+            conn.close()
+
+            result = public.build_database(
+                snapshot,
+                public_db,
+                nifti_db=nifti,
+                pathology_db=None,
+                include_pathdb_files=False,
+                replace=True,
+            )
+            self.assertEqual(result["counts"]["aspera_public_dicom_exception_assets"], 3)
+
+            conn = sqlite3.connect(public_db)
+            rows = conn.execute(
+                """
+                SELECT subject_id, modality, represented_file_count,
+                       representation_provenance_class, source_system
+                FROM public_non_dicom_assets
+                WHERE file_format='DICOM'
+                ORDER BY subject_id, modality
+                """
+            ).fetchall()
+            self.assertEqual(
+                rows,
+                [
+                    ("BraTS2021_00393", "T1w", 1, "submitted_original", "tcia_aspera"),
+                    ("BraTS2021_00794", "FLAIR", 1, "submitted_original", "tcia_aspera"),
+                    ("BraTS2021_00794", "T2w", 2, "submitted_original", "tcia_aspera"),
+                ],
+            )
+            conn.close()
+
+            participants.build_database(
+                participant_db,
+                snapshot_db=snapshot,
+                public_db=public_db,
+                controlled_db=base / "missing-controlled.sqlite",
+                clinical_db=base / "missing-clinical.sqlite",
+                replace=True,
+            )
+            conn = sqlite3.connect(participant_db)
+            participant_rows = conn.execute(
+                """
+                SELECT display_participant_id, has_public_dicom,
+                       has_public_non_dicom, file_formats
+                FROM agent_participant_search
+                WHERE short_title='RSNA-ASNR-MICCAI-BraTS-2021'
+                ORDER BY display_participant_id
+                """
+            ).fetchall()
+            self.assertEqual(
+                participant_rows,
+                [
+                    ("BraTS2021_00393", 1, 0, "DICOM"),
+                    ("BraTS2021_00794", 1, 0, "DICOM"),
+                ],
+            )
+            file_counts = dict(
+                conn.execute(
+                    """
+                    SELECT p.display_participant_id, a.file_count
+                    FROM participant_assets a JOIN participants p USING(participant_key)
+                    WHERE p.short_title='RSNA-ASNR-MICCAI-BraTS-2021'
+                    """
+                )
+            )
+            self.assertEqual(file_counts, {"BraTS2021_00393": 1, "BraTS2021_00794": 3})
+            conn.close()
 
     def test_participant_inventory_unifies_exact_same_dataset_identifiers(self):
         import sqlite3

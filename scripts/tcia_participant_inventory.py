@@ -176,8 +176,13 @@ SELECT
     COUNT(DISTINCT a.participant_asset_id) AS inventory_rows,
     MAX(CASE WHEN a.access_level = 'open' THEN 1 ELSE 0 END) AS has_open_data,
     MAX(CASE WHEN a.access_level = 'controlled' THEN 1 ELSE 0 END) AS has_controlled_data,
-    MAX(CASE WHEN a.managed_system = 'crdc_idc' THEN 1 ELSE 0 END) AS has_public_dicom,
-    MAX(CASE WHEN a.source_artifact = 'public_non_dicom_metadata' THEN 1 ELSE 0 END) AS has_public_non_dicom,
+    MAX(CASE WHEN a.access_level = 'open' AND instr(upper(COALESCE(a.file_format, '')), 'DICOM') > 0
+             THEN 1 ELSE 0 END) AS has_public_dicom,
+    MAX(CASE WHEN a.source_artifact = 'public_non_dicom_metadata'
+                  AND (COALESCE(a.file_format, '') = ''
+                       OR instr(upper(a.file_format), 'DICOM') = 0
+                       OR instr(upper(a.file_format), 'NIFTI') > 0)
+             THEN 1 ELSE 0 END) AS has_public_non_dicom,
     MAX(CASE WHEN a.source_artifact = 'clinical_metadata' THEN 1 ELSE 0 END) AS has_clinical,
     group_concat(DISTINCT NULLIF(a.data_domain, '')) AS data_domains,
     group_concat(DISTINCT NULLIF(a.modality, '')) AS modalities,
@@ -355,6 +360,11 @@ def ingest_public_non_dicom(
             raw_id = str(row["subject_id"] or "").strip()
             if not raw_id:
                 continue
+            source_system = (
+                str(row["source_system"] or "tcia_wordpress")
+                if "source_system" in row.keys()
+                else "tcia_wordpress"
+            )
             dataset_type, short_title = resolve_dataset_identity(
                 dataset_types, str(row["short_title"]), str(row["dataset_type"] or "Collection")
             )
@@ -363,16 +373,19 @@ def ingest_public_non_dicom(
                 dataset_type,
                 short_title,
                 raw_id,
-                managed_system="tcia_wordpress",
+                managed_system=source_system,
                 namespace=f"tcia_dataset:{row['short_title']}",
                 evidence=str(row["participant_link_status"] or "dataset_scoped_source_identifier"),
                 provenance={"source_artifact": "public_non_dicom_metadata"},
             )
-            asset_id = stable_id("pa", key, "public_non_dicom", row["file_formats"], row["object_roles"])
+            asset_id = stable_id(
+                "pa", key, "public_non_dicom", source_system,
+                row["file_formats"], row["object_roles"],
+            )
             add_asset(conn, {
                 "participant_asset_id": asset_id,
                 "participant_key": key,
-                "managed_system": "tcia_wordpress",
+                "managed_system": source_system,
                 "source_artifact": "public_non_dicom_metadata",
                 "access_level": "open",
                 "data_domain": row["imaging_domains"] or "other_imaging",
@@ -382,14 +395,25 @@ def ingest_public_non_dicom(
                 "object_role": row["object_roles"] or "",
                 "study_count": None,
                 "series_count": None,
-                "file_count": row["file_assets"] or row["asset_rows"],
+                "file_count": (
+                    row["represented_files"]
+                    if "represented_files" in row.keys() and row["represented_files"]
+                    else row["file_assets"] or row["asset_rows"]
+                ),
                 "known_size_bytes": row["known_size_bytes"] or 0,
                 "has_file_level_metadata": 1,
                 "detail_pointer": f"agent_public_non_dicom_asset_participants:{row['short_title']}:{raw_id}",
-                "access_route": "",
+                "access_route": (
+                    row["access_route"]
+                    if "access_route" in row.keys() and row["access_route"]
+                    else ""
+                ),
                 "inventory_status": "known",
-                "source_version": "schema-v3",
-                "provenance_json": json_dumps({"source_view": "agent_public_non_dicom_participant_summary"}),
+                "source_version": "schema-v4",
+                "provenance_json": json_dumps({
+                    "source_view": "agent_public_non_dicom_participant_summary",
+                    "managed_system": source_system,
+                }),
             })
             imported += 1
         for row in source.execute(
