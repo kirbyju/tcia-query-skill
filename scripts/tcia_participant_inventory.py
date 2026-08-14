@@ -13,6 +13,7 @@ import sqlite3
 import tempfile
 import urllib.parse
 import urllib.request
+from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -22,6 +23,7 @@ from tcia_artifact_model import json_dumps, stable_id
 
 
 SKILL_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_SNAPSHOT_DB = SKILL_ROOT / "cache" / "tcia_snapshot.sqlite"
 DEFAULT_PUBLIC_DB = SKILL_ROOT / "cache" / "public_non_dicom_metadata.sqlite"
 DEFAULT_CONTROLLED_DB = SKILL_ROOT / "cache" / "controlled_access_metadata.sqlite"
 DEFAULT_CLINICAL_DB = SKILL_ROOT / "cache" / "clinical_metadata.sqlite"
@@ -31,7 +33,7 @@ DEFAULT_RELEASE_TAG = "tcia-metadata-v2-preview"
 DEFAULT_REPOSITORY = "kirbyju/tcia-query-skill"
 DB_ASSET = "participant_inventory.sqlite.gz"
 MANIFEST_ASSET = "participant_inventory_manifest.json"
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 SCHEMA = """
@@ -48,6 +50,8 @@ CREATE TABLE participants (
     short_title TEXT NOT NULL,
     display_participant_id TEXT NOT NULL,
     identity_scope TEXT NOT NULL DEFAULT 'dataset_scoped',
+    within_dataset_identity_status TEXT NOT NULL DEFAULT 'single_namespace',
+    identity_resolution_method TEXT NOT NULL DEFAULT 'source_identifier',
     cross_dataset_identity_status TEXT NOT NULL DEFAULT 'not_asserted'
 );
 
@@ -142,6 +146,18 @@ CREATE TABLE participant_link_issues (
     evidence_json TEXT NOT NULL DEFAULT '{}'
 );
 
+CREATE TABLE participant_identity_evidence (
+    identity_evidence_id TEXT PRIMARY KEY,
+    participant_key TEXT NOT NULL,
+    resolution_scope TEXT NOT NULL,
+    resolution_method TEXT NOT NULL,
+    status TEXT NOT NULL,
+    confidence TEXT NOT NULL,
+    description TEXT NOT NULL,
+    evidence_json TEXT NOT NULL DEFAULT '{}',
+    FOREIGN KEY (participant_key) REFERENCES participants(participant_key)
+);
+
 CREATE INDEX idx_pi_participants_dataset ON participants(short_title, display_participant_id);
 CREATE INDEX idx_pi_identifiers_raw ON participant_identifiers(identifier_namespace, raw_identifier);
 CREATE INDEX idx_pi_assets_participant ON participant_assets(participant_key);
@@ -151,15 +167,21 @@ CREATE INDEX idx_pi_clinical_participant ON participant_clinical_values(particip
 CREATE VIEW agent_participants AS
 SELECT
     p.*,
+    (SELECT COUNT(DISTINCT i.identifier_namespace)
+     FROM participant_identifiers i
+     WHERE i.participant_key = p.participant_key) AS source_namespace_count,
+    (SELECT group_concat(DISTINCT i.identifier_namespace)
+     FROM participant_identifiers i
+     WHERE i.participant_key = p.participant_key) AS source_namespaces,
     COUNT(DISTINCT a.participant_asset_id) AS inventory_rows,
     MAX(CASE WHEN a.access_level = 'open' THEN 1 ELSE 0 END) AS has_open_data,
     MAX(CASE WHEN a.access_level = 'controlled' THEN 1 ELSE 0 END) AS has_controlled_data,
     MAX(CASE WHEN a.managed_system = 'crdc_idc' THEN 1 ELSE 0 END) AS has_public_dicom,
     MAX(CASE WHEN a.source_artifact = 'public_non_dicom_metadata' THEN 1 ELSE 0 END) AS has_public_non_dicom,
     MAX(CASE WHEN a.source_artifact = 'clinical_metadata' THEN 1 ELSE 0 END) AS has_clinical,
-    group_concat(DISTINCT a.data_domain) AS data_domains,
-    group_concat(DISTINCT a.modality) AS modalities,
-    group_concat(DISTINCT a.file_format) AS file_formats,
+    group_concat(DISTINCT NULLIF(a.data_domain, '')) AS data_domains,
+    group_concat(DISTINCT NULLIF(a.modality, '')) AS modalities,
+    group_concat(DISTINCT NULLIF(a.file_format, '')) AS file_formats,
     group_concat(DISTINCT a.managed_system) AS managed_systems
 FROM participants p
 LEFT JOIN participant_assets a USING(participant_key)
@@ -185,6 +207,14 @@ SELECT * FROM dataset_assets_without_participant_crosswalk;
 
 CREATE VIEW agent_participant_link_issues AS
 SELECT * FROM participant_link_issues;
+
+CREATE VIEW agent_participant_identity_evidence AS
+SELECT e.*, p.dataset_type, p.short_title, p.display_participant_id
+FROM participant_identity_evidence e
+JOIN participants p USING(participant_key);
+
+CREATE VIEW agent_participant_search AS
+SELECT * FROM agent_participants;
 """
 
 
@@ -208,11 +238,45 @@ def file_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def participant_key(
-    dataset_type: str, short_title: str, identifier_namespace: str, raw_identifier: str
-) -> str:
-    return stable_id(
-        "participant", dataset_type, short_title, identifier_namespace, raw_identifier
+def participant_key(dataset_type: str, short_title: str, raw_identifier: str) -> str:
+    """Return one canonical key for an exact identifier within one TCIA dataset."""
+    return stable_id("participant", dataset_type, short_title, raw_identifier)
+
+
+def load_dataset_types(snapshot_db: Path) -> dict[str, tuple[str, str]]:
+    """Map a TCIA short title to its authoritative WordPress dataset identity."""
+    if not snapshot_db.exists():
+        raise FileNotFoundError(f"Base TCIA snapshot does not exist: {snapshot_db}")
+    with connect(snapshot_db) as source:
+        if not table_exists(source, "agent_datasets"):
+            raise RuntimeError("Base TCIA snapshot is missing agent_datasets")
+        rows = source.execute(
+            "SELECT DISTINCT dataset_type, short_title FROM agent_datasets "
+            "WHERE COALESCE(short_title, '') <> ''"
+        ).fetchall()
+    result: dict[str, tuple[str, str]] = {}
+    for row in rows:
+        short_title = str(row["short_title"]).strip()
+        dataset_type = str(row["dataset_type"] or "Collection").strip()
+        key = short_title.casefold()
+        previous = result.get(key)
+        identity = (dataset_type, short_title)
+        if previous and previous != identity:
+            raise RuntimeError(
+                "Ambiguous WordPress dataset identity for short title "
+                f"{short_title!r}: {previous[0]!r} and {dataset_type!r}"
+            )
+        result[key] = identity
+    return result
+
+
+def resolve_dataset_identity(
+    dataset_types: dict[str, tuple[str, str]], short_title: str, fallback_type: str
+) -> tuple[str, str]:
+    supplied = str(short_title or "").strip()
+    return dataset_types.get(
+        supplied.casefold(),
+        (str(fallback_type or "Collection").strip() or "Collection", supplied),
     )
 
 
@@ -227,10 +291,15 @@ def ensure_participant(
     evidence: str,
     provenance: dict[str, Any],
 ) -> str:
-    key = participant_key(dataset_type, short_title, namespace, raw_identifier)
+    normalized_identifier = str(raw_identifier or "").strip()
+    key = participant_key(dataset_type, short_title, normalized_identifier)
     conn.execute(
-        "INSERT OR IGNORE INTO participants VALUES (?, ?, ?, ?, 'dataset_scoped', 'not_asserted')",
-        (key, dataset_type, short_title, raw_identifier),
+        """
+        INSERT OR IGNORE INTO participants
+        VALUES (?, ?, ?, ?, 'dataset_scoped', 'single_namespace',
+                'source_identifier', 'not_asserted')
+        """,
+        (key, dataset_type, short_title, normalized_identifier),
     )
     identifier_id = stable_id("pid", key, managed_system, namespace, raw_identifier)
     conn.execute(
@@ -244,7 +313,7 @@ def ensure_participant(
             managed_system,
             namespace,
             raw_identifier,
-            raw_identifier.strip(),
+            normalized_identifier,
             evidence,
             json_dumps(provenance),
         ),
@@ -269,7 +338,11 @@ def record_source(
     )
 
 
-def ingest_public_non_dicom(conn: sqlite3.Connection, path: Path) -> int:
+def ingest_public_non_dicom(
+    conn: sqlite3.Connection,
+    path: Path,
+    dataset_types: dict[str, tuple[str, str]],
+) -> int:
     if not path.exists():
         record_source(conn, "public_non_dicom_metadata", path, False, 0, "Optional source not installed.")
         return 0
@@ -282,10 +355,13 @@ def ingest_public_non_dicom(conn: sqlite3.Connection, path: Path) -> int:
             raw_id = str(row["subject_id"] or "").strip()
             if not raw_id:
                 continue
+            dataset_type, short_title = resolve_dataset_identity(
+                dataset_types, str(row["short_title"]), str(row["dataset_type"] or "Collection")
+            )
             key = ensure_participant(
                 conn,
-                str(row["dataset_type"] or "Collection"),
-                str(row["short_title"]),
+                dataset_type,
+                short_title,
                 raw_id,
                 managed_system="tcia_wordpress",
                 namespace=f"tcia_dataset:{row['short_title']}",
@@ -348,7 +424,11 @@ def ingest_public_non_dicom(conn: sqlite3.Connection, path: Path) -> int:
     return imported
 
 
-def ingest_controlled(conn: sqlite3.Connection, path: Path) -> int:
+def ingest_controlled(
+    conn: sqlite3.Connection,
+    path: Path,
+    dataset_types: dict[str, tuple[str, str]],
+) -> int:
     if not path.exists():
         record_source(conn, "controlled_access_metadata", path, False, 0, "Optional detailed controlled metadata not installed.")
         return 0
@@ -379,10 +459,13 @@ def ingest_controlled(conn: sqlite3.Connection, path: Path) -> int:
             raw_id = str(row["subject_id"])
             route = str(row["route_system"] or "")
             system = "crdc_ctdc" if route == "ctdc" else "crdc_gc"
+            dataset_type, short_title = resolve_dataset_identity(
+                dataset_types, str(row["short_title"]), str(row["dataset_type"] or "Collection")
+            )
             key = ensure_participant(
                 conn,
-                str(row["dataset_type"] or "Collection"),
-                str(row["short_title"]),
+                dataset_type,
+                short_title,
                 raw_id,
                 managed_system=system,
                 namespace=f"{system}:{row['short_title']}",
@@ -416,7 +499,11 @@ def ingest_controlled(conn: sqlite3.Connection, path: Path) -> int:
     return imported
 
 
-def ingest_clinical(conn: sqlite3.Connection, path: Path) -> int:
+def ingest_clinical(
+    conn: sqlite3.Connection,
+    path: Path,
+    dataset_types: dict[str, tuple[str, str]],
+) -> int:
     if not path.exists():
         record_source(conn, "clinical_metadata", path, False, 0, "Optional clinical metadata not installed.")
         return 0
@@ -427,8 +514,11 @@ def ingest_clinical(conn: sqlite3.Connection, path: Path) -> int:
                 raw_id = str(row["subject_id"] or "").strip()
                 if not raw_id:
                     continue
+                dataset_type, short_title = resolve_dataset_identity(
+                    dataset_types, str(row["short_title"]), "Collection"
+                )
                 key = ensure_participant(
-                    conn, "Collection", str(row["short_title"]), raw_id,
+                    conn, dataset_type, short_title, raw_id,
                     managed_system="tcia_wordpress",
                     namespace=f"tcia_dataset:{row['short_title']}",
                     evidence="clinical_sidecar_dataset_scoped_identifier",
@@ -464,8 +554,11 @@ def ingest_clinical(conn: sqlite3.Connection, path: Path) -> int:
                 raw_id = str(row["subject_id"] or "").strip()
                 if not raw_id:
                     continue
+                dataset_type, short_title = resolve_dataset_identity(
+                    dataset_types, str(row["short_title"]), "Collection"
+                )
                 key = ensure_participant(
-                    conn, "Collection", str(row["short_title"]), raw_id,
+                    conn, dataset_type, short_title, raw_id,
                     managed_system="crdc_idc",
                     namespace=f"tcia_dataset:{row['short_title']}",
                     evidence="idc_index_participant_projection",
@@ -506,13 +599,13 @@ def ingest_clinical(conn: sqlite3.Connection, path: Path) -> int:
                 raw_id = str(row["subject_id"] or "").strip()
                 if not raw_id:
                     continue
-                key = participant_key(
-                    "Collection", str(row["short_title"]),
-                    f"tcia_dataset:{row['short_title']}", raw_id,
+                dataset_type, short_title = resolve_dataset_identity(
+                    dataset_types, str(row["short_title"]), "Collection"
                 )
+                key = participant_key(dataset_type, short_title, raw_id)
                 if conn.execute("SELECT 1 FROM participants WHERE participant_key = ?", (key,)).fetchone() is None:
                     key = ensure_participant(
-                        conn, "Collection", str(row["short_title"]), raw_id,
+                        conn, dataset_type, short_title, raw_id,
                         managed_system="tcia_wordpress",
                         namespace=f"tcia_dataset:{row['short_title']}",
                         evidence="clinical_fact_dataset_scoped_identifier",
@@ -556,49 +649,80 @@ def ingest_clinical(conn: sqlite3.Connection, path: Path) -> int:
     return imported
 
 
-def add_same_text_cross_namespace_issues(conn: sqlite3.Connection) -> int:
+def resolve_exact_cross_namespace_identifiers(conn: sqlite3.Connection) -> int:
     rows = conn.execute(
         """
-        SELECT p.dataset_type, p.short_title, i.raw_identifier,
-               COUNT(DISTINCT i.identifier_namespace) AS namespace_count,
-               group_concat(DISTINCT i.identifier_namespace) AS namespaces,
-               group_concat(DISTINCT i.managed_system) AS managed_systems
+        SELECT p.participant_key, p.dataset_type, p.short_title,
+               p.display_participant_id,
+               COUNT(DISTINCT i.identifier_namespace) AS namespace_count
         FROM participant_identifiers i
         JOIN participants p USING(participant_key)
-        GROUP BY p.dataset_type, p.short_title, i.raw_identifier
+        GROUP BY p.participant_key, p.dataset_type, p.short_title,
+                 p.display_participant_id
         HAVING COUNT(DISTINCT i.identifier_namespace) > 1
         """
     ).fetchall()
-    conn.executemany(
+    target_keys = {str(row["participant_key"]) for row in rows}
+    identifier_provenance: dict[str, set[tuple[str, str]]] = defaultdict(set)
+    for item in conn.execute(
         """
-        INSERT OR IGNORE INTO participant_link_issues
-        VALUES (?, ?, ?, ?, 'same_text_cross_namespace', 'review_required', ?, ?)
-        """,
-        [
-            (
-                stable_id("link_issue", row["dataset_type"], row["short_title"], row["raw_identifier"]),
-                row["dataset_type"], row["short_title"], row["raw_identifier"],
-                "The same identifier text occurs in multiple source namespaces; no participant equivalence was asserted without an explicit crosswalk.",
-                json_dumps({
-                    "namespace_count": row["namespace_count"],
-                    "namespaces": row["namespaces"],
-                    "managed_systems": row["managed_systems"],
-                }),
+        SELECT participant_key, identifier_namespace, managed_system
+        FROM participant_identifiers
+        ORDER BY participant_key, identifier_namespace, managed_system
+        """
+    ):
+        key = str(item["participant_key"])
+        if key in target_keys:
+            identifier_provenance[key].add(
+                (str(item["identifier_namespace"]), str(item["managed_system"]))
             )
-            for row in rows
-        ],
-    )
+    for row in rows:
+        provenance = identifier_provenance[str(row["participant_key"])]
+        namespaces = sorted({namespace for namespace, _ in provenance})
+        managed_systems = sorted({system for _, system in provenance})
+        conn.execute(
+            """
+            UPDATE participants
+            SET within_dataset_identity_status = 'resolved',
+                identity_resolution_method = 'exact_identifier_same_tcia_dataset'
+            WHERE participant_key = ?
+            """,
+            (row["participant_key"],),
+        )
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO participant_identity_evidence
+            VALUES (?, ?, 'within_dataset', 'exact_identifier_same_tcia_dataset',
+                    'resolved', 'high', ?, ?)
+            """,
+            (
+                stable_id("identity_evidence", row["participant_key"], *namespaces),
+                row["participant_key"],
+                "Exact identifier text from multiple source namespaces was linked "
+                "because every record resolves to the same authoritative TCIA dataset.",
+                json_dumps({
+                    "dataset_type": row["dataset_type"],
+                    "short_title": row["short_title"],
+                    "display_participant_id": row["display_participant_id"],
+                    "namespace_count": row["namespace_count"],
+                    "namespaces": namespaces,
+                    "managed_systems": managed_systems,
+                }),
+            ),
+        )
     return len(rows)
 
 
 def build_database(
     out: Path,
     *,
+    snapshot_db: Path,
     public_db: Path,
     controlled_db: Path,
     clinical_db: Path,
     replace: bool,
 ) -> dict[str, Any]:
+    dataset_types = load_dataset_types(snapshot_db)
     if out.exists():
         if not replace:
             raise FileExistsError(f"Output exists: {out}; pass --replace")
@@ -606,17 +730,29 @@ def build_database(
     out.parent.mkdir(parents=True, exist_ok=True)
     with connect(out) as conn:
         conn.executescript(SCHEMA)
+        record_source(
+            conn,
+            "tcia_snapshot",
+            snapshot_db,
+            True,
+            len(dataset_types),
+            "Authoritative WordPress dataset type and short-title identities imported.",
+        )
         counts = {
-            "public_non_dicom": ingest_public_non_dicom(conn, public_db),
-            "controlled": ingest_controlled(conn, controlled_db),
-            "clinical": ingest_clinical(conn, clinical_db),
+            "public_non_dicom": ingest_public_non_dicom(conn, public_db, dataset_types),
+            "controlled": ingest_controlled(conn, controlled_db, dataset_types),
+            "clinical": ingest_clinical(conn, clinical_db, dataset_types),
         }
-        counts["same_text_cross_namespace_issues"] = add_same_text_cross_namespace_issues(conn)
+        counts["exact_cross_namespace_resolutions"] = resolve_exact_cross_namespace_identifiers(conn)
         metadata = {
             "schema_version": SCHEMA_VERSION,
             "artifact_model_schema_version": MODEL_SCHEMA_VERSION,
             "generated_at_utc": datetime.now(timezone.utc).isoformat(),
-            "identity_rule": "Participants are dataset-scoped; cross-dataset identity is never asserted from a repeated bare identifier.",
+            "identity_rule": (
+                "Exact identifiers from sources attached to the same authoritative TCIA "
+                "dataset resolve to one participant; cross-dataset identity is never "
+                "asserted from a repeated bare identifier."
+            ),
         }
         conn.executemany(
             "INSERT INTO participant_inventory_meta VALUES (?, ?)",
@@ -637,10 +773,11 @@ def build_database(
 def validate_database(path: Path) -> dict[str, Any]:
     required = {
         "participants", "participant_identifiers", "participant_assets",
-        "participant_clinical_values",
+        "participant_clinical_values", "participant_identity_evidence",
         "dataset_assets_without_participant_crosswalk", "participant_inventory_sources",
         "agent_participants", "agent_participant_assets", "agent_participant_identifiers",
-        "agent_participant_clinical_values",
+        "agent_participant_clinical_values", "agent_participant_identity_evidence",
+        "agent_participant_search",
     }
     errors: list[str] = []
     with connect(path) as conn:
@@ -656,6 +793,38 @@ def validate_database(path: Path) -> dict[str, Any]:
         ).fetchone()[0]
         if cross_dataset:
             errors.append(f"unexpected asserted cross-dataset identities: {cross_dataset}")
+        duplicate_participants = conn.execute(
+            """
+            SELECT COUNT(*) FROM (
+              SELECT dataset_type, short_title, display_participant_id
+              FROM participants
+              GROUP BY dataset_type, short_title, display_participant_id
+              HAVING COUNT(*) > 1
+            )
+            """
+        ).fetchone()[0]
+        if duplicate_participants:
+            errors.append(
+                "duplicate canonical participant display identifiers within one dataset: "
+                f"{duplicate_participants}"
+            )
+        unresolved_multiple_namespaces = conn.execute(
+            """
+            SELECT COUNT(*) FROM (
+              SELECT p.participant_key
+              FROM participants p
+              JOIN participant_identifiers i USING(participant_key)
+              GROUP BY p.participant_key, p.within_dataset_identity_status
+              HAVING COUNT(DISTINCT i.identifier_namespace) > 1
+                 AND p.within_dataset_identity_status <> 'resolved'
+            )
+            """
+        ).fetchone()[0]
+        if unresolved_multiple_namespaces:
+            errors.append(
+                "multi-namespace participants without resolved identity evidence: "
+                f"{unresolved_multiple_namespaces}"
+            )
         orphan_assets = conn.execute(
             "SELECT COUNT(*) FROM participant_assets a LEFT JOIN participants p USING(participant_key) WHERE p.participant_key IS NULL"
         ).fetchone()[0]
@@ -666,6 +835,9 @@ def validate_database(path: Path) -> dict[str, Any]:
             "participant_assets": conn.execute("SELECT COUNT(*) FROM participant_assets").fetchone()[0],
             "unlinked_dataset_assets": conn.execute("SELECT COUNT(*) FROM dataset_assets_without_participant_crosswalk").fetchone()[0],
             "clinical_values": conn.execute("SELECT COUNT(*) FROM participant_clinical_values").fetchone()[0],
+            "identity_resolutions": conn.execute(
+                "SELECT COUNT(*) FROM participant_identity_evidence WHERE status = 'resolved'"
+            ).fetchone()[0],
         }
     return {"ok": not errors, "errors": errors, "integrity_check": integrity, "counts": counts}
 
@@ -753,6 +925,7 @@ def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(description=__doc__)
     sub = root.add_subparsers(dest="command", required=True)
     build = sub.add_parser("build")
+    build.add_argument("--snapshot-db", default=str(DEFAULT_SNAPSHOT_DB))
     build.add_argument("--public-db", default=str(DEFAULT_PUBLIC_DB))
     build.add_argument("--controlled-db", default=str(DEFAULT_CONTROLLED_DB))
     build.add_argument("--clinical-db", default=str(DEFAULT_CLINICAL_DB))
@@ -783,6 +956,7 @@ def main() -> int:
         out = Path(args.out)
         result = build_database(
             out,
+            snapshot_db=Path(args.snapshot_db),
             public_db=Path(args.public_db),
             controlled_db=Path(args.controlled_db),
             clinical_db=Path(args.clinical_db),

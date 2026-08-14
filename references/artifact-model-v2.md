@@ -145,14 +145,27 @@ inventories and reviewed evidence.
 
 ## Participant identity
 
-Create participant keys from dataset identity, identifier namespace, and the
-preserved source identifier. Treat identifiers as dataset-scoped by default.
-Do not assert cross-dataset identity from an identical bare ID.
+Create participant keys from the authoritative WordPress dataset identity and
+the exact dataset-scoped participant identifier. Source namespaces belong to
+identifier provenance, not to the canonical participant key. When TCIA/IDC,
+GC, or CTDC records are explicitly attached to the same WordPress dataset and
+their exact identifiers agree one-to-one, resolve them to one participant and
+record `exact_identifier_same_tcia_dataset` as high-confidence identity
+evidence. This is a within-dataset association; it does not assert that the
+same bare identifier in another dataset represents the same person.
 
-Store source identifiers in `participant_identifiers` and require explicit
-mapping evidence for equivalence across sources. Use official manifests,
-submitter crosswalks, documented shared namespaces, or reviewed mappings.
-Route ambiguous matches to `participant_link_issues`.
+Store every source identifier and namespace in `participant_identifiers`, even
+when several identifiers resolve to one participant. Record automatic and
+reviewed associations in `participant_identity_evidence`. Require an official
+dataset relationship plus an exact, unambiguous identifier match for automatic
+resolution; use submitter crosswalks, documented shared namespaces, or reviewed
+mappings for other equivalence claims. Route cross-dataset, normalized-but-not-
+exact, one-to-many, and conflicting matches to `participant_link_issues`.
+
+Resolve `dataset_type` and canonical short title from the base WordPress
+snapshot rather than trusting sidecar defaults. This prevents one source from
+creating a Collection participant while another creates an Analysis Result
+participant for the same published dataset.
 
 The Participant Inventory may show detailed participant-linked assets,
 dataset-level availability without a participant crosswalk, and a source
@@ -182,7 +195,8 @@ value.
 
 ## Participant Explorer presentation
 
-Query the Participant Inventory first. Present user-centered summaries such as
+Query `agent_participant_search` in the Participant Inventory first; it is the
+one-row-per-canonical-participant search contract. Present user-centered summaries such as
 CT series, MHA volumes, pathology images, capsule-endoscopy videos, clinical
 data, and access level. Do not make users understand internal system names.
 
