@@ -163,10 +163,11 @@ not be described as current. See [references/snapshots.md](./references/snapshot
 for release assets, sidecar behavior, schema/version details, and maintainer
 workflows.
 
-The public non-DICOM and Participant Inventory model is published on the
-isolated `tcia-metadata-v2-preview` prerelease for Participant Explorer testing,
-so existing `tcia-snapshot-latest` and MCP/REST consumers remain supported while
-managed-system provenance and participant contracts are evaluated. See
+An official-shaped V2 bundle is published on the isolated
+`tcia-metadata-v2-preview` prerelease for Participant Explorer testing. It
+contains the base snapshot, all web exports, optional detail sidecars, public
+non-DICOM metadata, Participant Inventory, and one hash-pinned bundle manifest.
+Existing `tcia-snapshot-latest` and MCP/REST consumers remain unchanged. See
 [references/artifact-model-v2.md](./references/artifact-model-v2.md).
 
 Download and validate the preview databases without changing MCP/REST:

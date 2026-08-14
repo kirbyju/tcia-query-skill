@@ -195,26 +195,37 @@ clinical detail artifacts only when the user drills down.
 
 ## Release isolation
 
-Keep `tcia-snapshot-latest` unchanged while V2 is evaluated. Publish validated
-artifacts to the isolated `tcia-metadata-v2-preview` prerelease for Participant
-Explorer integration testing. Use distinct asset names:
+Keep `tcia-snapshot-latest` unchanged while V2 is evaluated. Publish an
+official-shaped, internally consistent bundle to the isolated
+`tcia-metadata-v2-preview` prerelease for Participant Explorer integration
+testing. The preview contains these asset groups:
 
-```text
-public_non_dicom_metadata.sqlite.gz
-public_non_dicom_metadata_manifest.json
-participant_inventory.sqlite.gz
-participant_inventory_manifest.json
-```
+- Base discovery: `tcia_snapshot.sqlite.gz`, its manifest, and all eight plain
+  and gzipped `agent_datasets`, `agent_current_downloads`,
+  `agent_dataset_versions`, and `agent_dataset_v1_releases` JSONL exports.
+- Optional detail: NIfTI, pathology, controlled-access, and clinical SQLite
+  databases and manifests, plus `clinical_qc_manual_review.csv`.
+- V2 core: public non-DICOM metadata and Participant Inventory SQLite databases
+  and manifests.
+- Bundle contract: `tcia_metadata_v2_bundle_manifest.json`, which pins the
+  SHA-256, size, category, source, and default-download status of all 23 payload
+  assets and records each component schema and release fingerprint.
 
-After the contracts stabilize, publish an immutable versioned release and a
-separate `tcia-metadata-v2-latest` moving tag. Do not replace or delete the May
-2026-compatible artifact line during the preview period.
+After the contracts stabilize, publish the same bundle shape as an immutable
+versioned release and a separate `tcia-metadata-v2-latest` moving tag. Do not
+replace or delete the May 2026-compatible artifact line during the preview
+period.
 
-The V2 build runs after each successful scheduled base-snapshot workflow and
-publishes only when its V2 release fingerprint changes. It reads source
-sidecars from `tcia-snapshot-latest` but never uploads to that tag. It also does
-not deploy, restart, or reconfigure MCP/REST; those interfaces remain on their
-existing artifact contracts until separately migrated.
+The V2 build runs after each successful scheduled base-snapshot workflow. It
+captures the V1 release record, verifies every copied source asset against the
+captured GitHub digest, regenerates all web exports from that exact bundled
+snapshot, validates every component, and publishes only when the complete
+bundle fingerprint changes. The top-level manifest is uploaded last so
+consumers never accept an update without a complete hash contract. Stale assets
+are removed only from the V2 preview tag, and that preview tag is advanced to
+the producer commit only after the published bundle passes remote digest
+validation. The workflow never uploads to
+`tcia-snapshot-latest` and does not deploy, restart, or reconfigure MCP/REST.
 
 Consumers can retrieve and validate the two databases independently:
 
@@ -223,10 +234,22 @@ python3 scripts/tcia_public_non_dicom_metadata.py ensure
 python3 scripts/tcia_participant_inventory.py ensure
 ```
 
+Existing helpers can test the copied compatibility artifacts from the same V2
+release by overriding their tag, for example:
+
+```bash
+python3 scripts/tcia_snapshot.py ensure --tag tcia-metadata-v2-preview
+python3 scripts/tcia_clinical_metadata.py ensure --tag tcia-metadata-v2-preview
+python3 scripts/tcia_controlled_access_metadata.py ensure --tag tcia-metadata-v2-preview
+python3 scripts/tcia_nifti_metadata.py ensure --tag tcia-metadata-v2-preview
+python3 scripts/tcia_pathology_metadata.py ensure --tag tcia-metadata-v2-preview
+```
+
 The stable preview asset URLs are:
 
 - `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-metadata-v2-preview/public_non_dicom_metadata.sqlite.gz`
 - `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-metadata-v2-preview/participant_inventory.sqlite.gz`
+- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-metadata-v2-preview/tcia_metadata_v2_bundle_manifest.json`
 
 Use the corresponding JSON manifest from the same release to verify schema,
 release fingerprint, compressed SHA-256, and SQLite SHA-256 before replacing a

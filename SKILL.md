@@ -162,6 +162,7 @@ Run scripts from the skill root.
 | `scripts/tcia_nifti_metadata.py` | Download, validate, summarize, and query the optional release SQLite for visible non-controlled TCIA NIfTI file-grain metadata. |
 | `scripts/tcia_public_non_dicom_metadata.py` | Build, validate, summarize, and query the V2 public non-DICOM logical-asset and managed-location artifact. |
 | `scripts/tcia_participant_inventory.py` | Compose dataset-scoped participant availability from public non-DICOM, controlled, clinical, and IDC participant projections. |
+| `scripts/tcia_v2_bundle.py` | Regenerate compatibility exports and build or validate the complete hash-pinned V2 release bundle contract. |
 | `scripts/tcia_controlled_access_metadata.py` | Build/download, validate, summarize, and query the optional release SQLite for public controlled-access WordPress manifests, metadata spreadsheets, `drs_uri` rows, and IDC-shaped radiology indexes. |
 | `scripts/tcia_clinical_metadata.py` | Build/download and validate the optional patient-level clinical SQLite from official TCIA artifacts, IDC collection clinical tables, strict TCIA-matched CDA rows, and DICOM fallback. |
 | `scripts/tcia_metadata_change_report.py` | Compare newly built SQLite assets with their previous releases and generate GitHub Actions summaries/annotations for additions and clinical review flags. |
@@ -273,7 +274,7 @@ Do not download the optional NIfTI SQLite unless the user needs NIfTI file-grain
 
 ## Metadata Artifact Model V2
 
-Load `references/artifact-model-v2.md` for public non-DICOM inventory, managed-system provenance, original-versus-standardized representations, Participant Explorer integration, or the V2 release line. Preserve the existing NIfTI/pathology interfaces as compatibility surfaces during migration. Keep `tcia-snapshot-latest` untouched until the V2 preview contracts have been evaluated and a migration is separately approved.
+Load `references/artifact-model-v2.md` for public non-DICOM inventory, managed-system provenance, original-versus-standardized representations, Participant Explorer integration, or the V2 release line. The preview is an official-shaped bundle containing the base snapshot, all eight web exports, optional detail sidecars, the two V2 databases, and a top-level hash manifest. Preserve the existing interfaces as compatibility surfaces during migration and keep `tcia-snapshot-latest` untouched until a migration is separately approved.
 
 ## PathDB Metadata
 

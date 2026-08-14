@@ -43,27 +43,49 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Download existing source artifacts without changing them
+      - name: Capture and download the source release without changing it
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          mkdir -p cache
+          mkdir -p cache dist
           legacy_tag="tcia-snapshot-latest"
+          gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${legacy_tag}" > cache/source_release.json
+          for asset in \
+            tcia_snapshot.sqlite.gz \
+            tcia_snapshot_manifest.json \
+            nifti_metadata.sqlite.gz \
+            nifti_metadata_manifest.json \
+            pathology_metadata.sqlite.gz \
+            pathology_metadata_manifest.json \
+            controlled_access_metadata.sqlite.gz \
+            controlled_access_metadata_manifest.json \
+            clinical_metadata.sqlite.gz \
+            clinical_metadata_manifest.json \
+            clinical_qc_manual_review.csv; do
+            gh release download "$legacy_tag" --pattern "$asset" --dir dist --clobber
+          done
+          python scripts/tcia_v2_bundle.py validate-source \
+            --asset-dir dist \
+            --source-release-json cache/source_release.json
           for asset in \
             tcia_snapshot.sqlite.gz \
             nifti_metadata.sqlite.gz \
             pathology_metadata.sqlite.gz \
             controlled_access_metadata.sqlite.gz \
             clinical_metadata.sqlite.gz; do
-            gh release download "$legacy_tag" --pattern "$asset" --dir cache --clobber
-            gzip -dc "cache/$asset" > "cache/${asset%.gz}"
+            gzip -dc "dist/$asset" > "cache/${asset%.gz}"
           done
+
+      - name: Regenerate the complete web export set from the bundled snapshot
+        run: |
+          python scripts/tcia_v2_bundle.py exports \
+            --snapshot-db cache/tcia_snapshot.sqlite \
+            --out-dir dist
 
       - name: Build public non-DICOM metadata
         run: |
           set -euo pipefail
-          mkdir -p dist
           pathdb_args=()
           if [ "${{ inputs.include_pathdb_files }}" = "false" ]; then
             pathdb_args+=(--no-pathdb-files)
@@ -74,40 +96,44 @@ jobs:
             --pathology-db cache/pathology_metadata.sqlite \
             --crosswalk-csv references/public_non_dicom_crosswalks_v1.csv \
             --crosswalk-curation references/public-non-dicom-crosswalk-curation-v1.json \
-            --out dist/public_non_dicom_metadata.sqlite \
+            --out cache/public_non_dicom_metadata.sqlite \
             --gzip-out dist/public_non_dicom_metadata.sqlite.gz \
             --manifest-out dist/public_non_dicom_metadata_manifest.json \
             --replace \
             "${pathdb_args[@]}"
           python scripts/tcia_public_non_dicom_metadata.py validate \
-            --db dist/public_non_dicom_metadata.sqlite
+            --db cache/public_non_dicom_metadata.sqlite
 
       - name: Build Participant Inventory
         run: |
           python scripts/tcia_participant_inventory.py build \
-            --public-db dist/public_non_dicom_metadata.sqlite \
+            --public-db cache/public_non_dicom_metadata.sqlite \
             --controlled-db cache/controlled_access_metadata.sqlite \
             --clinical-db cache/clinical_metadata.sqlite \
-            --out dist/participant_inventory.sqlite \
+            --out cache/participant_inventory.sqlite \
             --gzip-out dist/participant_inventory.sqlite.gz \
             --manifest-out dist/participant_inventory_manifest.json \
             --replace
           python scripts/tcia_participant_inventory.py validate \
-            --db dist/participant_inventory.sqlite
+            --db cache/participant_inventory.sqlite
 
       - name: Run V2 contract tests
-        run: python -m unittest scripts.tests.test_tcia_artifact_model
+        run: |
+          python -m unittest \
+            scripts.tests.test_tcia_artifact_model \
+            scripts.tests.test_tcia_v2_bundle
 
-      - name: Upload workflow artifact for evaluation
-        uses: actions/upload-artifact@v6
-        with:
-          name: tcia-metadata-v2-preview
-          path: |
-            dist/public_non_dicom_metadata.sqlite.gz
-            dist/public_non_dicom_metadata_manifest.json
-            dist/participant_inventory.sqlite.gz
-            dist/participant_inventory_manifest.json
-          retention-days: 30
+      - name: Build and validate the complete V2 bundle contract
+        run: |
+          python scripts/tcia_v2_bundle.py build \
+            --asset-dir dist \
+            --source-release-json cache/source_release.json \
+            --producer-commit "$GITHUB_SHA" \
+            --producer-skill-version "$(python -c 'import json; print(json.load(open("skill_version.json"))["skill_version"])')" \
+            --out dist/tcia_metadata_v2_bundle_manifest.json
+          python scripts/tcia_v2_bundle.py validate \
+            --asset-dir dist \
+            --manifest dist/tcia_metadata_v2_bundle_manifest.json
 
       - name: Decide whether to publish V2 release assets
         id: release
@@ -119,29 +145,26 @@ jobs:
           if [ "${{ github.event_name }}" = "workflow_run" ] || [ "${{ inputs.publish_preview }}" = "true" ]; then
             publish_requested="true"
           fi
+          if [ "$publish_requested" = "true" ] && [ "${{ inputs.include_pathdb_files }}" = "false" ]; then
+            echo "::error::Published V2 preview bundles must include the full PathDB inventory."
+            exit 1
+          fi
 
           publish="false"
           reason="publication not requested"
           if [ "$publish_requested" = "true" ]; then
             tag="tcia-metadata-v2-preview"
-            new_public_fingerprint="$(python -c 'import json; print(json.load(open("dist/public_non_dicom_metadata_manifest.json"))["release_fingerprint"])')"
-            new_participant_fingerprint="$(python -c 'import json; print(json.load(open("dist/participant_inventory_manifest.json"))["release_fingerprint"])')"
-            old_public_fingerprint=""
-            old_participant_fingerprint=""
+            new_fingerprint="$(python -c 'import json; print(json.load(open("dist/tcia_metadata_v2_bundle_manifest.json"))["release_fingerprint"])')"
+            old_fingerprint=""
             mkdir -p previous-v2
-            if gh release download "$tag" --pattern '*_manifest.json' --dir previous-v2 --clobber >/dev/null 2>&1; then
-              if [ -s previous-v2/public_non_dicom_metadata_manifest.json ]; then
-                old_public_fingerprint="$(python -c 'import json; print(json.load(open("previous-v2/public_non_dicom_metadata_manifest.json"))["release_fingerprint"])')"
-              fi
-              if [ -s previous-v2/participant_inventory_manifest.json ]; then
-                old_participant_fingerprint="$(python -c 'import json; print(json.load(open("previous-v2/participant_inventory_manifest.json"))["release_fingerprint"])')"
-              fi
+            if gh release download "$tag" --pattern tcia_metadata_v2_bundle_manifest.json --dir previous-v2 --clobber >/dev/null 2>&1; then
+              old_fingerprint="$(python -c 'import json; print(json.load(open("previous-v2/tcia_metadata_v2_bundle_manifest.json")).get("release_fingerprint", ""))')"
             fi
-            if [ "$new_public_fingerprint" != "$old_public_fingerprint" ] || [ "$new_participant_fingerprint" != "$old_participant_fingerprint" ]; then
+            if [ "$new_fingerprint" != "$old_fingerprint" ]; then
               publish="true"
-              reason="V2 release fingerprint changed"
+              reason="complete V2 bundle fingerprint changed"
             else
-              reason="V2 release fingerprint unchanged"
+              reason="complete V2 bundle fingerprint unchanged"
             fi
           fi
           echo "publish=$publish" >> "$GITHUB_OUTPUT"
@@ -150,6 +173,15 @@ jobs:
           echo "- Publish: $publish" >> "$GITHUB_STEP_SUMMARY"
           echo "- Reason: $reason" >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Upload complete workflow artifact for evaluation
+        if: github.event_name == 'workflow_dispatch' && inputs.publish_preview != 'true'
+        uses: actions/upload-artifact@v6
+        with:
+          name: tcia-metadata-v2-preview
+          path: dist/*
+          compression-level: 0
+          retention-days: 30
+
       - name: Publish isolated preview release
         if: steps.release.outputs.publish == 'true'
         env:
@@ -157,23 +189,66 @@ jobs:
         run: |
           set -euo pipefail
           tag="tcia-metadata-v2-preview"
+          notes="Experimental complete V2 metadata bundle for Participant Explorer integration testing. It contains the base snapshot, all eight web exports, optional detail sidecars, public non-DICOM metadata, Participant Inventory, and a hash-pinned bundle manifest. It does not replace tcia-snapshot-latest and is not used by MCP/REST."
           if ! gh release view "$tag" >/dev/null 2>&1; then
             gh release create "$tag" \
               --prerelease \
               --title "TCIA metadata V2 preview" \
-              --notes "Experimental V2 contracts for public non-DICOM metadata and the Participant Inventory, published for Participant Explorer integration testing. This prerelease does not replace tcia-snapshot-latest and is not used by the MCP/REST services."
+              --notes "$notes"
           else
             gh release edit "$tag" \
               --prerelease \
               --title "TCIA metadata V2 preview" \
-              --notes "Experimental V2 contracts for public non-DICOM metadata and the Participant Inventory, published for Participant Explorer integration testing. This prerelease does not replace tcia-snapshot-latest and is not used by the MCP/REST services."
+              --notes "$notes"
           fi
-          gh release upload "$tag" \
-            dist/public_non_dicom_metadata.sqlite.gz \
-            dist/public_non_dicom_metadata_manifest.json \
-            dist/participant_inventory.sqlite.gz \
-            dist/participant_inventory_manifest.json \
-            --clobber
+          previous_manifest=""
+          if [ -s previous-v2/tcia_metadata_v2_bundle_manifest.json ]; then
+            previous_manifest="previous-v2/tcia_metadata_v2_bundle_manifest.json"
+          fi
+          changed_args=(
+            --current dist/tcia_metadata_v2_bundle_manifest.json
+          )
+          if [ -n "$previous_manifest" ]; then
+            changed_args+=(--previous "$previous_manifest")
+          fi
+          mapfile -t changed_names < <(python scripts/tcia_v2_bundle.py changed-assets "${changed_args[@]}")
+          payload_assets=()
+          for asset in "${changed_names[@]}"; do
+            if [ -n "$asset" ]; then
+              payload_assets+=("dist/$asset")
+            fi
+          done
+          if [ "${#payload_assets[@]}" -gt 0 ]; then
+            gh release upload "$tag" "${payload_assets[@]}" --clobber
+          fi
+          while read -r asset; do
+            if [ ! -f "dist/$asset" ]; then
+              gh release delete-asset "$tag" "$asset" --yes
+            fi
+          done < <(gh release view "$tag" --json assets --jq '.assets[].name')
+          gh release upload "$tag" dist/tcia_metadata_v2_bundle_manifest.json --clobber
+
+          python scripts/tcia_v2_bundle.py expected-assets --include-bundle-manifest | sort > expected-assets.txt
+          gh release view "$tag" --json assets --jq '.assets[].name' | sort > published-assets.txt
+          diff -u expected-assets.txt published-assets.txt
+          for attempt in 1 2 3 4 5; do
+            gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" > published-release.json
+            if python scripts/tcia_v2_bundle.py validate-published \
+              --manifest dist/tcia_metadata_v2_bundle_manifest.json \
+              --release-json published-release.json; then
+              break
+            fi
+            if [ "$attempt" = "5" ]; then
+              exit 1
+            fi
+            sleep 5
+          done
+          gh api --method PATCH \
+            "repos/${GITHUB_REPOSITORY}/git/refs/tags/${tag}" \
+            -f sha="$GITHUB_SHA" \
+            -F force=true >/dev/null
+          published_tag_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}" --jq '.object.sha')"
+          test "$published_tag_sha" = "$GITHUB_SHA"
 
       - name: Confirm legacy release isolation
         run: |
