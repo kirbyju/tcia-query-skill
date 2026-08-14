@@ -163,12 +163,26 @@ not be described as current. See [references/snapshots.md](./references/snapshot
 for release assets, sidecar behavior, schema/version details, and maintainer
 workflows.
 
+The public non-DICOM and Participant Inventory model is published on the
+isolated `tcia-metadata-v2-preview` prerelease for Participant Explorer testing,
+so existing `tcia-snapshot-latest` and MCP/REST consumers remain supported while
+managed-system provenance and participant contracts are evaluated. See
+[references/artifact-model-v2.md](./references/artifact-model-v2.md).
+
+Download and validate the preview databases without changing MCP/REST:
+
+```bash
+python3 scripts/tcia_public_non_dicom_metadata.py ensure
+python3 scripts/tcia_participant_inventory.py ensure
+```
+
 ## Documentation Map
 
 - [SKILL.md](./SKILL.md): agent workflow, routing rules, and guardrails
 - [references/routing.md](./references/routing.md): source and access routing
 - [references/schema.md](./references/schema.md): SQLite views and query patterns
 - [references/snapshots.md](./references/snapshots.md): freshness and releases
+- [references/artifact-model-v2.md](./references/artifact-model-v2.md): public non-DICOM and Participant Inventory contracts
 - [references/clinical.md](./references/clinical.md): patient-level clinical data
 - [references/controlled-access.md](./references/controlled-access.md): controlled-access policy and authorized Data Retriever use
 - [references/nifti.md](./references/nifti.md): optional NIfTI metadata

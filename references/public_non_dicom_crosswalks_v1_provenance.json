@@ -1,0 +1,119 @@
+{
+  "acknowledged_without_crosswalk": [
+    "Bone-Marrow-Cytomorphology_MLL_Helmholtz_Fraunhofer"
+  ],
+  "crosswalk_csv": {
+    "bytes": 3425977,
+    "path": "/Users/kirbyju/github/tcia-query-skill/references/public_non_dicom_crosswalks_v1.csv",
+    "sha256": "693af32c79283e285e64e3e4f465f491e3192664cbabf2e4f2bd7e86ab164385"
+  },
+  "curation": {
+    "path": "/Users/kirbyju/github/tcia-query-skill/references/public-non-dicom-crosswalk-curation-v1.json",
+    "sha256": "25ce7e5ce98c733e0aba6e3c1482919ce3b189f6c4d037ea1f41a5dbbfd5395e"
+  },
+  "dataset_counts": {
+    "Breast-Lesions-USG": {
+      "files": 522,
+      "participants": 256
+    },
+    "CDD-CESM": {
+      "files": 2006,
+      "participants": 326
+    },
+    "Capsule-Endoscopy-SB-NET": {
+      "files": 270,
+      "participants": 20
+    },
+    "LDCT-and-Projection-data": {
+      "files": 551,
+      "participants": 179
+    },
+    "PROSTATE-DIAGNOSIS": {
+      "files": 65,
+      "participants": 32
+    },
+    "Pedi-Cranial-CT-Healthy": {
+      "files": 100,
+      "participants": 100
+    },
+    "Prostate-3T": {
+      "files": 60,
+      "participants": 45
+    }
+  },
+  "reviewed_at": "2026-08-13",
+  "row_count": 3574,
+  "schema_version": 1,
+  "source_files": [
+    {
+      "bytes": 75964,
+      "name": "Capsule-Endoscopy-SB-NET_52333_listing.csv",
+      "sha256": "bc4edb7ce7dfe6a68da06eaba005b7d3dfd69f93502f882bf131d55636e4da43"
+    },
+    {
+      "bytes": 26358,
+      "name": "Pedi-Cranial-CT-Healthy_55262_listing.csv",
+      "sha256": "0bfcbfe9aae321a204dc2b12067c43a34cacc5332939832eaca7d022ff96290a"
+    },
+    {
+      "bytes": 40173,
+      "name": "breast_clinical.xlsx",
+      "sha256": "89a8874496a6f1f93960390b963f7369b90f7e72ee08a738f2d17e37f5eff8bf"
+    },
+    {
+      "bytes": 69862076,
+      "name": "breast_images.zip",
+      "sha256": "c32e49cdfa54042e065582d0cb35978b5fc5e5b5e461b33bf773fb50cfdad355"
+    },
+    {
+      "bytes": 244539,
+      "name": "cdd_annotations.xlsx",
+      "sha256": "9feef3e38a2b826b3bd75fe85b991f65c21b10e4c3d043b13041c4ef69105345"
+    },
+    {
+      "bytes": 1389043,
+      "name": "crosswalk_workbooks.json",
+      "sha256": "e4c53d2d5bd8b19117390aeab7d5524a0954d0069b566349c4f76770a16c90a7"
+    },
+    {
+      "bytes": 99257625,
+      "name": "ldct_clinical.zip",
+      "sha256": "33a4369338b308aef7079e9d34b5edda074c738decdc1af3a8bb118677815aca"
+    },
+    {
+      "bytes": 5676,
+      "name": "pedi_demographics.tsv",
+      "sha256": "1ab2d8b609d493e0bc4b3def3e28fbf6fd37fd569178626a7c542f96d2c434f5"
+    },
+    {
+      "bytes": 23427,
+      "name": "pedi_image_metadata.tsv",
+      "sha256": "fe6314dafa4eb2ad2571df197be95c51f2d6cc345435213526ab334e49173b42"
+    },
+    {
+      "bytes": 451230,
+      "name": "prostate3t_mha.zip",
+      "sha256": "e2b38cbf81efae814b75d265dd0489df9f6b8fb03d02fed5e7e29e58cf3260cf"
+    },
+    {
+      "bytes": 120359,
+      "name": "prostate3t_nrrd.zip",
+      "sha256": "db9c6411fd8b5825ac49c79a1bbf743af4fcbbc95974f38b7aaabb1a59e2a40b"
+    },
+    {
+      "bytes": 164957,
+      "name": "prostatedx_isbi.zip",
+      "sha256": "ce9f289ff118443399e0b896be2b260b21029e3594f08535e16a98bfeae51fc9"
+    },
+    {
+      "bytes": 88868,
+      "name": "prostatedx_mha.zip",
+      "sha256": "f7b652d5f6be6313ab04715c3334e9c3f2b2d2433336021448dd8f372a35925a"
+    },
+    {
+      "bytes": 74976,
+      "name": "prostatedx_nrrd.zip",
+      "sha256": "5c054ab076e6e1c5e93f4bfb78768429c463969ce838f54740a2633337517b7e"
+    }
+  ]
+}

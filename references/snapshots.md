@@ -1,5 +1,11 @@
 # SQLite Metadata Snapshots
 
+For the separately versioned public non-DICOM and Participant Inventory
+preview release, load `references/artifact-model-v2.md`. The V2 workflow runs
+after successful scheduled base-snapshot updates and publishes only changed V2
+fingerprints to `tcia-metadata-v2-preview`. It leaves `tcia-snapshot-latest`,
+its May 2026-compatible asset contracts, and MCP/REST deployment unchanged.
+
 The skill uses a local SQLite snapshot for routine TCIA discovery instead of querying public APIs during end-user tasks. The snapshot contains:
 
 - TCIA WordPress Collections, Analysis Results, and Downloads.

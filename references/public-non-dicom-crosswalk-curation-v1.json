@@ -1,0 +1,78 @@
+{
+  "reviewed_at": "2026-08-13",
+  "review_source": "tcia_participant_file_crosswalk_review.xlsx",
+  "decisions": [
+    {
+      "dataset_type": "Collection",
+      "short_title": "Bone-Marrow-Cytomorphology_MLL_Helmholtz_Fraunhofer",
+      "download_ids": ["41411"],
+      "decision_status": "acknowledged",
+      "resolution_type": "source_confirmed_unavailable",
+      "reviewer_note": "Confirmed, no patient-level info available.",
+      "evidence_url": ""
+    },
+    {
+      "dataset_type": "Collection",
+      "short_title": "Breast-Lesions-USG",
+      "download_ids": ["41273"],
+      "decision_status": "resolved",
+      "resolution_type": "participant_crosswalk",
+      "reviewer_note": "ZIP filenames use case IDs and align with the clinical workbook; one image and one tumor mask are present per subject.",
+      "evidence_url": "https://www.cancerimagingarchive.net/wp-content/uploads/BrEaST-Lesions-USG-clinical-data-Dec-15-2023.xlsx"
+    },
+    {
+      "dataset_type": "Collection",
+      "short_title": "Capsule-Endoscopy-SB-NET",
+      "download_ids": ["52333"],
+      "decision_status": "resolved",
+      "resolution_type": "participant_crosswalk",
+      "reviewer_note": "Aspera folders are patient IDs SBNET_01 through SBNET_20; IMG and CLP filenames retain the patient ID.",
+      "evidence_url": "https://www.cancerimagingarchive.net/collection/capsule-endoscopy-sb-net/"
+    },
+    {
+      "dataset_type": "Collection",
+      "short_title": "CDD-CESM",
+      "download_ids": ["41789"],
+      "decision_status": "resolved",
+      "resolution_type": "participant_crosswalk",
+      "reviewer_note": "Image filenames begin with patient ID; the manual-annotations workbook supplies Patient_ID and Image_name.",
+      "evidence_url": "https://www.cancerimagingarchive.net/wp-content/uploads/Radiology-manual-annotations.xlsx"
+    },
+    {
+      "dataset_type": "Collection",
+      "short_title": "LDCT-and-Projection-data",
+      "download_ids": ["42661"],
+      "decision_status": "resolved",
+      "resolution_type": "participant_crosswalk",
+      "reviewer_note": "Nested ZIP filenames contain case IDs and companion workbooks provide case IDs and DICOM Series Instance UIDs.",
+      "evidence_url": "https://www.cancerimagingarchive.net/wp-content/uploads/LDCT-and-Projection-Data_CR_HeadChestAbdomen_v4.zip"
+    },
+    {
+      "dataset_type": "Collection",
+      "short_title": "Pedi-Cranial-CT-Healthy",
+      "download_ids": ["55262"],
+      "decision_status": "resolved",
+      "resolution_type": "participant_crosswalk",
+      "reviewer_note": "Aspera files are named with zero-padded patient IDs; image metadata and demographics TSV files establish the mapping.",
+      "evidence_url": "https://www.cancerimagingarchive.net/wp-content/uploads/Pedi-Cranial-CT-Healthy_demographics_v01_20260714.tsv"
+    },
+    {
+      "dataset_type": "Collection",
+      "short_title": "Prostate-3T",
+      "download_ids": ["43157", "43159"],
+      "decision_status": "resolved",
+      "resolution_type": "participant_crosswalk",
+      "reviewer_note": "Segmentation filenames retain the DICOM Patient ID, for example Prostate3T-01-0002.",
+      "evidence_url": ""
+    },
+    {
+      "dataset_type": "Collection",
+      "short_title": "PROSTATE-DIAGNOSIS",
+      "download_ids": ["43169", "43171", "43173"],
+      "decision_status": "resolved",
+      "resolution_type": "participant_crosswalk",
+      "reviewer_note": "Segmentation filenames retain the DICOM Patient ID; suffixes such as SV and NVB identify the segmented structure.",
+      "evidence_url": ""
+    }
+  ]
+}

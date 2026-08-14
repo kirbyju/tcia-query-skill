@@ -6,6 +6,26 @@ The GitHub Release web exports mirror the most useful agent-facing views for env
 
 The optional NIfTI file-grain SQLite is separate from `cache/tcia_snapshot.sqlite`. It is downloaded only when needed with `python scripts/tcia_nifti_metadata.py ensure`, defaults to `cache/nifti_metadata.sqlite`, and is documented in `references/nifti.md`.
 
+The V2 public non-DICOM and Participant Inventory contracts are documented in
+`references/artifact-model-v2.md`. They use a separate preview release line and
+do not replace the existing sidecars during migration.
+
+Reviewed and automated public non-DICOM crosswalks are exposed by
+`agent_public_non_dicom_crosswalk_evidence` at mapped-file grain and
+`agent_public_non_dicom_crosswalk_decisions` at decision grain. Query
+the evidence view for raw and resolved participant IDs, mapping method,
+confidence, evidence URL, reviewer note, and optional DICOM Series Instance UID.
+Automated decisions use `decision_status='accepted_automated'` and record
+`human_reviewed=false` in provenance; they require complete, unambiguous
+download coverage. Partial candidates remain in the review-issues view.
+
+Public non-DICOM schema v3 represents participant cardinality in
+`public_non_dicom_asset_participants` and exposes
+`agent_public_non_dicom_asset_participants`. Query that junction for file-level
+Participant Explorer drill-downs, including shared assets such as HANCOCK whole
+TMA block slides. The scalar asset `subject_id` remains a convenience for
+one-participant files and is intentionally empty for multi-participant assets.
+
 The optional pathology Aspera SQLite is also separate from `cache/tcia_snapshot.sqlite`. It is downloaded only when needed with `python scripts/tcia_pathology_metadata.py ensure`, defaults to `cache/pathology_metadata.sqlite`, and is documented in `references/pathology.md`.
 
 The optional controlled-access SQLite is also separate from `cache/tcia_snapshot.sqlite`. It is downloaded only when needed with `python scripts/tcia_controlled_access_metadata.py ensure`, defaults to `cache/controlled_access_metadata.sqlite`, and is documented in `references/controlled-access.md`.

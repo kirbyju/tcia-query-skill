@@ -1,0 +1,181 @@
+name: Build TCIA metadata V2 preview
+
+on:
+  workflow_run:
+    workflows: ["Update TCIA metadata snapshot"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      publish_preview:
+        description: "Publish validated artifacts to the isolated V2 preview release"
+        required: true
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+      include_pathdb_files:
+        description: "Include the full PathDB file inventory"
+        required: true
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: tcia-metadata-v2-preview
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Download existing source artifacts without changing them
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p cache
+          legacy_tag="tcia-snapshot-latest"
+          for asset in \
+            tcia_snapshot.sqlite.gz \
+            nifti_metadata.sqlite.gz \
+            pathology_metadata.sqlite.gz \
+            controlled_access_metadata.sqlite.gz \
+            clinical_metadata.sqlite.gz; do
+            gh release download "$legacy_tag" --pattern "$asset" --dir cache --clobber
+            gzip -dc "cache/$asset" > "cache/${asset%.gz}"
+          done
+
+      - name: Build public non-DICOM metadata
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          pathdb_args=()
+          if [ "${{ inputs.include_pathdb_files }}" = "false" ]; then
+            pathdb_args+=(--no-pathdb-files)
+          fi
+          python scripts/tcia_public_non_dicom_metadata.py build \
+            --snapshot-db cache/tcia_snapshot.sqlite \
+            --nifti-db cache/nifti_metadata.sqlite \
+            --pathology-db cache/pathology_metadata.sqlite \
+            --crosswalk-csv references/public_non_dicom_crosswalks_v1.csv \
+            --crosswalk-curation references/public-non-dicom-crosswalk-curation-v1.json \
+            --out dist/public_non_dicom_metadata.sqlite \
+            --gzip-out dist/public_non_dicom_metadata.sqlite.gz \
+            --manifest-out dist/public_non_dicom_metadata_manifest.json \
+            --replace \
+            "${pathdb_args[@]}"
+          python scripts/tcia_public_non_dicom_metadata.py validate \
+            --db dist/public_non_dicom_metadata.sqlite
+
+      - name: Build Participant Inventory
+        run: |
+          python scripts/tcia_participant_inventory.py build \
+            --public-db dist/public_non_dicom_metadata.sqlite \
+            --controlled-db cache/controlled_access_metadata.sqlite \
+            --clinical-db cache/clinical_metadata.sqlite \
+            --out dist/participant_inventory.sqlite \
+            --gzip-out dist/participant_inventory.sqlite.gz \
+            --manifest-out dist/participant_inventory_manifest.json \
+            --replace
+          python scripts/tcia_participant_inventory.py validate \
+            --db dist/participant_inventory.sqlite
+
+      - name: Run V2 contract tests
+        run: python -m unittest scripts.tests.test_tcia_artifact_model
+
+      - name: Upload workflow artifact for evaluation
+        uses: actions/upload-artifact@v6
+        with:
+          name: tcia-metadata-v2-preview
+          path: |
+            dist/public_non_dicom_metadata.sqlite.gz
+            dist/public_non_dicom_metadata_manifest.json
+            dist/participant_inventory.sqlite.gz
+            dist/participant_inventory_manifest.json
+          retention-days: 30
+
+      - name: Decide whether to publish V2 release assets
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          publish_requested="false"
+          if [ "${{ github.event_name }}" = "workflow_run" ] || [ "${{ inputs.publish_preview }}" = "true" ]; then
+            publish_requested="true"
+          fi
+
+          publish="false"
+          reason="publication not requested"
+          if [ "$publish_requested" = "true" ]; then
+            tag="tcia-metadata-v2-preview"
+            new_public_fingerprint="$(python -c 'import json; print(json.load(open("dist/public_non_dicom_metadata_manifest.json"))["release_fingerprint"])')"
+            new_participant_fingerprint="$(python -c 'import json; print(json.load(open("dist/participant_inventory_manifest.json"))["release_fingerprint"])')"
+            old_public_fingerprint=""
+            old_participant_fingerprint=""
+            mkdir -p previous-v2
+            if gh release download "$tag" --pattern '*_manifest.json' --dir previous-v2 --clobber >/dev/null 2>&1; then
+              if [ -s previous-v2/public_non_dicom_metadata_manifest.json ]; then
+                old_public_fingerprint="$(python -c 'import json; print(json.load(open("previous-v2/public_non_dicom_metadata_manifest.json"))["release_fingerprint"])')"
+              fi
+              if [ -s previous-v2/participant_inventory_manifest.json ]; then
+                old_participant_fingerprint="$(python -c 'import json; print(json.load(open("previous-v2/participant_inventory_manifest.json"))["release_fingerprint"])')"
+              fi
+            fi
+            if [ "$new_public_fingerprint" != "$old_public_fingerprint" ] || [ "$new_participant_fingerprint" != "$old_participant_fingerprint" ]; then
+              publish="true"
+              reason="V2 release fingerprint changed"
+            else
+              reason="V2 release fingerprint unchanged"
+            fi
+          fi
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+          echo "reason=$reason" >> "$GITHUB_OUTPUT"
+          echo "### V2 release decision" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Publish: $publish" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Reason: $reason" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish isolated preview release
+        if: steps.release.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="tcia-metadata-v2-preview"
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" \
+              --prerelease \
+              --title "TCIA metadata V2 preview" \
+              --notes "Experimental V2 contracts for public non-DICOM metadata and the Participant Inventory, published for Participant Explorer integration testing. This prerelease does not replace tcia-snapshot-latest and is not used by the MCP/REST services."
+          else
+            gh release edit "$tag" \
+              --prerelease \
+              --title "TCIA metadata V2 preview" \
+              --notes "Experimental V2 contracts for public non-DICOM metadata and the Participant Inventory, published for Participant Explorer integration testing. This prerelease does not replace tcia-snapshot-latest and is not used by the MCP/REST services."
+          fi
+          gh release upload "$tag" \
+            dist/public_non_dicom_metadata.sqlite.gz \
+            dist/public_non_dicom_metadata_manifest.json \
+            dist/participant_inventory.sqlite.gz \
+            dist/participant_inventory_manifest.json \
+            --clobber
+
+      - name: Confirm legacy release isolation
+        run: |
+          echo "This workflow never uploads to or modifies tcia-snapshot-latest."
+          echo "It does not deploy or reconfigure the MCP/REST service."
