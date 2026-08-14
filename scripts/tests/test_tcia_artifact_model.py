@@ -155,13 +155,146 @@ class BuilderTests(unittest.TestCase):
 
     def test_participant_keys_remain_dataset_scoped(self):
         self.assertNotEqual(
-            participants.participant_key("Collection", "Dataset-A", "tcia_dataset:Dataset-A", "001"),
-            participants.participant_key("Collection", "Dataset-B", "tcia_dataset:Dataset-B", "001"),
+            participants.participant_key("Collection", "Dataset-A", "001"),
+            participants.participant_key("Collection", "Dataset-B", "001"),
         )
-        self.assertNotEqual(
-            participants.participant_key("Collection", "Dataset-A", "tcia_dataset:Dataset-A", "001"),
-            participants.participant_key("Collection", "Dataset-A", "crdc_gc:Dataset-A", "001"),
-        )
+
+    def test_participant_inventory_unifies_exact_same_dataset_identifiers(self):
+        import sqlite3
+
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            snapshot = base / "snapshot.sqlite"
+            controlled = base / "controlled.sqlite"
+            clinical = base / "clinical.sqlite"
+            output = base / "participants.sqlite"
+
+            conn = sqlite3.connect(snapshot)
+            conn.execute("CREATE TABLE agent_datasets (dataset_type TEXT, short_title TEXT)")
+            conn.executemany(
+                "INSERT INTO agent_datasets VALUES (?, ?)",
+                [
+                    ("Collection", "AAPM-RT-MAC"),
+                    ("Analysis Result", "Outcome-Result"),
+                ],
+            )
+            conn.commit()
+            conn.close()
+
+            conn = sqlite3.connect(controlled)
+            conn.execute(
+                """
+                CREATE TABLE agent_controlled_files (
+                  dataset_type TEXT, short_title TEXT, route_system TEXT,
+                  patient_id TEXT, participant_id TEXT, modality TEXT,
+                  file_format TEXT, study_instance_uid TEXT,
+                  series_instance_uid TEXT, file_size_bytes INTEGER, drs_uri TEXT
+                )
+                """
+            )
+            conn.executemany(
+                "INSERT INTO agent_controlled_files VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                [
+                    (
+                        "Collection", "AAPM-RT-MAC", "general_commons",
+                        "RTMAC-LIVE-008", "", "MR", "DICOM", "study-1",
+                        "series-1", 10, "drs://example/1",
+                    ),
+                    (
+                        "Collection", "Outcome-Result", "general_commons",
+                        "CASE-001", "", "MR", "DICOM", "study-2",
+                        "series-2", 20, "drs://example/2",
+                    ),
+                ],
+            )
+            conn.commit()
+            conn.close()
+
+            conn = sqlite3.connect(clinical)
+            conn.execute(
+                "CREATE TABLE agent_clinical_all_subjects "
+                "(short_title TEXT, subject_id TEXT, source_kinds TEXT)"
+            )
+            conn.executemany(
+                "INSERT INTO agent_clinical_all_subjects VALUES (?,?,?)",
+                [
+                    ("AAPM-RT-MAC", "RTMAC-LIVE-008", "tcia,idc"),
+                    ("Outcome-Result", "CASE-001", "tcia"),
+                ],
+            )
+            conn.execute(
+                "CREATE TABLE clinical_imaging_subjects "
+                "(short_title TEXT, subject_id TEXT, imaging_source TEXT)"
+            )
+            conn.execute(
+                "INSERT INTO clinical_imaging_subjects VALUES (?,?,?)",
+                ("AAPM-RT-MAC", "RTMAC-LIVE-008", "idc_index"),
+            )
+            conn.commit()
+            conn.close()
+
+            result = participants.build_database(
+                output,
+                snapshot_db=snapshot,
+                public_db=base / "missing-public.sqlite",
+                controlled_db=controlled,
+                clinical_db=clinical,
+                replace=True,
+            )
+            self.assertEqual(result["counts"]["exact_cross_namespace_resolutions"], 2)
+
+            conn = sqlite3.connect(output)
+            aapm = conn.execute(
+                """
+                SELECT dataset_type, display_participant_id,
+                       within_dataset_identity_status, identity_resolution_method,
+                       source_namespace_count, modalities
+                FROM agent_participant_search
+                WHERE short_title='AAPM-RT-MAC'
+                """
+            ).fetchall()
+            self.assertEqual(
+                aapm,
+                [(
+                    "Collection", "RTMAC-LIVE-008", "resolved",
+                    "exact_identifier_same_tcia_dataset", 2, "MR",
+                )],
+            )
+            self.assertEqual(
+                conn.execute(
+                    "SELECT COUNT(*) FROM participant_identifiers "
+                    "WHERE participant_key=(SELECT participant_key FROM participants "
+                    "WHERE short_title='AAPM-RT-MAC')"
+                ).fetchone()[0],
+                3,
+            )
+            self.assertEqual(
+                conn.execute(
+                    "SELECT COUNT(*) FROM participant_assets "
+                    "WHERE participant_key=(SELECT participant_key FROM participants "
+                    "WHERE short_title='AAPM-RT-MAC')"
+                ).fetchone()[0],
+                3,
+            )
+            self.assertEqual(
+                conn.execute(
+                    "SELECT dataset_type FROM participants "
+                    "WHERE short_title='Outcome-Result'"
+                ).fetchone()[0],
+                "Analysis Result",
+            )
+            self.assertEqual(
+                conn.execute("SELECT COUNT(*) FROM participant_link_issues").fetchone()[0],
+                0,
+            )
+            self.assertEqual(
+                conn.execute(
+                    "SELECT COUNT(*) FROM participant_identity_evidence "
+                    "WHERE resolution_method='exact_identifier_same_tcia_dataset'"
+                ).fetchone()[0],
+                2,
+            )
+            conn.close()
 
     def test_hancock_tma_slide_links_one_asset_to_multiple_participants(self):
         import sqlite3

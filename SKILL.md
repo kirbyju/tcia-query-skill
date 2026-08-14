@@ -274,7 +274,7 @@ Do not download the optional NIfTI SQLite unless the user needs NIfTI file-grain
 
 ## Metadata Artifact Model V2
 
-Load `references/artifact-model-v2.md` for public non-DICOM inventory, managed-system provenance, original-versus-standardized representations, Participant Explorer integration, or the V2 release line. The preview is an official-shaped bundle containing the base snapshot, all eight web exports, optional detail sidecars, the two V2 databases, and a top-level hash manifest. Preserve the existing interfaces as compatibility surfaces during migration and keep `tcia-snapshot-latest` untouched until a migration is separately approved.
+Load `references/artifact-model-v2.md` for public non-DICOM inventory, managed-system provenance, original-versus-standardized representations, Participant Explorer integration, or the V2 release line. The preview is an official-shaped bundle containing the base snapshot, all eight web exports, optional detail sidecars, the two V2 databases, and a top-level hash manifest. Participant Explorer search should start with the Participant Inventory `agent_participant_search` view, which returns one canonical row for an exact participant identifier within one authoritative WordPress dataset while retaining TCIA/IDC, GC, and CTDC namespaces as identifier provenance. Preserve the existing interfaces as compatibility surfaces during migration and keep `tcia-snapshot-latest` untouched until a migration is separately approved.
 
 ## PathDB Metadata
 

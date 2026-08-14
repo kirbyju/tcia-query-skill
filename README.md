@@ -177,6 +177,11 @@ python3 scripts/tcia_public_non_dicom_metadata.py ensure
 python3 scripts/tcia_participant_inventory.py ensure
 ```
 
+Participant Explorer integrations should query `agent_participant_search` for
+one row per canonical dataset-scoped participant, then use the identifier,
+asset, clinical-value, identity-evidence, and issue views for drill-down and
+provenance.
+
 ## Documentation Map
 
 - [SKILL.md](./SKILL.md): agent workflow, routing rules, and guardrails

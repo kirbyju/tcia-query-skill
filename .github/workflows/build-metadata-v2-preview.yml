@@ -107,6 +107,7 @@ jobs:
       - name: Build Participant Inventory
         run: |
           python scripts/tcia_participant_inventory.py build \
+            --snapshot-db cache/tcia_snapshot.sqlite \
             --public-db cache/public_non_dicom_metadata.sqlite \
             --controlled-db cache/controlled_access_metadata.sqlite \
             --clinical-db cache/clinical_metadata.sqlite \
