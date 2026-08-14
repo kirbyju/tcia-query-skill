@@ -73,6 +73,10 @@ class V2BundleTests(unittest.TestCase):
         self.assertIn("agent_dataset_versions.jsonl", BUNDLE.expected_payload_assets())
         self.assertIn("agent_dataset_v1_releases.jsonl.gz", BUNDLE.expected_payload_assets())
 
+    def test_v2_built_participant_inventory_assets_have_v2_provenance(self):
+        self.assertEqual(BUNDLE.asset_source("participant_inventory.sqlite.gz"), "v2_build")
+        self.assertEqual(BUNDLE.asset_source("participant_inventory_manifest.json"), "v2_build")
+
     def test_source_release_copy_is_digest_verified(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

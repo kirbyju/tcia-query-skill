@@ -60,7 +60,7 @@
     "scripts/tcia_publications.py": "fcd1aa1e5abd48d0f556165bbee85af7d30030ba4ece1af573c8a441b720659a",
     "scripts/tcia_skill_version.py": "022626ade6a21b225cc0974c7e0593afb4bc158bc6850c41966205a5a41f796b",
     "scripts/tcia_snapshot.py": "5d37ff4d249e67185e00b71be2b09aed577781e8002896f0cfdbef52f7350f32",
-    "scripts/tcia_v2_bundle.py": "52aa2a3539b272082f34efabc8ca1a9e4add03299b9da600e238a2b12ec75214",
+    "scripts/tcia_v2_bundle.py": "800a08f1eebce80f7ddeda39081ad0ba6a3efc6bac5d4e2d9100b5768eae8ef3",
     "scripts/tcia_wordpress_search.py": "d9549a37961ed88f6279e40d1968985a5f5e3e90d6975a8a91527e91b663111c",
     "scripts/tests/test_tcia_artifact_model.py": "d053ee9c853b90b6bc9ccc7a8306186256b979e98e352d664b5fa14e1f319703",
     "scripts/tests/test_tcia_clinical_metadata.py": "043883e47ddecdbed429fef27b38b0e3fe507ec54f6fe4c86ca2139344d7deb3",
@@ -68,9 +68,9 @@
     "scripts/tests/test_tcia_nifti_metadata_harvest.py": "836af097f5f755ca2383c9433c8b219faf2814c8b4e282826319ae2ee5a4c926",
     "scripts/tests/test_tcia_skill_version.py": "a1106ca1f6736252d4c81a040cb98a5b9cff706437708df96bb6418189b18dbe",
     "scripts/tests/test_tcia_snapshot.py": "35dbe7b25518c09a6160cda5981cc5fd0a5e13e66c544dc19364f04bef059641",
-    "scripts/tests/test_tcia_v2_bundle.py": "874c7df15041791973dad9d958bbba91b489995c134d902e57ad9d5d0ba94980"
+    "scripts/tests/test_tcia_v2_bundle.py": "c5788a8ba4c3012ab31db1f5a6aee6301212337444ffad0f1137455e9c38401c"
   },
   "schema_version": 1,
-  "skill_version": "2026.08.14.1",
-  "updated_at_utc": "2026-08-14T15:36:31.529875+00:00"
+  "skill_version": "2026.08.14.2",
+  "updated_at_utc": "2026-08-14T15:53:48.733231+00:00"
 }

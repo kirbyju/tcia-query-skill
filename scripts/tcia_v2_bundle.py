@@ -112,7 +112,9 @@ def source_copy_assets() -> list[str]:
 def asset_source(name: str) -> str:
     if name in WEB_EXPORT_ASSETS:
         return "generated_from_bundled_snapshot"
-    if name.startswith(("public_non_dicom_", "participant_inventory_")):
+    if name.startswith("public_non_dicom_") or name.startswith(
+        ("participant_inventory.", "participant_inventory_")
+    ):
         return "v2_build"
     return "source_release_copy"
 
