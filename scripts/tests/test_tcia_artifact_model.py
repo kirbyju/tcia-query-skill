@@ -252,15 +252,15 @@ class BuilderTests(unittest.TestCase):
                        representation_provenance_class, source_system
                 FROM public_non_dicom_assets
                 WHERE file_format='DICOM'
-                ORDER BY subject_id, modality
+                ORDER BY subject_id, represented_file_count, asset_name
                 """
             ).fetchall()
             self.assertEqual(
                 rows,
                 [
-                    ("BraTS2021_00393", "T1w", 1, "submitted_original", "tcia_aspera"),
-                    ("BraTS2021_00794", "FLAIR", 1, "submitted_original", "tcia_aspera"),
-                    ("BraTS2021_00794", "T2w", 2, "submitted_original", "tcia_aspera"),
+                    ("BraTS2021_00393", "MR", 1, "submitted_original", "tcia_aspera"),
+                    ("BraTS2021_00794", "MR", 1, "submitted_original", "tcia_aspera"),
+                    ("BraTS2021_00794", "MR", 2, "submitted_original", "tcia_aspera"),
                 ],
             )
             conn.close()
@@ -496,6 +496,16 @@ class BuilderTests(unittest.TestCase):
                 "WHERE short_title='HANCOCK' AND asset_name='PrimaryTumor_HE_001'"
             ).fetchone()
             self.assertEqual(wsi[0], "patient001")
+            slide_metadata = conn.execute(
+                "SELECT modality, pathology_protocol, magnification, field_provenance_json "
+                "FROM agent_public_non_dicom_image_metadata "
+                "WHERE short_title='HANCOCK' AND file_name='PrimaryTumor_HE_001'"
+            ).fetchone()
+            self.assertEqual(slide_metadata[:3], ("SM", "primary tumor", "40x"))
+            self.assertEqual(
+                json.loads(slide_metadata[3])["magnification"]["source_kind"],
+                "pathdb_slide_csv",
+            )
             conn.close()
 
     def test_reviewed_crosswalk_adds_file_evidence_and_resolves_download_flag(self):
@@ -507,6 +517,7 @@ class BuilderTests(unittest.TestCase):
             output = base / "public.sqlite"
             crosswalk_csv = base / "crosswalk.csv"
             curation = base / "curation.json"
+            image_metadata_csv = base / "image_metadata.csv"
             self.build_snapshot(snapshot)
             values = {field: "" for field in crosswalks.FIELDS}
             values.update({
@@ -548,6 +559,30 @@ class BuilderTests(unittest.TestCase):
                     "evidence_url": "https://example.test/crosswalk.xlsx",
                 }],
             }))
+            with image_metadata_csv.open("w", newline="") as handle:
+                writer = csv.DictWriter(handle, fieldnames=[
+                    "dataset_type", "short_title", "download_id", "subject_id",
+                    "file_name", "value_role", "source_kind", "source_url",
+                    "source_file", "source_row", "inference_method", "confidence",
+                    "priority", "metadata_json",
+                ])
+                writer.writeheader()
+                writer.writerow({
+                    "dataset_type": "Collection",
+                    "short_title": "Breast-Lesions-USG",
+                    "download_id": "2",
+                    "subject_id": "case001",
+                    "file_name": "case001.png",
+                    "value_role": "normalized",
+                    "source_kind": "supporting_spreadsheet",
+                    "source_url": "https://example.test/metadata.xlsx",
+                    "source_file": "metadata.xlsx",
+                    "source_row": "2",
+                    "inference_method": "image_filename_exact_match",
+                    "confidence": "high",
+                    "priority": "100",
+                    "metadata_json": json.dumps({"pixel_spacing_mm": [0.1, 0.1]}),
+                })
             public.build_database(
                 snapshot,
                 output,
@@ -557,6 +592,7 @@ class BuilderTests(unittest.TestCase):
                 replace=True,
                 crosswalk_csv=crosswalk_csv,
                 crosswalk_curation=curation,
+                image_metadata_csv=image_metadata_csv,
             )
             conn = sqlite3.connect(output)
             self.assertEqual(
@@ -575,6 +611,22 @@ class BuilderTests(unittest.TestCase):
             self.assertIsNone(conn.execute(
                 "SELECT 1 FROM public_non_dicom_review_issues WHERE short_title='Breast-Lesions-USG'"
             ).fetchone())
+            metadata = conn.execute(
+                "SELECT pixel_spacing_mm, field_provenance_json "
+                "FROM agent_public_non_dicom_image_metadata "
+                "WHERE short_title='Breast-Lesions-USG' AND file_name='case001.png'"
+            ).fetchone()
+            self.assertEqual(json.loads(metadata[0]), [0.1, 0.1])
+            self.assertEqual(
+                json.loads(metadata[1])["pixel_spacing_mm"]["source_kind"],
+                "supporting_spreadsheet",
+            )
+            coverage = conn.execute(
+                "SELECT populated_assets, normalized_assets "
+                "FROM agent_public_non_dicom_metadata_field_coverage "
+                "WHERE short_title='Breast-Lesions-USG' AND field_name='pixel_spacing_mm'"
+            ).fetchone()
+            self.assertEqual(coverage, (1, 1))
             conn.close()
 
 

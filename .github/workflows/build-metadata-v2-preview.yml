@@ -96,6 +96,7 @@ jobs:
             --pathology-db cache/pathology_metadata.sqlite \
             --crosswalk-csv references/public_non_dicom_crosswalks_v1.csv \
             --crosswalk-curation references/public-non-dicom-crosswalk-curation-v1.json \
+            --image-metadata-csv references/public_non_dicom_image_metadata_v1.csv \
             --out cache/public_non_dicom_metadata.sqlite \
             --gzip-out dist/public_non_dicom_metadata.sqlite.gz \
             --manifest-out dist/public_non_dicom_metadata_manifest.json \

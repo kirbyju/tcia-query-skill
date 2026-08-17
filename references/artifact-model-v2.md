@@ -154,6 +154,63 @@ dataset counts are recorded in
 `scripts/tcia_public_non_dicom_crosswalks.py` only from retained source
 inventories and reviewed evidence.
 
+## Public non-DICOM image metadata
+
+Schema version 5 adds an exploratory, file-grain metadata layer without making
+every source-specific spreadsheet column part of the fixed relational schema:
+
+| Surface | Purpose |
+| --- | --- |
+| `agent_public_non_dicom_image_metadata` | One row per image asset, with common discovery fields projected as columns and the complete field set retained in `metadata_json` |
+| `agent_public_non_dicom_metadata_field_coverage` | Per-dataset field coverage, value diversity, provenance-role counts, examples, and contributing source kinds |
+| `agent_public_non_dicom_dataset_metadata_notes` | Dataset-level ambiguity, missing file mappings, conflicts, and other reviewer decisions |
+
+Each metadata field has its own provenance entry in
+`field_provenance_json`: source kind and source reference, extraction or
+inference method, confidence, semantic role (`source_raw`, `normalized`, or
+`inferred`), and precedence. The `_sources` member stores the referenced
+locator and evidence once per source rather than repeating it for every field.
+Conflicting lower-priority values are retained in
+`conflicting_values_json`; they are not silently discarded.
+
+The builder applies evidence in this order:
+
+1. file-linked values imported from the NIfTI and pathology metadata artifacts;
+2. curated file-linked spreadsheet values from
+   `references/public_non_dicom_image_metadata_v1.csv`;
+3. reviewed crosswalk spreadsheet columns that describe the matched file;
+4. uniform, explicit WordPress dataset labels or acquisition prose;
+5. conservative filename tokens such as MR sequence, pathology stain, view,
+   laterality, or image/mask role.
+
+An inferred dataset-level value is propagated to files only when the source
+supports one unambiguous value. For example, a CT-only MHA package may receive
+file-level `modality='CT'`, while a package described as mixed CT and PET stays
+unassigned unless filenames or a spreadsheet distinguish the files. Multiple
+field-strength, manufacturer, model, stain, magnification, or modality
+candidates are placed in the dataset review notes instead of being guessed.
+
+The initial curated spreadsheet pass covers MHA geometry and intensity fields
+for `Pedi-Cranial-CT-Healthy`, physical pixel spacing for source and paired mask
+PNGs in `Breast-Lesions-USG`, and acquisition type, laterality, view, and raw
+equipment codes from the reviewed `CDD-CESM` crosswalk. PathDB rows contribute
+the pathology CSV fields already available at file grain, including protocol,
+magnification, species, cancer type/location, and format. The legacy NIfTI
+artifact remains the detailed source for its broader file metadata and is
+projected into this V2 layer rather than replaced.
+
+Use the coverage surface to decide whether an exploratory field should become
+a stable projected column. Use the notes surface as the review queue. A useful
+starting query is:
+
+```sql
+SELECT short_title, field_name, note_code, severity, affected_assets,
+       description, evidence_json
+FROM agent_public_non_dicom_dataset_metadata_notes
+WHERE status = 'review_required'
+ORDER BY severity DESC, short_title, field_name;
+```
+
 ## Participant identity
 
 Create participant keys from the authoritative WordPress dataset identity and

@@ -23,6 +23,7 @@ import sqlite3
 import tempfile
 import urllib.parse
 import urllib.request
+from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
@@ -38,7 +39,6 @@ from tcia_artifact_model import (
     MANAGED_SYSTEMS,
     NON_DICOM_IMAGING_FORMATS,
     REPRESENTATION_PROVENANCE_CLASSES,
-    SCHEMA_VERSION,
     SYSTEM_FUNCTIONS,
     default_representation_class,
     default_system_functions,
@@ -59,12 +59,14 @@ DEFAULT_NIFTI_DB = SKILL_ROOT / "cache" / "nifti_metadata.sqlite"
 DEFAULT_PATHOLOGY_DB = SKILL_ROOT / "cache" / "pathology_metadata.sqlite"
 DEFAULT_CROSSWALK_CSV = SKILL_ROOT / "references" / "public_non_dicom_crosswalks_v1.csv"
 DEFAULT_CROSSWALK_CURATION = SKILL_ROOT / "references" / "public-non-dicom-crosswalk-curation-v1.json"
+DEFAULT_IMAGE_METADATA_CSV = SKILL_ROOT / "references" / "public_non_dicom_image_metadata_v1.csv"
 DEFAULT_DB = SKILL_ROOT / "cache" / "public_non_dicom_metadata.sqlite"
 DEFAULT_MANIFEST = SKILL_ROOT / "cache" / "public_non_dicom_metadata_manifest.json"
 DEFAULT_RELEASE_TAG = "tcia-metadata-v2-preview"
 DEFAULT_REPOSITORY = "kirbyju/tcia-query-skill"
 DB_ASSET = "public_non_dicom_metadata.sqlite.gz"
 MANIFEST_ASSET = "public_non_dicom_metadata_manifest.json"
+SCHEMA_VERSION = 5
 
 
 SCHEMA = """
@@ -208,6 +210,44 @@ CREATE TABLE public_non_dicom_review_issues (
     evidence_json TEXT NOT NULL DEFAULT '{}'
 );
 
+CREATE TABLE public_non_dicom_image_metadata (
+    asset_id TEXT PRIMARY KEY,
+    short_title TEXT NOT NULL,
+    metadata_json TEXT NOT NULL DEFAULT '{}',
+    field_provenance_json TEXT NOT NULL DEFAULT '{}',
+    conflicting_values_json TEXT NOT NULL DEFAULT '{}',
+    quality_flag_json TEXT NOT NULL DEFAULT '{}',
+    populated_field_count INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (asset_id) REFERENCES public_non_dicom_assets(asset_id)
+);
+
+CREATE TABLE public_non_dicom_metadata_field_coverage (
+    short_title TEXT NOT NULL,
+    field_name TEXT NOT NULL,
+    eligible_assets INTEGER NOT NULL,
+    populated_assets INTEGER NOT NULL,
+    source_raw_assets INTEGER NOT NULL DEFAULT 0,
+    normalized_assets INTEGER NOT NULL DEFAULT 0,
+    inferred_assets INTEGER NOT NULL DEFAULT 0,
+    resolved_assets INTEGER NOT NULL DEFAULT 0,
+    distinct_value_count INTEGER NOT NULL DEFAULT 0,
+    example_values_json TEXT NOT NULL DEFAULT '[]',
+    source_kinds_json TEXT NOT NULL DEFAULT '[]',
+    PRIMARY KEY (short_title, field_name)
+);
+
+CREATE TABLE public_non_dicom_dataset_metadata_notes (
+    note_id TEXT PRIMARY KEY,
+    short_title TEXT NOT NULL,
+    field_name TEXT NOT NULL DEFAULT '',
+    note_code TEXT NOT NULL,
+    severity TEXT NOT NULL,
+    status TEXT NOT NULL,
+    affected_assets INTEGER NOT NULL DEFAULT 0,
+    description TEXT NOT NULL,
+    evidence_json TEXT NOT NULL DEFAULT '{}'
+);
+
 CREATE INDEX idx_pnd_assets_dataset ON public_non_dicom_assets(short_title, dataset_type);
 CREATE INDEX idx_pnd_assets_subject ON public_non_dicom_assets(short_title, subject_id);
 CREATE INDEX idx_pnd_assets_format ON public_non_dicom_assets(file_format, media_kind);
@@ -219,6 +259,8 @@ CREATE UNIQUE INDEX idx_pnd_asset_participants_unique
     ON public_non_dicom_asset_participants(asset_id, subject_id_namespace, subject_id);
 CREATE INDEX idx_pnd_crosswalk_asset ON public_non_dicom_crosswalk_evidence(asset_id);
 CREATE INDEX idx_pnd_crosswalk_subject ON public_non_dicom_crosswalk_evidence(short_title, resolved_subject_id);
+CREATE INDEX idx_pnd_image_metadata_dataset ON public_non_dicom_image_metadata(short_title);
+CREATE INDEX idx_pnd_metadata_notes_dataset ON public_non_dicom_dataset_metadata_notes(short_title, status);
 
 CREATE VIEW agent_public_non_dicom_assets AS
 SELECT
@@ -328,6 +370,44 @@ SELECT
     a.source_url
 FROM public_non_dicom_crosswalk_evidence e
 JOIN public_non_dicom_assets a USING (asset_id);
+
+CREATE VIEW agent_public_non_dicom_image_metadata AS
+SELECT
+    a.asset_id,
+    a.dataset_type,
+    a.short_title,
+    a.subject_id,
+    a.file_name,
+    a.package_path,
+    a.file_format,
+    a.media_kind,
+    a.object_role,
+    json_extract(m.metadata_json, '$.modality') AS modality,
+    json_extract(m.metadata_json, '$.body_part_examined') AS body_part_examined,
+    json_extract(m.metadata_json, '$.study_description') AS study_description,
+    json_extract(m.metadata_json, '$.series_description') AS series_description,
+    json_extract(m.metadata_json, '$.manufacturer') AS manufacturer,
+    json_extract(m.metadata_json, '$.manufacturer_model_name') AS manufacturer_model_name,
+    json_extract(m.metadata_json, '$.magnetic_field_strength_t') AS magnetic_field_strength_t,
+    json_extract(m.metadata_json, '$.rows') AS rows,
+    json_extract(m.metadata_json, '$.columns') AS columns,
+    json_extract(m.metadata_json, '$.number_of_slices') AS number_of_slices,
+    json_extract(m.metadata_json, '$.pixel_spacing_mm') AS pixel_spacing_mm,
+    json_extract(m.metadata_json, '$.pathology_protocol') AS pathology_protocol,
+    json_extract(m.metadata_json, '$.magnification') AS magnification,
+    m.metadata_json,
+    m.field_provenance_json,
+    m.conflicting_values_json,
+    m.quality_flag_json,
+    m.populated_field_count
+FROM public_non_dicom_image_metadata m
+JOIN public_non_dicom_assets a USING (asset_id);
+
+CREATE VIEW agent_public_non_dicom_metadata_field_coverage AS
+SELECT * FROM public_non_dicom_metadata_field_coverage;
+
+CREATE VIEW agent_public_non_dicom_dataset_metadata_notes AS
+SELECT * FROM public_non_dicom_dataset_metadata_notes;
 """
 
 
@@ -380,6 +460,23 @@ def table_exists(conn: sqlite3.Connection, name: str) -> bool:
     ).fetchone() is not None
 
 
+def row_value(row: sqlite3.Row, name: str, default: Any = "") -> Any:
+    return row[name] if name in row.keys() else default
+
+
+def nonempty_extension_rows(conn: sqlite3.Connection, table: str) -> dict[str, dict[str, Any]]:
+    if not table_exists(conn, table):
+        return {}
+    names = [name for name in columns(conn, table) if name != "radiology_id"]
+    if not names:
+        return {}
+    predicate = " OR ".join(f"NULLIF(trim(COALESCE({name}, '')), '') IS NOT NULL" for name in names)
+    return {
+        str(row["radiology_id"]): {name: row[name] for name in names}
+        for row in conn.execute(f"SELECT * FROM {table} WHERE {predicate}")
+    }
+
+
 def columns(conn: sqlite3.Connection, name: str) -> set[str]:
     return {str(row[1]) for row in conn.execute(f"PRAGMA table_info({name})")}
 
@@ -429,6 +526,168 @@ def insert_location(conn: sqlite3.Connection, values: dict[str, Any]) -> None:
         f"INSERT OR IGNORE INTO public_non_dicom_locations ({', '.join(names)}) "
         f"VALUES ({', '.join('?' for _ in names)})",
         [values.get(name) for name in names],
+    )
+
+
+EMPTY_METADATA_VALUES = {"", "n/a", "na", "none", "null", "not available", "unknown"}
+
+
+def meaningful_metadata_value(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return value.strip().casefold() not in EMPTY_METADATA_VALUES
+    if isinstance(value, (list, dict)):
+        return bool(value)
+    return True
+
+
+def merge_image_metadata(
+    conn: sqlite3.Connection,
+    asset_id: str,
+    values: dict[str, Any],
+    *,
+    value_role: str,
+    source_kind: str,
+    source_locator: str,
+    inference_method: str,
+    confidence: str,
+    priority: int,
+    evidence: dict[str, Any] | None = None,
+    short_title: str = "",
+    assume_new: bool = False,
+) -> int:
+    """Add standardized metadata while retaining conflicts and field provenance."""
+    if assume_new:
+        asset_short_title = short_title
+        row = None
+    else:
+        row = conn.execute(
+            """
+            SELECT a.short_title AS asset_short_title, m.*
+            FROM public_non_dicom_assets a
+            LEFT JOIN public_non_dicom_image_metadata m USING(asset_id)
+            WHERE a.asset_id = ?
+            """,
+            (asset_id,),
+        ).fetchone()
+        if row is None:
+            return 0
+        asset_short_title = str(row["asset_short_title"])
+    metadata = json.loads(row["metadata_json"] or "{}") if row else {}
+    provenance = json.loads(row["field_provenance_json"] or "{}") if row else {}
+    provenance_sources = provenance.setdefault("_sources", {})
+    conflicts = json.loads(row["conflicting_values_json"] or "{}") if row else {}
+    quality = json.loads(row["quality_flag_json"] or "{}") if row else {}
+    source_definition = {
+        "source_kind": source_kind,
+        "source_locator": source_locator,
+        "inference_method": inference_method,
+        "confidence": confidence,
+        "priority": priority,
+        "evidence": evidence or {},
+    }
+    source_id = hashlib.sha256(json_dumps(source_definition).encode("utf-8")).hexdigest()[:12]
+    provenance_sources[source_id] = source_definition
+    changed = 0
+    for field_name, raw_value in values.items():
+        if not meaningful_metadata_value(raw_value):
+            continue
+        value = raw_value.strip() if isinstance(raw_value, str) else raw_value
+        candidate = {
+            "value_role": value_role,
+            "source_kind": source_kind,
+            "inference_method": inference_method,
+            "confidence": confidence,
+            "priority": priority,
+            "source_id": source_id,
+        }
+        if field_name not in metadata:
+            metadata[field_name] = value
+            provenance[field_name] = candidate
+            changed += 1
+            continue
+        if json_dumps(metadata[field_name]) == json_dumps(value):
+            existing = provenance.setdefault(field_name, candidate)
+            sources = existing.setdefault("additional_sources", [])
+            source_summary = {
+                "source_id": source_id,
+                "source_kind": source_kind,
+                "confidence": confidence,
+            }
+            if source_summary not in sources and (
+                existing.get("source_kind") != source_kind
+                or existing.get("source_id") != source_id
+            ):
+                sources.append(source_summary)
+            continue
+        existing = provenance.get(field_name, {})
+        conflict_rows = conflicts.setdefault(field_name, [])
+        conflict_candidate = {"value": value, **candidate}
+        if conflict_candidate not in conflict_rows:
+            conflict_rows.append(conflict_candidate)
+        if priority > int(existing.get("priority", 0)):
+            previous = {"value": metadata[field_name], **existing}
+            if previous not in conflict_rows:
+                conflict_rows.append(previous)
+            metadata[field_name] = value
+            provenance[field_name] = candidate
+            changed += 1
+        quality["metadata_conflict_fields"] = sorted(conflicts)
+    conn.execute(
+        """
+        INSERT INTO public_non_dicom_image_metadata
+          (asset_id, short_title, metadata_json, field_provenance_json,
+           conflicting_values_json, quality_flag_json, populated_field_count)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(asset_id) DO UPDATE SET
+          metadata_json=excluded.metadata_json,
+          field_provenance_json=excluded.field_provenance_json,
+          conflicting_values_json=excluded.conflicting_values_json,
+          quality_flag_json=excluded.quality_flag_json,
+          populated_field_count=excluded.populated_field_count
+        """,
+        (
+            asset_id,
+            asset_short_title,
+            json_dumps(metadata),
+            json_dumps(provenance),
+            json_dumps(conflicts),
+            json_dumps(quality),
+            len(metadata),
+        ),
+    )
+    return changed
+
+
+def add_dataset_metadata_note(
+    conn: sqlite3.Connection,
+    short_title: str,
+    field_name: str,
+    note_code: str,
+    description: str,
+    *,
+    severity: str = "info",
+    status: str = "manual_review",
+    affected_assets: int = 0,
+    evidence: dict[str, Any] | None = None,
+) -> None:
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO public_non_dicom_dataset_metadata_notes
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            stable_id("metadata_note", short_title, field_name, note_code),
+            short_title,
+            field_name,
+            note_code,
+            severity,
+            status,
+            affected_assets,
+            description,
+            json_dumps(evidence or {}),
+        ),
     )
 
 
@@ -494,6 +753,138 @@ def hancock_subject_id(raw_subject_id: str) -> str:
     return value
 
 
+RADIOLOGY_MODALITIES = {"CT", "MR", "MG", "DX", "CR", "US", "PET", "NM", "RTDOSE"}
+MR_SEQUENCE_PATTERNS = {
+    "T1CE": r"(?:^|[/_.-])(?:t1w?ce|t1gd|t1c)(?=$|[/_.-])",
+    "T1": r"(?:^|[/_.-])t1w?(?=$|[/_.-])",
+    "T2": r"(?:^|[/_.-])t2w?(?=$|[/_.-])",
+    "FLAIR": r"(?:^|[/_.-])flair(?=$|[/_.-])",
+    "DWI": r"(?:^|[/_.-])dwi(?=$|[/_.-])",
+    "ADC": r"(?:^|[/_.-])adc(?=$|[/_.-])",
+    "DSC": r"(?:^|[/_.-])dsc(?=$|[/_.-])",
+    "SWI": r"(?:^|[/_.-])swi(?=$|[/_.-])",
+}
+
+
+def modalities_from_labels(values: Iterable[Any]) -> set[str]:
+    found: set[str] = set()
+    for value in values:
+        label = str(value or "").strip().upper()
+        if label in RADIOLOGY_MODALITIES:
+            found.add(label)
+        elif label == "CAPSULE ENDOSCOPY":
+            found.add("ES")
+    return found
+
+
+def modalities_from_text(value: str) -> set[str]:
+    text = str(value or "")
+    full_name_patterns = {
+        "CT": r"\bcomputed tomography\b",
+        "MR": r"\bmagnetic resonance\b",
+        "US": r"\b(?:ultrasound|ultrasonography)\b",
+        "MG": r"\b(?:mammograph(?:y|ic)|mammogram)\b",
+        "PET": r"\bpositron emission tomography\b",
+        "NM": r"\bnuclear medicine\b",
+    }
+    found = {
+        modality for modality, pattern in full_name_patterns.items()
+        if re.search(pattern, text, re.IGNORECASE)
+    }
+    acronym_patterns = {
+        "CT": r"\bCTs?\b",
+        "MR": r"\b(?:MR|MRI)\b",
+        "US": r"\bUS\b",
+        "MG": r"\bMG\b",
+        "PET": r"\bPET\b",
+        "NM": r"\bNM\b",
+    }
+    found.update(
+        modality for modality, pattern in acronym_patterns.items()
+        if re.search(pattern, text)
+    )
+    return found
+
+
+def filename_metadata(path: str) -> dict[str, Any]:
+    lower = str(path or "").casefold()
+    values: dict[str, Any] = {}
+    sequences = [name for name, pattern in MR_SEQUENCE_PATTERNS.items() if re.search(pattern, lower)]
+    if len(sequences) == 1:
+        values.update({"modality": "MR", "sequence_name": sequences[0]})
+    elif re.search(r"(?:^|[/_.-])ct(?=$|[/_.-])", lower):
+        values["modality"] = "CT"
+    elif re.search(r"(?:^|[/_.-])(?:us|ultrasound)(?=$|[/_.-])", lower):
+        values["modality"] = "US"
+    stains = {
+        "H&E": r"(?:^|[/_.-])(?:h&e|h[_-]?e|he)(?=$|[/_.-])",
+        "CD3": r"(?:^|[/_.-])cd3(?=$|[/_.-])",
+        "CD8": r"(?:^|[/_.-])cd8(?=$|[/_.-])",
+        "CD56": r"(?:^|[/_.-])cd56(?=$|[/_.-])",
+        "CD68": r"(?:^|[/_.-])cd68(?=$|[/_.-])",
+        "CD163": r"(?:^|[/_.-])cd163(?=$|[/_.-])",
+        "PD-L1": r"(?:^|[/_.-])pd[_-]?l1(?=$|[/_.-])",
+        "MHC-1": r"(?:^|[/_.-])mhc[_-]?1(?=$|[/_.-])",
+    }
+    matched_stains = [name for name, pattern in stains.items() if re.search(pattern, lower)]
+    if len(matched_stains) == 1:
+        values["pathology_protocol"] = matched_stains[0]
+    return values
+
+
+def compact_number(value: str) -> str:
+    return value.rstrip("0").rstrip(".") if "." in value else value
+
+
+def description_acquisition_candidates(value: str) -> dict[str, list[str]]:
+    text = str(value or "")
+    strengths = sorted({
+        compact_number(match)
+        for match in re.findall(r"(?<![\d.])(\d(?:\.\d+)?)\s*[- ]?(?:t|tesla)\b", text, re.IGNORECASE)
+    })
+    magnifications = sorted({
+        f"{compact_number(match)}x"
+        for match in re.findall(r"(?<![\d.])(\d+(?:\.\d+)?)\s*(?:x|×|[- ]fold)\b", text, re.IGNORECASE)
+    })
+    stains: list[str] = []
+    stain_patterns = {
+        "H&E": r"\b(?:H\s*&\s*E|hematoxylin\s+and\s+eosin)\b",
+        "Giemsa": r"\b(?:May[- ]Gr[uü]nwald[- ]Giemsa|Jenner[- ]Giemsa|Giemsa)\b",
+        "IHC": r"\b(?:immunohistochemistry|IHC)\b",
+        "immunofluorescence": r"\bimmunofluorescence\b",
+        "CODEX": r"\bCODEX\b",
+    }
+    for name, pattern in stain_patterns.items():
+        if re.search(pattern, text, re.IGNORECASE):
+            stains.append(name)
+    manufacturers: list[str] = []
+    manufacturer_patterns = {
+        "Siemens": r"\bSiemens\b",
+        "Philips": r"\bPhilips\b",
+        "GE": r"\b(?:GE Healthcare|GE Medical|General Electric)\b",
+        "Canon": r"\bCanon\b",
+        "Toshiba": r"\bToshiba\b",
+    }
+    for name, pattern in manufacturer_patterns.items():
+        if re.search(pattern, text, re.IGNORECASE):
+            manufacturers.append(name)
+    models = sorted({
+        match.strip()
+        for match in re.findall(
+            r"\(([^,()]{2,80}),\s*(?:GE Healthcare|GE Medical|General Electric|Siemens|Philips|Canon|Toshiba)\b",
+            text,
+            re.IGNORECASE,
+        )
+    })
+    return {
+        "magnetic_field_strength_t": strengths,
+        "magnification": magnifications,
+        "pathology_protocol": stains,
+        "manufacturer": manufacturers,
+        "manufacturer_model_name": models,
+    }
+
+
 def location_values(
     asset_id: str,
     url: str,
@@ -545,7 +936,7 @@ def download_size_bytes(value: Any, unit: Any) -> int | None:
 
 def ingest_wordpress(conn: sqlite3.Connection, snapshot_db: Path) -> int:
     count = 0
-    with connect(snapshot_db) as source:
+    with closing(connect(snapshot_db)) as source:
         for row in source.execute(
             """
             SELECT * FROM agent_current_downloads
@@ -629,13 +1020,17 @@ def ingest_nifti(conn: sqlite3.Connection, nifti_db: Path) -> int:
     if not nifti_db.exists():
         return 0
     count = 0
-    with connect(nifti_db) as source:
+    with closing(connect(nifti_db)) as source:
         if not table_exists(source, "agent_nifti_files"):
             return 0
         downloads: dict[tuple[str, str], str] = {}
         if table_exists(source, "agent_nifti_downloads"):
             for row in source.execute("SELECT short_title, download_id, download_url FROM agent_nifti_downloads"):
                 downloads[(str(row["short_title"]), str(row["download_id"] or ""))] = str(row["download_url"] or "")
+        extensions: dict[str, dict[str, Any]] = {}
+        for table in ("radiology_mr", "radiology_ct", "radiology_pet", "radiology_contrast"):
+            for radiology_id, values in nonempty_extension_rows(source, table).items():
+                extensions.setdefault(radiology_id, {}).update(values)
         for row in source.execute("SELECT * FROM agent_nifti_files ORDER BY short_title, package_path"):
             package_path = str(row["package_path"] or row["file_name"] or "")
             file_format = format_from_path(package_path) or "NIFTI"
@@ -689,6 +1084,51 @@ def ingest_nifti(conn: sqlite3.Connection, nifti_db: Path) -> int:
                 },
             )
             insert_location(conn, location_values(asset_id, url, provenance={"source_artifact": "nifti_metadata"}))
+            metadata_values = {
+                "modality": row_value(row, "modality"),
+                "file_format": file_format,
+                "media_kind": "image_volume",
+                "spatial_dimensionality": "3D" if row_value(row, "number_of_slices") else "unknown",
+                "temporal_dimensionality": "time_series" if row_value(row, "number_of_temporal_positions") else "static",
+                "object_role": role,
+                "body_part_examined": row_value(row, "body_part_examined"),
+                "study_instance_uid": row_value(row, "study_instance_uid"),
+                "series_instance_uid": row_value(row, "series_instance_uid"),
+                "source_doi": row_value(row, "source_doi"),
+                "study_date": row_value(row, "study_date"),
+                "series_date": row_value(row, "series_date"),
+                "study_description": row_value(row, "study_description"),
+                "series_description": row_value(row, "series_description"),
+                "series_number": row_value(row, "series_number"),
+                "manufacturer": row_value(row, "manufacturer"),
+                "manufacturer_model_name": row_value(row, "manufacturer_model_name"),
+                "software_versions": row_value(row, "software_versions"),
+                "image_type": row_value(row, "image_type"),
+                "rows": row_value(row, "rows"),
+                "columns": row_value(row, "columns"),
+                "number_of_slices": row_value(row, "number_of_slices"),
+                "number_of_temporal_positions": row_value(row, "number_of_temporal_positions"),
+                "pixel_spacing_row_mm": row_value(row, "pixel_spacing_row_mm"),
+                "pixel_spacing_col_mm": row_value(row, "pixel_spacing_col_mm"),
+                "slice_thickness_mm": row_value(row, "slice_thickness_mm"),
+                "spacing_between_slices_mm": row_value(row, "spacing_between_slices_mm"),
+                "orientation_or_affine": row_value(row, "orientation_or_affine"),
+            }
+            metadata_values.update(extensions.get(str(row["radiology_id"]), {}))
+            merge_image_metadata(
+                conn,
+                asset_id,
+                metadata_values,
+                value_role="normalized",
+                source_kind="supporting_spreadsheet_or_package_metadata",
+                source_locator="nifti_metadata.agent_nifti_files",
+                inference_method="legacy_nifti_file_metadata_projection",
+                confidence="high",
+                priority=90,
+                evidence={"radiology_id": row["radiology_id"]},
+                short_title=str(row["short_title"]),
+                assume_new=True,
+            )
             count += 1
     return count
 
@@ -714,7 +1154,7 @@ def ingest_aspera_public_dicom_exceptions(
     """
     if not nifti_db.exists():
         return 0
-    with connect(nifti_db) as source:
+    with closing(connect(nifti_db)) as source:
         if not table_exists(source, "aspera_root_sums_inventory"):
             return 0
         downloads: dict[tuple[str, str], str] = {}
@@ -804,7 +1244,7 @@ def ingest_aspera_public_dicom_exceptions(
                     "spatial_dimensionality": "unknown",
                     "temporal_dimensionality": "unknown",
                     "imaging_domain": "radiology",
-                    "modality": modality,
+                    "modality": "MR",
                     "object_role": "source_image",
                     "represented_file_count": file_count,
                     "size_bytes": None,
@@ -822,6 +1262,7 @@ def ingest_aspera_public_dicom_exceptions(
                             "challenge_cohort": cohort,
                             "source_group": source_group,
                             "raw_subject_folder": raw_subject_id,
+                            "brats_sequence_folder": modality,
                             "represented_dicom_instances": file_count,
                         }
                     ),
@@ -853,6 +1294,28 @@ def ingest_aspera_public_dicom_exceptions(
                     },
                 ),
             )
+            merge_image_metadata(
+                conn,
+                asset_id,
+                {
+                    "modality": "MR",
+                    "file_format": "DICOM",
+                    "media_kind": "dicom_instance_collection",
+                    "spatial_dimensionality": "unknown",
+                    "temporal_dimensionality": "unknown",
+                    "object_role": "source_image",
+                    "sequence_name": filename_metadata(package_root).get("sequence_name", ""),
+                },
+                value_role="normalized",
+                source_kind="aspera_package_inventory",
+                source_locator="nifti_metadata.aspera_root_sums_inventory",
+                inference_method="brats_dicom_folder_projection",
+                confidence="high",
+                priority=90,
+                evidence={"package_root": package_root},
+                short_title=short_title,
+                assume_new=True,
+            )
     return len(grouped)
 
 
@@ -860,7 +1323,7 @@ def ingest_pathology_packages(conn: sqlite3.Connection, pathology_db: Path) -> i
     if not pathology_db.exists():
         return 0
     count = 0
-    with connect(pathology_db) as source:
+    with closing(connect(pathology_db)) as source:
         if not table_exists(source, "agent_pathology_file_objects"):
             return 0
         urls: dict[tuple[str, str], str] = {}
@@ -921,6 +1384,31 @@ def ingest_pathology_packages(conn: sqlite3.Connection, pathology_db: Path) -> i
                     provenance={"source_artifact": "pathology_metadata"},
                 ),
             )
+            merge_image_metadata(
+                conn,
+                asset_id,
+                {
+                    "modality": row["object_modality"] or "SM",
+                    "image_format": row["image_format"],
+                    "file_format": file_format,
+                    "media_kind": "whole_slide_image" if row["is_wsi"] else "still_image",
+                    "spatial_dimensionality": "2D",
+                    "temporal_dimensionality": "static",
+                    "object_role": row["file_role"] or "source_image",
+                    "is_whole_slide_image": bool(row["is_wsi"]),
+                    "is_micrograph": bool(row["is_micrograph"]),
+                    "is_codex": bool(row["is_codex"]),
+                },
+                value_role="normalized",
+                source_kind="pathology_package_inventory",
+                source_locator="pathology_metadata.agent_pathology_file_objects",
+                inference_method="pathology_file_inventory_projection",
+                confidence="high",
+                priority=90,
+                evidence={"source_row_id": row["source_row_id"]},
+                short_title=str(row["short_title"]),
+                assume_new=True,
+            )
             count += 1
     return count
 
@@ -929,7 +1417,7 @@ def ingest_pathdb(conn: sqlite3.Connection, snapshot_db: Path, include_files: bo
     if not include_files:
         return 0
     count = 0
-    with connect(snapshot_db) as source:
+    with closing(connect(snapshot_db)) as source:
         if not table_exists(source, "agent_pathdb_slides"):
             return 0
         for row in source.execute("SELECT * FROM agent_pathdb_slides ORDER BY collection, patient_id, slide_id"):
@@ -980,7 +1468,7 @@ def ingest_pathdb(conn: sqlite3.Connection, snapshot_db: Path, include_files: bo
                     "spatial_dimensionality": "2D",
                     "temporal_dimensionality": "static",
                     "imaging_domain": "pathology",
-                    "modality": row["modality"] or "SM",
+                    "modality": row["modality"],
                     "object_role": "source_image",
                     "size_bytes": None,
                     "checksum": "",
@@ -1027,6 +1515,47 @@ def ingest_pathdb(conn: sqlite3.Connection, snapshot_db: Path, include_files: bo
                     provenance={"source_artifact": "tcia_snapshot", "source_view": "agent_pathdb_slides"},
                 ),
             )
+            merge_image_metadata(
+                conn,
+                asset_id,
+                {
+                    "modality": row["modality"] or "SM",
+                    "pathology_protocol": row["protocol"],
+                    "magnification": row["magnification"],
+                    "species": row_value(row, "species"),
+                    "cancer_type": row_value(row, "cancer_type"),
+                    "cancer_location": row_value(row, "cancer_location"),
+                    "image_format": row["data_format"],
+                    "file_format": file_format,
+                    "media_kind": "whole_slide_image",
+                    "spatial_dimensionality": "2D",
+                    "temporal_dimensionality": "static",
+                    "object_role": "source_image",
+                },
+                value_role="source_raw",
+                source_kind="pathdb_slide_csv",
+                source_locator="tcia_snapshot.agent_pathdb_slides",
+                inference_method="direct_slide_row",
+                confidence="high",
+                priority=100,
+                evidence={"slide_id": row["slide_id"], "camic_id": row["camic_id"]},
+                short_title=str(row["collection"]),
+                assume_new=True,
+            )
+            if not meaningful_metadata_value(row["modality"]):
+                merge_image_metadata(
+                    conn,
+                    asset_id,
+                    {"modality": "SM"},
+                    value_role="normalized",
+                    source_kind="v2_asset_classification",
+                    source_locator="tcia_snapshot.agent_pathdb_slides",
+                    inference_method="pathology_whole_slide_modality_projection",
+                    confidence="high",
+                    priority=90,
+                    evidence={"imaging_domain": "pathology", "media_kind": "whole_slide_image"},
+                    short_title=str(row["collection"]),
+                )
             count += 1
             if count % 10000 == 0:
                 conn.commit()
@@ -1163,6 +1692,51 @@ def ingest_reviewed_crosswalks(
                     representation_class=download["representation_provenance_class"],
                     provenance={"source_artifact": "public_non_dicom_crosswalks_v1", "crosswalk_id": crosswalk_id},
                 ),
+            )
+            try:
+                crosswalk_raw = json.loads(source_row["raw_values_json"] or "{}")
+            except json.JSONDecodeError:
+                crosswalk_raw = {}
+            raw_metadata_mapping = {
+                "Type": "acquisition_type",
+                "Side": "laterality",
+                "View": "view_position",
+                "Machine": "equipment_code",
+                "Pixel_size": "pixel_size_source_value",
+                "pixel_spacing": "pixel_spacing_mm",
+                "direction_cosines": "direction_cosines",
+                "origin": "origin_mm",
+                "pixel_type": "pixel_type",
+                "rescale_slope": "rescale_slope",
+                "rescale_intercept": "rescale_intercept",
+                "contrast_used": "contrast_used",
+            }
+            mapped_metadata = {
+                target: crosswalk_raw.get(source)
+                for source, target in raw_metadata_mapping.items()
+                if meaningful_metadata_value(crosswalk_raw.get(source))
+            }
+            mapped_metadata.update({
+                "modality": source_row["modality"],
+                "file_format": source_row["file_format"],
+                "media_kind": source_row["media_kind"],
+                "spatial_dimensionality": "3D" if source_row["media_kind"] == "image_volume" else "2D",
+                "temporal_dimensionality": "video" if source_row["media_kind"] == "video" else "static",
+                "object_role": source_row["object_role"],
+            })
+            merge_image_metadata(
+                conn,
+                asset_id,
+                mapped_metadata,
+                value_role="source_raw",
+                source_kind="supporting_spreadsheet",
+                source_locator=source_row["crosswalk_source_url"],
+                inference_method="reviewed_crosswalk_source_row_projection",
+                confidence=source_row["crosswalk_confidence"] or "high",
+                priority=100,
+                evidence={"crosswalk_id": crosswalk_id},
+                short_title=str(source_row["short_title"]),
+                assume_new=True,
             )
             conn.execute(
                 """
@@ -1381,6 +1955,514 @@ def apply_automated_pathdb_crosswalks(
     }
 
 
+def ingest_curated_image_metadata(
+    conn: sqlite3.Connection, metadata_csv: Path | None
+) -> dict[str, int]:
+    if not metadata_csv or not metadata_csv.exists():
+        return {"rows": 0, "matched_rows": 0, "matched_assets": 0, "unmatched_rows": 0}
+    counts = {"rows": 0, "matched_rows": 0, "matched_assets": 0, "unmatched_rows": 0}
+    unmatched_by_dataset: dict[str, list[dict[str, str]]] = {}
+    with metadata_csv.open(newline="", encoding="utf-8-sig") as handle:
+        for source_row in csv.DictReader(handle):
+            counts["rows"] += 1
+            short_title = str(source_row.get("short_title") or "").strip()
+            file_name = str(source_row.get("file_name") or "").strip()
+            subject_id = str(source_row.get("subject_id") or "").strip()
+            download_id = str(source_row.get("download_id") or "").strip()
+            clauses = ["short_title = ?", "asset_granularity <> 'download'"]
+            params: list[Any] = [short_title]
+            if file_name:
+                clauses.append("lower(file_name) = lower(?)")
+                params.append(file_name)
+            if subject_id and not file_name:
+                clauses.append("subject_id = ?")
+                params.append(subject_id)
+            if download_id:
+                clauses.append("(',' || replace(COALESCE(download_id,''), ';', ',') || ',') LIKE ?")
+                params.append(f"%,{download_id},%")
+            assets = conn.execute(
+                "SELECT asset_id FROM public_non_dicom_assets WHERE " + " AND ".join(clauses),
+                params,
+            ).fetchall()
+            if not assets:
+                counts["unmatched_rows"] += 1
+                unmatched_by_dataset.setdefault(short_title, []).append({
+                    "file_name": file_name,
+                    "subject_id": subject_id,
+                    "download_id": download_id,
+                })
+                continue
+            try:
+                values = json.loads(source_row.get("metadata_json") or "{}")
+            except json.JSONDecodeError:
+                values = {}
+            counts["matched_rows"] += 1
+            for asset in assets:
+                merge_image_metadata(
+                    conn,
+                    asset["asset_id"],
+                    values,
+                    value_role=str(source_row.get("value_role") or "source_raw"),
+                    source_kind=str(source_row.get("source_kind") or "supporting_spreadsheet"),
+                    source_locator=str(source_row.get("source_url") or source_row.get("source_file") or metadata_csv),
+                    inference_method=str(source_row.get("inference_method") or "file_name_to_spreadsheet_row"),
+                    confidence=str(source_row.get("confidence") or "high"),
+                    priority=int(source_row.get("priority") or 100),
+                    evidence={
+                        "source_file": source_row.get("source_file") or "",
+                        "source_row": source_row.get("source_row") or "",
+                        "curation_file": str(metadata_csv),
+                    },
+                )
+                counts["matched_assets"] += 1
+    for short_title, rows in unmatched_by_dataset.items():
+        add_dataset_metadata_note(
+            conn,
+            short_title,
+            "",
+            "curated_spreadsheet_rows_unmatched",
+            "One or more curated supporting-spreadsheet metadata rows did not match a current file asset.",
+            severity="warning",
+            affected_assets=len(rows),
+            evidence={"examples": rows[:10], "source_file": str(metadata_csv)},
+        )
+    return counts
+
+
+def seed_core_asset_metadata(conn: sqlite3.Connection) -> int:
+    changed = 0
+    for row in conn.execute(
+        """
+        SELECT asset_id, modality, file_format, media_kind, spatial_dimensionality,
+               temporal_dimensionality, object_role, source_system, source_record_id
+        FROM public_non_dicom_assets
+        WHERE asset_granularity <> 'download'
+          AND NOT EXISTS (
+            SELECT 1 FROM public_non_dicom_image_metadata m
+            WHERE m.asset_id=public_non_dicom_assets.asset_id
+          )
+        """
+    ):
+        changed += merge_image_metadata(
+            conn,
+            row["asset_id"],
+            {
+                "modality": row["modality"],
+                "file_format": row["file_format"],
+                "media_kind": row["media_kind"],
+                "spatial_dimensionality": row["spatial_dimensionality"],
+                "temporal_dimensionality": row["temporal_dimensionality"],
+                "object_role": row["object_role"],
+            },
+            value_role="normalized",
+            source_kind="v2_asset_record",
+            source_locator=f"{row['source_system']}:{row['source_record_id'] or ''}",
+            inference_method="asset_classification_projection",
+            confidence="high",
+            priority=85,
+        )
+    return changed
+
+
+def enrich_from_wordpress_and_filenames(conn: sqlite3.Connection, snapshot_db: Path) -> dict[str, int]:
+    counts = {"filename_assets": 0, "wordpress_label_assets": 0, "description_assets": 0}
+    download_context: dict[tuple[str, str], dict[str, Any]] = {}
+    dataset_download_modalities: dict[str, set[str]] = {}
+    dataset_text: dict[str, str] = {}
+    with closing(connect(snapshot_db)) as source:
+        download_columns = columns(source, "agent_current_downloads")
+        for row in source.execute("SELECT * FROM agent_current_downloads WHERE hidden = 0 AND controlled_access = 0"):
+            short_title = str(row["short_title"])
+            download_id = str(row["download_id"] or "")
+            data_types = parse_list(row["data_types"] if "data_types" in download_columns else "")
+            modalities = modalities_from_labels(data_types)
+            download_context[(short_title, download_id)] = {
+                "modalities": modalities,
+                "data_types": data_types,
+                "download_title": row_value(row, "download_title"),
+                "description": row_value(row, "description"),
+            }
+            dataset_download_modalities.setdefault(short_title, set()).update(modalities)
+        if table_exists(source, "agent_datasets"):
+            dataset_columns = columns(source, "agent_datasets")
+            text_fields = [
+                name for name in ("title", "summary", "abstract", "detailed_description")
+                if name in dataset_columns
+            ]
+            if text_fields:
+                dataset_query = "SELECT * FROM agent_datasets"
+                if "hidden" in dataset_columns:
+                    dataset_query += " WHERE hidden = 0"
+                for row in source.execute(dataset_query):
+                    dataset_text[str(row["short_title"])] = " ".join(
+                        str(row[name] or "") for name in text_fields
+                    )
+    assets = conn.execute(
+        """
+        SELECT a.*,
+               COALESCE(m.metadata_json, '{}') AS image_metadata_json
+        FROM public_non_dicom_assets a
+        LEFT JOIN public_non_dicom_image_metadata m USING (asset_id)
+        WHERE a.asset_granularity <> 'download'
+          AND a.source_system <> 'tcia_pathdb'
+        ORDER BY lower(a.short_title), a.asset_id
+        """
+    ).fetchall()
+    assets_by_dataset: dict[str, list[sqlite3.Row]] = {}
+    for asset in assets:
+        assets_by_dataset.setdefault(str(asset["short_title"]), []).append(asset)
+        path_values = filename_metadata(str(asset["package_path"] or asset["file_name"] or ""))
+        if path_values:
+            merge_image_metadata(
+                conn,
+                asset["asset_id"],
+                path_values,
+                value_role="inferred",
+                source_kind="structured_filename",
+                source_locator=str(asset["package_path"] or asset["file_name"] or ""),
+                inference_method="delimiter_bounded_filename_token",
+                confidence="medium",
+                priority=70,
+            )
+            counts["filename_assets"] += 1
+        current = json.loads(asset["image_metadata_json"] or "{}")
+        if meaningful_metadata_value(current.get("modality")) or meaningful_metadata_value(path_values.get("modality")):
+            continue
+        download_ids = parse_list(str(asset["download_id"] or "").replace(",", ";"))
+        modalities: set[str] = set()
+        for download_id in download_ids:
+            modalities.update(download_context.get((asset["short_title"], download_id), {}).get("modalities", set()))
+        if not modalities:
+            modalities = dataset_download_modalities.get(str(asset["short_title"]), set())
+        if len(modalities) == 1:
+            merge_image_metadata(
+                conn,
+                asset["asset_id"],
+                {"modality": next(iter(modalities))},
+                value_role="inferred",
+                source_kind="wordpress_download_label",
+                source_locator=f"agent_current_downloads:{asset['short_title']}:{asset['download_id'] or ''}",
+                inference_method="single_unambiguous_download_modality",
+                confidence="medium",
+                priority=60,
+            )
+            counts["wordpress_label_assets"] += 1
+    for short_title, dataset_assets in assets_by_dataset.items():
+        text = dataset_text.get(short_title, "")
+        title_modalities = modalities_from_text(short_title)
+        description_modalities = modalities_from_text(text)
+        text_modalities = title_modalities | description_modalities
+        preferred_text_modalities = (
+            title_modalities if len(title_modalities) == 1
+            else text_modalities if len(text_modalities) == 1
+            else set()
+        )
+        candidates = description_acquisition_candidates(text)
+        blank_modality_assets = []
+        resolved_modalities: set[str] = set()
+        for asset in dataset_assets:
+            row = conn.execute(
+                "SELECT metadata_json FROM public_non_dicom_image_metadata WHERE asset_id=?",
+                (asset["asset_id"],),
+            ).fetchone()
+            values = json.loads(row["metadata_json"] or "{}") if row else {}
+            if not meaningful_metadata_value(values.get("modality")):
+                blank_modality_assets.append(asset)
+            if len(preferred_text_modalities) == 1 and not meaningful_metadata_value(values.get("modality")):
+                merge_image_metadata(
+                    conn,
+                    asset["asset_id"],
+                    {"modality": next(iter(preferred_text_modalities))},
+                    value_role="inferred",
+                    source_kind="wordpress_dataset_description",
+                    source_locator=f"agent_datasets:{short_title}",
+                    inference_method=(
+                        "single_modality_in_dataset_title"
+                        if len(title_modalities) == 1
+                        else "single_modality_in_dataset_description"
+                    ),
+                    confidence="medium",
+                    priority=50,
+                )
+                values["modality"] = next(iter(preferred_text_modalities))
+                counts["description_assets"] += 1
+            if meaningful_metadata_value(values.get("modality")):
+                resolved_modalities.add(str(values["modality"]))
+            if values.get("modality") == "MR" and len(candidates["magnetic_field_strength_t"]) == 1:
+                merge_image_metadata(
+                    conn,
+                    asset["asset_id"],
+                    {"magnetic_field_strength_t": candidates["magnetic_field_strength_t"][0]},
+                    value_role="inferred",
+                    source_kind="wordpress_dataset_description",
+                    source_locator=f"agent_datasets:{short_title}",
+                    inference_method="single_field_strength_in_dataset_description",
+                    confidence="medium",
+                    priority=45,
+                )
+            if asset["imaging_domain"] == "pathology":
+                for field_name in ("magnification", "pathology_protocol"):
+                    if len(candidates[field_name]) == 1:
+                        merge_image_metadata(
+                            conn,
+                            asset["asset_id"],
+                            {field_name: candidates[field_name][0]},
+                            value_role="inferred",
+                            source_kind="wordpress_dataset_description",
+                            source_locator=f"agent_datasets:{short_title}",
+                            inference_method=f"single_{field_name}_in_dataset_description",
+                            confidence="medium",
+                            priority=45,
+                        )
+            if re.search(r"\b(?:all|each|acquired|scanned|digitized)\b", text, re.IGNORECASE):
+                equipment_values = {
+                    field_name: candidates[field_name][0]
+                    for field_name in ("manufacturer", "manufacturer_model_name")
+                    if len(candidates[field_name]) == 1
+                }
+                if equipment_values:
+                    merge_image_metadata(
+                        conn,
+                        asset["asset_id"],
+                        equipment_values,
+                        value_role="inferred",
+                        source_kind="wordpress_dataset_description",
+                        source_locator=f"agent_datasets:{short_title}",
+                        inference_method="single_scanner_in_uniform_acquisition_description",
+                        confidence="low",
+                        priority=40,
+                    )
+        if len(text_modalities) > 1 and not preferred_text_modalities and blank_modality_assets:
+            add_dataset_metadata_note(
+                conn,
+                short_title,
+                "modality",
+                "mixed_modalities_not_assigned",
+                "The dataset description mentions multiple modalities, so modality was not propagated to unclassified files.",
+                severity="warning",
+                affected_assets=len(blank_modality_assets),
+                evidence={"candidate_modalities": sorted(text_modalities)},
+            )
+        for field_name, values in candidates.items():
+            relevant = (
+                field_name in {"manufacturer", "manufacturer_model_name"}
+                or (field_name == "magnetic_field_strength_t" and "MR" in resolved_modalities)
+                or (field_name in {"magnification", "pathology_protocol"} and any(
+                    asset["imaging_domain"] == "pathology" for asset in dataset_assets
+                ))
+            )
+            if relevant and len(values) > 1:
+                add_dataset_metadata_note(
+                    conn,
+                    short_title,
+                    field_name,
+                    "multiple_description_values_not_assigned",
+                    f"The WordPress description contains multiple candidate values for {field_name}; no dataset-wide value was assigned.",
+                    affected_assets=len(dataset_assets),
+                    evidence={"candidate_values": values},
+                )
+    return counts
+
+
+def build_metadata_field_coverage(conn: sqlite3.Connection) -> int:
+    conn.execute("DELETE FROM public_non_dicom_metadata_field_coverage")
+    eligible = {
+        str(row["short_title"]): int(row["asset_count"])
+        for row in conn.execute(
+            "SELECT short_title, COUNT(*) AS asset_count FROM public_non_dicom_image_metadata GROUP BY short_title"
+        )
+    }
+    aggregates: dict[tuple[str, str], dict[str, Any]] = {}
+    for row in conn.execute(
+        "SELECT short_title, metadata_json, field_provenance_json FROM public_non_dicom_image_metadata"
+    ):
+        short_title = str(row["short_title"])
+        metadata = json.loads(row["metadata_json"] or "{}")
+        provenance = json.loads(row["field_provenance_json"] or "{}")
+        for field_name, value in metadata.items():
+            key = (short_title, field_name)
+            item = aggregates.setdefault(
+                key,
+                {
+                    "populated": 0,
+                    "roles": {role: 0 for role in ("source_raw", "normalized", "inferred", "resolved")},
+                    "distinct_hashes": set(),
+                    "examples": [],
+                    "source_kinds": set(),
+                },
+            )
+            item["populated"] += 1
+            field_provenance = provenance.get(field_name) or {}
+            value_role = str(field_provenance.get("value_role") or "")
+            if value_role in item["roles"]:
+                item["roles"][value_role] += 1
+            source_kind = str(field_provenance.get("source_kind") or "")
+            if source_kind:
+                item["source_kinds"].add(source_kind)
+            serialized = json_dumps(value)
+            value_hash = hashlib.sha256(serialized.encode("utf-8")).digest()[:16]
+            if value_hash not in item["distinct_hashes"]:
+                item["distinct_hashes"].add(value_hash)
+                if len(item["examples"]) < 8:
+                    item["examples"].append(value)
+    conn.executemany(
+        """
+        INSERT INTO public_non_dicom_metadata_field_coverage VALUES
+          (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            (
+                short_title,
+                field_name,
+                eligible[short_title],
+                item["populated"],
+                item["roles"]["source_raw"],
+                item["roles"]["normalized"],
+                item["roles"]["inferred"],
+                item["roles"]["resolved"],
+                len(item["distinct_hashes"]),
+                json_dumps(item["examples"]),
+                json_dumps(sorted(item["source_kinds"])),
+            )
+            for (short_title, field_name), item in sorted(aggregates.items())
+        ],
+    )
+    return len(aggregates)
+
+
+def add_metadata_assessment_notes(conn: sqlite3.Connection, nifti_db: Path | None) -> int:
+    before = conn.total_changes
+    for row in conn.execute(
+        """
+        SELECT d.short_title, COUNT(*) AS download_assets
+        FROM public_non_dicom_assets d
+        WHERE d.asset_granularity='download'
+          AND NOT EXISTS (
+            SELECT 1 FROM public_non_dicom_assets f
+            WHERE f.short_title=d.short_title AND f.asset_granularity<>'download'
+          )
+        GROUP BY d.short_title
+        """
+    ):
+        add_dataset_metadata_note(
+            conn,
+            row["short_title"],
+            "",
+            "file_level_inventory_unavailable",
+            "Only download-level non-DICOM declarations are available, so image metadata cannot yet be assigned to individual files.",
+            affected_assets=row["download_assets"],
+        )
+    for row in conn.execute(
+        """
+        SELECT a.short_title, COUNT(*) AS affected
+        FROM public_non_dicom_assets a
+        LEFT JOIN public_non_dicom_image_metadata m USING(asset_id)
+        WHERE a.asset_granularity<>'download'
+          AND NULLIF(trim(COALESCE(json_extract(m.metadata_json,'$.modality'),'')),'') IS NULL
+        GROUP BY a.short_title
+        """
+    ):
+        add_dataset_metadata_note(
+            conn,
+            row["short_title"],
+            "modality",
+            "file_modality_unresolved",
+            "One or more file assets still lack a defensible modality after spreadsheet, filename, label, and description inference.",
+            severity="warning",
+            affected_assets=row["affected"],
+        )
+    for row in conn.execute(
+        """
+        SELECT short_title, COUNT(*) AS affected
+        FROM public_non_dicom_image_metadata
+        WHERE conflicting_values_json <> '{}'
+        GROUP BY short_title
+        """
+    ):
+        add_dataset_metadata_note(
+            conn,
+            row["short_title"],
+            "",
+            "asset_metadata_value_conflicts",
+            "Some assets have conflicting metadata values from different evidence sources; the selected value and alternatives are preserved for review.",
+            severity="warning",
+            affected_assets=row["affected"],
+        )
+    for row in conn.execute(
+        """
+        SELECT short_title, COUNT(*) AS affected,
+               json_group_array(DISTINCT json_extract(metadata_json,'$.equipment_code')) AS codes
+        FROM public_non_dicom_image_metadata
+        WHERE json_extract(metadata_json,'$.equipment_code') IS NOT NULL
+        GROUP BY short_title
+        """
+    ):
+        add_dataset_metadata_note(
+            conn,
+            row["short_title"],
+            "equipment_code",
+            "equipment_code_dictionary_needed",
+            "The supporting spreadsheet supplies equipment codes, but they are not promoted to manufacturer/model without a source dictionary.",
+            affected_assets=row["affected"],
+            evidence={"codes": json.loads(row["codes"] or "[]")},
+        )
+    for row in conn.execute(
+        """
+        SELECT m.short_title, COUNT(*) AS affected
+        FROM public_non_dicom_image_metadata m, json_each(m.field_provenance_json) p
+        WHERE p.key <> '_sources'
+          AND json_extract(p.value,'$.confidence')='low'
+        GROUP BY m.short_title
+        """
+    ):
+        add_dataset_metadata_note(
+            conn,
+            row["short_title"],
+            "",
+            "low_confidence_description_inference",
+            "At least one value was inferred conservatively from acquisition wording in the WordPress description and should be reviewed.",
+            affected_assets=row["affected"],
+        )
+    if nifti_db and nifti_db.exists():
+        with closing(connect(nifti_db)) as source:
+            if table_exists(source, "normalized_series_rows"):
+                candidate_fields = [
+                    name for name in (
+                        "Manufacturer", "ManufacturerModelName", "MagneticFieldStrength",
+                        "ScanningSequence", "SequenceVariant", "MRAcquisitionType",
+                        "EchoTime", "RepetitionTime", "FlipAngle", "InversionTime",
+                        "ReceiveCoilName", "SequenceName", "DiffusionBValue", "Rows",
+                        "Columns", "SliceThickness", "KVP", "ConvolutionKernel",
+                        "XRayTubeCurrent_min", "XRayTubeCurrent_max", "SpiralPitchFactor",
+                    ) if name in columns(source, "normalized_series_rows")
+                ]
+                for field_name in candidate_fields:
+                    for row in source.execute(
+                        f"""
+                        SELECT short_title, COUNT(*) AS source_rows,
+                               COUNT(DISTINCT {field_name}) AS distinct_values,
+                               group_concat(DISTINCT source_file_name) AS source_files
+                        FROM normalized_series_rows
+                        WHERE NULLIF(trim(COALESCE({field_name},'')),'') IS NOT NULL
+                          AND NULLIF(trim(COALESCE(nifti_file,'')),'') IS NULL
+                        GROUP BY short_title
+                        """
+                    ):
+                        add_dataset_metadata_note(
+                            conn,
+                            row["short_title"],
+                            field_name,
+                            "spreadsheet_values_not_file_mapped",
+                            f"Supporting spreadsheets contain {field_name} values, but the rows are not mapped to individual NIfTI files.",
+                            affected_assets=row["source_rows"],
+                            evidence={
+                                "distinct_values": row["distinct_values"],
+                                "source_files": parse_list(row["source_files"]),
+                            },
+                        )
+    return conn.total_changes - before
+
+
 def add_review_issues(conn: sqlite3.Connection) -> None:
     rows = conn.execute(
         """
@@ -1457,6 +2539,7 @@ def build_database(
     replace: bool,
     crosswalk_csv: Path | None = None,
     crosswalk_curation: Path | None = None,
+    image_metadata_csv: Path | None = None,
 ) -> dict[str, Any]:
     if not snapshot_db.exists():
         raise FileNotFoundError(f"Base snapshot not found: {snapshot_db}")
@@ -1465,7 +2548,7 @@ def build_database(
             raise FileExistsError(f"Output exists: {out}; pass --replace")
         out.unlink()
     out.parent.mkdir(parents=True, exist_ok=True)
-    with connect(out) as conn:
+    with closing(connect(out)) as conn:
         conn.executescript(SCHEMA)
         insert_vocab(conn)
         counts = {
@@ -1485,6 +2568,13 @@ def build_database(
         counts.update({f"reviewed_crosswalk_{key}": value for key, value in reviewed.items()})
         automated = apply_automated_pathdb_crosswalks(conn, snapshot_db)
         counts.update({f"automated_crosswalk_{key}": value for key, value in automated.items()})
+        curated_metadata = ingest_curated_image_metadata(conn, image_metadata_csv)
+        counts.update({f"curated_image_metadata_{key}": value for key, value in curated_metadata.items()})
+        counts["core_image_metadata_values"] = seed_core_asset_metadata(conn)
+        inferred_metadata = enrich_from_wordpress_and_filenames(conn, snapshot_db)
+        counts.update({f"inferred_image_metadata_{key}": value for key, value in inferred_metadata.items()})
+        counts["metadata_field_coverage_rows"] = build_metadata_field_coverage(conn)
+        counts["metadata_assessment_note_changes"] = add_metadata_assessment_notes(conn, nifti_db)
         counts["asset_participant_links_projected"] = sync_scalar_asset_participants(conn)
         add_review_issues(conn)
         generated = datetime.now(timezone.utc).isoformat()
@@ -1496,6 +2586,7 @@ def build_database(
             "source_pathology": source_meta(pathology_db) if pathology_db else {"enabled": False},
             "source_crosswalk_csv": source_meta(crosswalk_csv) if crosswalk_csv else {"enabled": False},
             "source_crosswalk_curation": source_meta(crosswalk_curation) if crosswalk_curation else {"enabled": False},
+            "source_image_metadata_csv": source_meta(image_metadata_csv) if image_metadata_csv else {"enabled": False},
             "include_pathdb_files": include_pathdb_files,
             "ingest_counts": counts,
         }
@@ -1505,6 +2596,7 @@ def build_database(
         )
         conn.commit()
         conn.execute("ANALYZE")
+        conn.commit()
         integrity = conn.execute("PRAGMA integrity_check").fetchone()[0]
         counts["asset_rows"] = conn.execute("SELECT COUNT(*) FROM public_non_dicom_assets").fetchone()[0]
         counts["location_rows"] = conn.execute("SELECT COUNT(*) FROM public_non_dicom_locations").fetchone()[0]
@@ -1515,6 +2607,12 @@ def build_database(
             "SELECT COUNT(*) FROM agent_public_non_dicom_participant_summary"
         ).fetchone()[0]
         counts["review_issues"] = conn.execute("SELECT COUNT(*) FROM public_non_dicom_review_issues").fetchone()[0]
+        counts["image_metadata_assets"] = conn.execute(
+            "SELECT COUNT(*) FROM public_non_dicom_image_metadata"
+        ).fetchone()[0]
+        counts["dataset_metadata_notes"] = conn.execute(
+            "SELECT COUNT(*) FROM public_non_dicom_dataset_metadata_notes"
+        ).fetchone()[0]
     return {"path": str(out), "schema_version": SCHEMA_VERSION, "integrity_check": integrity, "counts": counts}
 
 
@@ -1527,6 +2625,9 @@ def validate_database(path: Path) -> dict[str, Any]:
         "public_non_dicom_crosswalk_decisions",
         "public_non_dicom_crosswalk_evidence",
         "public_non_dicom_review_issues",
+        "public_non_dicom_image_metadata",
+        "public_non_dicom_metadata_field_coverage",
+        "public_non_dicom_dataset_metadata_notes",
         "agent_public_non_dicom_assets",
         "agent_public_non_dicom_locations",
         "agent_public_non_dicom_asset_participants",
@@ -1534,9 +2635,12 @@ def validate_database(path: Path) -> dict[str, Any]:
         "agent_public_non_dicom_participant_summary",
         "agent_public_non_dicom_crosswalk_decisions",
         "agent_public_non_dicom_crosswalk_evidence",
+        "agent_public_non_dicom_image_metadata",
+        "agent_public_non_dicom_metadata_field_coverage",
+        "agent_public_non_dicom_dataset_metadata_notes",
     }
     errors: list[str] = []
-    with connect(path) as conn:
+    with closing(connect(path)) as conn:
         integrity = conn.execute("PRAGMA integrity_check").fetchone()[0]
         if integrity != "ok":
             errors.append(f"integrity_check={integrity}")
@@ -1562,6 +2666,12 @@ def validate_database(path: Path) -> dict[str, Any]:
         ).fetchone()[0]
         if orphan_participant_links:
             errors.append(f"orphan asset participant links: {orphan_participant_links}")
+        orphan_image_metadata = conn.execute(
+            """SELECT COUNT(*) FROM public_non_dicom_image_metadata m
+               LEFT JOIN public_non_dicom_assets a USING(asset_id) WHERE a.asset_id IS NULL"""
+        ).fetchone()[0]
+        if orphan_image_metadata:
+            errors.append(f"orphan image metadata rows: {orphan_image_metadata}")
         counts = {
             "assets": conn.execute("SELECT COUNT(*) FROM public_non_dicom_assets").fetchone()[0],
             "locations": conn.execute("SELECT COUNT(*) FROM public_non_dicom_locations").fetchone()[0],
@@ -1571,6 +2681,9 @@ def validate_database(path: Path) -> dict[str, Any]:
                 "SELECT COUNT(*) FROM public_non_dicom_asset_participants"
             ).fetchone()[0],
             "crosswalk_evidence": conn.execute("SELECT COUNT(*) FROM public_non_dicom_crosswalk_evidence").fetchone()[0],
+            "image_metadata_assets": conn.execute("SELECT COUNT(*) FROM public_non_dicom_image_metadata").fetchone()[0],
+            "metadata_field_coverage_rows": conn.execute("SELECT COUNT(*) FROM public_non_dicom_metadata_field_coverage").fetchone()[0],
+            "dataset_metadata_notes": conn.execute("SELECT COUNT(*) FROM public_non_dicom_dataset_metadata_notes").fetchone()[0],
         }
     return {"ok": not errors, "errors": errors, "integrity_check": integrity, "counts": counts}
 
@@ -1650,7 +2763,7 @@ def ensure_release(repo: str, tag: str, db: Path, manifest_path: Path) -> dict[s
 
 
 def info(path: Path) -> dict[str, Any]:
-    with connect(path) as conn:
+    with closing(connect(path)) as conn:
         meta = {row["key"]: row["value"] for row in conn.execute("SELECT * FROM artifact_meta")}
         counts = {
             "assets": conn.execute("SELECT COUNT(*) FROM public_non_dicom_assets").fetchone()[0],
@@ -1658,6 +2771,9 @@ def info(path: Path) -> dict[str, Any]:
             "datasets": conn.execute("SELECT COUNT(*) FROM agent_public_non_dicom_dataset_summary").fetchone()[0],
             "participants": conn.execute("SELECT COUNT(*) FROM agent_public_non_dicom_participant_summary").fetchone()[0],
             "review_issues": conn.execute("SELECT COUNT(*) FROM public_non_dicom_review_issues").fetchone()[0],
+            "image_metadata_assets": conn.execute("SELECT COUNT(*) FROM public_non_dicom_image_metadata").fetchone()[0],
+            "metadata_field_coverage_rows": conn.execute("SELECT COUNT(*) FROM public_non_dicom_metadata_field_coverage").fetchone()[0],
+            "dataset_metadata_notes": conn.execute("SELECT COUNT(*) FROM public_non_dicom_dataset_metadata_notes").fetchone()[0],
         }
     return {"path": str(path), "meta": meta, "counts": counts}
 
@@ -1671,6 +2787,7 @@ def parser() -> argparse.ArgumentParser:
     build.add_argument("--pathology-db", default=str(DEFAULT_PATHOLOGY_DB))
     build.add_argument("--crosswalk-csv", default=str(DEFAULT_CROSSWALK_CSV))
     build.add_argument("--crosswalk-curation", default=str(DEFAULT_CROSSWALK_CURATION))
+    build.add_argument("--image-metadata-csv", default=str(DEFAULT_IMAGE_METADATA_CSV))
     build.add_argument("--out", default=str(DEFAULT_DB))
     build.add_argument("--gzip-out")
     build.add_argument("--manifest-out")
@@ -1719,6 +2836,7 @@ def main() -> int:
             pathology_db=Path(args.pathology_db) if args.pathology_db else None,
             crosswalk_csv=Path(args.crosswalk_csv) if args.crosswalk_csv else None,
             crosswalk_curation=Path(args.crosswalk_curation) if args.crosswalk_curation else None,
+            image_metadata_csv=Path(args.image_metadata_csv) if args.image_metadata_csv else None,
             include_pathdb_files=not args.no_pathdb_files,
             replace=args.replace,
         )
@@ -1745,7 +2863,7 @@ def main() -> int:
     if args.command == "info":
         print(json.dumps(info(Path(args.db)), indent=2, sort_keys=True))
         return 0
-    with connect(Path(args.db)) as conn:
+    with closing(connect(Path(args.db))) as conn:
         if args.command == "datasets":
             print_rows(conn.execute(
                 "SELECT * FROM agent_public_non_dicom_dataset_summary ORDER BY lower(short_title) LIMIT ?",
