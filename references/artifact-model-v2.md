@@ -156,7 +156,7 @@ inventories and reviewed evidence.
 
 ## Public non-DICOM image metadata
 
-Schema version 5 adds an exploratory, file-grain metadata layer without making
+Schema version 6 adds an exploratory, file-grain metadata layer without making
 every source-specific spreadsheet column part of the fixed relational schema:
 
 | Surface | Purpose |
@@ -165,13 +165,17 @@ every source-specific spreadsheet column part of the fixed relational schema:
 | `agent_public_non_dicom_metadata_field_coverage` | Per-dataset field coverage, value diversity, provenance-role counts, examples, and contributing source kinds |
 | `agent_public_non_dicom_dataset_metadata_notes` | Dataset-level ambiguity, missing file mappings, conflicts, and other reviewer decisions |
 
-Each metadata field has its own provenance entry in
-`field_provenance_json`: source kind and source reference, extraction or
-inference method, confidence, semantic role (`source_raw`, `normalized`, or
-`inferred`), and precedence. The `_sources` member stores the referenced
-locator and evidence once per source rather than repeating it for every field.
-Conflicting lower-priority values are retained in
-`conflicting_values_json`; they are not silently discarded.
+Each metadata field has its own provenance entry during the full build: source
+kind and source reference, extraction or inference method, confidence,
+semantic role (`source_raw`, `normalized`, or `inferred`), and precedence. The
+release splitter moves `field_provenance_json`, conflicting lower-priority
+values, and detailed quality evidence into
+`public_non_dicom_audit.sqlite.gz`; they are not discarded. The research-detail
+database retains the selected metadata values and explicit conflict/coverage
+summary states needed for interpretation. Its compact
+`field_source_ids_json` maps each selected field to the normalized
+`public_non_dicom_metadata_sources` registry, so researchers can identify the
+root source without installing the audit companion.
 
 The builder applies evidence in this order:
 
@@ -213,22 +217,31 @@ ORDER BY severity DESC, short_title, field_name;
 
 ## Participant identity
 
-Create participant keys from the authoritative WordPress dataset identity and
-the exact dataset-scoped participant identifier. Source namespaces belong to
-identifier provenance, not to the canonical participant key. When TCIA/IDC,
-GC, or CTDC records are explicitly attached to the same WordPress dataset and
-their exact identifiers agree one-to-one, resolve them to one participant and
-record `exact_identifier_same_tcia_dataset` as high-confidence identity
-evidence. This is a within-dataset association; it does not assert that the
-same bare identifier in another dataset represents the same person.
+Create participant keys from the authoritative WordPress dataset type and
+short title plus the stripped, casefolded dataset-scoped participant
+identifier. Source namespaces and original spellings belong to identifier
+provenance, not to the canonical participant key. Preserve every spelling in
+`participant_identifiers`. Select one deterministic display form using source
+precedence: prefer TCIA-origin spelling, then other managed-system sources,
+with stable case and lexical tie-breakers.
+
+When TCIA/IDC, GC, or CTDC records are explicitly attached to the same
+WordPress dataset and their exact or case-equivalent identifiers agree
+one-to-one, resolve them to one participant. Record
+`exact_identifier_same_tcia_dataset` for exact text and
+`casefolded_identifier_same_tcia_dataset` for case-only spelling differences.
+Both are high-confidence within-dataset associations; neither asserts that the
+same bare identifier in another dataset represents the same person. Collections
+and Analysis Results remain separate identity scopes.
 
 Store every source identifier and namespace in `participant_identifiers`, even
 when several identifiers resolve to one participant. Record automatic and
 reviewed associations in `participant_identity_evidence`. Require an official
-dataset relationship plus an exact, unambiguous identifier match for automatic
-resolution; use submitter crosswalks, documented shared namespaces, or reviewed
-mappings for other equivalence claims. Route cross-dataset, normalized-but-not-
-exact, one-to-many, and conflicting matches to `participant_link_issues`.
+dataset relationship plus an exact or case-equivalent, unambiguous identifier
+match for automatic resolution; use submitter crosswalks, documented shared
+namespaces, or reviewed mappings for other equivalence claims. Route
+cross-dataset, normalized-but-not-case-equivalent, one-to-many, and conflicting
+matches to `participant_link_issues`.
 
 Resolve `dataset_type` and canonical short title from the base WordPress
 snapshot rather than trusting sidecar defaults. This prevents one source from
@@ -282,16 +295,45 @@ official-shaped, internally consistent bundle to the isolated
 `tcia-metadata-v2-preview` prerelease for Participant Explorer integration
 testing. The preview contains these asset groups:
 
-- Base discovery: `tcia_snapshot.sqlite.gz`, its manifest, and all eight plain
-  and gzipped `agent_datasets`, `agent_current_downloads`,
-  `agent_dataset_versions`, and `agent_dataset_v1_releases` JSONL exports.
-- Optional detail: NIfTI, pathology, controlled-access, and clinical SQLite
-  databases and manifests, plus `clinical_qc_manual_review.csv`.
-- V2 core: public non-DICOM metadata and Participant Inventory SQLite databases
-  and manifests.
+- Research core: `tcia_snapshot.sqlite.gz`, compact
+  `participant_inventory.sqlite.gz`, their manifests, and the compressed
+  current dataset/download exports. This is the default install profile.
+- Research detail: public non-DICOM, NIfTI, pathology, controlled-access, and
+  clinical SQLite databases and manifests. These are fetched only for relevant
+  drill-down workflows.
+- Audit support: `public_non_dicom_audit.sqlite.gz`,
+  `participant_inventory_audit.sqlite.gz`, their manifests, and the clinical
+  manual-review queue. Audit companions hold verbose JSON provenance and
+  detailed crosswalk evidence keyed by stable research-artifact identifiers.
+- Compatibility exports: uncompressed and historical JSONL exports retained
+  for specialized consumers, but excluded from ordinary downloads.
 - Bundle contract: `tcia_metadata_v2_bundle_manifest.json`, which pins the
-  SHA-256, size, category, source, and default-download status of all 23 payload
-  assets and records each component schema and release fingerprint.
+  SHA-256, size, profile, category, source, and default-download status of every
+  payload and records each component schema and release fingerprint.
+
+The compact Participant Inventory preserves participant identity, availability,
+access, clinical-presence, and explicit linkage/coverage states. It does not
+duplicate accepted clinical fact rows by default; those remain in
+`clinical_metadata.sqlite.gz`. Pass `--embed-clinical-values` only for a
+deliberate compatibility build.
+
+Research rows retain the root managed system, source URL or record pointer,
+raw scientific value where applicable, and interpretation flags. Detailed
+`raw_values_json`, field-level provenance, conflicting alternatives, crosswalk
+evidence, reviewer notes, and extraction/QC payloads move to the audit
+companions. Repeated JSON is stored once in `payloads` and referenced from
+`entity_payloads`; `agent_entity_payloads` provides the resolved JSON. Join its
+`entity_id` to the stable primary identifier in `entity_table`. SQLite cannot
+enforce foreign keys across attached databases, so the build validates both
+companions before publishing.
+
+Inspect an additive download plan without fetching assets:
+
+```bash
+python3 scripts/tcia_v2_bundle.py expected-assets --profile research_core
+python3 scripts/tcia_v2_bundle.py expected-assets --profile research_detail
+python3 scripts/tcia_v2_bundle.py expected-assets --profile audit_support
+```
 
 After the contracts stabilize, publish the same bundle shape as an immutable
 versioned release and a separate `tcia-metadata-v2-latest` moving tag. Do not
@@ -309,12 +351,17 @@ the producer commit only after the published bundle passes remote digest
 validation. The workflow never uploads to
 `tcia-snapshot-latest` and does not deploy, restart, or reconfigure MCP/REST.
 
-Consumers can retrieve and validate the two databases independently:
+Consumers can retrieve and validate the two research databases independently:
 
 ```bash
 python3 scripts/tcia_public_non_dicom_metadata.py ensure
 python3 scripts/tcia_participant_inventory.py ensure
 ```
+
+Verbose provenance and troubleshooting payloads are distributed separately as
+`public_non_dicom_audit.sqlite.gz` and `participant_inventory_audit.sqlite.gz`.
+Use the `audit_support` profile in the bundle manifest when those companions are
+needed; stable entity IDs provide the join back to the research databases.
 
 Existing helpers can test the copied compatibility artifacts from the same V2
 release by overriding their tag, for example:
@@ -331,6 +378,8 @@ The stable preview asset URLs are:
 
 - `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-metadata-v2-preview/public_non_dicom_metadata.sqlite.gz`
 - `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-metadata-v2-preview/participant_inventory.sqlite.gz`
+- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-metadata-v2-preview/public_non_dicom_audit.sqlite.gz`
+- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-metadata-v2-preview/participant_inventory_audit.sqlite.gz`
 - `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-metadata-v2-preview/tcia_metadata_v2_bundle_manifest.json`
 
 Use the corresponding JSON manifest from the same release to verify schema,

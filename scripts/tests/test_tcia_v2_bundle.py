@@ -42,7 +42,7 @@ class V2BundleTests(unittest.TestCase):
             first = BUNDLE.build_bundle_manifest(root)
             second = BUNDLE.build_bundle_manifest(root)
             self.assertEqual(first["release_fingerprint"], second["release_fingerprint"])
-            self.assertEqual(first["asset_count"], 23)
+            self.assertEqual(first["asset_count"], 27)
             manifest = root / BUNDLE.BUNDLE_MANIFEST_ASSET
             manifest.write_text(json.dumps(first))
             result = BUNDLE.validate_bundle(root, manifest)
@@ -76,6 +76,19 @@ class V2BundleTests(unittest.TestCase):
     def test_v2_built_participant_inventory_assets_have_v2_provenance(self):
         self.assertEqual(BUNDLE.asset_source("participant_inventory.sqlite.gz"), "v2_build")
         self.assertEqual(BUNDLE.asset_source("participant_inventory_manifest.json"), "v2_build")
+
+    def test_research_core_defers_file_grain_and_audit_artifacts(self):
+        core = BUNDLE.assets_for_profile("research_core")
+        self.assertIn("participant_inventory.sqlite.gz", core)
+        self.assertIn("tcia_snapshot.sqlite.gz", core)
+        self.assertNotIn("public_non_dicom_metadata.sqlite.gz", core)
+        self.assertNotIn("public_non_dicom_audit.sqlite.gz", core)
+        detail = BUNDLE.assets_for_profile("research_detail")
+        self.assertIn("public_non_dicom_metadata.sqlite.gz", detail)
+        self.assertIn("participant_inventory.sqlite.gz", detail)
+        audit = BUNDLE.assets_for_profile("audit_support", include_dependencies=False)
+        self.assertIn("public_non_dicom_audit.sqlite.gz", audit)
+        self.assertIn("participant_inventory_audit.sqlite.gz", audit)
 
     def test_source_release_copy_is_digest_verified(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -126,7 +139,7 @@ class V2BundleTests(unittest.TestCase):
             release_path.write_text(json.dumps({"tag_name": BUNDLE.DEFAULT_RELEASE_TAG, "assets": assets}))
             result = BUNDLE.validate_published_release(manifest_path, release_path)
             self.assertTrue(result["ok"], result["errors"])
-            self.assertEqual(result["asset_count"], 24)
+            self.assertEqual(result["asset_count"], 28)
 
     def test_changed_assets_excludes_unchanged_large_sidecars(self):
         with tempfile.TemporaryDirectory() as temporary:

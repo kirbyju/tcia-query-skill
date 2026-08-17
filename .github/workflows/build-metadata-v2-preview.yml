@@ -98,12 +98,27 @@ jobs:
             --crosswalk-curation references/public-non-dicom-crosswalk-curation-v1.json \
             --image-metadata-csv references/public_non_dicom_image_metadata_v1.csv \
             --out cache/public_non_dicom_metadata.sqlite \
-            --gzip-out dist/public_non_dicom_metadata.sqlite.gz \
-            --manifest-out dist/public_non_dicom_metadata_manifest.json \
             --replace \
             "${pathdb_args[@]}"
           python scripts/tcia_public_non_dicom_metadata.py validate \
             --db cache/public_non_dicom_metadata.sqlite
+          # The public artifact has absorbed these sources; free runner space
+          # before audit extraction and VACUUM rewrite the multi-GB database.
+          rm -f cache/nifti_metadata.sqlite cache/pathology_metadata.sqlite
+          python scripts/tcia_v2_audit.py split \
+            --artifact public_non_dicom \
+            --db cache/public_non_dicom_metadata.sqlite \
+            --audit-out cache/public_non_dicom_audit.sqlite \
+            --research-gzip-out dist/public_non_dicom_metadata.sqlite.gz \
+            --research-manifest-out dist/public_non_dicom_metadata_manifest.json \
+            --audit-gzip-out dist/public_non_dicom_audit.sqlite.gz \
+            --audit-manifest-out dist/public_non_dicom_audit_manifest.json \
+            --replace
+          python scripts/tcia_public_non_dicom_metadata.py validate \
+            --db cache/public_non_dicom_metadata.sqlite
+          python scripts/tcia_v2_audit.py validate \
+            --artifact public_non_dicom \
+            --db cache/public_non_dicom_audit.sqlite
 
       - name: Build Participant Inventory
         run: |
@@ -113,16 +128,31 @@ jobs:
             --controlled-db cache/controlled_access_metadata.sqlite \
             --clinical-db cache/clinical_metadata.sqlite \
             --out cache/participant_inventory.sqlite \
-            --gzip-out dist/participant_inventory.sqlite.gz \
-            --manifest-out dist/participant_inventory_manifest.json \
             --replace
           python scripts/tcia_participant_inventory.py validate \
             --db cache/participant_inventory.sqlite
+          # Participant Inventory is now self-contained for search/summary.
+          rm -f cache/clinical_metadata.sqlite cache/controlled_access_metadata.sqlite
+          python scripts/tcia_v2_audit.py split \
+            --artifact participant_inventory \
+            --db cache/participant_inventory.sqlite \
+            --audit-out cache/participant_inventory_audit.sqlite \
+            --research-gzip-out dist/participant_inventory.sqlite.gz \
+            --research-manifest-out dist/participant_inventory_manifest.json \
+            --audit-gzip-out dist/participant_inventory_audit.sqlite.gz \
+            --audit-manifest-out dist/participant_inventory_audit_manifest.json \
+            --replace
+          python scripts/tcia_participant_inventory.py validate \
+            --db cache/participant_inventory.sqlite
+          python scripts/tcia_v2_audit.py validate \
+            --artifact participant_inventory \
+            --db cache/participant_inventory_audit.sqlite
 
       - name: Run V2 contract tests
         run: |
           python -m unittest \
             scripts.tests.test_tcia_artifact_model \
+            scripts.tests.test_tcia_v2_audit \
             scripts.tests.test_tcia_v2_bundle
 
       - name: Build and validate the complete V2 bundle contract
@@ -191,7 +221,7 @@ jobs:
         run: |
           set -euo pipefail
           tag="tcia-metadata-v2-preview"
-          notes="Experimental complete V2 metadata bundle for Participant Explorer integration testing. It contains the base snapshot, all eight web exports, optional detail sidecars, public non-DICOM metadata, Participant Inventory, and a hash-pinned bundle manifest. It does not replace tcia-snapshot-latest and is not used by MCP/REST."
+          notes="Experimental V2 metadata bundle for Participant Explorer integration testing. The manifest defines research-core, research-detail, audit-support, and compatibility-export profiles. Participant Inventory is compact by default, consolidates case-equivalent identifiers within each Collection or Analysis Result while retaining source spellings, and reports clinical presence only from clinical-domain rows. File-grain detail and verbose provenance are optional, hash-pinned companions. It does not replace tcia-snapshot-latest and is not used by MCP/REST."
           if ! gh release view "$tag" >/dev/null 2>&1; then
             gh release create "$tag" \
               --prerelease \

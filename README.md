@@ -165,8 +165,10 @@ workflows.
 
 An official-shaped V2 bundle is published on the isolated
 `tcia-metadata-v2-preview` prerelease for Participant Explorer testing. It
-contains the base snapshot, all web exports, optional detail sidecars, public
-non-DICOM metadata, Participant Inventory, and one hash-pinned bundle manifest.
+contains hash-pinned research-core, research-detail, audit-support, and
+compatibility-export profiles. The default research-core profile contains the
+base snapshot and compact Participant Inventory; file-grain metadata and
+verbose audit evidence are optional.
 Existing `tcia-snapshot-latest` and MCP/REST consumers remain unchanged. See
 [references/artifact-model-v2.md](./references/artifact-model-v2.md).
 
@@ -178,9 +180,14 @@ python3 scripts/tcia_participant_inventory.py ensure
 ```
 
 Participant Explorer integrations should query `agent_participant_search` for
-one row per canonical dataset-scoped participant, then use the identifier,
-asset, clinical-value, identity-evidence, and issue views for drill-down and
-provenance.
+one row per canonical dataset-scoped, case-equivalent participant identifier,
+then download detail components only for drill-down. Every original identifier
+spelling remains available through `participant_identifiers`, and Collections
+remain distinct from Analysis Results. Accepted clinical facts are no longer copied
+into Participant Inventory by default; use the clinical detail artifact for
+those values. Root source, access, linkage, inference, and coverage states stay
+in the research artifacts, while verbose JSON evidence is joinable from the
+optional `*_audit.sqlite.gz` companions by stable entity ID.
 
 ## Documentation Map
 

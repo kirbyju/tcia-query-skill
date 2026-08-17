@@ -16,7 +16,7 @@ except ModuleNotFoundError:  # Imported as scripts.tcia_v2_bundle by tests or an
     from scripts.tcia_snapshot import WEB_EXPORT_ASSETS, export_web_artifacts, validate_snapshot_file
 
 
-BUNDLE_SCHEMA_VERSION = 1
+BUNDLE_SCHEMA_VERSION = 2
 BUNDLE_ARTIFACT = "tcia_metadata_v2_bundle"
 BUNDLE_MANIFEST_ASSET = "tcia_metadata_v2_bundle_manifest.json"
 DEFAULT_REPOSITORY = "kirbyju/tcia-query-skill"
@@ -33,32 +33,32 @@ COMPONENTS = {
     "nifti": {
         "database": "nifti_metadata.sqlite.gz",
         "manifest": "nifti_metadata_manifest.json",
-        "category": "optional_detail",
+        "category": "research_detail",
         "default_download": False,
     },
     "pathology": {
         "database": "pathology_metadata.sqlite.gz",
         "manifest": "pathology_metadata_manifest.json",
-        "category": "optional_detail",
+        "category": "research_detail",
         "default_download": False,
     },
     "controlled_access": {
         "database": "controlled_access_metadata.sqlite.gz",
         "manifest": "controlled_access_metadata_manifest.json",
-        "category": "optional_detail",
+        "category": "research_detail",
         "default_download": False,
     },
     "clinical": {
         "database": "clinical_metadata.sqlite.gz",
         "manifest": "clinical_metadata_manifest.json",
-        "category": "optional_detail",
+        "category": "research_detail",
         "default_download": False,
     },
     "public_non_dicom": {
         "database": "public_non_dicom_metadata.sqlite.gz",
         "manifest": "public_non_dicom_metadata_manifest.json",
-        "category": "v2_core",
-        "default_download": True,
+        "category": "research_detail",
+        "default_download": False,
     },
     "participant_inventory": {
         "database": "participant_inventory.sqlite.gz",
@@ -66,17 +66,36 @@ COMPONENTS = {
         "category": "v2_core",
         "default_download": True,
     },
+    "public_non_dicom_audit": {
+        "database": "public_non_dicom_audit.sqlite.gz",
+        "manifest": "public_non_dicom_audit_manifest.json",
+        "category": "audit_support",
+        "default_download": False,
+    },
+    "participant_inventory_audit": {
+        "database": "participant_inventory_audit.sqlite.gz",
+        "manifest": "participant_inventory_audit_manifest.json",
+        "category": "audit_support",
+        "default_download": False,
+    },
 }
 
 EXTRA_ASSETS = {
     "clinical_qc_manual_review.csv": {
-        "category": "optional_detail",
+        "category": "audit_support",
         "default_download": False,
         "source": "source_release_copy",
     },
 }
 
 SOURCE_COMPONENTS = ("snapshot", "nifti", "pathology", "controlled_access", "clinical")
+PROFILE_ORDER = ("research_core", "research_detail", "audit_support", "compatibility_exports")
+PROFILE_DEPENDENCIES = {
+    "research_core": (),
+    "research_detail": ("research_core",),
+    "audit_support": ("research_core", "research_detail"),
+    "compatibility_exports": ("research_core",),
+}
 
 
 def canonical_json(value: Any) -> str:
@@ -131,6 +150,29 @@ def asset_category(name: str) -> tuple[str, bool]:
     raise KeyError(name)
 
 
+def asset_profile(name: str) -> str:
+    category, default_download = asset_category(name)
+    if default_download:
+        return "research_core"
+    if category == "research_detail":
+        return "research_detail"
+    if category == "audit_support":
+        return "audit_support"
+    return "compatibility_exports"
+
+
+def assets_for_profile(profile: str, *, include_dependencies: bool = True) -> list[str]:
+    if profile not in PROFILE_ORDER:
+        raise ValueError(f"Unknown V2 profile: {profile}")
+    selected = {name for name in expected_payload_assets() if asset_profile(name) == profile}
+    if include_dependencies:
+        for dependency in PROFILE_DEPENDENCIES[profile]:
+            selected.update(
+                name for name in expected_payload_assets() if asset_profile(name) == dependency
+            )
+    return sorted(selected)
+
+
 def load_component_manifest(asset_dir: Path, component: str) -> dict[str, Any]:
     details = COMPONENTS[component]
     path = asset_dir / str(details["manifest"])
@@ -165,10 +207,13 @@ def validate_component_assets(asset_dir: Path) -> dict[str, dict[str, Any]]:
         components[name] = {
             "database_asset": database_path.name,
             "manifest_asset": manifest_path.name,
+            "profile": asset_profile(database_path.name),
             "schema_version": manifest.get("schema_version"),
             "release_fingerprint": manifest.get("release_fingerprint"),
             "sqlite_sha256": manifest.get("sqlite_sha256"),
             "gzip_sha256": actual_gzip_sha256,
+            "provenance": manifest.get("provenance"),
+            "storage_contract": manifest.get("storage_contract"),
         }
 
     snapshot_manifest = components.get("snapshot")
@@ -258,6 +303,7 @@ def build_bundle_manifest(
             "bytes": path.stat().st_size,
             "category": category,
             "default_download": default_download,
+            "profile": asset_profile(name),
             "sha256": file_sha256(path),
             "source": asset_source(name),
         }
@@ -288,6 +334,13 @@ def build_bundle_manifest(
         "asset_count": len(assets),
         "assets": assets,
         "components": components,
+        "profiles": {
+            profile: {
+                "assets": assets_for_profile(profile),
+                "depends_on": list(PROFILE_DEPENDENCIES[profile]),
+            }
+            for profile in PROFILE_ORDER
+        },
         "release_fingerprint": hashlib.sha256(canonical_json(fingerprint_payload).encode("utf-8")).hexdigest(),
     }
 
@@ -303,6 +356,13 @@ def validate_bundle(asset_dir: Path, manifest_path: Path) -> dict[str, Any]:
     manifest_assets = manifest.get("assets") or {}
     if sorted(manifest_assets) != expected_names:
         errors.append("bundle manifest asset names do not match the contract")
+    profiles = manifest.get("profiles") or {}
+    if sorted(profiles) != sorted(PROFILE_ORDER):
+        errors.append("bundle manifest profiles do not match the contract")
+    else:
+        for profile in PROFILE_ORDER:
+            if (profiles.get(profile) or {}).get("assets") != assets_for_profile(profile):
+                errors.append(f"bundle profile {profile} asset names do not match the contract")
     for name in expected_names:
         path = asset_dir / name
         if not path.is_file():
@@ -406,6 +466,8 @@ def parser() -> argparse.ArgumentParser:
     changed.add_argument("--previous")
     expected = sub.add_parser("expected-assets", help="Print the exact release asset contract.")
     expected.add_argument("--include-bundle-manifest", action="store_true")
+    expected.add_argument("--profile", choices=PROFILE_ORDER)
+    expected.add_argument("--no-dependencies", action="store_true")
     return root
 
 
@@ -450,7 +512,11 @@ def main() -> int:
         )
         print("\n".join(changed_assets))
         return 0
-    assets = expected_payload_assets()
+    assets = (
+        assets_for_profile(args.profile, include_dependencies=not args.no_dependencies)
+        if args.profile
+        else expected_payload_assets()
+    )
     if args.include_bundle_manifest:
         assets.append(BUNDLE_MANIFEST_ASSET)
     print("\n".join(sorted(assets)))

@@ -14,6 +14,7 @@ import tempfile
 import urllib.parse
 import urllib.request
 from collections import defaultdict
+from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -33,7 +34,17 @@ DEFAULT_RELEASE_TAG = "tcia-metadata-v2-preview"
 DEFAULT_REPOSITORY = "kirbyju/tcia-query-skill"
 DB_ASSET = "participant_inventory.sqlite.gz"
 MANIFEST_ASSET = "participant_inventory_manifest.json"
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 6
+
+
+DISPLAY_SOURCE_PRECEDENCE = {
+    "tcia_wordpress": 0,
+    "tcia_aspera": 1,
+    "pathdb": 2,
+    "crdc_ctdc": 3,
+    "crdc_gc": 4,
+    "crdc_idc": 5,
+}
 
 
 SCHEMA = """
@@ -183,7 +194,7 @@ SELECT
                        OR instr(upper(a.file_format), 'DICOM') = 0
                        OR instr(upper(a.file_format), 'NIFTI') > 0)
              THEN 1 ELSE 0 END) AS has_public_non_dicom,
-    MAX(CASE WHEN a.source_artifact = 'clinical_metadata' THEN 1 ELSE 0 END) AS has_clinical,
+    MAX(CASE WHEN a.data_domain = 'clinical' THEN 1 ELSE 0 END) AS has_clinical,
     group_concat(DISTINCT NULLIF(a.data_domain, '')) AS data_domains,
     group_concat(DISTINCT NULLIF(a.modality, '')) AS modalities,
     group_concat(DISTINCT NULLIF(a.file_format, '')) AS file_formats,
@@ -226,6 +237,12 @@ SELECT * FROM agent_participants;
 def connect(path: Path) -> sqlite3.Connection:
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
+    conn.create_function(
+        "casefold",
+        1,
+        lambda value: str(value or "").strip().casefold(),
+        deterministic=True,
+    )
     return conn
 
 
@@ -244,15 +261,50 @@ def file_sha256(path: Path) -> str:
 
 
 def participant_key(dataset_type: str, short_title: str, raw_identifier: str) -> str:
-    """Return one canonical key for an exact identifier within one TCIA dataset."""
-    return stable_id("participant", dataset_type, short_title, raw_identifier)
+    """Return one key for a case-equivalent identifier within one TCIA dataset."""
+    canonical_identifier = str(raw_identifier or "").strip().casefold()
+    return stable_id("participant", dataset_type, short_title, canonical_identifier)
+
+
+def select_display_participant_ids(conn: sqlite3.Connection) -> int:
+    """Select one deterministic source spelling without discarding any identifier."""
+    identifiers: dict[str, list[sqlite3.Row]] = defaultdict(list)
+    for row in conn.execute(
+        """
+        SELECT participant_identifier_id, participant_key, managed_system,
+               identifier_namespace, raw_identifier, normalized_identifier
+        FROM participant_identifiers
+        ORDER BY participant_key, participant_identifier_id
+        """
+    ):
+        identifiers[str(row["participant_key"])].append(row)
+
+    updates: list[tuple[str, str]] = []
+    for key, rows in identifiers.items():
+        selected = min(
+            rows,
+            key=lambda row: (
+                DISPLAY_SOURCE_PRECEDENCE.get(str(row["managed_system"]), 100),
+                -sum(character.isupper() for character in str(row["normalized_identifier"])),
+                str(row["normalized_identifier"]).casefold(),
+                str(row["normalized_identifier"]),
+                str(row["identifier_namespace"]),
+                str(row["participant_identifier_id"]),
+            ),
+        )
+        updates.append((str(selected["normalized_identifier"]), key))
+    conn.executemany(
+        "UPDATE participants SET display_participant_id = ? WHERE participant_key = ?",
+        updates,
+    )
+    return len(updates)
 
 
 def load_dataset_types(snapshot_db: Path) -> dict[str, tuple[str, str]]:
     """Map a TCIA short title to its authoritative WordPress dataset identity."""
     if not snapshot_db.exists():
         raise FileNotFoundError(f"Base TCIA snapshot does not exist: {snapshot_db}")
-    with connect(snapshot_db) as source:
+    with closing(connect(snapshot_db)) as source:
         if not table_exists(source, "agent_datasets"):
             raise RuntimeError("Base TCIA snapshot is missing agent_datasets")
         rows = source.execute(
@@ -352,10 +404,17 @@ def ingest_public_non_dicom(
         record_source(conn, "public_non_dicom_metadata", path, False, 0, "Optional source not installed.")
         return 0
     imported = 0
-    with connect(path) as source:
+    with closing(connect(path)) as source:
         if not table_exists(source, "agent_public_non_dicom_participant_summary"):
             record_source(conn, "public_non_dicom_metadata", path, True, 0, "Required participant view missing.")
             return 0
+        public_schema_version = ""
+        if table_exists(source, "artifact_meta"):
+            row = source.execute(
+                "SELECT value FROM artifact_meta WHERE key='schema_version'"
+            ).fetchone()
+            if row:
+                public_schema_version = str(row[0])
         for row in source.execute("SELECT * FROM agent_public_non_dicom_participant_summary"):
             raw_id = str(row["subject_id"] or "").strip()
             if not raw_id:
@@ -409,7 +468,9 @@ def ingest_public_non_dicom(
                     else ""
                 ),
                 "inventory_status": "known",
-                "source_version": "schema-v4",
+                "source_version": (
+                    f"schema-v{public_schema_version}" if public_schema_version else ""
+                ),
                 "provenance_json": json_dumps({
                     "source_view": "agent_public_non_dicom_participant_summary",
                     "managed_system": source_system,
@@ -457,7 +518,7 @@ def ingest_controlled(
         record_source(conn, "controlled_access_metadata", path, False, 0, "Optional detailed controlled metadata not installed.")
         return 0
     imported = 0
-    with connect(path) as source:
+    with closing(connect(path)) as source:
         if not table_exists(source, "agent_controlled_files"):
             record_source(conn, "controlled_access_metadata", path, True, 0, "Required controlled file view missing.")
             return 0
@@ -527,12 +588,14 @@ def ingest_clinical(
     conn: sqlite3.Connection,
     path: Path,
     dataset_types: dict[str, tuple[str, str]],
+    *,
+    include_clinical_values: bool = False,
 ) -> int:
     if not path.exists():
         record_source(conn, "clinical_metadata", path, False, 0, "Optional clinical metadata not installed.")
         return 0
     imported = 0
-    with connect(path) as source:
+    with closing(connect(path)) as source:
         if table_exists(source, "agent_clinical_all_subjects"):
             for row in source.execute("SELECT short_title, subject_id, source_kinds FROM agent_clinical_all_subjects"):
                 raw_id = str(row["subject_id"] or "").strip()
@@ -610,7 +673,7 @@ def ingest_clinical(
                     "source_version": "",
                     "provenance_json": json_dumps({"source_table": "clinical_imaging_subjects", "imaging_source": row["imaging_source"]}),
                 })
-        if table_exists(source, "agent_clinical_facts"):
+        if include_clinical_values and table_exists(source, "agent_clinical_facts"):
             for row in source.execute(
                 """
                 SELECT short_title, subject_id, concept, value_text, value_resolved,
@@ -673,24 +736,26 @@ def ingest_clinical(
     return imported
 
 
-def resolve_exact_cross_namespace_identifiers(conn: sqlite3.Connection) -> int:
+def resolve_within_dataset_identifiers(conn: sqlite3.Connection) -> dict[str, int]:
     rows = conn.execute(
         """
         SELECT p.participant_key, p.dataset_type, p.short_title,
                p.display_participant_id,
-               COUNT(DISTINCT i.identifier_namespace) AS namespace_count
+               COUNT(DISTINCT i.identifier_namespace) AS namespace_count,
+               COUNT(DISTINCT i.normalized_identifier) AS spelling_count
         FROM participant_identifiers i
         JOIN participants p USING(participant_key)
         GROUP BY p.participant_key, p.dataset_type, p.short_title,
                  p.display_participant_id
         HAVING COUNT(DISTINCT i.identifier_namespace) > 1
+            OR COUNT(DISTINCT i.normalized_identifier) > 1
         """
     ).fetchall()
     target_keys = {str(row["participant_key"]) for row in rows}
-    identifier_provenance: dict[str, set[tuple[str, str]]] = defaultdict(set)
+    identifier_provenance: dict[str, set[tuple[str, str, str]]] = defaultdict(set)
     for item in conn.execute(
         """
-        SELECT participant_key, identifier_namespace, managed_system
+        SELECT participant_key, identifier_namespace, managed_system, normalized_identifier
         FROM participant_identifiers
         ORDER BY participant_key, identifier_namespace, managed_system
         """
@@ -698,43 +763,82 @@ def resolve_exact_cross_namespace_identifiers(conn: sqlite3.Connection) -> int:
         key = str(item["participant_key"])
         if key in target_keys:
             identifier_provenance[key].add(
-                (str(item["identifier_namespace"]), str(item["managed_system"]))
+                (
+                    str(item["identifier_namespace"]),
+                    str(item["managed_system"]),
+                    str(item["normalized_identifier"]),
+                )
             )
+    resolution_counts = {
+        "exact_cross_namespace_resolutions": 0,
+        "casefolded_identifier_resolutions": 0,
+    }
     for row in rows:
         provenance = identifier_provenance[str(row["participant_key"])]
-        namespaces = sorted({namespace for namespace, _ in provenance})
-        managed_systems = sorted({system for _, system in provenance})
+        namespaces = sorted({namespace for namespace, _, _ in provenance})
+        managed_systems = sorted({system for _, system, _ in provenance})
+        identifier_spellings = sorted({identifier for _, _, identifier in provenance})
+        exact_text_match = len(identifier_spellings) == 1
+        resolution_method = (
+            "exact_identifier_same_tcia_dataset"
+            if exact_text_match
+            else "casefolded_identifier_same_tcia_dataset"
+        )
+        count_key = (
+            "exact_cross_namespace_resolutions"
+            if exact_text_match
+            else "casefolded_identifier_resolutions"
+        )
+        resolution_counts[count_key] += 1
+        source_scope = (
+            "multiple source namespaces"
+            if row["namespace_count"] > 1
+            else "multiple managed-system records in one source namespace"
+        )
+        description = (
+            f"Exact identifier text from {source_scope} was linked"
+            if exact_text_match
+            else f"Case-equivalent identifier spellings from {source_scope} were linked"
+        )
         conn.execute(
             """
             UPDATE participants
             SET within_dataset_identity_status = 'resolved',
-                identity_resolution_method = 'exact_identifier_same_tcia_dataset'
+                identity_resolution_method = ?
             WHERE participant_key = ?
             """,
-            (row["participant_key"],),
+            (resolution_method, row["participant_key"]),
         )
         conn.execute(
             """
             INSERT OR IGNORE INTO participant_identity_evidence
-            VALUES (?, ?, 'within_dataset', 'exact_identifier_same_tcia_dataset',
+            VALUES (?, ?, 'within_dataset', ?,
                     'resolved', 'high', ?, ?)
             """,
             (
-                stable_id("identity_evidence", row["participant_key"], *namespaces),
+                stable_id(
+                    "identity_evidence",
+                    row["participant_key"],
+                    resolution_method,
+                    *namespaces,
+                ),
                 row["participant_key"],
-                "Exact identifier text from multiple source namespaces was linked "
-                "because every record resolves to the same authoritative TCIA dataset.",
+                resolution_method,
+                f"{description} because every record resolves to the same "
+                "authoritative TCIA dataset.",
                 json_dumps({
                     "dataset_type": row["dataset_type"],
                     "short_title": row["short_title"],
                     "display_participant_id": row["display_participant_id"],
+                    "identifier_spellings": identifier_spellings,
                     "namespace_count": row["namespace_count"],
+                    "spelling_count": row["spelling_count"],
                     "namespaces": namespaces,
                     "managed_systems": managed_systems,
                 }),
             ),
         )
-    return len(rows)
+    return resolution_counts
 
 
 def build_database(
@@ -745,6 +849,7 @@ def build_database(
     controlled_db: Path,
     clinical_db: Path,
     replace: bool,
+    include_clinical_values: bool = False,
 ) -> dict[str, Any]:
     dataset_types = load_dataset_types(snapshot_db)
     if out.exists():
@@ -752,7 +857,7 @@ def build_database(
             raise FileExistsError(f"Output exists: {out}; pass --replace")
         out.unlink()
     out.parent.mkdir(parents=True, exist_ok=True)
-    with connect(out) as conn:
+    with closing(connect(out)) as conn:
         conn.executescript(SCHEMA)
         record_source(
             conn,
@@ -765,17 +870,33 @@ def build_database(
         counts = {
             "public_non_dicom": ingest_public_non_dicom(conn, public_db, dataset_types),
             "controlled": ingest_controlled(conn, controlled_db, dataset_types),
-            "clinical": ingest_clinical(conn, clinical_db, dataset_types),
+            "clinical": ingest_clinical(
+                conn,
+                clinical_db,
+                dataset_types,
+                include_clinical_values=include_clinical_values,
+            ),
         }
-        counts["exact_cross_namespace_resolutions"] = resolve_exact_cross_namespace_identifiers(conn)
+        counts["display_identifiers_selected"] = select_display_participant_ids(conn)
+        resolution_counts = resolve_within_dataset_identifiers(conn)
+        counts.update(resolution_counts)
+        counts["within_dataset_identity_resolutions"] = sum(resolution_counts.values())
         metadata = {
             "schema_version": SCHEMA_VERSION,
             "artifact_model_schema_version": MODEL_SCHEMA_VERSION,
             "generated_at_utc": datetime.now(timezone.utc).isoformat(),
             "identity_rule": (
-                "Exact identifiers from sources attached to the same authoritative TCIA "
-                "dataset resolve to one participant; cross-dataset identity is never "
-                "asserted from a repeated bare identifier."
+                "Case-equivalent identifiers from sources attached to the same authoritative "
+                "TCIA dataset resolve to one participant while every source spelling is "
+                "preserved; cross-dataset identity is never asserted from a repeated bare "
+                "identifier."
+            ),
+            "display_identifier_rule": (
+                "Prefer TCIA-origin identifier spelling, then other managed-system sources, "
+                "with deterministic case and lexical tie-breakers."
+            ),
+            "clinical_values_storage": (
+                "embedded" if include_clinical_values else "clinical_metadata_detail_artifact"
             ),
         }
         conn.executemany(
@@ -804,7 +925,7 @@ def validate_database(path: Path) -> dict[str, Any]:
         "agent_participant_search",
     }
     errors: list[str] = []
-    with connect(path) as conn:
+    with closing(connect(path)) as conn:
         integrity = conn.execute("PRAGMA integrity_check").fetchone()[0]
         if integrity != "ok":
             errors.append(f"integrity_check={integrity}")
@@ -820,17 +941,48 @@ def validate_database(path: Path) -> dict[str, Any]:
         duplicate_participants = conn.execute(
             """
             SELECT COUNT(*) FROM (
-              SELECT dataset_type, short_title, display_participant_id
+              SELECT dataset_type, short_title, casefold(display_participant_id)
               FROM participants
-              GROUP BY dataset_type, short_title, display_participant_id
+              GROUP BY dataset_type, short_title, casefold(display_participant_id)
               HAVING COUNT(*) > 1
             )
             """
         ).fetchone()[0]
         if duplicate_participants:
             errors.append(
-                "duplicate canonical participant display identifiers within one dataset: "
+                "case-equivalent canonical participant display identifiers within one dataset: "
                 f"{duplicate_participants}"
+            )
+        canonical_key_mismatches = sum(
+            1
+            for row in conn.execute(
+                "SELECT participant_key, dataset_type, short_title, display_participant_id "
+                "FROM participants"
+            )
+            if str(row["participant_key"])
+            != participant_key(
+                str(row["dataset_type"]),
+                str(row["short_title"]),
+                str(row["display_participant_id"]),
+            )
+        )
+        if canonical_key_mismatches:
+            errors.append(
+                "participant keys inconsistent with dataset-scoped casefold identity rule: "
+                f"{canonical_key_mismatches}"
+            )
+        identifier_case_mismatches = conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM participant_identifiers i
+            JOIN participants p USING(participant_key)
+            WHERE casefold(i.normalized_identifier) <> casefold(p.display_participant_id)
+            """
+        ).fetchone()[0]
+        if identifier_case_mismatches:
+            errors.append(
+                "participant identifiers outside their canonical casefold group: "
+                f"{identifier_case_mismatches}"
             )
         unresolved_multiple_namespaces = conn.execute(
             """
@@ -886,6 +1038,16 @@ def build_manifest(db: Path, gzip_path: Path | None = None) -> dict[str, Any]:
         "sqlite_sha256": file_sha256(db),
         "counts": validation["counts"],
     }
+    with closing(connect(db)) as conn:
+        build_contract = dict(
+            conn.execute(
+                "SELECT key, value FROM participant_inventory_meta WHERE key IN "
+                "('clinical_values_storage', 'provenance_storage', "
+                "'audit_companion_asset', 'audit_schema_version')"
+            )
+        )
+    if build_contract:
+        result["storage_contract"] = build_contract
     if gzip_path:
         result["gzip_bytes"] = gzip_path.stat().st_size
         result["gzip_sha256"] = file_sha256(gzip_path)
@@ -957,6 +1119,11 @@ def parser() -> argparse.ArgumentParser:
     build.add_argument("--gzip-out")
     build.add_argument("--manifest-out")
     build.add_argument("--replace", action="store_true")
+    build.add_argument(
+        "--embed-clinical-values",
+        action="store_true",
+        help="Embed all accepted clinical facts for compatibility; research-core builds defer them to clinical_metadata.",
+    )
     validate = sub.add_parser("validate")
     validate.add_argument("--db", default=str(DEFAULT_DB))
     info = sub.add_parser("info")
@@ -985,6 +1152,7 @@ def main() -> int:
             controlled_db=Path(args.controlled_db),
             clinical_db=Path(args.clinical_db),
             replace=args.replace,
+            include_clinical_values=args.embed_clinical_values,
         )
         if args.gzip_out:
             gzip_database(out, Path(args.gzip_out))
@@ -1005,7 +1173,7 @@ def main() -> int:
             sort_keys=True,
         ))
         return 0
-    with connect(Path(args.db)) as conn:
+    with closing(connect(Path(args.db))) as conn:
         if args.command == "info":
             result = {
                 "meta": {row["key"]: row["value"] for row in conn.execute("SELECT * FROM participant_inventory_meta")},
@@ -1020,8 +1188,13 @@ def main() -> int:
                 sql += " AND lower(short_title) = lower(?)"
                 params.append(args.collection)
             if args.participant:
-                sql += " AND display_participant_id = ?"
-                params.append(args.participant)
+                sql += (
+                    " AND (casefold(display_participant_id) = casefold(?) OR EXISTS ("
+                    "SELECT 1 FROM participant_identifiers i "
+                    "WHERE i.participant_key = agent_participants.participant_key "
+                    "AND casefold(i.raw_identifier) = casefold(?)))"
+                )
+                params.extend([args.participant, args.participant])
             sql += " ORDER BY lower(short_title), display_participant_id LIMIT ?"
             params.append(args.limit)
             for row in conn.execute(sql, params):

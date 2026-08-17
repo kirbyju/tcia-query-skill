@@ -302,7 +302,7 @@ class BuilderTests(unittest.TestCase):
             self.assertEqual(file_counts, {"BraTS2021_00393": 1, "BraTS2021_00794": 3})
             conn.close()
 
-    def test_participant_inventory_unifies_exact_same_dataset_identifiers(self):
+    def test_participant_inventory_unifies_case_equivalent_same_dataset_identifiers(self):
         import sqlite3
 
         with tempfile.TemporaryDirectory() as directory:
@@ -369,9 +369,12 @@ class BuilderTests(unittest.TestCase):
                 "CREATE TABLE clinical_imaging_subjects "
                 "(short_title TEXT, subject_id TEXT, imaging_source TEXT)"
             )
-            conn.execute(
+            conn.executemany(
                 "INSERT INTO clinical_imaging_subjects VALUES (?,?,?)",
-                ("AAPM-RT-MAC", "RTMAC-LIVE-008", "idc_index"),
+                [
+                    ("AAPM-RT-MAC", "rtmac-live-008", "idc_index"),
+                    ("AAPM-RT-MAC", "IDC-ONLY-009", "idc_index"),
+                ],
             )
             conn.commit()
             conn.close()
@@ -384,7 +387,8 @@ class BuilderTests(unittest.TestCase):
                 clinical_db=clinical,
                 replace=True,
             )
-            self.assertEqual(result["counts"]["exact_cross_namespace_resolutions"], 2)
+            self.assertEqual(result["counts"]["exact_cross_namespace_resolutions"], 1)
+            self.assertEqual(result["counts"]["casefolded_identifier_resolutions"], 1)
 
             conn = sqlite3.connect(output)
             aapm = conn.execute(
@@ -394,20 +398,32 @@ class BuilderTests(unittest.TestCase):
                        source_namespace_count, modalities
                 FROM agent_participant_search
                 WHERE short_title='AAPM-RT-MAC'
+                  AND display_participant_id='RTMAC-LIVE-008'
                 """
             ).fetchall()
             self.assertEqual(
                 aapm,
                 [(
                     "Collection", "RTMAC-LIVE-008", "resolved",
-                    "exact_identifier_same_tcia_dataset", 2, "MR",
+                    "casefolded_identifier_same_tcia_dataset", 2, "MR",
                 )],
+            )
+            self.assertEqual(
+                conn.execute(
+                    "SELECT raw_identifier FROM participant_identifiers "
+                    "WHERE participant_key=(SELECT participant_key FROM participants "
+                    "WHERE short_title='AAPM-RT-MAC' "
+                    "AND display_participant_id='RTMAC-LIVE-008') "
+                    "ORDER BY raw_identifier"
+                ).fetchall(),
+                [("RTMAC-LIVE-008",), ("RTMAC-LIVE-008",), ("rtmac-live-008",)],
             )
             self.assertEqual(
                 conn.execute(
                     "SELECT COUNT(*) FROM participant_identifiers "
                     "WHERE participant_key=(SELECT participant_key FROM participants "
-                    "WHERE short_title='AAPM-RT-MAC')"
+                    "WHERE short_title='AAPM-RT-MAC' "
+                    "AND display_participant_id='RTMAC-LIVE-008')"
                 ).fetchone()[0],
                 3,
             )
@@ -415,7 +431,8 @@ class BuilderTests(unittest.TestCase):
                 conn.execute(
                     "SELECT COUNT(*) FROM participant_assets "
                     "WHERE participant_key=(SELECT participant_key FROM participants "
-                    "WHERE short_title='AAPM-RT-MAC')"
+                    "WHERE short_title='AAPM-RT-MAC' "
+                    "AND display_participant_id='RTMAC-LIVE-008')"
                 ).fetchone()[0],
                 3,
             )
@@ -434,10 +451,86 @@ class BuilderTests(unittest.TestCase):
                 conn.execute(
                     "SELECT COUNT(*) FROM participant_identity_evidence "
                     "WHERE resolution_method='exact_identifier_same_tcia_dataset'"
-                ).fetchone()[0],
-                2,
+                ).fetchone()[0], 1,
+            )
+            self.assertEqual(
+                conn.execute(
+                    "SELECT COUNT(*) FROM participant_identity_evidence "
+                    "WHERE resolution_method='casefolded_identifier_same_tcia_dataset'"
+                ).fetchone()[0], 1,
+            )
+            self.assertEqual(
+                conn.execute(
+                    "SELECT has_clinical FROM agent_participant_search "
+                    "WHERE display_participant_id='IDC-ONLY-009'"
+                ).fetchone()[0], 0,
             )
             conn.close()
+
+    def test_participant_key_casefolds_within_but_not_across_dataset_types(self):
+        collection_upper = participants.participant_key("Collection", "TEST", "Case-001")
+        collection_lower = participants.participant_key("Collection", "TEST", "case-001")
+        analysis_lower = participants.participant_key("Analysis Result", "TEST", "case-001")
+        self.assertEqual(collection_upper, collection_lower)
+        self.assertNotEqual(collection_upper, analysis_lower)
+
+    def test_display_identifier_uses_source_precedence_not_ingest_order(self):
+        conn = participants.connect(Path(":memory:"))
+        conn.executescript(participants.SCHEMA)
+        key = participants.ensure_participant(
+            conn, "Collection", "TEST", "case-001",
+            managed_system="crdc_idc",
+            namespace="tcia_dataset:TEST",
+            evidence="idc_index_participant_projection",
+            provenance={"source_artifact": "clinical_metadata"},
+        )
+        self.assertEqual(
+            participants.ensure_participant(
+                conn, "Collection", "TEST", "CASE-001",
+                managed_system="tcia_wordpress",
+                namespace="tcia_dataset:TEST",
+                evidence="clinical_sidecar_dataset_scoped_identifier",
+                provenance={"source_artifact": "clinical_metadata"},
+            ),
+            key,
+        )
+        participants.select_display_participant_ids(conn)
+        self.assertEqual(
+            conn.execute(
+                "SELECT display_participant_id FROM participants WHERE participant_key=?",
+                (key,),
+            ).fetchone()[0],
+            "CASE-001",
+        )
+        self.assertEqual(
+            conn.execute(
+                "SELECT COUNT(DISTINCT raw_identifier) FROM participant_identifiers"
+            ).fetchone()[0],
+            2,
+        )
+        conn.close()
+
+    def test_participant_validator_rejects_case_equivalent_canonical_rows(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "participants.sqlite"
+            conn = participants.connect(output)
+            conn.executescript(participants.SCHEMA)
+            conn.executemany(
+                "INSERT INTO participants VALUES (?,?,?,?,?,?,?,?)",
+                [
+                    ("p1", "Collection", "TEST", "Case-001", "dataset_scoped",
+                     "single_namespace", "source_identifier", "not_asserted"),
+                    ("p2", "Collection", "TEST", "case-001", "dataset_scoped",
+                     "single_namespace", "source_identifier", "not_asserted"),
+                ],
+            )
+            conn.commit()
+            conn.close()
+            result = participants.validate_database(output)
+            self.assertFalse(result["ok"])
+            self.assertTrue(
+                any("case-equivalent canonical participant" in error for error in result["errors"])
+            )
 
     def test_hancock_tma_slide_links_one_asset_to_multiple_participants(self):
         import sqlite3

@@ -66,7 +66,7 @@ DEFAULT_RELEASE_TAG = "tcia-metadata-v2-preview"
 DEFAULT_REPOSITORY = "kirbyju/tcia-query-skill"
 DB_ASSET = "public_non_dicom_metadata.sqlite.gz"
 MANIFEST_ASSET = "public_non_dicom_metadata_manifest.json"
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 
 SCHEMA = """
@@ -214,11 +214,19 @@ CREATE TABLE public_non_dicom_image_metadata (
     asset_id TEXT PRIMARY KEY,
     short_title TEXT NOT NULL,
     metadata_json TEXT NOT NULL DEFAULT '{}',
+    field_source_ids_json TEXT NOT NULL DEFAULT '{}',
     field_provenance_json TEXT NOT NULL DEFAULT '{}',
     conflicting_values_json TEXT NOT NULL DEFAULT '{}',
     quality_flag_json TEXT NOT NULL DEFAULT '{}',
     populated_field_count INTEGER NOT NULL DEFAULT 0,
+    conflict_field_count INTEGER NOT NULL DEFAULT 0,
     FOREIGN KEY (asset_id) REFERENCES public_non_dicom_assets(asset_id)
+);
+
+CREATE TABLE public_non_dicom_metadata_sources (
+    source_id TEXT PRIMARY KEY,
+    source_kind TEXT NOT NULL,
+    source_locator TEXT NOT NULL
 );
 
 CREATE TABLE public_non_dicom_metadata_field_coverage (
@@ -396,10 +404,12 @@ SELECT
     json_extract(m.metadata_json, '$.pathology_protocol') AS pathology_protocol,
     json_extract(m.metadata_json, '$.magnification') AS magnification,
     m.metadata_json,
+    m.field_source_ids_json,
     m.field_provenance_json,
     m.conflicting_values_json,
     m.quality_flag_json,
-    m.populated_field_count
+    m.populated_field_count,
+    m.conflict_field_count
 FROM public_non_dicom_image_metadata m
 JOIN public_non_dicom_assets a USING (asset_id);
 
@@ -575,6 +585,7 @@ def merge_image_metadata(
             return 0
         asset_short_title = str(row["asset_short_title"])
     metadata = json.loads(row["metadata_json"] or "{}") if row else {}
+    field_sources = json.loads(row["field_source_ids_json"] or "{}") if row else {}
     provenance = json.loads(row["field_provenance_json"] or "{}") if row else {}
     provenance_sources = provenance.setdefault("_sources", {})
     conflicts = json.loads(row["conflicting_values_json"] or "{}") if row else {}
@@ -589,6 +600,10 @@ def merge_image_metadata(
     }
     source_id = hashlib.sha256(json_dumps(source_definition).encode("utf-8")).hexdigest()[:12]
     provenance_sources[source_id] = source_definition
+    conn.execute(
+        "INSERT OR IGNORE INTO public_non_dicom_metadata_sources VALUES (?, ?, ?)",
+        (source_id, source_kind, source_locator),
+    )
     changed = 0
     for field_name, raw_value in values.items():
         if not meaningful_metadata_value(raw_value):
@@ -604,11 +619,13 @@ def merge_image_metadata(
         }
         if field_name not in metadata:
             metadata[field_name] = value
+            field_sources[field_name] = source_id
             provenance[field_name] = candidate
             changed += 1
             continue
         if json_dumps(metadata[field_name]) == json_dumps(value):
             existing = provenance.setdefault(field_name, candidate)
+            field_sources.setdefault(field_name, str(existing.get("source_id") or source_id))
             sources = existing.setdefault("additional_sources", [])
             source_summary = {
                 "source_id": source_id,
@@ -631,30 +648,37 @@ def merge_image_metadata(
             if previous not in conflict_rows:
                 conflict_rows.append(previous)
             metadata[field_name] = value
+            field_sources[field_name] = source_id
             provenance[field_name] = candidate
             changed += 1
         quality["metadata_conflict_fields"] = sorted(conflicts)
     conn.execute(
         """
         INSERT INTO public_non_dicom_image_metadata
-          (asset_id, short_title, metadata_json, field_provenance_json,
-           conflicting_values_json, quality_flag_json, populated_field_count)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+          (asset_id, short_title, metadata_json, field_source_ids_json,
+           field_provenance_json,
+           conflicting_values_json, quality_flag_json, populated_field_count,
+           conflict_field_count)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(asset_id) DO UPDATE SET
           metadata_json=excluded.metadata_json,
+          field_source_ids_json=excluded.field_source_ids_json,
           field_provenance_json=excluded.field_provenance_json,
           conflicting_values_json=excluded.conflicting_values_json,
           quality_flag_json=excluded.quality_flag_json,
-          populated_field_count=excluded.populated_field_count
+          populated_field_count=excluded.populated_field_count,
+          conflict_field_count=excluded.conflict_field_count
         """,
         (
             asset_id,
             asset_short_title,
             json_dumps(metadata),
+            json_dumps(field_sources),
             json_dumps(provenance),
             json_dumps(conflicts),
             json_dumps(quality),
             len(metadata),
+            len(conflicts),
         ),
     )
     return changed
@@ -2626,6 +2650,7 @@ def validate_database(path: Path) -> dict[str, Any]:
         "public_non_dicom_crosswalk_evidence",
         "public_non_dicom_review_issues",
         "public_non_dicom_image_metadata",
+        "public_non_dicom_metadata_sources",
         "public_non_dicom_metadata_field_coverage",
         "public_non_dicom_dataset_metadata_notes",
         "agent_public_non_dicom_assets",
@@ -2672,6 +2697,18 @@ def validate_database(path: Path) -> dict[str, Any]:
         ).fetchone()[0]
         if orphan_image_metadata:
             errors.append(f"orphan image metadata rows: {orphan_image_metadata}")
+        orphan_field_sources = conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM public_non_dicom_image_metadata m,
+                 json_each(m.field_source_ids_json) f
+            LEFT JOIN public_non_dicom_metadata_sources s
+                   ON s.source_id = f.value
+            WHERE s.source_id IS NULL
+            """
+        ).fetchone()[0]
+        if orphan_field_sources:
+            errors.append(f"orphan image metadata field-source references: {orphan_field_sources}")
         counts = {
             "assets": conn.execute("SELECT COUNT(*) FROM public_non_dicom_assets").fetchone()[0],
             "locations": conn.execute("SELECT COUNT(*) FROM public_non_dicom_locations").fetchone()[0],
@@ -2708,12 +2745,26 @@ def build_manifest(db: Path, gzip_path: Path | None = None) -> dict[str, Any]:
         "sqlite_sha256": file_sha256(db),
         "counts": validation["counts"],
     }
+    with closing(connect(db)) as conn:
+        artifact_meta = dict(
+            conn.execute(
+                "SELECT key, value FROM artifact_meta WHERE key IN "
+                "('provenance_storage', 'audit_companion_asset', 'audit_schema_version')"
+            )
+        )
+    if artifact_meta:
+        manifest["provenance"] = artifact_meta
     if gzip_path:
         manifest.update({
             "gzip_bytes": gzip_path.stat().st_size,
             "gzip_sha256": file_sha256(gzip_path),
         })
-    fingerprint_payload = {key: manifest[key] for key in ("artifact", "schema_version", "sqlite_sha256", "counts")}
+    fingerprint_payload = {
+        key: manifest[key]
+        for key in ("artifact", "schema_version", "sqlite_sha256", "counts")
+    }
+    if "provenance" in manifest:
+        fingerprint_payload["provenance"] = manifest["provenance"]
     manifest["release_fingerprint"] = hashlib.sha256(json_dumps(fingerprint_payload).encode()).hexdigest()
     return manifest
 

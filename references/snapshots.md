@@ -3,8 +3,9 @@
 For the official-shaped V2 preview bundle, load
 `references/artifact-model-v2.md`. After successful scheduled base-snapshot
 updates, the V2 workflow copies the base snapshot and optional sidecars,
-regenerates all eight web exports, builds the two V2 databases, and publishes
-the complete hash-pinned bundle only when its fingerprint changes. It leaves
+regenerates all eight web exports, builds the two V2 research databases and
+their optional audit companions, and publishes the complete profile-based,
+hash-pinned bundle only when its fingerprint changes. It leaves
 `tcia-snapshot-latest`, its May 2026-compatible contracts, and MCP/REST
 deployment unchanged.
 
