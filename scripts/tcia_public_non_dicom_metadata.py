@@ -57,6 +57,7 @@ SKILL_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SNAPSHOT_DB = SKILL_ROOT / "cache" / "tcia_snapshot.sqlite"
 DEFAULT_NIFTI_DB = SKILL_ROOT / "cache" / "nifti_metadata.sqlite"
 DEFAULT_PATHOLOGY_DB = SKILL_ROOT / "cache" / "pathology_metadata.sqlite"
+DEFAULT_CLINICAL_DB = SKILL_ROOT / "cache" / "clinical_metadata.sqlite"
 DEFAULT_CROSSWALK_CSV = SKILL_ROOT / "references" / "public_non_dicom_crosswalks_v1.csv"
 DEFAULT_CROSSWALK_CURATION = SKILL_ROOT / "references" / "public-non-dicom-crosswalk-curation-v1.json"
 DEFAULT_IMAGE_METADATA_CSV = SKILL_ROOT / "references" / "public_non_dicom_image_metadata_v1.csv"
@@ -66,7 +67,7 @@ DEFAULT_RELEASE_TAG = "tcia-metadata-v2-preview"
 DEFAULT_REPOSITORY = "kirbyju/tcia-query-skill"
 DB_ASSET = "public_non_dicom_metadata.sqlite.gz"
 MANIFEST_ASSET = "public_non_dicom_metadata_manifest.json"
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 
 SCHEMA = """
@@ -397,6 +398,21 @@ SELECT
     json_extract(m.metadata_json, '$.manufacturer') AS manufacturer,
     json_extract(m.metadata_json, '$.manufacturer_model_name') AS manufacturer_model_name,
     json_extract(m.metadata_json, '$.magnetic_field_strength_t') AS magnetic_field_strength_t,
+    json_extract(m.metadata_json, '$.study_datetime') AS study_datetime,
+    json_extract(m.metadata_json, '$.acquisition_dimensionality') AS acquisition_dimensionality,
+    json_extract(m.metadata_json, '$.scanner_site') AS scanner_site,
+    json_extract(m.metadata_json, '$.sequence_class') AS sequence_class,
+    json_extract(m.metadata_json, '$.sequence_tags') AS sequence_tags,
+    json_extract(m.metadata_json, '$.slice_thickness_mm') AS slice_thickness_mm,
+    json_extract(m.metadata_json, '$.spacing_between_slices_mm') AS spacing_between_slices_mm,
+    json_extract(m.metadata_json, '$.repetition_time_ms') AS repetition_time_ms,
+    json_extract(m.metadata_json, '$.echo_time_ms') AS echo_time_ms,
+    json_extract(m.metadata_json, '$.inversion_time_ms') AS inversion_time_ms,
+    json_extract(m.metadata_json, '$.pre_included') AS pre_included,
+    json_extract(m.metadata_json, '$.post_included') AS post_included,
+    json_extract(m.metadata_json, '$.t2_included') AS t2_included,
+    json_extract(m.metadata_json, '$.flair_included') AS flair_included,
+    json_extract(m.metadata_json, '$.sequences_present') AS sequences_present,
     json_extract(m.metadata_json, '$.rows') AS rows,
     json_extract(m.metadata_json, '$.columns') AS columns,
     json_extract(m.metadata_json, '$.number_of_slices') AS number_of_slices,
@@ -1157,6 +1173,208 @@ def ingest_nifti(conn: sqlite3.Connection, nifti_db: Path) -> int:
     return count
 
 
+def metadata_number(value: Any) -> int | float | str | None:
+    """Keep source precision while making workbook measurements queryable."""
+    if not meaningful_metadata_value(value):
+        return None
+    text = str(value).strip()
+    try:
+        number = float(text)
+    except ValueError:
+        return text
+    return int(number) if number.is_integer() else number
+
+
+def metadata_flag(value: Any) -> bool | None:
+    text = str(value or "").strip().casefold()
+    if text in {"1", "1.0", "true", "yes", "present"}:
+        return True
+    if text in {"0", "0.0", "false", "no", "absent"}:
+        return False
+    return None
+
+
+def ingest_yale_brain_mets_workbook_metadata(
+    conn: sqlite3.Connection, clinical_db: Path | None
+) -> dict[str, int]:
+    """Join Yale's official file/acquisition workbook rows to NIfTI assets."""
+    counts = {
+        "image_rows": 0,
+        "matched_image_rows": 0,
+        "unmatched_image_rows": 0,
+        "matched_assets": 0,
+        "acquisition_rows": 0,
+        "metadata_values": 0,
+    }
+    if not clinical_db or not clinical_db.exists():
+        return counts
+    unmatched_examples: list[str] = []
+    with closing(connect(clinical_db)) as source:
+        if not table_exists(source, "clinical_rows") or not table_exists(
+            source, "clinical_sources"
+        ):
+            return counts
+        source_row = source.execute(
+            """SELECT source_id, source_url, artifact_sha256
+               FROM clinical_sources
+               WHERE short_title = 'Yale-Brain-Mets-Longitudinal'
+                 AND source_kind = 'tcia_clinical_download'
+               ORDER BY source_priority DESC LIMIT 1"""
+        ).fetchone()
+        if source_row is None:
+            return counts
+        source_id = str(source_row["source_id"])
+        source_url = str(source_row["source_url"] or "")
+        acquisitions: dict[tuple[str, str], tuple[str, dict[str, Any]]] = {}
+        for row in source.execute(
+            """SELECT source_row_id, subject_id, row_json
+               FROM clinical_rows
+               WHERE source_id = ? AND table_name LIKE '%::Acquisition_data'""",
+            (source_id,),
+        ):
+            values = json.loads(row["row_json"] or "{}")
+            study_datetime = str(values.get("study_datetime") or "").strip()
+            if not study_datetime:
+                continue
+            acquisitions[(str(row["subject_id"]), study_datetime)] = (
+                str(row["source_row_id"]),
+                values,
+            )
+            counts["acquisition_rows"] += 1
+
+        assets_by_file: dict[str, list[str]] = {}
+        for asset in conn.execute(
+            """SELECT asset_id, file_name
+               FROM public_non_dicom_assets
+               WHERE short_title = 'Yale-Brain-Mets-Longitudinal'
+                 AND asset_granularity = 'file'
+                 AND NULLIF(trim(COALESCE(file_name, '')), '') IS NOT NULL"""
+        ):
+            assets_by_file.setdefault(str(asset["file_name"]).casefold(), []).append(
+                str(asset["asset_id"])
+            )
+
+        for row in source.execute(
+            """SELECT source_row_id, subject_id, row_json
+               FROM clinical_rows
+               WHERE source_id = ?
+                 AND table_name LIKE '%::image_acquisition_parameters'""",
+            (source_id,),
+        ):
+            counts["image_rows"] += 1
+            values = json.loads(row["row_json"] or "{}")
+            file_name = str(values.get("file_name") or "").strip()
+            asset_ids = assets_by_file.get(file_name.casefold(), [])
+            if not asset_ids:
+                counts["unmatched_image_rows"] += 1
+                if file_name and len(unmatched_examples) < 8:
+                    unmatched_examples.append(file_name)
+                continue
+            counts["matched_image_rows"] += 1
+            image_values = {
+                "study_datetime": values.get("study_datetime"),
+                "sequence_class": values.get("sequence_class"),
+                "sequence_tags": values.get("sequence_tags"),
+                "slice_thickness_mm": metadata_number(values.get("slice_thickness (mm)")),
+                "spacing_between_slices_mm": metadata_number(
+                    values.get("spacing_between_slices (mm)")
+                ),
+                "repetition_time_ms": metadata_number(values.get("repetition_time (ms)")),
+                "echo_time_ms": metadata_number(values.get("echo_time (ms)")),
+                "inversion_time_ms": metadata_number(values.get("inversion_time (ms)")),
+            }
+            study_key = (
+                str(row["subject_id"]),
+                str(values.get("study_datetime") or "").strip(),
+            )
+            acquisition = acquisitions.get(study_key)
+            acquisition_values: dict[str, Any] = {}
+            acquisition_row_id = ""
+            if acquisition:
+                acquisition_row_id, acquisition_row = acquisition
+                sequence_flags = {
+                    "PRE": metadata_flag(
+                        acquisition_row.get("pre_included (1=present; 0=absent)")
+                    ),
+                    "POST": metadata_flag(
+                        acquisition_row.get("post_included (1=present; 0=absent)")
+                    ),
+                    "T2": metadata_flag(
+                        acquisition_row.get("t2_included (1=present; 0=absent)")
+                    ),
+                    "FLAIR": metadata_flag(
+                        acquisition_row.get("flair_included (1=present; 0=absent)")
+                    ),
+                }
+                acquisition_values = {
+                    "manufacturer": acquisition_row.get("vendor"),
+                    "manufacturer_model_name": acquisition_row.get("model"),
+                    "magnetic_field_strength_t": metadata_number(
+                        acquisition_row.get("field_strength (T)")
+                    ),
+                    "acquisition_dimensionality": acquisition_row.get("2D_3D_acquisition"),
+                    "scanner_site": acquisition_row.get("scanner_site"),
+                    "pre_included": sequence_flags["PRE"],
+                    "post_included": sequence_flags["POST"],
+                    "t2_included": sequence_flags["T2"],
+                    "flair_included": sequence_flags["FLAIR"],
+                    "sequences_present": [
+                        name for name, present in sequence_flags.items() if present is True
+                    ],
+                }
+            for asset_id in asset_ids:
+                counts["metadata_values"] += merge_image_metadata(
+                    conn,
+                    asset_id,
+                    image_values,
+                    value_role="normalized",
+                    source_kind="tcia_clinical_download",
+                    source_locator=f"{source_url}::image_acquisition_parameters",
+                    inference_method="exact_file_name_to_official_workbook_row",
+                    confidence="high",
+                    priority=110,
+                    evidence={
+                        "source_id": source_id,
+                        "source_row_id": str(row["source_row_id"]),
+                        "artifact_sha256": str(source_row["artifact_sha256"] or ""),
+                    },
+                )
+                if acquisition_values:
+                    counts["metadata_values"] += merge_image_metadata(
+                        conn,
+                        asset_id,
+                        acquisition_values,
+                        value_role="normalized",
+                        source_kind="tcia_clinical_download",
+                        source_locator=f"{source_url}::Acquisition_data",
+                        inference_method="patient_and_study_datetime_to_official_workbook_row",
+                        confidence="high",
+                        priority=110,
+                        evidence={
+                            "source_id": source_id,
+                            "source_row_id": acquisition_row_id,
+                            "artifact_sha256": str(source_row["artifact_sha256"] or ""),
+                        },
+                    )
+                counts["matched_assets"] += 1
+    if counts["unmatched_image_rows"]:
+        add_dataset_metadata_note(
+            conn,
+            "Yale-Brain-Mets-Longitudinal",
+            "file_name",
+            "official_workbook_file_not_in_public_inventory",
+            "One or more official workbook file names did not match a current public NIfTI asset.",
+            affected_assets=counts["unmatched_image_rows"],
+            evidence={
+                "matched_image_rows": counts["matched_image_rows"],
+                "unmatched_image_rows": counts["unmatched_image_rows"],
+                "unmatched_file_examples": unmatched_examples,
+                "source_url": source_url,
+            },
+        )
+    return counts
+
+
 BRATS_DICOM_PATH = re.compile(
     r"^(?P<root>.+/BraTS2021_(?P<cohort>Training|Validation)Set_dcm/"
     r"(?P<source_group>[^/]+)/(?P<raw_subject_id>\d{5})/(?P<modality>[^/]+))/"
@@ -1661,15 +1879,43 @@ def ingest_reviewed_crosswalks(
                 raise RuntimeError(f"Reviewed crosswalk has no matching public download asset: {key}")
             source_url = str(download["source_url"] or source_row["source_url"] or "")
             source_system = str(download["source_system"] or source_row["source_system"] or "tcia_wordpress")
-            asset_id = stable_id(
-                "asset", "reviewed_crosswalk", source_row["dataset_type"], source_row["short_title"],
-                source_row["download_id"], source_row["package_path"], source_row["subject_id"],
+            existing_assets = conn.execute(
+                """
+                SELECT * FROM public_non_dicom_assets
+                WHERE dataset_type = ? AND short_title = ?
+                  AND COALESCE(download_id, '') = COALESCE(?, '')
+                  AND file_format = ?
+                  AND source_system = ?
+                  AND asset_granularity = 'file'
+                  AND participant_link_status IN ('dataset_only', 'unavailable')
+                  AND (
+                    (COALESCE(package_path, '') <> '' AND package_path = ?)
+                    OR (COALESCE(package_path, '') = '' AND file_name = ?)
+                  )
+                """,
+                (
+                    source_row["dataset_type"], source_row["short_title"],
+                    source_row["download_id"], source_row["file_format"], source_system,
+                    source_row["package_path"], source_row["file_name"],
+                ),
+            ).fetchall()
+            if len(existing_assets) > 1:
+                raise RuntimeError(
+                    "Reviewed crosswalk ambiguously matches existing file assets: "
+                    f"{source_row['short_title']} {source_row['package_path']}"
+                )
+            asset_id = (
+                str(existing_assets[0]["asset_id"])
+                if existing_assets
+                else stable_id(
+                    "asset", "reviewed_crosswalk", source_row["dataset_type"],
+                    source_row["short_title"], source_row["download_id"],
+                    source_row["package_path"], source_row["subject_id"],
+                )
             )
             crosswalk_id = stable_id("crosswalk", asset_id, source_row["crosswalk_method"], reviewed_at)
             size_bytes = int(source_row["size_bytes"]) if str(source_row["size_bytes"] or "").isdigit() else None
-            insert_asset(
-                conn,
-                {
+            asset_values = {
                     "asset_id": asset_id,
                     "dataset_type": source_row["dataset_type"],
                     "short_title": source_row["short_title"],
@@ -1706,6 +1952,44 @@ def ingest_reviewed_crosswalks(
                         "source_provenance": json.loads(source_row["provenance_json"] or "{}"),
                     }),
                     "quality_flag_json": source_row["quality_flag_json"] or "{}",
+                }
+            if existing_assets:
+                existing = existing_assets[0]
+                try:
+                    existing_provenance = json.loads(existing["provenance_json"] or "{}")
+                except json.JSONDecodeError:
+                    existing_provenance = {}
+                existing_provenance["reviewed_crosswalk"] = json.loads(
+                    asset_values["provenance_json"]
+                )
+                asset_values["provenance_json"] = json_dumps(existing_provenance)
+                assignments = [
+                    name for name in asset_values
+                    if name not in {"asset_id", "download_row_id", "source_record_id"}
+                ]
+                conn.execute(
+                    f"UPDATE public_non_dicom_assets SET "
+                    f"{', '.join(f'{name} = ?' for name in assignments)} WHERE asset_id = ?",
+                    [asset_values[name] for name in assignments] + [asset_id],
+                )
+            else:
+                insert_asset(conn, asset_values)
+            conn.execute(
+                "DELETE FROM public_non_dicom_asset_participants WHERE asset_id = ?",
+                (asset_id,),
+            )
+            insert_asset_participant(
+                conn,
+                asset_id=asset_id,
+                short_title=source_row["short_title"],
+                subject_id=source_row["subject_id"],
+                namespace=source_row["subject_id_namespace"],
+                raw_subject_id=source_row["raw_subject_id"],
+                participant_role="depicted_subject",
+                link_status="reviewed_source_crosswalk",
+                evidence={
+                    "crosswalk_id": crosswalk_id,
+                    "mapping_method": source_row["crosswalk_method"],
                 },
             )
             insert_location(
@@ -1784,6 +2068,66 @@ def ingest_reviewed_crosswalks(
             )
             assets += 1
             evidence_rows += 1
+
+            pathdb_matches = conn.execute(
+                """
+                SELECT * FROM public_non_dicom_assets
+                WHERE dataset_type = ? AND short_title = ?
+                  AND source_system = 'tcia_pathdb'
+                  AND COALESCE(source_url, '') <> ''
+                  AND lower(source_url) LIKE '%' || lower(?)
+                """,
+                (
+                    source_row["dataset_type"], source_row["short_title"],
+                    source_row["package_path"],
+                ),
+            ).fetchall()
+            if len(pathdb_matches) > 1:
+                raise RuntimeError(
+                    "Reviewed crosswalk ambiguously matches PathDB assets: "
+                    f"{source_row['short_title']} {source_row['package_path']}"
+                )
+            if pathdb_matches:
+                pathdb_asset = pathdb_matches[0]
+                try:
+                    pathdb_provenance = json.loads(pathdb_asset["provenance_json"] or "{}")
+                except json.JSONDecodeError:
+                    pathdb_provenance = {}
+                pathdb_provenance["reviewed_crosswalk_projection"] = {
+                    "crosswalk_id": crosswalk_id,
+                    "mapping_method": "exact_pathdb_source_url_suffix",
+                }
+                conn.execute(
+                    """
+                    UPDATE public_non_dicom_assets
+                    SET subject_id = ?, subject_id_namespace = ?,
+                        participant_link_status = 'reviewed_source_crosswalk',
+                        provenance_json = ?
+                    WHERE asset_id = ?
+                    """,
+                    (
+                        source_row["subject_id"], source_row["subject_id_namespace"],
+                        json_dumps(pathdb_provenance), pathdb_asset["asset_id"],
+                    ),
+                )
+                conn.execute(
+                    "DELETE FROM public_non_dicom_asset_participants WHERE asset_id = ?",
+                    (pathdb_asset["asset_id"],),
+                )
+                insert_asset_participant(
+                    conn,
+                    asset_id=str(pathdb_asset["asset_id"]),
+                    short_title=source_row["short_title"],
+                    subject_id=source_row["subject_id"],
+                    namespace=source_row["subject_id_namespace"],
+                    raw_subject_id=source_row["raw_subject_id"],
+                    participant_role="depicted_subject",
+                    link_status="reviewed_source_crosswalk",
+                    evidence={
+                        "crosswalk_id": crosswalk_id,
+                        "mapping_method": "exact_pathdb_source_url_suffix",
+                    },
+                )
 
     conn.execute(
         """
@@ -2561,6 +2905,7 @@ def build_database(
     pathology_db: Path | None,
     include_pathdb_files: bool,
     replace: bool,
+    clinical_db: Path | None = None,
     crosswalk_csv: Path | None = None,
     crosswalk_curation: Path | None = None,
     image_metadata_csv: Path | None = None,
@@ -2594,6 +2939,8 @@ def build_database(
         counts.update({f"automated_crosswalk_{key}": value for key, value in automated.items()})
         curated_metadata = ingest_curated_image_metadata(conn, image_metadata_csv)
         counts.update({f"curated_image_metadata_{key}": value for key, value in curated_metadata.items()})
+        yale_metadata = ingest_yale_brain_mets_workbook_metadata(conn, clinical_db)
+        counts.update({f"yale_workbook_{key}": value for key, value in yale_metadata.items()})
         counts["core_image_metadata_values"] = seed_core_asset_metadata(conn)
         inferred_metadata = enrich_from_wordpress_and_filenames(conn, snapshot_db)
         counts.update({f"inferred_image_metadata_{key}": value for key, value in inferred_metadata.items()})
@@ -2608,6 +2955,7 @@ def build_database(
             "source_snapshot": source_meta(snapshot_db),
             "source_nifti": source_meta(nifti_db) if nifti_db else {"enabled": False},
             "source_pathology": source_meta(pathology_db) if pathology_db else {"enabled": False},
+            "source_clinical": source_meta(clinical_db) if clinical_db else {"enabled": False},
             "source_crosswalk_csv": source_meta(crosswalk_csv) if crosswalk_csv else {"enabled": False},
             "source_crosswalk_curation": source_meta(crosswalk_curation) if crosswalk_curation else {"enabled": False},
             "source_image_metadata_csv": source_meta(image_metadata_csv) if image_metadata_csv else {"enabled": False},
@@ -2836,6 +3184,7 @@ def parser() -> argparse.ArgumentParser:
     build.add_argument("--snapshot-db", default=str(DEFAULT_SNAPSHOT_DB))
     build.add_argument("--nifti-db", default=str(DEFAULT_NIFTI_DB))
     build.add_argument("--pathology-db", default=str(DEFAULT_PATHOLOGY_DB))
+    build.add_argument("--clinical-db", default=str(DEFAULT_CLINICAL_DB))
     build.add_argument("--crosswalk-csv", default=str(DEFAULT_CROSSWALK_CSV))
     build.add_argument("--crosswalk-curation", default=str(DEFAULT_CROSSWALK_CURATION))
     build.add_argument("--image-metadata-csv", default=str(DEFAULT_IMAGE_METADATA_CSV))
@@ -2885,6 +3234,7 @@ def main() -> int:
             Path(args.snapshot_db), out,
             nifti_db=Path(args.nifti_db) if args.nifti_db else None,
             pathology_db=Path(args.pathology_db) if args.pathology_db else None,
+            clinical_db=Path(args.clinical_db) if args.clinical_db else None,
             crosswalk_csv=Path(args.crosswalk_csv) if args.crosswalk_csv else None,
             crosswalk_curation=Path(args.crosswalk_curation) if args.crosswalk_curation else None,
             image_metadata_csv=Path(args.image_metadata_csv) if args.image_metadata_csv else None,

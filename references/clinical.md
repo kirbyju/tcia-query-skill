@@ -324,6 +324,10 @@ stored in `clinical_meta.idc_clinical_result` under `victre`.
 - `agent_clinical_source_tables`: IDC table inventory, row counts, subject
   counts, image-linked subject counts, and ingest status.
 - `agent_clinical_dictionary`: IDC column labels and coded-value dictionaries.
+- `agent_clinical_source_dictionary`: reviewed dictionaries shipped inside
+  official TCIA clinical workbooks, with source and row provenance.
+- `agent_clinical_longitudinal_observations`: visit-, scanner-, and file-level
+  observations that must not be collapsed into patient-level conflicts.
 - `agent_clinical_imaging_subjects`: the subject allowlist derived from IDC
   imaging plus a legacy IDC/DICOM seed.
 - `agent_clinical_dataset_inferences`: Collection-label eligibility, rejection
@@ -339,6 +343,20 @@ treatment/operation, diagnosis,
 primary site, stage, grade, vital status, survival intervals, recurrence,
 progression, response, and screening result. Dataset-specific columns that are
 not mapped remain in `clinical_rows.row_json`.
+
+For `Yale-Brain-Mets-Longitudinal`, the workbook Data Dictionary is preserved
+in `agent_clinical_source_dictionary`; `age_at_Imaging (years)` is exposed as
+the patient fact `age_at_imaging_years`, and all 57,580 rows from
+`Clinical_data`, `Acquisition_data`, and `image_acquisition_parameters` are
+available through `agent_clinical_longitudinal_observations`. Study datetime,
+scanner vendor/model/site, magnetic field strength, 2D/3D acquisition, sequence
+availability, file name/class/tags, slice measurements, and MR timing parameters
+remain row-grain observations so expected changes between visits are not
+reported as contradictory patient facts. The resolved subject summary uses the
+minimum accepted imaging age as baseline and does not classify expected
+longitudinal age changes as conflicts. The public non-DICOM detail artifact
+also joins the file-level and study-level values to NIfTI assets by exact file
+name plus patient/study datetime.
 
 For ACRIN-6698 specifically, `age` is stored as
 `age_at_enrollment_years`, `SBRgrade` as `grade`, and `pcr` as `response`.

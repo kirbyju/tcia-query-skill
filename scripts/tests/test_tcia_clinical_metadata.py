@@ -23,6 +23,169 @@ SPEC.loader.exec_module(CLINICAL)
 
 
 class ClinicalMetadataTest(unittest.TestCase):
+    def test_yale_longitudinal_ages_resolve_to_baseline_without_false_conflict(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            conn = CLINICAL.init_db(
+                Path(directory) / "yale-age.sqlite", replace=True
+            )
+            CLINICAL.insert_source(
+                conn,
+                source_id="official:yale",
+                source_kind="tcia_clinical_download",
+                short_title="Yale-Brain-Mets-Longitudinal",
+                source_signature_value="test",
+            )
+            for row_number, age in enumerate(("72", "71"), 2):
+                CLINICAL.insert_row_and_facts(
+                    conn,
+                    source_id="official:yale",
+                    source_kind="tcia_clinical_download",
+                    short_title="Yale-Brain-Mets-Longitudinal",
+                    subject_id="YG_TEST",
+                    table_name="clinical.xlsx::Clinical_data",
+                    row_number=row_number,
+                    row={"patient_id": "YG_TEST", "age_at_Imaging (years)": age},
+                    facts=[
+                        ("age_at_imaging_years", age, "age_at_Imaging (years)", "years")
+                    ],
+                )
+            CLINICAL.materialize_subjects(conn)
+            subject = conn.execute(
+                """SELECT age_at_imaging_years, conflict_count
+                   FROM agent_clinical_all_subjects"""
+            ).fetchone()
+            self.assertEqual(tuple(subject), ("71", 0))
+            self.assertEqual(
+                conn.execute("SELECT COUNT(*) FROM agent_clinical_conflicts").fetchone()[0],
+                0,
+            )
+            conn.close()
+
+    def test_yale_brain_mets_dictionary_and_longitudinal_columns_are_exposed(
+        self,
+    ) -> None:
+        mappings = {
+            "age_at_Imaging (years)": ("age_at_imaging_years", "years"),
+        }
+        for column, expected in mappings.items():
+            self.assertEqual(
+                (
+                    CLINICAL.concept_for_source_column(
+                        "Yale-Brain-Mets-Longitudinal", column
+                    ),
+                    CLINICAL.unit_for_source_column(
+                        "Yale-Brain-Mets-Longitudinal", column
+                    ),
+                ),
+                expected,
+            )
+
+        with tempfile.TemporaryDirectory() as directory:
+            conn = CLINICAL.init_db(
+                Path(directory) / "yale-dictionary.sqlite", replace=True
+            )
+            CLINICAL.insert_source(
+                conn,
+                source_id="official:yale",
+                source_kind="tcia_clinical_download",
+                short_title="Yale-Brain-Mets-Longitudinal",
+                source_signature_value="test",
+            )
+            frame = CLINICAL.SimpleFrame(
+                ["Data Collection Name", "Data Descriptor /Metadata Name"],
+                [
+                    {
+                        "Data Collection Name": "Patient ID",
+                        "Data Descriptor /Metadata Name": "Patient Identification Number",
+                    },
+                    {
+                        "Data Collection Name": "Study-Datetime",
+                        "Data Descriptor /Metadata Name": "Anonymized Study Date and Time",
+                    },
+                    {
+                        "Data Collection Name": "Age at Study",
+                        "Data Descriptor /Metadata Name": "Age at Imaging",
+                    },
+                    {
+                        "Data Collection Name": "Sex",
+                        "Data Descriptor /Metadata Name": "Sex at Birth",
+                    },
+                ],
+            )
+            inserted = CLINICAL.ingest_official_source_dictionary(
+                conn,
+                source_id="official:yale",
+                short_title="Yale-Brain-Mets-Longitudinal",
+                table_name="clinical.xlsx::Data Dictionary",
+                frame=frame,
+            )
+            self.assertEqual(inserted, 4)
+            rows = conn.execute(
+                """SELECT field_name, field_description
+                   FROM agent_clinical_source_dictionary
+                   ORDER BY field_name"""
+            ).fetchall()
+            self.assertEqual(
+                [tuple(row) for row in rows],
+                [
+                    ("age_at_Imaging (years)", "Age at Imaging"),
+                    ("patient_id", "Patient Identification Number"),
+                    ("sex", "Sex at Birth"),
+                    ("study_datetime", "Anonymized Study Date and Time"),
+                ],
+            )
+            CLINICAL.insert_row_and_facts(
+                conn,
+                source_id="official:yale",
+                source_kind="tcia_clinical_download",
+                short_title="Yale-Brain-Mets-Longitudinal",
+                subject_id="YG_TEST",
+                table_name="clinical.xlsx::image_acquisition_parameters",
+                row_number=2,
+                row={
+                    "patient_id": "YG_TEST",
+                    "study_datetime": "2020-01-02_03-04-05",
+                    "file_name": "YG_TEST_FLAIR.nii.gz",
+                    "sequence_class": "FLAIR",
+                    "slice_thickness (mm)": "5",
+                },
+                facts=[],
+            )
+            inserted_observation = CLINICAL.ingest_yale_longitudinal_observation(
+                conn,
+                source_id="official:yale",
+                short_title="Yale-Brain-Mets-Longitudinal",
+                subject_id="YG_TEST",
+                table_name="clinical.xlsx::image_acquisition_parameters",
+                row_number=2,
+                row={
+                    "patient_id": "YG_TEST",
+                    "study_datetime": "2020-01-02_03-04-05",
+                    "file_name": "YG_TEST_FLAIR.nii.gz",
+                    "sequence_class": "FLAIR",
+                    "slice_thickness (mm)": "5",
+                },
+            )
+            self.assertEqual(inserted_observation, 1)
+            observation = conn.execute(
+                """SELECT observation_type, study_datetime, file_name,
+                          sequence_class, slice_thickness_mm
+                   FROM agent_clinical_longitudinal_observations"""
+            ).fetchone()
+            self.assertEqual(
+                tuple(observation),
+                (
+                    "image_acquisition",
+                    "2020-01-02_03-04-05",
+                    "YG_TEST_FLAIR.nii.gz",
+                    "FLAIR",
+                    "5",
+                ),
+            )
+            conn.close()
+
     def test_reviewed_bare_id_mappings_are_dataset_scoped_and_auditable(
         self,
     ) -> None:

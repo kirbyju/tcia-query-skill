@@ -154,9 +154,20 @@ dataset counts are recorded in
 `scripts/tcia_public_non_dicom_crosswalks.py` only from retained source
 inventories and reviewed evidence.
 
+For `AURORA-Metastatic-Breast-Multiomics`, the reviewed layer uses the
+WordPress Usage Notes filename diagram to separate the `AUR` project prefix
+from the four-character patient identifier in H&E SVS filenames. The official
+clinical workbook's `5.HLA sample ID linkage` sheet maps the separate
+immunofluorescence TIFF slide identifiers to those same patients. The current
+crosswalk covers 289 pathology images for 54 patients; the 55th four-character
+clinical patient identifier has no pathology image. Existing exact Aspera
+package-file rows are enriched in place rather than duplicated, and exact
+PathDB source-URL suffix matches receive the same reviewed participant link
+while retaining their original PathDB identifier in raw provenance.
+
 ## Public non-DICOM image metadata
 
-Schema version 6 adds an exploratory, file-grain metadata layer without making
+Schema version 7 adds an exploratory, file-grain metadata layer without making
 every source-specific spreadsheet column part of the fixed relational schema:
 
 | Surface | Purpose |
@@ -176,6 +187,15 @@ summary states needed for interpretation. Its compact
 `field_source_ids_json` maps each selected field to the normalized
 `public_non_dicom_metadata_sources` registry, so researchers can identify the
 root source without installing the audit companion.
+
+`Yale-Brain-Mets-Longitudinal` uses its official TCIA clinical/scanner workbook
+as a source-supported file metadata layer. Exact `file_name` matches attach
+sequence class/tags, slice spacing and thickness, repetition/echo/inversion
+times, study datetime, vendor/model, field strength, acquisition dimensionality,
+scanner site, and sequence-presence flags to 33,811 NIfTI assets. The join
+retains the workbook URL, artifact digest, and source-row identifier in field
+provenance; unmatched workbook filenames remain an explicit dataset metadata
+note rather than being silently discarded.
 
 The builder applies evidence in this order:
 

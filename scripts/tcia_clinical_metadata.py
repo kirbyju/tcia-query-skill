@@ -39,7 +39,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 
-SCHEMA_VERSION = 16
+SCHEMA_VERSION = 17
 DEFAULT_REPO = "kirbyju/tcia-query-skill"
 DEFAULT_RELEASE_TAG = "tcia-snapshot-latest"
 CLINICAL_ASSET = "clinical_metadata.sqlite.gz"
@@ -323,6 +323,14 @@ SOURCE_COLUMN_CONCEPT_OVERRIDES = {
     ("upenngbm", "gtrover90percent"): "extent_of_resection",
     ("upenngbm", "timesincebaselinepreop"): "days_from_baseline_preop",
     ("upenngbm", "psptpscore"): "pseudoprogression_true_progression_score",
+    # The Yale workbook defines this study-level column as age at imaging.
+    # Scanner and file-grain fields use the longitudinal observation surface
+    # below so repeated visits are not misclassified as patient conflicts.
+    ("yalebrainmetslongitudinal", "ageatimagingyears"): "age_at_imaging_years",
+}
+
+SOURCE_COLUMN_UNIT_OVERRIDES = {
+    ("yalebrainmetslongitudinal", "ageatimagingyears"): "years",
 }
 
 CURATED_SCREENING_DIAGNOSIS_RESOLUTIONS = {
@@ -483,6 +491,7 @@ OFFICIAL_SOURCE_TRANSFORM_VERSIONS = {
     "ucsdvslongitudinal": 1,
     "ucsfpdgm": 1,
     "upenngbm": 1,
+    "yalebrainmetslongitudinal": 1,
 }
 
 REVIEWED_OFFICIAL_COHORT_PATTERNS = {
@@ -588,6 +597,8 @@ REQUIRED_TABLES = [
     "clinical_downloads",
     "clinical_idc_tables",
     "clinical_dictionary",
+    "clinical_source_dictionary",
+    "clinical_longitudinal_observations",
     "clinical_imaging_subjects",
     "clinical_dataset_inferences",
     "clinical_dataset_relationships",
@@ -606,6 +617,8 @@ REQUIRED_VIEWS = [
     "agent_clinical_dataset_summary",
     "agent_clinical_source_tables",
     "agent_clinical_dictionary",
+    "agent_clinical_source_dictionary",
+    "agent_clinical_longitudinal_observations",
     "agent_clinical_imaging_subjects",
     "agent_clinical_dataset_inferences",
     "agent_clinical_dataset_relationships",
@@ -685,6 +698,34 @@ CREATE TABLE clinical_dictionary (
     values_json TEXT NOT NULL,
     idc_version TEXT NOT NULL,
     PRIMARY KEY (collection_id, table_name, column_name)
+);
+
+CREATE TABLE clinical_source_dictionary (
+    dictionary_id TEXT PRIMARY KEY,
+    source_id TEXT NOT NULL,
+    short_title TEXT NOT NULL,
+    table_name TEXT NOT NULL,
+    field_name TEXT NOT NULL,
+    field_label TEXT,
+    field_description TEXT,
+    values_json TEXT NOT NULL DEFAULT '[]',
+    provenance_json TEXT NOT NULL DEFAULT '{}',
+    FOREIGN KEY (source_id) REFERENCES clinical_sources(source_id)
+);
+
+CREATE TABLE clinical_longitudinal_observations (
+    observation_id TEXT PRIMARY KEY,
+    source_row_id TEXT NOT NULL,
+    source_id TEXT NOT NULL,
+    short_title TEXT NOT NULL,
+    subject_id TEXT NOT NULL,
+    observation_type TEXT NOT NULL,
+    study_datetime TEXT,
+    file_name TEXT,
+    attributes_json TEXT NOT NULL DEFAULT '{}',
+    provenance_json TEXT NOT NULL DEFAULT '{}',
+    FOREIGN KEY (source_row_id) REFERENCES clinical_rows(source_row_id),
+    FOREIGN KEY (source_id) REFERENCES clinical_sources(source_id)
 );
 
 CREATE TABLE clinical_imaging_subjects (
@@ -888,6 +929,10 @@ SELECT
     GROUP_CONCAT(DISTINCT source_kind) AS source_kinds
 FROM clinical_facts
 WHERE qc_excluded = 0
+  AND NOT (
+      lower(replace(short_title, '-', '')) = 'yalebrainmetslongitudinal'
+      AND concept = 'age_at_imaging_years'
+  )
 GROUP BY short_title, subject_key, concept
 HAVING COUNT(DISTINCT value_normalized) > 1;
 
@@ -917,6 +962,37 @@ SELECT * FROM clinical_idc_tables;
 
 CREATE VIEW agent_clinical_dictionary AS
 SELECT * FROM clinical_dictionary;
+
+CREATE VIEW agent_clinical_source_dictionary AS
+SELECT * FROM clinical_source_dictionary;
+
+CREATE VIEW agent_clinical_longitudinal_observations AS
+SELECT
+    observation_id,
+    source_row_id,
+    source_id,
+    short_title,
+    subject_id,
+    observation_type,
+    study_datetime,
+    file_name,
+    json_extract(attributes_json, '$.age_at_Imaging (years)') AS age_at_imaging_years,
+    json_extract(attributes_json, '$.sex') AS sex,
+    json_extract(attributes_json, '$.vendor') AS manufacturer,
+    json_extract(attributes_json, '$.model') AS manufacturer_model_name,
+    json_extract(attributes_json, '$.field_strength (T)') AS magnetic_field_strength_t,
+    json_extract(attributes_json, '$.2D_3D_acquisition') AS acquisition_dimensionality,
+    json_extract(attributes_json, '$.scanner_site') AS scanner_site,
+    json_extract(attributes_json, '$.sequence_class') AS sequence_class,
+    json_extract(attributes_json, '$.sequence_tags') AS sequence_tags,
+    json_extract(attributes_json, '$.slice_thickness (mm)') AS slice_thickness_mm,
+    json_extract(attributes_json, '$.spacing_between_slices (mm)') AS spacing_between_slices_mm,
+    json_extract(attributes_json, '$.repetition_time (ms)') AS repetition_time_ms,
+    json_extract(attributes_json, '$.echo_time (ms)') AS echo_time_ms,
+    json_extract(attributes_json, '$.inversion_time (ms)') AS inversion_time_ms,
+    attributes_json,
+    provenance_json
+FROM clinical_longitudinal_observations;
 
 CREATE VIEW agent_clinical_imaging_subjects AS
 SELECT * FROM clinical_imaging_subjects;
@@ -1122,6 +1198,127 @@ def concept_for_source_column(
     if override:
         return override
     return concept_for_column(column) or concept_for_column(label)
+
+
+def unit_for_source_column(short_title: str, column: Any) -> str | None:
+    return SOURCE_COLUMN_UNIT_OVERRIDES.get(
+        (normalize_name(short_title), normalize_name(column))
+    )
+
+
+YALE_BRAIN_METS_DICTIONARY_FIELDS = {
+    "patientid": "patient_id",
+    "studydatetime": "study_datetime",
+    "ageatstudy": "age_at_Imaging (years)",
+    "sex": "sex",
+}
+
+
+def ingest_official_source_dictionary(
+    conn: sqlite3.Connection,
+    *,
+    source_id: str,
+    short_title: str,
+    table_name: str,
+    frame: Any,
+) -> int:
+    """Preserve reviewed official workbook dictionaries as queryable rows."""
+    if normalize_name(short_title) != "yalebrainmetslongitudinal":
+        return 0
+    if not str(table_name).casefold().endswith("::data dictionary"):
+        return 0
+    columns = list(frame.columns)
+    if len(columns) < 2:
+        return 0
+    label_column, description_column = columns[:2]
+    inserted = 0
+    for index, record in frame.iterrows():
+        field_label = clean_value(record[label_column])
+        description = clean_value(record[description_column])
+        field_name = YALE_BRAIN_METS_DICTIONARY_FIELDS.get(
+            normalize_name(field_label)
+        )
+        if not field_name:
+            continue
+        row_number = int(index) + 2 if isinstance(index, int) else inserted + 2
+        dictionary_id = stable_id(
+            source_id, table_name, row_number, field_name, description
+        )
+        conn.execute(
+            """INSERT OR REPLACE INTO clinical_source_dictionary
+               (dictionary_id, source_id, short_title, table_name, field_name,
+                field_label, field_description, values_json, provenance_json)
+               VALUES (?, ?, ?, ?, ?, ?, ?, '[]', ?)""",
+            (
+                dictionary_id,
+                source_id,
+                short_title,
+                table_name,
+                field_name,
+                field_label,
+                description,
+                json_dumps(
+                    {
+                        "row_number": row_number,
+                        "label_column": str(label_column),
+                        "description_column": str(description_column),
+                    }
+                ),
+            ),
+        )
+        inserted += 1
+    return inserted
+
+
+def ingest_yale_longitudinal_observation(
+    conn: sqlite3.Connection,
+    *,
+    source_id: str,
+    short_title: str,
+    subject_id: str,
+    table_name: str,
+    row_number: int,
+    row: dict[str, Any],
+) -> int:
+    """Expose Yale visit/file rows without treating expected variation as conflict."""
+    if normalize_name(short_title) != "yalebrainmetslongitudinal":
+        return 0
+    sheet_name = str(table_name).rsplit("::", 1)[-1]
+    observation_type = {
+        "clinical_data": "clinical_study",
+        "acquisition_data": "scanner_acquisition",
+        "image_acquisition_parameters": "image_acquisition",
+    }.get(sheet_name.casefold())
+    if not observation_type:
+        return 0
+    cleaned_row = {str(key): clean_value(value) for key, value in row.items()}
+    normalized_subject = clean_value(subject_id)
+    subject_key = f"{normalize_name(short_title)}:{normalize_subject(normalized_subject)}"
+    row_json = json_dumps(cleaned_row)
+    source_row_id = stable_id(
+        source_id, table_name, row_number, subject_key, row_json
+    )
+    observation_id = stable_id("observation", source_row_id, observation_type)
+    conn.execute(
+        """INSERT OR REPLACE INTO clinical_longitudinal_observations
+           (observation_id, source_row_id, source_id, short_title, subject_id,
+            observation_type, study_datetime, file_name, attributes_json,
+            provenance_json)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            observation_id,
+            source_row_id,
+            source_id,
+            short_title,
+            normalized_subject,
+            observation_type,
+            clean_value(row.get("study_datetime")),
+            clean_value(row.get("file_name")),
+            row_json,
+            json_dumps({"table_name": table_name, "row_number": row_number}),
+        ),
+    )
+    return 1
 
 
 def choose_subject_column(
@@ -2033,6 +2230,26 @@ def copy_source_from_previous(
                VALUES (?, ?, ?, ?)""",
             tuple(previous_warning),
         )
+    if "clinical_source_dictionary" in tables:
+        for dictionary_row in previous.execute(
+            "SELECT * FROM clinical_source_dictionary WHERE source_id = ?",
+            (source_id,),
+        ):
+            conn.execute(
+                """INSERT OR REPLACE INTO clinical_source_dictionary
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                tuple(dictionary_row),
+            )
+    if "clinical_longitudinal_observations" in tables:
+        for observation in previous.execute(
+            "SELECT * FROM clinical_longitudinal_observations WHERE source_id = ?",
+            (source_id,),
+        ):
+            conn.execute(
+                """INSERT OR REPLACE INTO clinical_longitudinal_observations
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                tuple(observation),
+            )
     previous.close()
     return True
 
@@ -3319,6 +3536,15 @@ def ingest_official_bytes(
         if frame is None or frame.empty:
             continue
         frame = prepare_official_table(row["short_title"], table_name, frame)
+        dictionary_rows = ingest_official_source_dictionary(
+            conn,
+            source_id=source_id,
+            short_title=row["short_title"],
+            table_name=table_name,
+            frame=frame,
+        )
+        if dictionary_rows:
+            continue
         subject_column = choose_subject_column(
             frame.columns, row["short_title"]
         )
@@ -3362,7 +3588,14 @@ def ingest_official_bytes(
                     # Preserve official source codes in value_text. Audited
                     # dataset-specific decoding occurs in the QC layer and is
                     # recorded separately in value_resolved.
-                    facts.append((concept, value, str(column), None))
+                    facts.append(
+                        (
+                            concept,
+                            value,
+                            str(column),
+                            unit_for_source_column(row["short_title"], column),
+                        )
+                    )
             facts.extend(
                 ct_colonography_workbook_facts(
                     row["short_title"],
@@ -3388,6 +3621,9 @@ def ingest_official_bytes(
                     (subject_key,),
                 ).fetchone()
             )
+            source_row_number = (
+                int(index) + 2 if isinstance(index, int) else loaded_rows + 2
+            )
             if insert_row_and_facts(
                 conn,
                 source_id=source_id,
@@ -3395,7 +3631,7 @@ def ingest_official_bytes(
                 short_title=row["short_title"],
                 subject_id=subject_id,
                 table_name=table_name,
-                row_number=int(index) + 2 if isinstance(index, int) else loaded_rows + 2,
+                row_number=source_row_number,
                 row=values,
                 facts=facts,
                 has_imaging=has_imaging,
@@ -3405,6 +3641,15 @@ def ingest_official_bytes(
                     "subject_id_mapping_method": subject_id_mapping_method,
                 },
             ):
+                ingest_yale_longitudinal_observation(
+                    conn,
+                    source_id=source_id,
+                    short_title=row["short_title"],
+                    subject_id=subject_id,
+                    table_name=table_name,
+                    row_number=source_row_number,
+                    row=values,
+                )
                 loaded_rows += 1
                 subjects.add(normalize_subject(subject_id))
     return loaded_rows, len(subjects)
@@ -5678,7 +5923,23 @@ def materialize_subjects(conn: sqlite3.Connection) -> None:
         resolved_sources: dict[str, dict[str, Any]] = {}
         conflicts: dict[str, list[dict[str, Any]]] = {}
         for concept, concept_facts in grouped.items():
-            winner = concept_facts[0]
+            yale_longitudinal_age = (
+                normalize_name(facts[0]["short_title"])
+                == "yalebrainmetslongitudinal"
+                and concept == "age_at_imaging_years"
+            )
+            if yale_longitudinal_age:
+                winner = min(
+                    concept_facts,
+                    key=lambda fact: (
+                        fact["value_number"]
+                        if fact["value_number"] is not None
+                        else float("inf"),
+                        fact["fact_id"],
+                    ),
+                )
+            else:
+                winner = concept_facts[0]
             resolved[concept] = display_values.get(
                 (concept, winner["value_normalized"]), winner["value_resolved"]
             )
@@ -5703,7 +5964,7 @@ def materialize_subjects(conn: sqlite3.Connection) -> None:
                         "priority": fact["source_priority"],
                     },
                 )
-            if len(distinct) > 1:
+            if len(distinct) > 1 and not yale_longitudinal_age:
                 conflicts[concept] = list(distinct.values())
         source_kinds = sorted({fact["source_kind"] for fact in facts})
         source_lineages = {fact["source_lineage"] for fact in facts}

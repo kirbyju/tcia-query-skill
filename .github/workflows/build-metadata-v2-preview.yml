@@ -94,6 +94,7 @@ jobs:
             --snapshot-db cache/tcia_snapshot.sqlite \
             --nifti-db cache/nifti_metadata.sqlite \
             --pathology-db cache/pathology_metadata.sqlite \
+            --clinical-db cache/clinical_metadata.sqlite \
             --crosswalk-csv references/public_non_dicom_crosswalks_v1.csv \
             --crosswalk-curation references/public-non-dicom-crosswalk-curation-v1.json \
             --image-metadata-csv references/public_non_dicom_image_metadata_v1.csv \

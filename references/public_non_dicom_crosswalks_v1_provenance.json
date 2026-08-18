@@ -3,15 +3,19 @@
     "Bone-Marrow-Cytomorphology_MLL_Helmholtz_Fraunhofer"
   ],
   "crosswalk_csv": {
-    "bytes": 3425977,
+    "bytes": 3725947,
     "path": "/Users/kirbyju/github/tcia-query-skill/references/public_non_dicom_crosswalks_v1.csv",
-    "sha256": "693af32c79283e285e64e3e4f465f491e3192664cbabf2e4f2bd7e86ab164385"
+    "sha256": "ce5821a00184d6eb4c7c3529e58d6b596aa69ed26bc978b6389e093dcc1501d3"
   },
   "curation": {
     "path": "/Users/kirbyju/github/tcia-query-skill/references/public-non-dicom-crosswalk-curation-v1.json",
-    "sha256": "25ce7e5ce98c733e0aba6e3c1482919ce3b189f6c4d037ea1f41a5dbbfd5395e"
+    "sha256": "7c1288a75536d72a5d0659966a213045b0905f71449f19dde5d1529340b54403"
   },
   "dataset_counts": {
+    "AURORA-Metastatic-Breast-Multiomics": {
+      "files": 289,
+      "participants": 54
+    },
     "Breast-Lesions-USG": {
       "files": 522,
       "participants": 256
@@ -41,8 +45,8 @@
       "participants": 45
     }
   },
-  "reviewed_at": "2026-08-13",
-  "row_count": 3574,
+  "reviewed_at": "2026-08-18",
+  "row_count": 3863,
   "schema_version": 1,
   "source_files": [
     {
@@ -54,6 +58,21 @@
       "bytes": 26358,
       "name": "Pedi-Cranial-CT-Healthy_55262_listing.csv",
       "sha256": "0bfcbfe9aae321a204dc2b12067c43a34cacc5332939832eaca7d022ff96290a"
+    },
+    {
+      "bytes": 125383,
+      "name": "aurora_clinical.xlsx",
+      "sha256": "96dd552561bfee28bf61d0a27a64f914d5a48cbbdc9ad83809632938660fdf29"
+    },
+    {
+      "bytes": 3534,
+      "name": "aurora_hla_linkage.csv",
+      "sha256": "728b12f8a9af71d226e0b894d7bc69de71d9cb1347c1addf256a5a667e7b6c14"
+    },
+    {
+      "bytes": 40948,
+      "name": "aurora_pathology_listing.csv",
+      "sha256": "b33d475dde61660fd0b6aa5d9d3e1cac81d4fc208b771f171b6262668c7532de"
     },
     {
       "bytes": 40173,

@@ -1,7 +1,17 @@
 {
-  "reviewed_at": "2026-08-13",
-  "review_source": "tcia_participant_file_crosswalk_review.xlsx",
+  "reviewed_at": "2026-08-18",
+  "review_source": "tcia_participant_file_crosswalk_review.xlsx plus published TCIA WordPress and clinical updates",
   "decisions": [
+    {
+      "dataset_type": "Collection",
+      "short_title": "AURORA-Metastatic-Breast-Multiomics",
+      "download_ids": ["52487"],
+      "decision_status": "resolved",
+      "resolution_type": "participant_crosswalk",
+      "reviewer_note": "The WordPress Usage Notes define the SVS filename patient and specimen fields. The clinical workbook HLA linkage sheet maps the separate immunofluorescence slide IDs to the same AURORA patient identifiers.",
+      "evidence_url": "https://www.cancerimagingarchive.net/collection/aurora-metastatic-breast-multiomics/",
+      "supporting_evidence_url": "https://www.cancerimagingarchive.net/wp-content/uploads/Aurora-CDEmappedClinicalData_updatedwithHLAlinkage_03-16-2026.xlsx"
+    },
     {
       "dataset_type": "Collection",
       "short_title": "Bone-Marrow-Cytomorphology_MLL_Helmholtz_Fraunhofer",

@@ -77,6 +77,326 @@ class VocabularyTests(unittest.TestCase):
 
 
 class BuilderTests(unittest.TestCase):
+    def test_yale_workbook_enriches_matching_nifti_asset(self):
+        import sqlite3
+
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            public_db = base / "public.sqlite"
+            clinical_db = base / "clinical.sqlite"
+            conn = public.connect(public_db)
+            conn.executescript(public.SCHEMA)
+            public.insert_vocab(conn)
+            public.insert_asset(
+                conn,
+                {
+                    "asset_id": "asset-yale-1",
+                    "dataset_type": "Collection",
+                    "short_title": "Yale-Brain-Mets-Longitudinal",
+                    "subject_id": "YG_TEST",
+                    "subject_id_namespace": "tcia_dataset:Yale-Brain-Mets-Longitudinal",
+                    "participant_link_status": "dataset_scoped_source_identifier",
+                    "asset_granularity": "file",
+                    "asset_name": "YG_TEST_2020-01-02_03-04-05_FLAIR.nii.gz",
+                    "file_name": "YG_TEST_2020-01-02_03-04-05_FLAIR.nii.gz",
+                    "package_path": "Yale/YG_TEST/YG_TEST_2020-01-02_03-04-05_FLAIR.nii.gz",
+                    "file_format": "NIFTI",
+                    "media_kind": "image_volume",
+                    "spatial_dimensionality": "3D",
+                    "temporal_dimensionality": "static",
+                    "imaging_domain": "radiology",
+                    "modality": "MR",
+                    "object_role": "source_image",
+                    "representation_provenance_class": "submitted_original",
+                    "source_system": "tcia_aspera",
+                    "raw_values_json": "{}",
+                    "provenance_json": "{}",
+                    "quality_flag_json": "{}",
+                },
+            )
+            conn.commit()
+            conn.close()
+
+            source = sqlite3.connect(clinical_db)
+            source.executescript(
+                """
+                CREATE TABLE clinical_sources (
+                    source_id TEXT, source_kind TEXT, source_priority INTEGER,
+                    short_title TEXT, source_url TEXT, artifact_sha256 TEXT
+                );
+                CREATE TABLE clinical_rows (
+                    source_row_id TEXT, source_id TEXT, subject_id TEXT,
+                    table_name TEXT, row_json TEXT
+                );
+                """
+            )
+            source.execute(
+                "INSERT INTO clinical_sources VALUES (?,?,?,?,?,?)",
+                (
+                    "official:yale",
+                    "tcia_clinical_download",
+                    400,
+                    "Yale-Brain-Mets-Longitudinal",
+                    "https://example.test/yale.xlsx",
+                    "abc123",
+                ),
+            )
+            source.executemany(
+                "INSERT INTO clinical_rows VALUES (?,?,?,?,?)",
+                [
+                    (
+                        "acq-row",
+                        "official:yale",
+                        "YG_TEST",
+                        "yale.xlsx::Acquisition_data",
+                        json.dumps(
+                            {
+                                "patient_id": "YG_TEST",
+                                "study_datetime": "2020-01-02_03-04-05",
+                                "vendor": "SIEMENS",
+                                "model": "Verio",
+                                "field_strength (T)": "3",
+                                "2D_3D_acquisition": "2D",
+                                "scanner_site": "Yale",
+                                "pre_included (1=present; 0=absent)": "1",
+                                "post_included (1=present; 0=absent)": "1",
+                                "t2_included (1=present; 0=absent)": "0",
+                                "flair_included (1=present; 0=absent)": "1",
+                            }
+                        ),
+                    ),
+                    (
+                        "image-row",
+                        "official:yale",
+                        "YG_TEST",
+                        "yale.xlsx::image_acquisition_parameters",
+                        json.dumps(
+                            {
+                                "file_name": "YG_TEST_2020-01-02_03-04-05_FLAIR.nii.gz",
+                                "study_datetime": "2020-01-02_03-04-05",
+                                "sequence_class": "FLAIR",
+                                "sequence_tags": "ax_flair_blade",
+                                "slice_thickness (mm)": "5",
+                                "spacing_between_slices (mm)": "5",
+                                "repetition_time (ms)": "9000",
+                                "echo_time (ms)": "94",
+                                "inversion_time (ms)": "2500",
+                            }
+                        ),
+                    ),
+                ],
+            )
+            source.commit()
+            source.close()
+
+            conn = public.connect(public_db)
+            counts = public.ingest_yale_brain_mets_workbook_metadata(
+                conn, clinical_db
+            )
+            public.build_metadata_field_coverage(conn)
+            row = conn.execute(
+                """SELECT manufacturer, manufacturer_model_name,
+                          magnetic_field_strength_t, sequence_class,
+                          slice_thickness_mm, metadata_json,
+                          field_provenance_json
+                   FROM agent_public_non_dicom_image_metadata
+                   WHERE asset_id = 'asset-yale-1'"""
+            ).fetchone()
+            self.assertEqual(row[:5], ("SIEMENS", "Verio", 3, "FLAIR", 5))
+            metadata = json.loads(row[5])
+            self.assertEqual(metadata["sequence_class"], "FLAIR")
+            self.assertEqual(metadata["slice_thickness_mm"], 5)
+            self.assertEqual(metadata["sequences_present"], ["PRE", "POST", "FLAIR"])
+            provenance = json.loads(row[6])
+            self.assertEqual(
+                provenance["manufacturer"]["source_kind"],
+                "tcia_clinical_download",
+            )
+            self.assertEqual(counts["matched_image_rows"], 1)
+            self.assertEqual(counts["unmatched_image_rows"], 0)
+            coverage = conn.execute(
+                """SELECT populated_assets, normalized_assets
+                   FROM agent_public_non_dicom_metadata_field_coverage
+                   WHERE short_title = 'Yale-Brain-Mets-Longitudinal'
+                     AND field_name = 'sequence_class'"""
+            ).fetchone()
+            self.assertEqual(tuple(coverage), (1, 1))
+            conn.close()
+
+    def test_reviewed_crosswalk_enriches_existing_aspera_and_pathdb_assets(self):
+        import sqlite3
+
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            db = base / "public.sqlite"
+            crosswalk_path = base / "crosswalk.csv"
+            curation_path = base / "curation.json"
+            package_path = "H&E/AUR-AD9G-TTP1-B-1-0-S1.example.svs"
+            conn = public.connect(db)
+            conn.executescript(public.SCHEMA)
+            public.insert_vocab(conn)
+
+            def asset(asset_id, granularity, system, subject_id="", source_url=""):
+                public.insert_asset(conn, {
+                    "asset_id": asset_id,
+                    "dataset_type": "Collection",
+                    "short_title": "AURORA-Metastatic-Breast-Multiomics",
+                    "download_row_id": 1,
+                    "download_id": "52487" if system == "tcia_aspera" else "",
+                    "subject_id": subject_id,
+                    "subject_id_namespace": "tcia_dataset:AURORA-Metastatic-Breast-Multiomics",
+                    "participant_link_status": "unavailable" if not subject_id else "dataset_scoped_source_identifier",
+                    "asset_granularity": granularity,
+                    "asset_name": Path(package_path).name,
+                    "file_name": Path(package_path).name,
+                    "package_path": (
+                        package_path
+                        if system == "tcia_aspera" and granularity == "file"
+                        else ""
+                    ),
+                    "file_format": "SVS",
+                    "container_format": "",
+                    "media_kind": "whole_slide_image",
+                    "spatial_dimensionality": "2D",
+                    "temporal_dimensionality": "static",
+                    "imaging_domain": "pathology",
+                    "modality": "SM",
+                    "object_role": "whole_slide_image",
+                    "representation_provenance_class": "unknown",
+                    "source_system": system,
+                    "source_record_id": asset_id,
+                    "source_url": source_url,
+                    "raw_values_json": json.dumps({"raw_patient_id": subject_id}),
+                    "provenance_json": json.dumps({"original": system}),
+                    "quality_flag_json": "{}",
+                })
+
+            asset("download", "download", "tcia_aspera")
+            asset("package", "file", "tcia_aspera")
+            asset(
+                "pathdb", "file", "tcia_pathdb", "AUR-AD9G",
+                f"https://pathdb.example/{package_path}",
+            )
+            public.insert_asset_participant(
+                conn,
+                asset_id="pathdb",
+                short_title="AURORA-Metastatic-Breast-Multiomics",
+                subject_id="AUR-AD9G",
+                namespace="tcia_dataset:AURORA-Metastatic-Breast-Multiomics",
+                raw_subject_id="AUR-AD9G",
+                participant_role="depicted_subject",
+                link_status="dataset_scoped_source_identifier",
+            )
+            conn.commit()
+
+            crosswalk_row = crosswalks.row(
+                dataset_type="Collection",
+                short_title="AURORA-Metastatic-Breast-Multiomics",
+                download_id="52487",
+                subject_id="AD9G",
+                raw_subject_id="AUR-AD9G",
+                subject_id_namespace="tcia_dataset:AURORA-Metastatic-Breast-Multiomics",
+                participant_link_status="reviewed_source_crosswalk",
+                package_path=package_path,
+                file_name=Path(package_path).name,
+                file_format="SVS",
+                media_kind="whole_slide_image",
+                imaging_domain="pathology",
+                modality="SM",
+                object_role="whole_slide_image",
+                source_system="tcia_aspera",
+                crosswalk_source_url="https://example.test/usage-notes",
+                crosswalk_method="published_filename_schema_patient_identifier",
+                crosswalk_confidence="high",
+                reviewer_note="reviewed",
+            )
+            with crosswalk_path.open("w", newline="") as handle:
+                writer = csv.DictWriter(handle, fieldnames=crosswalks.FIELDS)
+                writer.writeheader()
+                writer.writerow(crosswalk_row)
+            curation_path.write_text(json.dumps({
+                "reviewed_at": "2026-08-18",
+                "review_source": "unit test",
+                "decisions": [{
+                    "dataset_type": "Collection",
+                    "short_title": "AURORA-Metastatic-Breast-Multiomics",
+                    "download_ids": ["52487"],
+                    "decision_status": "resolved",
+                    "resolution_type": "participant_crosswalk",
+                    "reviewer_note": "reviewed",
+                    "evidence_url": "https://example.test/usage-notes",
+                }],
+            }))
+            result = public.ingest_reviewed_crosswalks(conn, crosswalk_path, curation_path)
+            conn.commit()
+
+            self.assertEqual(result["file_assets"], 1)
+            self.assertEqual(
+                conn.execute("SELECT COUNT(*) FROM public_non_dicom_assets").fetchone()[0],
+                3,
+            )
+            linked = conn.execute(
+                "SELECT asset_id, subject_id, participant_link_status "
+                "FROM public_non_dicom_assets WHERE asset_id IN ('package', 'pathdb') "
+                "ORDER BY asset_id"
+            ).fetchall()
+            self.assertEqual(
+                [tuple(row) for row in linked],
+                [
+                    ("package", "AD9G", "reviewed_source_crosswalk"),
+                    ("pathdb", "AD9G", "reviewed_source_crosswalk"),
+                ],
+            )
+            participant_links = conn.execute(
+                    "SELECT subject_id FROM public_non_dicom_asset_participants "
+                    "WHERE asset_id IN ('package', 'pathdb') ORDER BY asset_id"
+                ).fetchall()
+            self.assertEqual(
+                [tuple(row) for row in participant_links],
+                [("AD9G",), ("AD9G",)],
+            )
+            conn.close()
+
+    def test_aurora_crosswalk_uses_usage_notes_and_hla_linkage(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory)
+            listing = ["package_path,file_name,file_ext,size_bytes"]
+            for index in range(225):
+                patient = f"{index % 54:04X}"
+                uuid = f"{index:08X}-1111-1111-1111-111111111111"
+                name = f"AUR-{patient}-TTP1-B-1-0-S1.{uuid}.svs"
+                listing.append(f"H&E/{name},{name},.svs,10")
+            linkage = ["Patient ID,BCR Sample barcode,Sample_Identifier,Slide ID"]
+            for index in range(64):
+                token = f"{120000 + index}-3"
+                patient = f"{index % 54:04X}"
+                name = f"JMB_HLAA_CK_HLADR_{token}-Image Export-{index:02d}_c1-3.tif"
+                listing.append(f"HLA/{name},{name},.tif,20")
+                linkage.append(
+                    f"AUR-{patient},AUR-{patient}-TTM1-A,AUR_01_01_01,HLAA_CK_{token}"
+                )
+            (source / "aurora_pathology_listing.csv").write_text("\n".join(listing) + "\n")
+            (source / "aurora_hla_linkage.csv").write_text("\n".join(linkage) + "\n")
+            decision = {
+                "evidence_url": "https://example.test/usage-notes",
+                "supporting_evidence_url": "https://example.test/clinical.xlsx",
+                "reviewer_note": "reviewed",
+            }
+            rows = crosswalks.aurora_rows(source, decision)
+            self.assertEqual(len(rows), 289)
+            self.assertEqual(len({item["subject_id"] for item in rows}), 54)
+            self.assertEqual(rows[0]["subject_id"], "0000")
+            self.assertEqual(rows[0]["raw_subject_id"], "AUR-0000")
+            self.assertEqual(
+                json.loads(rows[0]["raw_values_json"])["sample_short_code"],
+                "TTP",
+            )
+            self.assertEqual(rows[-1]["file_format"], "TIFF")
+            self.assertEqual(
+                rows[-1]["crosswalk_method"],
+                "clinical_workbook_slide_id_to_patient_id",
+            )
+
     def build_snapshot(self, path: Path):
         import sqlite3
 

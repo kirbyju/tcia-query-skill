@@ -497,6 +497,8 @@ Prefer these views:
 - `agent_clinical_dataset_summary`
 - `agent_clinical_source_tables`
 - `agent_clinical_dictionary`
+- `agent_clinical_source_dictionary`
+- `agent_clinical_longitudinal_observations`
 - `agent_clinical_imaging_subjects`
 - `agent_clinical_dataset_inferences`
 - `agent_clinical_dataset_relationships`
@@ -512,6 +514,11 @@ they lose resolution. WordPress fallbacks are added only when the concept has
 no patient-level fact. `agent_clinical_subjects` contains only image-linked
 subjects; use `agent_clinical_all_subjects` to audit clinical-only source rows.
 See `references/clinical.md`.
+
+Use `agent_clinical_longitudinal_observations` for repeated visit-, scanner-,
+or file-level values. For example, Yale brain-metastasis MRI acquisition
+parameters are keyed by dataset-scoped subject, study datetime, and optional
+file name; they are not collapsed into one patient-level value.
 
 Analysis Result inheritance requires both strong WordPress relationship
 evidence and an exact normalized PatientID match. Program-wide related lists

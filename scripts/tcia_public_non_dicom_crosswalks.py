@@ -234,6 +234,130 @@ def prostate_rows(source_dir: Path, decisions: dict[str, dict[str, Any]]) -> lis
     return output
 
 
+def aurora_rows(source_dir: Path, decision: dict[str, Any]) -> list[dict[str, Any]]:
+    """Resolve AURORA pathology files using the published naming schema/workbook."""
+
+    listing_path = source_dir / "aurora_pathology_listing.csv"
+    hla_path = source_dir / "aurora_hla_linkage.csv"
+    usage_notes_url = decision["evidence_url"]
+    clinical_url = decision["supporting_evidence_url"]
+    he_pattern = re.compile(
+        r"^AUR-(?P<patient>[A-Z0-9]{4})-"
+        r"(?P<sample_short_code>[A-Z]+)(?P<biospecimen_ordinal>\d+)-"
+        r"(?P<vial_identifier>[A-Z])-(?P<portion_identifier>\d+)-"
+        r"(?P<subportion_identifier>\d+)-S(?P<slide_number>\d+)\."
+        r"(?P<uuid>[0-9A-F-]+)\.svs$",
+        re.IGNORECASE,
+    )
+
+    with hla_path.open(newline="") as handle:
+        hla_rows = list(csv.DictReader(handle))
+    hla_by_slide_token: dict[str, dict[str, str]] = {}
+    for item in hla_rows:
+        slide_id = str(item.get("Slide ID") or "").strip()
+        match = re.fullmatch(r"HLAA_CK_(\d+-\d+)", slide_id, re.IGNORECASE)
+        if not match:
+            raise RuntimeError(f"AURORA HLA linkage has an unexpected Slide ID: {slide_id}")
+        token = match.group(1)
+        if token in hla_by_slide_token:
+            raise RuntimeError(f"AURORA HLA linkage repeats slide token: {token}")
+        hla_by_slide_token[token] = item
+
+    output: list[dict[str, Any]] = []
+    matched_hla_tokens: set[str] = set()
+    with listing_path.open(newline="") as handle:
+        for item in csv.DictReader(handle):
+            package_path = str(item.get("package_path") or "").strip()
+            file_name = str(item.get("file_name") or Path(package_path).name).strip()
+            file_ext = str(item.get("file_ext") or Path(file_name).suffix).casefold()
+            size = str(item.get("size_bytes") or "").strip()
+            size_bytes = int(size) if size.isdigit() else ""
+            if file_ext == ".svs":
+                match = he_pattern.fullmatch(file_name)
+                if not match:
+                    raise RuntimeError(f"AURORA SVS filename does not match published schema: {file_name}")
+                values = {key: value for key, value in match.groupdict().items()}
+                patient_id = values["patient"].upper()
+                raw_patient_id = f"AUR-{patient_id}"
+                raw_values = {
+                    "project_name": "AUR",
+                    "patient_identifier": values["patient"].upper(),
+                    "sample_short_code": values["sample_short_code"].upper(),
+                    "biospecimen_ordinal": int(values["biospecimen_ordinal"]),
+                    "vial_identifier": values["vial_identifier"].upper(),
+                    "portion_identifier": int(values["portion_identifier"]),
+                    "subportion_identifier": int(values["subportion_identifier"]),
+                    "slide_number": int(values["slide_number"]),
+                    "uuid": values["uuid"].upper(),
+                }
+                method = "published_filename_schema_patient_identifier"
+                crosswalk_url = usage_notes_url
+                provenance = {
+                    "inventory": listing_path.name,
+                    "naming_schema": "WordPress Usage Notes",
+                }
+            elif file_ext in {".tif", ".tiff"}:
+                tokens = re.findall(r"(?<!\d)(\d{6}-\d)(?!\d)", file_name)
+                matches = [hla_by_slide_token[token] for token in tokens if token in hla_by_slide_token]
+                if len(matches) != 1:
+                    raise RuntimeError(
+                        f"AURORA TIFF filename has {len(matches)} HLA linkage matches: {file_name}"
+                    )
+                linkage = matches[0]
+                matched_hla_tokens.add(str(linkage["Slide ID"]).split("HLAA_CK_", 1)[-1])
+                raw_patient_id = str(linkage["Patient ID"]).strip().upper()
+                if not re.fullmatch(r"AUR-[A-Z0-9]{4}", raw_patient_id):
+                    raise RuntimeError(
+                        f"AURORA HLA linkage has an unexpected Patient ID: {raw_patient_id}"
+                    )
+                patient_id = raw_patient_id.removeprefix("AUR-")
+                raw_values = dict(linkage)
+                method = "clinical_workbook_slide_id_to_patient_id"
+                crosswalk_url = clinical_url
+                provenance = {
+                    "inventory": listing_path.name,
+                    "crosswalk": hla_path.name,
+                    "workbook_sheet": "5.HLA sample ID linkage",
+                }
+            else:
+                continue
+
+            output.append(row(
+                dataset_type="Collection",
+                short_title="AURORA-Metastatic-Breast-Multiomics",
+                download_id="52487",
+                subject_id=patient_id,
+                raw_subject_id=raw_patient_id,
+                subject_id_namespace="tcia_dataset:AURORA-Metastatic-Breast-Multiomics",
+                participant_link_status="reviewed_source_crosswalk",
+                package_path=package_path,
+                file_name=file_name,
+                file_format="TIFF" if file_ext in {".tif", ".tiff"} else "SVS",
+                media_kind="whole_slide_image",
+                imaging_domain="pathology",
+                modality="SM",
+                object_role="whole_slide_image",
+                size_bytes=size_bytes,
+                source_system="tcia_aspera",
+                source_url="",
+                crosswalk_source_url=crosswalk_url,
+                crosswalk_method=method,
+                crosswalk_confidence="high",
+                reviewer_note=decision["reviewer_note"],
+                raw_values_json=raw_values,
+                provenance_json=provenance,
+            ))
+
+    if len(output) != 289:
+        raise RuntimeError(f"AURORA crosswalk expected 289 image files, found {len(output)}")
+    if matched_hla_tokens != set(hla_by_slide_token):
+        missing = sorted(set(hla_by_slide_token) - matched_hla_tokens)
+        raise RuntimeError(f"AURORA HLA linkage rows missing from TIFF inventory: {missing}")
+    if len({item["subject_id"] for item in output}) != 54:
+        raise RuntimeError("AURORA crosswalk expected pathology files for 54 patients")
+    return output
+
+
 def ldct_rows(source_dir: Path, decision: dict[str, Any], workbook_json: dict[str, Any]) -> list[dict[str, Any]]:
     workbook_names = {
         "CR_Abdomen_v4 2026_07_21.zip": "CR_Abdomen_v4_2026_07_21__Abdomen_v11 2026.xlsx",
@@ -305,6 +429,7 @@ def build(source_dir: Path, curation_path: Path, out: Path, manifest_path: Path)
     rows.extend(aspera_rows(source_dir, decisions["Pedi-Cranial-CT-Healthy"], kind="pedi"))
     rows.extend(ldct_rows(source_dir, decisions["LDCT-and-Projection-data"], workbook_json))
     rows.extend(prostate_rows(source_dir, decisions))
+    rows.extend(aurora_rows(source_dir, decisions["AURORA-Metastatic-Breast-Multiomics"]))
     rows.sort(key=lambda item: (item["short_title"].casefold(), item["subject_id"], item["package_path"]))
     count = write_rows(out, rows)
     source_files = sorted({
@@ -313,6 +438,7 @@ def build(source_dir: Path, curation_path: Path, out: Path, manifest_path: Path)
         "pedi_demographics.tsv", "pedi_image_metadata.tsv", "ldct_clinical.zip",
         "prostate3t_mha.zip", "prostate3t_nrrd.zip", "prostatedx_nrrd.zip",
         "prostatedx_isbi.zip", "prostatedx_mha.zip", "crosswalk_workbooks.json",
+        "aurora_pathology_listing.csv", "aurora_hla_linkage.csv", "aurora_clinical.xlsx",
     })
     counts: dict[str, dict[str, int]] = {}
     for item in rows:
