@@ -18,23 +18,31 @@ Follow the IDC-REST-MCP pattern:
 4. Test the service layer directly, then add parity tests for REST/MCP as the
    server surface stabilizes.
 
-## Data Sources
+## Data Sources And Release Contract
 
-- Required: `tcia_snapshot.sqlite`.
+- Required V2 research core: `tcia_snapshot.sqlite`,
+  `participant_inventory.sqlite`, and the top-level bundle manifest.
+- Optional V2 detail: `public_non_dicom_metadata.sqlite`.
 - Optional but supported: `controlled_access_metadata.sqlite`.
 - Optional but supported: `nifti_metadata.sqlite`.
 - Optional but supported: `pathology_metadata.sqlite`.
 - Optional but supported: `clinical_metadata.sqlite`.
 
-The base snapshot is the TCIA provenance, visibility, release-history, DOI, and
-access/license authority. Optional sidecars add file-grain controlled-access,
-NIfTI, pathology, PathDB, Aspera inventory, and patient-level clinical metadata.
+The base snapshot remains the TCIA provenance, visibility, release-history,
+DOI, and access/license authority. Participant Inventory is the participant
+identity and availability surface. Optional detail artifacts add file-grain
+public non-DICOM, controlled-access, NIfTI, pathology, PathDB, Aspera inventory,
+and patient-level clinical metadata. Public DICOM detail stays in IDC.
 
 ## Tool Families
 
 - Snapshot/version: `get_snapshot_info`, `get_dataset_versions`,
   `get_dataset_v1_releases`.
 - Dataset discovery: `search_datasets`, `get_dataset`.
+- Participant discovery: `search_participants`, `get_participant`,
+  `get_participant_assets`, `get_dataset_participant_coverage`,
+  `find_participant_link_issues`.
+- Public non-DICOM: `find_public_non_dicom_assets`.
 - Download/access: `get_current_downloads`, `summarize_access`,
   `find_dicom_annotations`.
 - Controlled access: `find_controlled_access_datasets`,
@@ -63,8 +71,9 @@ NIfTI, pathology, PathDB, Aspera inventory, and patient-level clinical metadata.
   grant authorization.
 - Scope clinical identities by `(short_title, subject_id)`, retain source
   provenance/conflicts, and flag dataset-scope inferred values.
-- Use `scripts/*_metadata.py ensure` and `scripts/tcia_snapshot.py ensure` to
-  fetch current release artifacts instead of copying stale local databases.
+- Use `scripts/tcia_v2_bundle.py install` so the top-level release fingerprint,
+  component hashes, decompressed SQLite hashes, and integrity checks are
+  validated together. Keep individual `ensure` commands for compatibility.
 
 ## Deployment Shape
 

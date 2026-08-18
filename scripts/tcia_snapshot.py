@@ -61,6 +61,9 @@ REQUIRED_AGENT_VIEWS = [
 SKILL_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DB_PATH = SKILL_ROOT / "cache" / "tcia_snapshot.sqlite"
 DEFAULT_MANIFEST_PATH = SKILL_ROOT / "cache" / MANIFEST_ASSET
+DEFAULT_V2_ROOT = SKILL_ROOT / "cache" / "tcia-metadata-v2-latest"
+DEFAULT_V2_DB_PATH = DEFAULT_V2_ROOT / "tcia_snapshot.sqlite"
+DEFAULT_V2_MANIFEST_PATH = DEFAULT_V2_ROOT / MANIFEST_ASSET
 
 BASE_WORDPRESS_URL = "https://cancerimagingarchive.net/api/v2"
 DATACITE_DOIS_URL = "https://api.datacite.org/dois"
@@ -136,7 +139,7 @@ def snapshot_path(path: str | os.PathLike[str] | None = None) -> Path:
     env_path = os.environ.get("TCIA_SNAPSHOT_DB")
     if env_path:
         return Path(env_path)
-    return DEFAULT_DB_PATH
+    return DEFAULT_V2_DB_PATH if DEFAULT_V2_DB_PATH.exists() else DEFAULT_DB_PATH
 
 
 def manifest_path(path: str | os.PathLike[str] | None = None) -> Path:
@@ -145,7 +148,7 @@ def manifest_path(path: str | os.PathLike[str] | None = None) -> Path:
     env_path = os.environ.get("TCIA_SNAPSHOT_MANIFEST")
     if env_path:
         return Path(env_path)
-    return DEFAULT_MANIFEST_PATH
+    return DEFAULT_V2_MANIFEST_PATH if DEFAULT_V2_MANIFEST_PATH.exists() else DEFAULT_MANIFEST_PATH
 
 
 def snapshot_available(path: str | os.PathLike[str] | None = None) -> bool:

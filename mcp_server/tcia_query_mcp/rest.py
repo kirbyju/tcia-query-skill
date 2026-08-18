@@ -14,6 +14,7 @@ from . import __version__
 from .service import TciaQueryService, TciaServiceError
 
 API_PREFIX = "/v1"
+V2_API_PREFIX = "/v2"
 
 
 class SearchDatasetsRequest(BaseModel):
@@ -36,6 +37,15 @@ class SearchDatasetsRequest(BaseModel):
     limit: int = Field(default=25, ge=1, le=200)
 
 
+class SearchParticipantsRequest(BaseModel):
+    query: str | None = None
+    short_titles: list[str] | None = None
+    dataset_type: str = "both"
+    access_levels: list[str] | None = None
+    modalities: list[str] | None = None
+    limit: int = Field(default=25, ge=1, le=500)
+
+
 def _service_from_app(app: FastAPI) -> TciaQueryService:
     return app.state.tcia_service
 
@@ -47,9 +57,9 @@ def create_app(service: TciaQueryService | None = None) -> FastAPI:
         title="TCIA Query API",
         version=__version__,
         summary="Read-only REST API for TCIA query skill SQLite release snapshots.",
-        docs_url=f"{API_PREFIX}/docs",
-        redoc_url=f"{API_PREFIX}/redoc",
-        openapi_url=f"{API_PREFIX}/openapi.json",
+        docs_url=f"{V2_API_PREFIX}/docs",
+        redoc_url=f"{V2_API_PREFIX}/redoc",
+        openapi_url=f"{V2_API_PREFIX}/openapi.json",
     )
     app.state.tcia_service = service or TciaQueryService()
 
@@ -65,9 +75,110 @@ def create_app(service: TciaQueryService | None = None) -> FastAPI:
         return {
             "name": "TCIA Query API",
             "version": __version__,
-            "docs": f"{API_PREFIX}/docs",
-            "health": f"{API_PREFIX}/health",
+            "docs": f"{V2_API_PREFIX}/docs",
+            "health": f"{V2_API_PREFIX}/health",
+            "compatibility_api": API_PREFIX,
         }
+
+    @app.get(f"{V2_API_PREFIX}/health")
+    def v2_health() -> dict[str, str]:
+        return {"status": "ok", "default_api": "v2"}
+
+    @app.get(f"{V2_API_PREFIX}/bundle")
+    def v2_bundle_info() -> dict[str, Any]:
+        return S().snapshot_info()
+
+    @app.post(f"{V2_API_PREFIX}/datasets/search")
+    def v2_search_datasets(request: SearchDatasetsRequest) -> dict[str, Any]:
+        return S().search_datasets(**request.model_dump())
+
+    @app.get(f"{V2_API_PREFIX}/datasets/{{short_title}}/downloads")
+    def v2_get_current_downloads(
+        short_title: str,
+        access_levels: Annotated[list[str] | None, Query()] = None,
+        modalities: Annotated[list[str] | None, Query()] = None,
+        data_types: Annotated[list[str] | None, Query()] = None,
+        download_types: Annotated[list[str] | None, Query()] = None,
+        file_types: Annotated[list[str] | None, Query()] = None,
+        requires_annotations: bool = False,
+        include_hidden: bool = False,
+        limit: int = Query(default=25, ge=1, le=200),
+    ) -> dict[str, Any]:
+        return S().get_current_downloads(
+            short_title=short_title,
+            access_levels=access_levels,
+            modalities=modalities,
+            data_types=data_types,
+            download_types=download_types,
+            file_types=file_types,
+            requires_annotations=requires_annotations,
+            include_hidden=include_hidden,
+            limit=limit,
+        )
+
+    @app.get(f"{V2_API_PREFIX}/datasets/{{short_title}}/access")
+    def v2_summarize_access(short_title: str, include_hidden: bool = False) -> dict[str, Any]:
+        return S().summarize_access(short_title=short_title, include_hidden=include_hidden)
+
+    @app.post(f"{V2_API_PREFIX}/participants/search")
+    def v2_search_participants(request: SearchParticipantsRequest) -> dict[str, Any]:
+        return S().search_participants(**request.model_dump())
+
+    @app.get(f"{V2_API_PREFIX}/participants/{{participant_key}}")
+    def v2_get_participant(participant_key: str) -> dict[str, Any]:
+        return S().get_participant(participant_key=participant_key)
+
+    @app.get(f"{V2_API_PREFIX}/participants/{{participant_key}}/assets")
+    def v2_get_participant_assets(
+        participant_key: str,
+        access_levels: Annotated[list[str] | None, Query()] = None,
+        data_domains: Annotated[list[str] | None, Query()] = None,
+        limit: int = Query(default=100, ge=1, le=500),
+    ) -> dict[str, Any]:
+        return S().get_participant_assets(
+            participant_key,
+            access_levels=access_levels,
+            data_domains=data_domains,
+            limit=limit,
+        )
+
+    @app.get(f"{V2_API_PREFIX}/datasets/{{short_title}}/participant-coverage")
+    def v2_get_dataset_participant_coverage(
+        short_title: str, dataset_type: str | None = None
+    ) -> dict[str, Any]:
+        return S().get_dataset_participant_coverage(short_title, dataset_type=dataset_type)
+
+    @app.get(f"{V2_API_PREFIX}/datasets/{{short_title}}")
+    def v2_get_dataset(short_title: str, include_hidden: bool = False) -> dict[str, Any]:
+        return S().get_dataset(short_title=short_title, include_hidden=include_hidden)
+
+    @app.get(f"{V2_API_PREFIX}/participant-link-issues")
+    def v2_find_participant_link_issues(
+        short_titles: Annotated[list[str] | None, Query()] = None,
+        statuses: Annotated[list[str] | None, Query()] = None,
+        limit: int = Query(default=50, ge=1, le=500),
+    ) -> dict[str, Any]:
+        return S().find_participant_link_issues(
+            short_titles=short_titles, statuses=statuses, limit=limit
+        )
+
+    @app.get(f"{V2_API_PREFIX}/public-non-dicom/assets")
+    def v2_find_public_non_dicom_assets(
+        short_titles: Annotated[list[str] | None, Query()] = None,
+        participant_id: str | None = None,
+        file_formats: Annotated[list[str] | None, Query()] = None,
+        media_kinds: Annotated[list[str] | None, Query()] = None,
+        object_roles: Annotated[list[str] | None, Query()] = None,
+        limit: int = Query(default=50, ge=1, le=500),
+    ) -> dict[str, Any]:
+        return S().find_public_non_dicom_assets(
+            short_titles=short_titles,
+            participant_id=participant_id,
+            file_formats=file_formats,
+            media_kinds=media_kinds,
+            object_roles=object_roles,
+            limit=limit,
+        )
 
     @app.get(f"{API_PREFIX}/health")
     def health() -> dict[str, str]:
@@ -450,6 +561,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--nifti-db", help="Path to nifti_metadata.sqlite.")
     parser.add_argument("--pathology-db", help="Path to pathology_metadata.sqlite.")
     parser.add_argument("--clinical-db", help="Path to clinical_metadata.sqlite.")
+    parser.add_argument("--participant-db", help="Path to participant_inventory.sqlite.")
+    parser.add_argument("--public-non-dicom-db", help="Path to public_non_dicom_metadata.sqlite.")
+    parser.add_argument("--bundle-manifest", help="Path to tcia_metadata_v2_bundle_manifest.json.")
     parser.add_argument("--skill-root", type=Path, help="Skill repository root.")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8766)
@@ -464,6 +578,9 @@ def main(argv: list[str] | None = None) -> int:
         nifti_db=args.nifti_db,
         pathology_db=args.pathology_db,
         clinical_db=args.clinical_db,
+        participant_db=args.participant_db,
+        public_non_dicom_db=args.public_non_dicom_db,
+        bundle_manifest=args.bundle_manifest,
         skill_root=args.skill_root,
     )
     app = create_app(service)

@@ -67,7 +67,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--limit", type=int, default=25, help="Maximum records to display.")
     parser.add_argument(
         "--snapshot-db",
-        help="Optional SQLite snapshot path. Defaults to TCIA_SNAPSHOT_DB or cache/tcia_snapshot.sqlite.",
+        help="Optional SQLite snapshot path. Defaults to TCIA_SNAPSHOT_DB, the installed V2 research core, or the legacy cache.",
     )
     parser.add_argument(
         "--include-hidden",
@@ -83,7 +83,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     if not tcia_snapshot.snapshot_available(args.snapshot_db):
         print(
             f"No local TCIA snapshot found at {tcia_snapshot.snapshot_path(args.snapshot_db)}. "
-            "Run `python scripts/tcia_snapshot.py ensure` from the skill root, then try again.",
+            "Run `python scripts/tcia_v2_bundle.py install --profile research_core` from the skill root, then try again.",
             file=sys.stderr,
         )
         return 1

@@ -5,8 +5,14 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import gzip
 import hashlib
 import json
+import os
+import sqlite3
+import tempfile
+import urllib.request
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 
@@ -21,7 +27,10 @@ BUNDLE_ARTIFACT = "tcia_metadata_v2_bundle"
 BUNDLE_MANIFEST_ASSET = "tcia_metadata_v2_bundle_manifest.json"
 DEFAULT_REPOSITORY = "kirbyju/tcia-query-skill"
 DEFAULT_SOURCE_TAG = "tcia-snapshot-latest"
-DEFAULT_RELEASE_TAG = "tcia-metadata-v2-preview"
+DEFAULT_RELEASE_TAG = "tcia-metadata-v2-latest"
+PREVIEW_RELEASE_TAG = "tcia-metadata-v2-preview"
+DEFAULT_INSTALL_DIR = Path(__file__).resolve().parents[1] / "cache" / DEFAULT_RELEASE_TAG
+INSTALL_STATE_ASSET = "tcia_metadata_v2_install.json"
 
 COMPONENTS = {
     "snapshot": {
@@ -108,6 +117,28 @@ def file_sha256(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def fetch_bytes(url: str) -> bytes:
+    with urllib.request.urlopen(url) as response:
+        return response.read()
+
+
+def release_asset_url(repository: str, tag: str, asset: str) -> str:
+    return f"https://github.com/{repository}/releases/download/{tag}/{asset}"
+
+
+def database_assets() -> dict[str, str]:
+    return {
+        str(details["database"]): str(details["manifest"])
+        for details in COMPONENTS.values()
+    }
+
+
+def installed_asset_name(asset: str) -> str:
+    if asset in database_assets() and asset.endswith(".gz"):
+        return asset[:-3]
+    return asset
 
 
 def expected_payload_assets() -> list[str]:
@@ -284,6 +315,7 @@ def build_bundle_manifest(
     source_release_json: Path | None = None,
     producer_commit: str = "",
     producer_skill_version: str = "",
+    release_channel: str = "stable",
 ) -> dict[str, Any]:
     required = expected_payload_assets()
     missing = [name for name in required if not (asset_dir / name).is_file()]
@@ -311,6 +343,8 @@ def build_bundle_manifest(
     fingerprint_payload = {
         "artifact": BUNDLE_ARTIFACT,
         "schema_version": BUNDLE_SCHEMA_VERSION,
+        "release_channel": release_channel,
+        "release_tag": release_tag,
         "source": {"repository": repository, "release_tag": source_details.get("release_tag")},
         "producer": {
             "repository": repository,
@@ -322,7 +356,7 @@ def build_bundle_manifest(
     return {
         "artifact": BUNDLE_ARTIFACT,
         "schema_version": BUNDLE_SCHEMA_VERSION,
-        "release_channel": "preview",
+        "release_channel": release_channel,
         "release_tag": release_tag,
         "generated_at_utc": dt.datetime.now(dt.timezone.utc).isoformat(),
         "source": source_details,
@@ -381,6 +415,8 @@ def validate_bundle(asset_dir: Path, manifest_path: Path) -> dict[str, Any]:
     fingerprint_payload = {
         "artifact": manifest.get("artifact"),
         "schema_version": manifest.get("schema_version"),
+        "release_channel": manifest.get("release_channel"),
+        "release_tag": manifest.get("release_tag"),
         "source": {"repository": source.get("repository"), "release_tag": source.get("release_tag")},
         "producer": manifest.get("producer"),
         "assets": {name: (manifest_assets.get(name) or {}).get("sha256") for name in sorted(manifest_assets)},
@@ -437,6 +473,192 @@ def changed_payload_assets(current_manifest_path: Path, previous_manifest_path: 
     )
 
 
+def validate_manifest_contract(manifest: dict[str, Any]) -> list[str]:
+    """Validate the self-contained bundle contract before downloading payloads."""
+    errors: list[str] = []
+    if manifest.get("artifact") != BUNDLE_ARTIFACT:
+        errors.append("unexpected artifact identifier")
+    if manifest.get("schema_version") != BUNDLE_SCHEMA_VERSION:
+        errors.append("unexpected bundle schema version")
+    manifest_assets = manifest.get("assets") or {}
+    if sorted(manifest_assets) != expected_payload_assets():
+        errors.append("bundle manifest asset names do not match the contract")
+    profiles = manifest.get("profiles") or {}
+    if sorted(profiles) != sorted(PROFILE_ORDER):
+        errors.append("bundle manifest profiles do not match the contract")
+    else:
+        for profile in PROFILE_ORDER:
+            details = profiles.get(profile) or {}
+            if details.get("assets") != assets_for_profile(profile):
+                errors.append(f"bundle profile {profile} asset names do not match the contract")
+            if details.get("depends_on") != list(PROFILE_DEPENDENCIES[profile]):
+                errors.append(f"bundle profile {profile} dependencies do not match the contract")
+    source = manifest.get("source") or {}
+    fingerprint_payload = {
+        "artifact": manifest.get("artifact"),
+        "schema_version": manifest.get("schema_version"),
+        "release_channel": manifest.get("release_channel"),
+        "release_tag": manifest.get("release_tag"),
+        "source": {"repository": source.get("repository"), "release_tag": source.get("release_tag")},
+        "producer": manifest.get("producer"),
+        "assets": {
+            name: (manifest_assets.get(name) or {}).get("sha256")
+            for name in sorted(manifest_assets)
+        },
+    }
+    expected_fingerprint = hashlib.sha256(
+        canonical_json(fingerprint_payload).encode("utf-8")
+    ).hexdigest()
+    if manifest.get("release_fingerprint") != expected_fingerprint:
+        errors.append("bundle release fingerprint mismatch")
+    for name, details in manifest_assets.items():
+        if not isinstance(details, dict) or not details.get("sha256"):
+            errors.append(f"bundle asset has no SHA-256: {name}")
+        if not isinstance((details or {}).get("bytes"), int):
+            errors.append(f"bundle asset has no byte size: {name}")
+    return errors
+
+
+def _read_json_bytes(body: bytes, label: str) -> dict[str, Any]:
+    try:
+        payload = json.loads(body)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"Cannot parse {label}: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"{label} must contain a JSON object")
+    return payload
+
+
+def _validate_download(body: bytes, details: dict[str, Any], asset: str) -> None:
+    if len(body) != details.get("bytes"):
+        raise RuntimeError(f"Downloaded V2 asset byte-size mismatch: {asset}")
+    if hashlib.sha256(body).hexdigest() != details.get("sha256"):
+        raise RuntimeError(f"Downloaded V2 asset SHA-256 mismatch: {asset}")
+
+
+def _sqlite_integrity(path: Path, asset: str) -> None:
+    try:
+        with closing(sqlite3.connect(path)) as conn:
+            result = conn.execute("PRAGMA integrity_check").fetchone()[0]
+    except sqlite3.Error as exc:
+        raise RuntimeError(f"Cannot open installed V2 SQLite for {asset}: {exc}") from exc
+    if result != "ok":
+        raise RuntimeError(f"V2 SQLite integrity check failed for {asset}: {result}")
+
+
+def install_bundle(
+    *,
+    repository: str = DEFAULT_REPOSITORY,
+    tag: str = DEFAULT_RELEASE_TAG,
+    profile: str = "research_core",
+    install_dir: Path = DEFAULT_INSTALL_DIR,
+    manifest_url: str | None = None,
+) -> dict[str, Any]:
+    """Install one manifest-pinned V2 profile after validating every changed asset."""
+    if profile not in PROFILE_ORDER:
+        raise ValueError(f"Unknown V2 profile: {profile}")
+    bundle_url = manifest_url or release_asset_url(repository, tag, BUNDLE_MANIFEST_ASSET)
+    manifest_body = fetch_bytes(bundle_url)
+    manifest = _read_json_bytes(manifest_body, BUNDLE_MANIFEST_ASSET)
+    errors = validate_manifest_contract(manifest)
+    if errors:
+        raise RuntimeError("Invalid V2 bundle manifest: " + "; ".join(errors))
+    if manifest.get("release_tag") != tag and manifest_url is None:
+        raise RuntimeError(
+            f"V2 manifest release tag {manifest.get('release_tag')!r} does not match requested tag {tag!r}"
+        )
+
+    selected_assets = list((manifest["profiles"][profile] or {}).get("assets") or [])
+    manifest_assets = manifest["assets"]
+    component_by_database = database_assets()
+    component_payloads: dict[str, dict[str, Any]] = {}
+    install_dir.parent.mkdir(parents=True, exist_ok=True)
+    install_dir.mkdir(parents=True, exist_ok=True)
+
+    with tempfile.TemporaryDirectory(prefix=".tcia-v2-stage-", dir=install_dir.parent) as temporary:
+        stage = Path(temporary)
+        downloaded: list[str] = []
+        unchanged: list[str] = []
+
+        # Component manifests are small and are needed to validate decompressed databases.
+        for database_asset, component_manifest_asset in component_by_database.items():
+            if database_asset not in selected_assets:
+                continue
+            details = manifest_assets[component_manifest_asset]
+            body = fetch_bytes(release_asset_url(repository, tag, component_manifest_asset))
+            _validate_download(body, details, component_manifest_asset)
+            component_payloads[database_asset] = _read_json_bytes(body, component_manifest_asset)
+            (stage / component_manifest_asset).write_bytes(body)
+
+        for asset in selected_assets:
+            destination = install_dir / installed_asset_name(asset)
+            details = manifest_assets[asset]
+            if asset in component_by_database:
+                expected_sqlite = component_payloads[asset].get("sqlite_sha256")
+                if destination.is_file() and expected_sqlite and file_sha256(destination) == expected_sqlite:
+                    _sqlite_integrity(destination, asset)
+                    unchanged.append(asset)
+                    continue
+            elif destination.is_file() and file_sha256(destination) == details.get("sha256"):
+                unchanged.append(asset)
+                continue
+
+            body = fetch_bytes(release_asset_url(repository, tag, asset))
+            _validate_download(body, details, asset)
+            staged = stage / installed_asset_name(asset)
+            staged.parent.mkdir(parents=True, exist_ok=True)
+            if asset in component_by_database:
+                try:
+                    raw = gzip.decompress(body)
+                except OSError as exc:
+                    raise RuntimeError(f"Cannot decompress V2 database {asset}: {exc}") from exc
+                expected_sqlite = component_payloads[asset].get("sqlite_sha256")
+                if not expected_sqlite or hashlib.sha256(raw).hexdigest() != expected_sqlite:
+                    raise RuntimeError(f"Downloaded V2 SQLite SHA-256 mismatch: {asset}")
+                staged.write_bytes(raw)
+                _sqlite_integrity(staged, asset)
+            else:
+                staged.write_bytes(body)
+            downloaded.append(asset)
+
+        # Validate first, then replace changed payloads. Component manifests are refreshed
+        # even when their database bytes are unchanged so metadata stays release-consistent.
+        for asset in selected_assets:
+            staged = stage / installed_asset_name(asset)
+            if staged.exists():
+                os.replace(staged, install_dir / installed_asset_name(asset))
+        for database_asset, component_manifest_asset in component_by_database.items():
+            staged_manifest = stage / component_manifest_asset
+            if database_asset in selected_assets and staged_manifest.exists():
+                os.replace(staged_manifest, install_dir / component_manifest_asset)
+
+        state = {
+            "artifact": "tcia_metadata_v2_install",
+            "release_tag": tag,
+            "release_channel": manifest.get("release_channel"),
+            "release_fingerprint": manifest.get("release_fingerprint"),
+            "installed_profile": profile,
+            "installed_assets": selected_assets,
+            "installed_at_utc": dt.datetime.now(dt.timezone.utc).isoformat(),
+        }
+        staged_manifest = stage / BUNDLE_MANIFEST_ASSET
+        staged_manifest.write_bytes(manifest_body)
+        staged_state = stage / INSTALL_STATE_ASSET
+        staged_state.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        os.replace(staged_manifest, install_dir / BUNDLE_MANIFEST_ASSET)
+        os.replace(staged_state, install_dir / INSTALL_STATE_ASSET)
+
+    return {
+        "status": "downloaded" if downloaded else "unchanged",
+        "install_dir": str(install_dir),
+        "profile": profile,
+        "release_tag": tag,
+        "release_fingerprint": manifest.get("release_fingerprint"),
+        "downloaded_assets": downloaded,
+        "unchanged_assets": unchanged,
+    }
+
+
 def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(description=__doc__)
     sub = root.add_subparsers(dest="command", required=True)
@@ -452,6 +674,7 @@ def parser() -> argparse.ArgumentParser:
     build.add_argument("--source-release-json")
     build.add_argument("--producer-commit", default="")
     build.add_argument("--producer-skill-version", default="")
+    build.add_argument("--release-channel", choices=("stable", "preview"), default="stable")
     validate = sub.add_parser("validate", help="Validate a complete V2 bundle directory.")
     validate.add_argument("--asset-dir", required=True)
     validate.add_argument("--manifest", required=True)
@@ -468,6 +691,12 @@ def parser() -> argparse.ArgumentParser:
     expected.add_argument("--include-bundle-manifest", action="store_true")
     expected.add_argument("--profile", choices=PROFILE_ORDER)
     expected.add_argument("--no-dependencies", action="store_true")
+    install = sub.add_parser("install", help="Install a manifest-pinned V2 release profile.")
+    install.add_argument("--repository", default=DEFAULT_REPOSITORY)
+    install.add_argument("--tag", default=DEFAULT_RELEASE_TAG)
+    install.add_argument("--profile", choices=PROFILE_ORDER, default="research_core")
+    install.add_argument("--install-dir", default=str(DEFAULT_INSTALL_DIR))
+    install.add_argument("--manifest-url")
     return root
 
 
@@ -489,6 +718,7 @@ def main() -> int:
             source_release_json=Path(args.source_release_json) if args.source_release_json else None,
             producer_commit=args.producer_commit,
             producer_skill_version=args.producer_skill_version,
+            release_channel=args.release_channel,
         )
         Path(args.out).write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         print(json.dumps({"asset_count": payload["asset_count"], "release_fingerprint": payload["release_fingerprint"]}, indent=2))
@@ -511,6 +741,16 @@ def main() -> int:
             Path(args.previous) if args.previous else None,
         )
         print("\n".join(changed_assets))
+        return 0
+    if args.command == "install":
+        result = install_bundle(
+            repository=args.repository,
+            tag=args.tag,
+            profile=args.profile,
+            install_dir=Path(args.install_dir),
+            manifest_url=args.manifest_url,
+        )
+        print(json.dumps(result, indent=2, sort_keys=True))
         return 0
     assets = (
         assets_for_profile(args.profile, include_dependencies=not args.no_dependencies)

@@ -14,11 +14,15 @@ WorkingDirectory=/srv/tcia-query-mcp/tcia-query-skill
 Environment=TCIA_MCP_ROOT=/srv/tcia-query-mcp
 Environment=PIP_CACHE_DIR=/srv/tcia-query-mcp/pip-cache
 Environment=PYTHONDONTWRITEBYTECODE=1
-Environment=TCIA_SNAPSHOT_DB=/srv/tcia-query-mcp/cache/tcia_snapshot.sqlite
-Environment=TCIA_CONTROLLED_ACCESS_METADATA_DB=/srv/tcia-query-mcp/cache/controlled_access_metadata.sqlite
-Environment=TCIA_NIFTI_METADATA_DB=/srv/tcia-query-mcp/cache/nifti_metadata.sqlite
-Environment=TCIA_PATHOLOGY_METADATA_DB=/srv/tcia-query-mcp/cache/pathology_metadata.sqlite
-Environment=TCIA_CLINICAL_METADATA_DB=/srv/tcia-query-mcp/cache/clinical_metadata.sqlite
+Environment=TCIA_V2_INSTALL_DIR=/srv/tcia-query-mcp/cache/tcia-metadata-v2-latest
+Environment=TCIA_SNAPSHOT_DB=/srv/tcia-query-mcp/cache/tcia-metadata-v2-latest/tcia_snapshot.sqlite
+Environment=TCIA_PARTICIPANT_INVENTORY_DB=/srv/tcia-query-mcp/cache/tcia-metadata-v2-latest/participant_inventory.sqlite
+Environment=TCIA_PUBLIC_NON_DICOM_METADATA_DB=/srv/tcia-query-mcp/cache/tcia-metadata-v2-latest/public_non_dicom_metadata.sqlite
+Environment=TCIA_CONTROLLED_ACCESS_METADATA_DB=/srv/tcia-query-mcp/cache/tcia-metadata-v2-latest/controlled_access_metadata.sqlite
+Environment=TCIA_NIFTI_METADATA_DB=/srv/tcia-query-mcp/cache/tcia-metadata-v2-latest/nifti_metadata.sqlite
+Environment=TCIA_PATHOLOGY_METADATA_DB=/srv/tcia-query-mcp/cache/tcia-metadata-v2-latest/pathology_metadata.sqlite
+Environment=TCIA_CLINICAL_METADATA_DB=/srv/tcia-query-mcp/cache/tcia-metadata-v2-latest/clinical_metadata.sqlite
+Environment=TCIA_V2_BUNDLE_MANIFEST=/srv/tcia-query-mcp/cache/tcia-metadata-v2-latest/tcia_metadata_v2_bundle_manifest.json
 
 ExecStart=/srv/tcia-query-mcp/.venv/bin/python -m mcp_server.tcia_query_mcp.rest --host 127.0.0.1 --port 8766
 Restart=on-failure

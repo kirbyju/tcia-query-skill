@@ -46,7 +46,9 @@ The MCP URL is a protocol endpoint, not a normal web page; configure it in an
 MCP-capable client using streamable HTTP. The demo is intended for evaluation
 and read-only queries. It does not expose arbitrary SQL, shell access, live
 WordPress scraping, credentials, or controlled-data downloads. Availability
-and capacity are not guaranteed.
+and capacity are not guaranteed. These links continue to describe the currently
+deployed compatibility service; repository-local REST V2 becomes the documented
+default only after the separate host deployment is completed and verified.
 
 See [mcp_server/README.md](./mcp_server/README.md) for the tool surface and
 instructions for running your own MCP/REST server.
@@ -81,11 +83,12 @@ or follow [references/mcp-and-web-llms.md](./references/mcp-and-web-llms.md).
 Python 3 is required. These examples use `python3`; substitute your
 environment's Python 3 launcher if it has a different name.
 
-From the skill root, verify the installed skill and fetch the current base
-snapshot:
+From the skill root, install the manifest-pinned V2 research core. This fetches
+the base WordPress snapshot and compact Participant Inventory as one validated
+release contract:
 
 ```bash
-python3 scripts/tcia_freshness.py ensure
+python3 scripts/tcia_v2_bundle.py install --profile research_core
 ```
 
 Then run a snapshot-backed search:
@@ -95,18 +98,20 @@ python3 scripts/tcia_wordpress_search.py --query breast --limit 10
 python3 scripts/tcia_wordpress_search.py --short-title TCGA-BRCA --json
 ```
 
-The `cache/` directory is intentionally excluded from Git. A fresh clone does
-not include `cache/tcia_snapshot.sqlite`; the freshness command downloads and
-checksum-verifies the current release asset.
+The `cache/` directory is intentionally excluded from Git. The installer
+stages changed assets, checks bundle and component hashes, verifies decompressed
+SQLite hashes and integrity, and only then replaces installed files under
+`cache/tcia-metadata-v2-latest/`.
 
-Optional sidecars are downloaded only when requested:
+Install file-grain detail or verbose audit support only when needed:
 
 ```bash
-python3 scripts/tcia_freshness.py ensure --sidecar clinical
-python3 scripts/tcia_freshness.py ensure --sidecar controlled
-python3 scripts/tcia_freshness.py ensure --sidecar nifti
-python3 scripts/tcia_freshness.py ensure --sidecar pathology
+python3 scripts/tcia_v2_bundle.py install --profile research_detail
+python3 scripts/tcia_v2_bundle.py install --profile audit_support
 ```
+
+`scripts/tcia_freshness.py` and the individual legacy `ensure` commands remain
+available for the `tcia-snapshot-latest` compatibility line.
 
 Most routine snapshot and manifest helpers use the Python standard library.
 Install task-specific packages such as `idc-index`, `pydicom`, or `cdapython`
@@ -153,30 +158,30 @@ the specific workflow rather than broadly allowing all external traffic.
 ## Data Freshness
 
 The base snapshot is normally rebuilt at 7:17 AM and 7:17 PM
-America/New_York. `scripts/tcia_freshness.py ensure` verifies the local
-operational files against the version manifest on GitHub `main`, then refreshes
-the checksum-verified release snapshot. It reports an update requirement
-instead of silently replacing skill code.
+America/New_York, followed by the V2 bundle producer. Run
+`scripts/tcia_freshness.py check` to verify local operational files against the
+version manifest on GitHub `main`, then run the V2 bundle installer to refresh
+the checksum-verified research core. The skill check reports an update
+requirement instead of silently replacing skill code.
 
 If network verification fails, local results are offline/unverified and should
 not be described as current. See [references/snapshots.md](./references/snapshots.md)
 for release assets, sidecar behavior, schema/version details, and maintainer
 workflows.
 
-An official-shaped V2 bundle is published on the isolated
-`tcia-metadata-v2-preview` prerelease for Participant Explorer testing. It
-contains hash-pinned research-core, research-detail, audit-support, and
-compatibility-export profiles. The default research-core profile contains the
-base snapshot and compact Participant Inventory; file-grain metadata and
-verbose audit evidence are optional.
-Existing `tcia-snapshot-latest` and MCP/REST consumers remain unchanged. See
-[references/artifact-model-v2.md](./references/artifact-model-v2.md).
+The default release contract is the moving `tcia-metadata-v2-latest` tag, with
+immutable versioned V2 releases retained for reproducibility. It contains
+hash-pinned research-core, research-detail, audit-support, and
+compatibility-export profiles. The default research core contains the base
+snapshot and compact Participant Inventory; file-grain metadata and verbose
+audit evidence are optional. `tcia-snapshot-latest` remains available as the
+legacy compatibility line. See [references/artifact-model-v2.md](./references/artifact-model-v2.md).
 
-Download and validate the preview databases without changing MCP/REST:
+Install the default V2 core or add research detail:
 
 ```bash
-python3 scripts/tcia_public_non_dicom_metadata.py ensure
-python3 scripts/tcia_participant_inventory.py ensure
+python3 scripts/tcia_v2_bundle.py install --profile research_core
+python3 scripts/tcia_v2_bundle.py install --profile research_detail
 ```
 
 Participant Explorer integrations should query `agent_participant_search` for

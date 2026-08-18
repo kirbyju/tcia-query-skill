@@ -308,12 +308,13 @@ status, and reconciliation warnings.
 Query IDC for public DICOM detail. Query the public non-DICOM, controlled, or
 clinical detail artifacts only when the user drills down.
 
-## Release isolation
+## Release channels and compatibility
 
-Keep `tcia-snapshot-latest` unchanged while V2 is evaluated. Publish an
-official-shaped, internally consistent bundle to the isolated
-`tcia-metadata-v2-preview` prerelease for Participant Explorer integration
-testing. The preview contains these asset groups:
+Use `tcia-metadata-v2-latest` as the moving default release contract and retain
+immutable `tcia-metadata-v2-YYYY.MM...` releases for reproducibility. Keep
+`tcia-metadata-v2-preview` for explicit schema-changing candidates. Do not
+replace or delete `tcia-snapshot-latest`; it remains the May 2026-compatible
+legacy line. Every V2 channel contains these asset groups:
 
 - Research core: `tcia_snapshot.sqlite.gz`, compact
   `participant_inventory.sqlite.gz`, their manifests, and the compressed
@@ -355,10 +356,17 @@ python3 scripts/tcia_v2_bundle.py expected-assets --profile research_detail
 python3 scripts/tcia_v2_bundle.py expected-assets --profile audit_support
 ```
 
-After the contracts stabilize, publish the same bundle shape as an immutable
-versioned release and a separate `tcia-metadata-v2-latest` moving tag. Do not
-replace or delete the May 2026-compatible artifact line during the preview
-period.
+Install the stable research core with the bundle-level installer:
+
+```bash
+python3 scripts/tcia_v2_bundle.py install --profile research_core
+```
+
+The installer reads the top-level manifest first, stages every changed asset,
+verifies compressed and decompressed hashes plus SQLite integrity, and only
+then replaces installed components. Add `research_detail` for drill-down or
+`audit_support` for verbose provenance and QC. Installed files default to
+`cache/tcia-metadata-v2-latest/`.
 
 The V2 build runs after each successful scheduled base-snapshot workflow. It
 captures the V1 release record, verifies every copied source asset against the
@@ -366,12 +374,14 @@ captured GitHub digest, regenerates all web exports from that exact bundled
 snapshot, validates every component, and publishes only when the complete
 bundle fingerprint changes. The top-level manifest is uploaded last so
 consumers never accept an update without a complete hash contract. Stale assets
-are removed only from the V2 preview tag, and that preview tag is advanced to
+are removed only from the selected V2 moving tag, and that tag is advanced to
 the producer commit only after the published bundle passes remote digest
-validation. The workflow never uploads to
+validation. A manually supplied immutable stable tag is created only if it
+does not already exist. The workflow never uploads to
 `tcia-snapshot-latest` and does not deploy, restart, or reconfigure MCP/REST.
 
-Consumers can retrieve and validate the two research databases independently:
+Component helpers remain available for targeted and compatibility workflows,
+but new integrations should prefer the bundle installer:
 
 ```bash
 python3 scripts/tcia_public_non_dicom_metadata.py ensure
@@ -383,24 +393,24 @@ Verbose provenance and troubleshooting payloads are distributed separately as
 Use the `audit_support` profile in the bundle manifest when those companions are
 needed; stable entity IDs provide the join back to the research databases.
 
-Existing helpers can test the copied compatibility artifacts from the same V2
+Existing helpers can use compatibility artifacts from the same stable V2
 release by overriding their tag, for example:
 
 ```bash
-python3 scripts/tcia_snapshot.py ensure --tag tcia-metadata-v2-preview
-python3 scripts/tcia_clinical_metadata.py ensure --tag tcia-metadata-v2-preview
-python3 scripts/tcia_controlled_access_metadata.py ensure --tag tcia-metadata-v2-preview
-python3 scripts/tcia_nifti_metadata.py ensure --tag tcia-metadata-v2-preview
-python3 scripts/tcia_pathology_metadata.py ensure --tag tcia-metadata-v2-preview
+python3 scripts/tcia_snapshot.py ensure --tag tcia-metadata-v2-latest
+python3 scripts/tcia_clinical_metadata.py ensure --tag tcia-metadata-v2-latest
+python3 scripts/tcia_controlled_access_metadata.py ensure --tag tcia-metadata-v2-latest
+python3 scripts/tcia_nifti_metadata.py ensure --tag tcia-metadata-v2-latest
+python3 scripts/tcia_pathology_metadata.py ensure --tag tcia-metadata-v2-latest
 ```
 
-The stable preview asset URLs are:
+The stable asset URLs are:
 
-- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-metadata-v2-preview/public_non_dicom_metadata.sqlite.gz`
-- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-metadata-v2-preview/participant_inventory.sqlite.gz`
-- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-metadata-v2-preview/public_non_dicom_audit.sqlite.gz`
-- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-metadata-v2-preview/participant_inventory_audit.sqlite.gz`
-- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-metadata-v2-preview/tcia_metadata_v2_bundle_manifest.json`
+- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-metadata-v2-latest/public_non_dicom_metadata.sqlite.gz`
+- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-metadata-v2-latest/participant_inventory.sqlite.gz`
+- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-metadata-v2-latest/public_non_dicom_audit.sqlite.gz`
+- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-metadata-v2-latest/participant_inventory_audit.sqlite.gz`
+- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-metadata-v2-latest/tcia_metadata_v2_bundle_manifest.json`
 
 Use the corresponding JSON manifest from the same release to verify schema,
 release fingerprint, compressed SHA-256, and SQLite SHA-256 before replacing a

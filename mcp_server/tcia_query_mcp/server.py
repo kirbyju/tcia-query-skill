@@ -35,18 +35,22 @@ retired records are excluded unless a TCIA staff workflow explicitly asks for
 them.
 
 Work this way:
-1. Start with get_snapshot_info to confirm which SQLite snapshots and optional
-   sidecars are loaded.
+1. Start with get_snapshot_info to confirm the V2 bundle fingerprint, research
+   core, and optional detail artifacts.
 2. Use search_datasets and get_dataset for TCIA provenance, license/access
    status, current download labels, external-resource labels, and related
    Analysis Results.
-3. Use download-level tools for modality, file type, route, and controlled
+3. Use search_participants for participant discovery and availability. Use
+   get_participant_assets for participant drill-down and
+   get_dataset_participant_coverage before making completeness claims.
+4. Use download-level tools for modality, file type, route, and controlled
    access decisions. Split mixed-access datasets into open and controlled
    downloads.
-4. Use the optional sidecar tools only after confirming TCIA provenance in the
+5. Use the optional detail tools only after confirming TCIA provenance in the
    base snapshot: patient-level clinical metadata, controlled-access files,
-   public NIfTI metadata, and pathology Aspera/PathDB metadata.
-5. This MCP server is a read-only metadata service and does not transfer payloads.
+   public non-DICOM metadata, and pathology Aspera/PathDB metadata. Public
+   DICOM detail remains an IDC/idc-index responsibility.
+6. This MCP server is a read-only metadata service and does not transfer payloads.
    Return policy and manifest/DRS guidance. A capable client agent may invoke the
    official TCIA Data Retriever after the user supplies their authorized JSON-key
    path, following the skill's controlled-access guidance.
@@ -62,8 +66,8 @@ decide whether something is TCIA-published.
 
 Recommended workflow:
 
-1. Call `get_snapshot_info` and confirm the base snapshot plus any needed
-   optional sidecar exists.
+1. Call `get_snapshot_info` and confirm the V2 bundle fingerprint, research
+   core, and any needed optional detail artifact.
 2. Use `search_datasets` for broad discovery. Use `get_dataset` for one short
    title, including current downloads and related visible Analysis Results.
 3. Use `summarize_access` before any download guidance. Creative Commons is
@@ -75,14 +79,19 @@ Recommended workflow:
    routes for controlled-access data.
 5. Use `get_dataset_versions` and `get_dataset_v1_releases` for release-history
    questions when the loaded base snapshot includes those views.
-6. Use `get_controlled_access_files` only for public file-grain metadata about
+6. Use `search_participants`, `get_participant`, and `get_participant_assets`
+   for dataset-scoped participant discovery and holdings. Use
+   `get_dataset_participant_coverage` before asserting complete linkage.
+7. Use `get_controlled_access_files` only for public file-grain metadata about
    controlled-access records. It does not grant authorization.
-7. Use the clinical tools for patient-level resolved values, sourced facts, and
+8. Use the clinical tools for patient-level resolved values, sourced facts, and
    conflicts. Subject identity is scoped by `(short_title, subject_id)`; retain
    source provenance and distinguish dataset-scope inferred values.
-8. Use `get_nifti_characteristics` for reviewed NIfTI object roles and source
+9. Use `find_public_non_dicom_assets` for V2 non-DICOM detail. Use
+   `get_nifti_characteristics` for the legacy detailed NIfTI compatibility
+   surface and reviewed source relationships.
    relationships, and `find_nifti_review_issues` for unresolved dataset-level QC.
-9. Use the pathology tools for PathDB/Aspera metadata. PathDB is optimized for
+10. Use the pathology tools for PathDB/Aspera metadata. PathDB is optimized for
    metadata/viewers and may use converted files; Aspera packages are the
    original submitter-provided route.
 """
@@ -131,6 +140,9 @@ def configure_service(
     nifti_db: str | os.PathLike[str] | None = None,
     pathology_db: str | os.PathLike[str] | None = None,
     clinical_db: str | os.PathLike[str] | None = None,
+    participant_db: str | os.PathLike[str] | None = None,
+    public_non_dicom_db: str | os.PathLike[str] | None = None,
+    bundle_manifest: str | os.PathLike[str] | None = None,
     skill_root: str | os.PathLike[str] | None = None,
 ) -> TciaQueryService:
     """Replace the process-wide service used by MCP tools."""
@@ -142,6 +154,9 @@ def configure_service(
         nifti_db=nifti_db,
         pathology_db=pathology_db,
         clinical_db=clinical_db,
+        participant_db=participant_db,
+        public_non_dicom_db=public_non_dicom_db,
+        bundle_manifest=bundle_manifest,
         skill_root=skill_root,
     )
     return _service
@@ -173,6 +188,104 @@ def get_snapshot_info() -> dict:
     """Return configured snapshot paths, optional sidecar availability, row counts, and feature flags."""
 
     return service().snapshot_info()
+
+
+@mcp.tool()
+@guard
+def search_participants(
+    query: str | None = None,
+    short_titles: list[str] | None = None,
+    dataset_type: str = "both",
+    access_levels: list[str] | None = None,
+    modalities: list[str] | None = None,
+    limit: int = 25,
+) -> dict:
+    """Search canonical dataset-scoped participants from the V2 research core."""
+    return service().search_participants(
+        query=query,
+        short_titles=short_titles,
+        dataset_type=dataset_type,
+        access_levels=access_levels,
+        modalities=modalities,
+        limit=limit,
+    )
+
+
+@mcp.tool()
+@guard
+def get_participant(
+    participant_key: str | None = None,
+    short_title: str | None = None,
+    participant_id: str | None = None,
+    dataset_type: str | None = None,
+) -> dict:
+    """Return one canonical participant and every retained source identifier spelling."""
+    return service().get_participant(
+        participant_key=participant_key,
+        short_title=short_title,
+        participant_id=participant_id,
+        dataset_type=dataset_type,
+    )
+
+
+@mcp.tool()
+@guard
+def get_participant_assets(
+    participant_key: str,
+    access_levels: list[str] | None = None,
+    data_domains: list[str] | None = None,
+    limit: int = 100,
+) -> dict:
+    """Return compact participant holdings; use detail artifacts or IDC for drill-down."""
+    return service().get_participant_assets(
+        participant_key,
+        access_levels=access_levels,
+        data_domains=data_domains,
+        limit=limit,
+    )
+
+
+@mcp.tool()
+@guard
+def get_dataset_participant_coverage(
+    short_title: str, dataset_type: str | None = None
+) -> dict:
+    """Report participant counts, unlinked assets, source coverage, and link issues."""
+    return service().get_dataset_participant_coverage(short_title, dataset_type=dataset_type)
+
+
+@mcp.tool()
+@guard
+def find_participant_link_issues(
+    short_titles: list[str] | None = None,
+    statuses: list[str] | None = None,
+    limit: int = 50,
+) -> dict:
+    """Find explicit V2 participant linkage and crosswalk review states."""
+    return service().find_participant_link_issues(
+        short_titles=short_titles, statuses=statuses, limit=limit
+    )
+
+
+@mcp.tool()
+@guard
+def find_public_non_dicom_assets(
+    short_titles: list[str] | None = None,
+    participant_id: str | None = None,
+    file_formats: list[str] | None = None,
+    media_kinds: list[str] | None = None,
+    object_roles: list[str] | None = None,
+    limit: int = 50,
+) -> dict:
+    """Query V2 public non-DICOM detail; use IDC/idc-index for public DICOM detail."""
+    return service().find_public_non_dicom_assets(
+        short_titles=short_titles,
+        participant_id=participant_id,
+        file_formats=file_formats,
+        media_kinds=media_kinds,
+        object_roles=object_roles,
+        limit=limit,
+    )
 
 
 @mcp.tool()
@@ -719,6 +832,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--nifti-db", help="Path to nifti_metadata.sqlite.")
     parser.add_argument("--pathology-db", help="Path to pathology_metadata.sqlite.")
     parser.add_argument("--clinical-db", help="Path to clinical_metadata.sqlite.")
+    parser.add_argument("--participant-db", help="Path to participant_inventory.sqlite.")
+    parser.add_argument("--public-non-dicom-db", help="Path to public_non_dicom_metadata.sqlite.")
+    parser.add_argument("--bundle-manifest", help="Path to tcia_metadata_v2_bundle_manifest.json.")
     parser.add_argument("--skill-root", type=Path, help="Skill repository root.")
     parser.add_argument("--transport", choices=["stdio", "http"], default="stdio")
     parser.add_argument("--http", action="store_true", help="Alias for --transport http.")
@@ -735,6 +851,9 @@ def main(argv: list[str] | None = None) -> int:
         nifti_db=args.nifti_db,
         pathology_db=args.pathology_db,
         clinical_db=args.clinical_db,
+        participant_db=args.participant_db,
+        public_non_dicom_db=args.public_non_dicom_db,
+        bundle_manifest=args.bundle_manifest,
         skill_root=args.skill_root,
     )
     transport = "http" if args.http else args.transport

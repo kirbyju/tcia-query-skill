@@ -39,6 +39,7 @@ ANNOTATION_LABELS = {
 }
 DEFAULT_LIMIT = 25
 MAX_LIMIT = 200
+V2_RELEASE_TAG = "tcia-metadata-v2-latest"
 
 
 class TciaServiceError(RuntimeError):
@@ -47,6 +48,16 @@ class TciaServiceError(RuntimeError):
 
 class SnapshotNotFoundError(TciaServiceError):
     """Raised when a configured SQLite snapshot path is unavailable."""
+
+
+class ClosingConnection(sqlite3.Connection):
+    """SQLite context manager that commits/rolls back and then closes."""
+
+    def __exit__(self, exc_type, exc_value, traceback) -> bool:
+        try:
+            return bool(super().__exit__(exc_type, exc_value, traceback))
+        finally:
+            self.close()
 
 
 def default_skill_root() -> Path:
@@ -582,6 +593,30 @@ def safe_int(value: Any) -> int:
         return 0
 
 
+def normalize_v2_row(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
+    output = dict(row)
+    for key in list(output):
+        value = output[key]
+        if key.endswith("_json"):
+            if isinstance(value, str):
+                try:
+                    output[key] = json.loads(value)
+                except json.JSONDecodeError:
+                    pass
+        elif key in {
+            "source_namespaces",
+            "data_domains",
+            "modalities",
+            "file_formats",
+            "managed_systems",
+            "media_kinds",
+            "imaging_domains",
+            "object_roles",
+        }:
+            output[key] = parse_comma_values(value)
+    return output
+
+
 class TciaQueryService:
     """Snapshot-backed TCIA query facade."""
 
@@ -592,42 +627,71 @@ class TciaQueryService:
         nifti_db: str | os.PathLike[str] | None = None,
         pathology_db: str | os.PathLike[str] | None = None,
         clinical_db: str | os.PathLike[str] | None = None,
+        participant_db: str | os.PathLike[str] | None = None,
+        public_non_dicom_db: str | os.PathLike[str] | None = None,
+        bundle_manifest: str | os.PathLike[str] | None = None,
         skill_root: str | os.PathLike[str] | None = None,
     ) -> None:
         self.skill_root = Path(skill_root) if skill_root else default_skill_root()
+        v2_root = Path(
+            os.environ.get("TCIA_V2_INSTALL_DIR", "")
+            or self.skill_root / "cache" / V2_RELEASE_TAG
+        )
+
+        def preferred_v2(name: str) -> Path:
+            candidate = v2_root / name
+            legacy = self.skill_root / "cache" / name
+            return candidate if candidate.exists() else legacy
+
         self.snapshot_db = Path(
             snapshot_db
             or os.environ.get("TCIA_SNAPSHOT_DB", "")
-            or self.skill_root / "cache" / "tcia_snapshot.sqlite"
+            or preferred_v2("tcia_snapshot.sqlite")
         )
         self.controlled_db = Path(
             controlled_db
             or os.environ.get("TCIA_CONTROLLED_ACCESS_METADATA_DB", "")
-            or self.skill_root / "cache" / "controlled_access_metadata.sqlite"
+            or preferred_v2("controlled_access_metadata.sqlite")
         )
         self.nifti_db = Path(
             nifti_db
             or os.environ.get("TCIA_NIFTI_METADATA_DB", "")
-            or self.skill_root / "cache" / "nifti_metadata.sqlite"
+            or preferred_v2("nifti_metadata.sqlite")
         )
         self.pathology_db = Path(
             pathology_db
             or os.environ.get("TCIA_PATHOLOGY_METADATA_DB", "")
-            or self.skill_root / "cache" / "pathology_metadata.sqlite"
+            or preferred_v2("pathology_metadata.sqlite")
         )
         self.clinical_db = Path(
             clinical_db
             or os.environ.get("TCIA_CLINICAL_METADATA_DB", "")
-            or self.skill_root / "cache" / "clinical_metadata.sqlite"
+            or preferred_v2("clinical_metadata.sqlite")
         )
+        self.participant_db = Path(
+            participant_db
+            or os.environ.get("TCIA_PARTICIPANT_INVENTORY_DB", "")
+            or v2_root / "participant_inventory.sqlite"
+        )
+        self.public_non_dicom_db = Path(
+            public_non_dicom_db
+            or os.environ.get("TCIA_PUBLIC_NON_DICOM_METADATA_DB", "")
+            or v2_root / "public_non_dicom_metadata.sqlite"
+        )
+        self.bundle_manifest = Path(
+            bundle_manifest
+            or os.environ.get("TCIA_V2_BUNDLE_MANIFEST", "")
+            or v2_root / "tcia_metadata_v2_bundle_manifest.json"
+        )
+        self.v2_install_state = self.bundle_manifest.with_name("tcia_metadata_v2_install.json")
 
     def _connect_snapshot(self) -> sqlite3.Connection:
         if not self.snapshot_db.exists():
             raise SnapshotNotFoundError(
                 f"TCIA snapshot not found at {self.snapshot_db}. "
-                "Run `python scripts/tcia_snapshot.py ensure` from the skill root."
+                "Run `python scripts/tcia_v2_bundle.py install --profile research_core` from the skill root."
             )
-        conn = sqlite3.connect(self.snapshot_db)
+        conn = sqlite3.connect(self.snapshot_db, factory=ClosingConnection)
         conn.row_factory = sqlite3.Row
         return conn
 
@@ -637,7 +701,7 @@ class TciaQueryService:
                 f"Controlled-access metadata snapshot not found at {self.controlled_db}. "
                 "Run `python scripts/tcia_controlled_access_metadata.py ensure` from the skill root."
             )
-        conn = sqlite3.connect(self.controlled_db)
+        conn = sqlite3.connect(self.controlled_db, factory=ClosingConnection)
         conn.row_factory = sqlite3.Row
         return conn
 
@@ -647,7 +711,7 @@ class TciaQueryService:
                 f"NIfTI metadata snapshot not found at {self.nifti_db}. "
                 "Run `python scripts/tcia_nifti_metadata.py ensure` from the skill root."
             )
-        conn = sqlite3.connect(self.nifti_db)
+        conn = sqlite3.connect(self.nifti_db, factory=ClosingConnection)
         conn.row_factory = sqlite3.Row
         return conn
 
@@ -657,7 +721,7 @@ class TciaQueryService:
                 f"Pathology metadata snapshot not found at {self.pathology_db}. "
                 "Run `python scripts/tcia_pathology_metadata.py ensure` from the skill root."
             )
-        conn = sqlite3.connect(self.pathology_db)
+        conn = sqlite3.connect(self.pathology_db, factory=ClosingConnection)
         conn.row_factory = sqlite3.Row
         return conn
 
@@ -667,7 +731,27 @@ class TciaQueryService:
                 f"Clinical metadata snapshot not found at {self.clinical_db}. "
                 "Run `python scripts/tcia_clinical_metadata.py ensure` from the skill root."
             )
-        conn = sqlite3.connect(self.clinical_db)
+        conn = sqlite3.connect(self.clinical_db, factory=ClosingConnection)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def _connect_participants(self) -> sqlite3.Connection:
+        if not self.participant_db.exists():
+            raise SnapshotNotFoundError(
+                f"Participant Inventory not found at {self.participant_db}. "
+                "Run `python scripts/tcia_v2_bundle.py install --profile research_core` from the skill root."
+            )
+        conn = sqlite3.connect(self.participant_db, factory=ClosingConnection)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def _connect_public_non_dicom(self) -> sqlite3.Connection:
+        if not self.public_non_dicom_db.exists():
+            raise SnapshotNotFoundError(
+                f"Public non-DICOM metadata not found at {self.public_non_dicom_db}. "
+                "Run `python scripts/tcia_v2_bundle.py install --profile research_detail` from the skill root."
+            )
+        conn = sqlite3.connect(self.public_non_dicom_db, factory=ClosingConnection)
         conn.row_factory = sqlite3.Row
         return conn
 
@@ -717,8 +801,38 @@ class TciaQueryService:
             "pathology_metadata_db_exists": self.pathology_db.exists(),
             "clinical_metadata_db": str(self.clinical_db),
             "clinical_metadata_db_exists": self.clinical_db.exists(),
+            "participant_inventory_db": str(self.participant_db),
+            "participant_inventory_db_exists": self.participant_db.exists(),
+            "public_non_dicom_metadata_db": str(self.public_non_dicom_db),
+            "public_non_dicom_metadata_db_exists": self.public_non_dicom_db.exists(),
+            "v2_bundle_manifest": str(self.bundle_manifest),
+            "v2_bundle_manifest_exists": self.bundle_manifest.exists(),
+            "v2_install_state": str(self.v2_install_state),
+            "v2_install_state_exists": self.v2_install_state.exists(),
             "controlled_access_policy_url": CONTROLLED_ACCESS_POLICY_URL,
         }
+        if self.bundle_manifest.exists():
+            try:
+                bundle = json.loads(self.bundle_manifest.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                info["v2_bundle_error"] = str(exc)
+            else:
+                info["v2_bundle"] = {
+                    "artifact": bundle.get("artifact"),
+                    "schema_version": bundle.get("schema_version"),
+                    "release_channel": bundle.get("release_channel"),
+                    "release_tag": bundle.get("release_tag"),
+                    "release_fingerprint": bundle.get("release_fingerprint"),
+                    "producer": bundle.get("producer"),
+                    "components": bundle.get("components"),
+                }
+        if self.v2_install_state.exists():
+            try:
+                state = json.loads(self.v2_install_state.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                info["v2_install_state_error"] = str(exc)
+            else:
+                info["v2_install"] = state
         if self.snapshot_db.exists():
             with self._connect_snapshot() as conn:
                 meta = {}
@@ -822,6 +936,41 @@ class TciaQueryService:
                         )
                     ),
                 }
+        if self.participant_db.exists():
+            with self._connect_participants() as conn:
+                info["participant_inventory"] = self._read_meta_table(
+                    conn, "participant_inventory_meta"
+                )
+                info["participant_counts"] = {
+                    "participants": self._count_object(conn, "agent_participant_search"),
+                    "assets": self._count_object(conn, "agent_participant_assets"),
+                    "identifiers": self._count_object(conn, "agent_participant_identifiers"),
+                    "unlinked_dataset_assets": self._count_object(
+                        conn, "agent_dataset_assets_without_participant_crosswalk"
+                    ),
+                    "link_issues": self._count_object(conn, "agent_participant_link_issues"),
+                }
+        if self.public_non_dicom_db.exists():
+            with self._connect_public_non_dicom() as conn:
+                info["public_non_dicom_metadata"] = self._read_meta_table(conn, "artifact_meta")
+                info["public_non_dicom_counts"] = {
+                    "datasets": self._count_object(conn, "agent_public_non_dicom_dataset_summary"),
+                    "assets": self._count_object(conn, "agent_public_non_dicom_assets"),
+                    "participant_links": self._count_object(
+                        conn, "agent_public_non_dicom_asset_participants"
+                    ),
+                    "review_issues": self._count_object(
+                        conn, "agent_public_non_dicom_review_issues"
+                    ),
+                }
+        info["v2_capabilities"] = {
+            "participant_search": self.participant_db.exists(),
+            "public_non_dicom_detail": self.public_non_dicom_db.exists(),
+            "bundle_manifest": self.bundle_manifest.exists(),
+            "install_state": self.v2_install_state.exists(),
+            "public_dicom_authority": "IDC",
+            "publication_authority": "TCIA WordPress snapshot",
+        }
         return info
 
     def search_datasets(self, **filters: Any) -> dict[str, Any]:
@@ -896,7 +1045,7 @@ class TciaQueryService:
                 if "has_external_clinical_resource" not in columns:
                     raise TciaServiceError(
                         "This snapshot does not expose has_external_clinical_resource. "
-                        "Refresh with `python scripts/tcia_snapshot.py ensure`."
+                        "Refresh with `python scripts/tcia_v2_bundle.py install --profile research_core`."
                     )
                 sql += " AND COALESCE(has_external_clinical_resource, 0) = ?"
                 params.append(1 if is_truthy(has_external_clinical_resource) else 0)
@@ -979,7 +1128,7 @@ class TciaQueryService:
                     "count": 0,
                     "note": (
                         "The loaded snapshot does not include agent_dataset_versions. "
-                        "Refresh the release snapshot with `python scripts/tcia_snapshot.py ensure`."
+                        "Refresh with `python scripts/tcia_v2_bundle.py install --profile research_core`."
                     ),
                 }
             hidden_clause = "" if include_hidden else " AND hidden = 0"
@@ -1024,7 +1173,7 @@ class TciaQueryService:
                     "count": 0,
                     "note": (
                         "The loaded snapshot does not include agent_dataset_v1_releases. "
-                        "Refresh the release snapshot with `python scripts/tcia_snapshot.py ensure`."
+                        "Refresh with `python scripts/tcia_v2_bundle.py install --profile research_core`."
                     ),
                 }
             sql = "SELECT * FROM agent_dataset_v1_releases WHERE 1 = 1"
@@ -1900,6 +2049,246 @@ class TciaQueryService:
             "count": len(rows),
             "limit": limit,
             "note": "Review conflicts before analysis; resolved values follow the documented source precedence.",
+        }
+
+    def search_participants(self, **filters: Any) -> dict[str, Any]:
+        """Search canonical dataset-scoped participants from the V2 research core."""
+        limit = coerce_limit(filters.get("limit"), default=25, maximum=500)
+        query = str(filters.get("query") or "").strip().lower()
+        short_titles = [item.lower() for item in as_list(filters.get("short_titles"))]
+        dataset_type = str(filters.get("dataset_type") or "both").strip().lower()
+        modalities = [item.lower() for item in as_list(filters.get("modalities"))]
+        access_levels = [item.lower() for item in as_list(filters.get("access_levels"))]
+        with self._connect_participants() as conn:
+            sql = "SELECT * FROM agent_participant_search WHERE 1 = 1"
+            params: list[Any] = []
+            if query:
+                sql += (
+                    " AND (lower(short_title) LIKE ? OR lower(display_participant_id) LIKE ? "
+                    "OR EXISTS (SELECT 1 FROM agent_participant_identifiers i "
+                    "WHERE i.participant_key = agent_participant_search.participant_key "
+                    "AND lower(i.raw_identifier) LIKE ?))"
+                )
+                pattern = f"%{query}%"
+                params.extend([pattern, pattern, pattern])
+            if short_titles:
+                sql += f" AND lower(short_title) IN ({','.join('?' for _ in short_titles)})"
+                params.extend(short_titles)
+            if dataset_type in {"collection", "analysis result"}:
+                sql += " AND lower(dataset_type) = ?"
+                params.append(dataset_type)
+            if "open" in access_levels and "controlled" not in access_levels:
+                sql += " AND has_open_data = 1"
+            elif "controlled" in access_levels and "open" not in access_levels:
+                sql += " AND has_controlled_data = 1"
+            for modality in modalities:
+                sql += (
+                    " AND instr(',' || lower(replace(COALESCE(modalities, ''), ' ', '')) || ',', "
+                    "',' || replace(?, ' ', '') || ',') > 0"
+                )
+                params.append(modality)
+            sql += " ORDER BY lower(short_title), lower(display_participant_id) LIMIT ?"
+            params.append(limit)
+            rows = [normalize_v2_row(row) for row in conn.execute(sql, params).fetchall()]
+        return {
+            "participants": rows,
+            "count": len(rows),
+            "limit": limit,
+            "identity_scope": "Dataset-scoped; Collections and Analysis Results remain distinct.",
+            "public_dicom_detail_route": "IDC/idc-index",
+        }
+
+    def get_participant(
+        self,
+        *,
+        participant_key: str | None = None,
+        short_title: str | None = None,
+        participant_id: str | None = None,
+        dataset_type: str | None = None,
+    ) -> dict[str, Any]:
+        """Return one canonical participant plus retained identifier spellings."""
+        if not participant_key and not (short_title and participant_id):
+            raise TciaServiceError(
+                "participant_key or both short_title and participant_id are required"
+            )
+        with self._connect_participants() as conn:
+            if participant_key:
+                row = conn.execute(
+                    "SELECT * FROM agent_participant_search WHERE participant_key = ?",
+                    (participant_key,),
+                ).fetchone()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT p.*
+                    FROM agent_participant_search p
+                    WHERE lower(p.short_title) = lower(?)
+                      AND (? IS NULL OR lower(p.dataset_type) = lower(?))
+                      AND (lower(p.display_participant_id) = lower(?) OR EXISTS (
+                        SELECT 1 FROM agent_participant_identifiers i
+                        WHERE i.participant_key = p.participant_key
+                          AND lower(i.raw_identifier) = lower(?)
+                      ))
+                    ORDER BY lower(p.dataset_type)
+                    LIMIT 2
+                    """,
+                    (short_title, dataset_type, dataset_type, participant_id, participant_id),
+                ).fetchall()
+                if len(rows) > 1:
+                    raise TciaServiceError(
+                        "Participant identifier is ambiguous across Collection and Analysis Result scope; "
+                        "provide dataset_type or participant_key"
+                    )
+                row = rows[0] if rows else None
+            if row is None:
+                return {"participant": None, "identifiers": [], "count": 0}
+            key = str(row["participant_key"])
+            identifiers = [
+                normalize_v2_row(item)
+                for item in conn.execute(
+                    "SELECT * FROM agent_participant_identifiers "
+                    "WHERE participant_key = ? ORDER BY managed_system, identifier_namespace, raw_identifier",
+                    (key,),
+                ).fetchall()
+            ]
+        return {
+            "participant": normalize_v2_row(row),
+            "identifiers": identifiers,
+            "count": 1,
+            "identity_scope": "Dataset-scoped; no cross-dataset person identity is asserted.",
+        }
+
+    def get_participant_assets(self, participant_key: str, **filters: Any) -> dict[str, Any]:
+        key = participant_key.strip()
+        if not key:
+            raise TciaServiceError("participant_key is required")
+        limit = coerce_limit(filters.get("limit"), default=100, maximum=500)
+        access_levels = [item.lower() for item in as_list(filters.get("access_levels"))]
+        data_domains = [item.lower() for item in as_list(filters.get("data_domains"))]
+        with self._connect_participants() as conn:
+            sql = "SELECT * FROM agent_participant_assets WHERE participant_key = ?"
+            params: list[Any] = [key]
+            if access_levels:
+                sql += f" AND lower(access_level) IN ({','.join('?' for _ in access_levels)})"
+                params.extend(access_levels)
+            if data_domains:
+                sql += f" AND lower(data_domain) IN ({','.join('?' for _ in data_domains)})"
+                params.extend(data_domains)
+            sql += " ORDER BY data_domain, managed_system, participant_asset_id LIMIT ?"
+            params.append(limit)
+            rows = [normalize_v2_row(row) for row in conn.execute(sql, params).fetchall()]
+        return {
+            "participant_key": key,
+            "assets": rows,
+            "count": len(rows),
+            "limit": limit,
+            "public_dicom_detail_route": "IDC/idc-index",
+        }
+
+    def get_dataset_participant_coverage(
+        self, short_title: str, dataset_type: str | None = None
+    ) -> dict[str, Any]:
+        title = short_title.strip()
+        if not title:
+            raise TciaServiceError("short_title is required")
+        with self._connect_participants() as conn:
+            type_sql = " AND lower(dataset_type) = lower(?)" if dataset_type else ""
+            type_params: list[Any] = [dataset_type] if dataset_type else []
+            participant_count = conn.execute(
+                "SELECT COUNT(*) FROM agent_participant_search "
+                "WHERE lower(short_title) = lower(?)" + type_sql,
+                [title, *type_params],
+            ).fetchone()[0]
+            unlinked = [
+                normalize_v2_row(row)
+                for row in conn.execute(
+                    "SELECT * FROM agent_dataset_assets_without_participant_crosswalk "
+                    "WHERE lower(short_title) = lower(?)" + type_sql + " ORDER BY data_domain",
+                    [title, *type_params],
+                ).fetchall()
+            ]
+            issues = [
+                normalize_v2_row(row)
+                for row in conn.execute(
+                    "SELECT * FROM agent_participant_link_issues "
+                    "WHERE lower(short_title) = lower(?)" + type_sql + " ORDER BY status, issue_code",
+                    [title, *type_params],
+                ).fetchall()
+            ]
+            sources = [
+                normalize_v2_row(row)
+                for row in conn.execute(
+                    "SELECT * FROM participant_inventory_sources ORDER BY source_name"
+                ).fetchall()
+            ]
+        return {
+            "short_title": title,
+            "dataset_type": dataset_type,
+            "participant_count": participant_count,
+            "unlinked_dataset_assets": unlinked,
+            "participant_link_issues": issues,
+            "sources": sources,
+            "coverage_complete": not unlinked and not any(
+                str(issue.get("status") or "").lower() not in {"resolved", "closed"}
+                for issue in issues
+            ),
+        }
+
+    def find_participant_link_issues(self, **filters: Any) -> dict[str, Any]:
+        limit = coerce_limit(filters.get("limit"), default=50, maximum=500)
+        short_titles = [item.lower() for item in as_list(filters.get("short_titles"))]
+        statuses = [item.lower() for item in as_list(filters.get("statuses"))]
+        with self._connect_participants() as conn:
+            sql = "SELECT * FROM agent_participant_link_issues WHERE 1 = 1"
+            params: list[Any] = []
+            if short_titles:
+                sql += f" AND lower(short_title) IN ({','.join('?' for _ in short_titles)})"
+                params.extend(short_titles)
+            if statuses:
+                sql += f" AND lower(status) IN ({','.join('?' for _ in statuses)})"
+                params.extend(statuses)
+            sql += " ORDER BY lower(short_title), status, issue_code LIMIT ?"
+            params.append(limit)
+            rows = [normalize_v2_row(row) for row in conn.execute(sql, params).fetchall()]
+        return {"participant_link_issues": rows, "count": len(rows), "limit": limit}
+
+    def find_public_non_dicom_assets(self, **filters: Any) -> dict[str, Any]:
+        """Query V2 public non-DICOM detail; public DICOM remains an IDC concern."""
+        limit = coerce_limit(filters.get("limit"), default=50, maximum=500)
+        short_titles = [item.lower() for item in as_list(filters.get("short_titles"))]
+        participant_id = str(filters.get("participant_id") or "").strip().lower()
+        file_formats = [item.lower() for item in as_list(filters.get("file_formats"))]
+        media_kinds = [item.lower() for item in as_list(filters.get("media_kinds"))]
+        object_roles = [item.lower() for item in as_list(filters.get("object_roles"))]
+        with self._connect_public_non_dicom() as conn:
+            sql = "SELECT * FROM agent_public_non_dicom_assets a WHERE 1 = 1"
+            params: list[Any] = []
+            if short_titles:
+                sql += f" AND lower(a.short_title) IN ({','.join('?' for _ in short_titles)})"
+                params.extend(short_titles)
+            if participant_id:
+                sql += (
+                    " AND EXISTS (SELECT 1 FROM agent_public_non_dicom_asset_participants p "
+                    "WHERE p.asset_id = a.asset_id AND lower(p.subject_id) = ?)"
+                )
+                params.append(participant_id)
+            for column, values in (
+                ("file_format", file_formats),
+                ("media_kind", media_kinds),
+                ("object_role", object_roles),
+            ):
+                if values:
+                    sql += f" AND lower(COALESCE(a.{column}, '')) IN ({','.join('?' for _ in values)})"
+                    params.extend(values)
+            sql += " ORDER BY lower(a.short_title), a.asset_id LIMIT ?"
+            params.append(limit)
+            rows = [normalize_v2_row(row) for row in conn.execute(sql, params).fetchall()]
+        return {
+            "assets": rows,
+            "count": len(rows),
+            "limit": limit,
+            "scope": "Public non-DICOM and narrowly reviewed IDC-missing DICOM exceptions.",
+            "public_dicom_detail_route": "IDC/idc-index",
         }
 
     def _download_has_annotation(self, row: dict[str, Any]) -> bool:

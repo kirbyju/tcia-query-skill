@@ -1,13 +1,15 @@
 # SQLite Metadata Snapshots
 
-For the official-shaped V2 preview bundle, load
-`references/artifact-model-v2.md`. After successful scheduled base-snapshot
+For the default V2 bundle contract, load `references/artifact-model-v2.md`.
+After successful scheduled base-snapshot
 updates, the V2 workflow copies the base snapshot and optional sidecars,
 regenerates all eight web exports, builds the two V2 research databases and
 their optional audit companions, and publishes the complete profile-based,
-hash-pinned bundle only when its fingerprint changes. It leaves
-`tcia-snapshot-latest`, its May 2026-compatible contracts, and MCP/REST
-deployment unchanged.
+hash-pinned bundle only when its fingerprint changes. The moving stable tag is
+`tcia-metadata-v2-latest`; immutable tags preserve reproducible releases and
+`tcia-metadata-v2-preview` remains available for explicit candidates. The
+workflow leaves `tcia-snapshot-latest` and its May 2026-compatible contracts
+unchanged. Publication does not itself deploy or restart MCP/REST.
 
 The skill uses a local SQLite snapshot for routine TCIA discovery instead of querying public APIs during end-user tasks. The snapshot contains:
 
@@ -158,25 +160,33 @@ export TCIA_CLINICAL_METADATA_DB=/path/to/clinical_metadata.sqlite
 End users do not need to reinstall the skill just to receive newer TCIA metadata. Skill code/instructions and snapshot data are separate.
 
 - Reinstall or update the skill only when the skill instructions or scripts changed.
-- Refresh metadata by updating the local SQLite snapshot:
+- Verify skill code, then refresh the manifest-pinned V2 research core:
 
 ```bash
-python scripts/tcia_freshness.py ensure
+python scripts/tcia_freshness.py check
+python scripts/tcia_v2_bundle.py install --profile research_core
 ```
 
 The freshness helper first fetches `skill_version.json` from GitHub `main` and compares its version plus per-file hashes with the installed `SKILL.md`, agent metadata, references, scripts, and MCP files. If code differs, it exits with `update_required` and does not overwrite the installed skill. This deliberate stop prevents an old script from silently operating against a newer artifact schema and preserves the user's authority over skill installation or replacement.
 
-When the skill is current, the helper runs the normal base `ensure`. It compares the remote release manifest with SQLite metadata, verifies gzip and SQLite SHA-256 values, and replaces `cache/tcia_snapshot.sqlite` only when published content or schema changed. Run this preflight at the start of each discovery task; having a local database is not evidence that it is still the newest published artifact.
+When the skill is current, the bundle installer compares the remote V2
+fingerprint with the installed state, verifies the top-level and component
+contracts, and stages changed assets. It replaces installed files only after
+compressed and decompressed hashes plus SQLite integrity checks pass. Run this
+preflight at the start of each discovery task; having a local database is not
+evidence that it is still the newest published artifact.
 
-Refresh only optional sidecars needed for the task:
+Install only the additional profiles needed for the task:
 
 ```bash
-python scripts/tcia_freshness.py ensure --sidecar clinical
-python scripts/tcia_freshness.py ensure --sidecar controlled --sidecar nifti
-python scripts/tcia_freshness.py ensure --installed-sidecars
+python scripts/tcia_v2_bundle.py install --profile research_detail
+python scripts/tcia_v2_bundle.py install --profile audit_support
 ```
 
-`--installed-sidecars` checks every optional SQLite already present under `cache/`. It does not install sidecars that are absent. The individual `python scripts/tcia_snapshot.py ensure` and sidecar `ensure` commands remain available for maintainers and troubleshooting, but routine skill use should start with `tcia_freshness.py` so skill-code and artifact freshness are checked together.
+The individual `python scripts/tcia_snapshot.py ensure`, sidecar `ensure`, and
+`tcia_freshness.py ensure` commands remain available for legacy compatibility,
+maintainers, and troubleshooting. New integrations should start with the V2
+bundle contract so components cannot drift across releases.
 
 If GitHub cannot be reached, freshness is unverified. Do not claim that cached results are current. Report the local manifest's `generated_at_utc` and ask whether the user wants to continue offline with potentially outdated metadata.
 

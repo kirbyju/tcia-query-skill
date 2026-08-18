@@ -10,9 +10,12 @@ tcia_query_mcp/server.py   # MCP tools/resources for LLM clients
 tcia_query_mcp/rest.py     # FastAPI routes for scripts, checks, and apps
 ```
 
-The server is backed by release SQLite files:
+The server defaults to the manifest-pinned V2 research core and optional detail
+profiles:
 
 - `tcia_snapshot.sqlite`: required TCIA WordPress/DataCite/PathDB snapshot.
+- `participant_inventory.sqlite`: required V2 dataset-scoped participant availability.
+- `public_non_dicom_metadata.sqlite`: optional V2 public non-DICOM file-grain detail.
 - `controlled_access_metadata.sqlite`: optional controlled-access file-grain public metadata.
 - `nifti_metadata.sqlite`: optional public non-DICOM NIfTI file-grain metadata.
 - `pathology_metadata.sqlite`: optional pathology, PathDB, and Aspera package metadata.
@@ -33,9 +36,15 @@ Core MCP tools:
 - `get_current_downloads`
 - `summarize_access`
 - `find_dicom_annotations`
+- `search_participants`
+- `get_participant`
+- `get_participant_assets`
+- `get_dataset_participant_coverage`
+- `find_participant_link_issues`
 
 Optional sidecar tools:
 
+- `find_public_non_dicom_assets`
 - `find_controlled_access_datasets`
 - `get_controlled_access_files`
 - `find_nifti_datasets`
@@ -73,27 +82,28 @@ For production, create the virtual environment, pip cache, logs, and SQLite
 snapshots in a server-local runtime directory rather than inside the Git
 checkout. See `DEPLOYMENT.md`.
 
-## Configure Snapshots
+## Configure V2 Artifacts
 
-The base snapshot is required. The sidecars are optional, but install all four
-for the full MCP interface.
+Install the research core first. The bundle manifest pins the base snapshot and
+Participant Inventory to one release fingerprint:
 
 ```bash
-export TCIA_SNAPSHOT_DB=/path/to/cache/tcia_snapshot.sqlite
-export TCIA_CONTROLLED_ACCESS_METADATA_DB=/path/to/cache/controlled_access_metadata.sqlite
-export TCIA_NIFTI_METADATA_DB=/path/to/cache/nifti_metadata.sqlite
-export TCIA_PATHOLOGY_METADATA_DB=/path/to/cache/pathology_metadata.sqlite
-export TCIA_CLINICAL_METADATA_DB=/path/to/cache/clinical_metadata.sqlite
-
-python3 scripts/tcia_snapshot.py ensure
-python3 scripts/tcia_controlled_access_metadata.py ensure
-python3 scripts/tcia_nifti_metadata.py ensure
-python3 scripts/tcia_pathology_metadata.py ensure
-python3 scripts/tcia_clinical_metadata.py ensure
+python3 scripts/tcia_v2_bundle.py install --profile research_core
+python3 scripts/tcia_v2_bundle.py install --profile research_detail
 ```
 
-Use the `ensure` commands rather than copying scratch SQLite files. They fetch
-and verify the current `tcia-snapshot-latest` GitHub release assets.
+By default the service prefers validated files under
+`cache/tcia-metadata-v2-latest/`, then falls back to the legacy cache for
+compatibility. Production deployments can set `TCIA_V2_INSTALL_DIR`, or set
+the individual paths explicitly:
+
+```bash
+export TCIA_V2_INSTALL_DIR=/path/to/cache/tcia-metadata-v2-latest
+export TCIA_SNAPSHOT_DB="$TCIA_V2_INSTALL_DIR/tcia_snapshot.sqlite"
+export TCIA_PARTICIPANT_INVENTORY_DB="$TCIA_V2_INSTALL_DIR/participant_inventory.sqlite"
+export TCIA_PUBLIC_NON_DICOM_METADATA_DB="$TCIA_V2_INSTALL_DIR/public_non_dicom_metadata.sqlite"
+export TCIA_V2_BUNDLE_MANIFEST="$TCIA_V2_INSTALL_DIR/tcia_metadata_v2_bundle_manifest.json"
+```
 
 ## Run MCP
 
@@ -128,11 +138,14 @@ scripts, dashboards, or non-MCP clients:
 python3 -m mcp_server.tcia_query_mcp.rest --host 127.0.0.1 --port 8766
 ```
 
-Interactive docs are available at:
+V2 is the documented default. Interactive docs are available at:
 
 ```text
-http://127.0.0.1:8766/v1/docs
+http://127.0.0.1:8766/v2/docs
 ```
+
+Existing `/v1` dataset, download, clinical, NIfTI, pathology, and controlled
+routes remain registered as compatibility endpoints.
 
 ## Source Control Boundary
 

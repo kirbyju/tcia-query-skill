@@ -1,4 +1,4 @@
-name: Build TCIA metadata V2 preview
+name: Build TCIA metadata V2
 
 on:
   workflow_run:
@@ -6,14 +6,19 @@ on:
     types: [completed]
   workflow_dispatch:
     inputs:
-      publish_preview:
-        description: "Publish validated artifacts to the isolated V2 preview release"
+      publish_channel:
+        description: "Choose a release channel after validation"
         required: true
-        default: "false"
+        default: "none"
         type: choice
         options:
-          - "false"
-          - "true"
+          - "none"
+          - "preview"
+          - "stable"
+      immutable_tag:
+        description: "Optional immutable tag for a stable promotion, for example tcia-metadata-v2-2026.08"
+        required: false
+        type: string
       include_pathdb_files:
         description: "Include the full PathDB file inventory"
         required: true
@@ -27,7 +32,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: tcia-metadata-v2-preview
+  group: tcia-metadata-v2
   cancel-in-progress: false
 
 jobs:
@@ -158,9 +163,17 @@ jobs:
 
       - name: Build and validate the complete V2 bundle contract
         run: |
+          release_channel="stable"
+          release_tag="tcia-metadata-v2-latest"
+          if [ "${{ inputs.publish_channel }}" = "preview" ]; then
+            release_channel="preview"
+            release_tag="tcia-metadata-v2-preview"
+          fi
           python scripts/tcia_v2_bundle.py build \
             --asset-dir dist \
             --source-release-json cache/source_release.json \
+            --release-channel "$release_channel" \
+            --release-tag "$release_tag" \
             --producer-commit "$GITHUB_SHA" \
             --producer-skill-version "$(python -c 'import json; print(json.load(open("skill_version.json"))["skill_version"])')" \
             --out dist/tcia_metadata_v2_bundle_manifest.json
@@ -175,18 +188,37 @@ jobs:
         run: |
           set -euo pipefail
           publish_requested="false"
-          if [ "${{ github.event_name }}" = "workflow_run" ] || [ "${{ inputs.publish_preview }}" = "true" ]; then
+          channel="${{ inputs.publish_channel }}"
+          tag=""
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            if gh release view tcia-metadata-v2-latest >/dev/null 2>&1; then
+              channel="stable"
+            else
+              channel="none"
+              echo "::notice::Stable V2 publication requires an initial manual promotion with an immutable tag."
+            fi
+          fi
+          if [ "$channel" != "none" ] && [ -n "$channel" ]; then
             publish_requested="true"
           fi
           if [ "$publish_requested" = "true" ] && [ "${{ inputs.include_pathdb_files }}" = "false" ]; then
-            echo "::error::Published V2 preview bundles must include the full PathDB inventory."
+            echo "::error::Published V2 bundles must include the full PathDB inventory."
+            exit 1
+          fi
+          if [ "$channel" = "stable" ] \
+             && ! gh release view tcia-metadata-v2-latest >/dev/null 2>&1 \
+             && [ -z "${{ inputs.immutable_tag }}" ]; then
+            echo "::error::The initial stable promotion requires immutable_tag."
             exit 1
           fi
 
           publish="false"
           reason="publication not requested"
           if [ "$publish_requested" = "true" ]; then
-            tag="tcia-metadata-v2-preview"
+            tag="tcia-metadata-v2-latest"
+            if [ "$channel" = "preview" ]; then
+              tag="tcia-metadata-v2-preview"
+            fi
             new_fingerprint="$(python -c 'import json; print(json.load(open("dist/tcia_metadata_v2_bundle_manifest.json"))["release_fingerprint"])')"
             old_fingerprint=""
             mkdir -p previous-v2
@@ -201,37 +233,67 @@ jobs:
             fi
           fi
           echo "publish=$publish" >> "$GITHUB_OUTPUT"
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "reason=$reason" >> "$GITHUB_OUTPUT"
           echo "### V2 release decision" >> "$GITHUB_STEP_SUMMARY"
           echo "- Publish: $publish" >> "$GITHUB_STEP_SUMMARY"
           echo "- Reason: $reason" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload complete workflow artifact for evaluation
-        if: github.event_name == 'workflow_dispatch' && inputs.publish_preview != 'true'
+        if: github.event_name == 'workflow_dispatch' && inputs.publish_channel == 'none'
         uses: actions/upload-artifact@v6
         with:
-          name: tcia-metadata-v2-preview
+          name: tcia-metadata-v2-candidate
           path: dist/*
           compression-level: 0
           retention-days: 30
 
-      - name: Publish isolated preview release
+      - name: Publish validated V2 release
         if: steps.release.outputs.publish == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          tag="tcia-metadata-v2-preview"
-          notes="Experimental V2 metadata bundle for Participant Explorer integration testing. The manifest defines research-core, research-detail, audit-support, and compatibility-export profiles. Participant Inventory is compact by default, consolidates case-equivalent identifiers within each Collection or Analysis Result while retaining source spellings, and reports clinical presence only from clinical-domain rows. File-grain detail and verbose provenance are optional, hash-pinned companions. It does not replace tcia-snapshot-latest and is not used by MCP/REST."
+          tag="${{ steps.release.outputs.tag }}"
+          channel="${{ steps.release.outputs.channel }}"
+          notes="TCIA Metadata Artifact Model V2 bundle. The manifest defines research-core, research-detail, audit-support, and compatibility-export profiles. Participant Inventory is compact by default; file-grain metadata and verbose audit evidence are optional hash-pinned companions. Public DICOM detail remains authoritative in IDC. The legacy tcia-snapshot-latest release is retained as a compatibility line."
+          prerelease_args=()
+          title="TCIA metadata V2 latest"
+          if [ "$channel" = "preview" ]; then
+            prerelease_args+=(--prerelease)
+            title="TCIA metadata V2 preview"
+          fi
+          immutable_tag="${{ inputs.immutable_tag }}"
+          if [ "$channel" = "stable" ] && [ -n "$immutable_tag" ]; then
+            case "$immutable_tag" in
+              tcia-metadata-v2-[0-9][0-9][0-9][0-9].[0-9][0-9]*) ;;
+              *)
+                echo "::error::immutable_tag must start with tcia-metadata-v2-YYYY.MM"
+                exit 1
+                ;;
+            esac
+            if gh release view "$immutable_tag" >/dev/null 2>&1; then
+              echo "::error::Immutable release already exists: $immutable_tag"
+              exit 1
+            fi
+            gh release create "$immutable_tag" dist/* \
+              --title "TCIA metadata V2 ${immutable_tag#tcia-metadata-v2-}" \
+              --notes "$notes"
+            gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${immutable_tag}" > immutable-release.json
+            python scripts/tcia_v2_bundle.py validate-published \
+              --manifest dist/tcia_metadata_v2_bundle_manifest.json \
+              --release-json immutable-release.json
+          fi
           if ! gh release view "$tag" >/dev/null 2>&1; then
             gh release create "$tag" \
-              --prerelease \
-              --title "TCIA metadata V2 preview" \
+              "${prerelease_args[@]}" \
+              --title "$title" \
               --notes "$notes"
           else
             gh release edit "$tag" \
-              --prerelease \
-              --title "TCIA metadata V2 preview" \
+              "${prerelease_args[@]}" \
+              --title "$title" \
               --notes "$notes"
           fi
           previous_manifest=""

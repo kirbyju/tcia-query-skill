@@ -1,7 +1,7 @@
 interface:
   display_name: "TCIA Query Skill"
   short_description: "Query TCIA datasets and verified TCIA-based publications"
-  default_prompt: "Use $tcia-query-skill to verify TCIA provenance and freshness, find datasets or publications, explain access and citations, route public DICOM through IDC, and help authorized users run controlled downloads with official TCIA Data Retriever manifests and their own JSON-key path."
+  default_prompt: "Use $tcia-query-skill with the manifest-pinned V2 research core to verify TCIA provenance and freshness, find datasets, participants, or publications, explain access and citations, route public DICOM through IDC, and help authorized users run controlled downloads with official TCIA Data Retriever manifests and their own JSON-key path."
 
 policy:
   allow_implicit_invocation: true

@@ -40,31 +40,35 @@ export PIP_CACHE_DIR="$TCIA_MCP_ROOT/pip-cache"
   -r "$TCIA_MCP_ROOT/tcia-query-skill/mcp_server/requirements.txt"
 ```
 
-## 4. Download Release Snapshots
+## 4. Install the V2 Release Contract
 
-Set explicit paths for the base snapshot and all optional sidecars:
+Set one server-local V2 installation directory:
 
 ```bash
-export TCIA_SNAPSHOT_DB="$TCIA_MCP_ROOT/cache/tcia_snapshot.sqlite"
-export TCIA_CONTROLLED_ACCESS_METADATA_DB="$TCIA_MCP_ROOT/cache/controlled_access_metadata.sqlite"
-export TCIA_NIFTI_METADATA_DB="$TCIA_MCP_ROOT/cache/nifti_metadata.sqlite"
-export TCIA_PATHOLOGY_METADATA_DB="$TCIA_MCP_ROOT/cache/pathology_metadata.sqlite"
-export TCIA_CLINICAL_METADATA_DB="$TCIA_MCP_ROOT/cache/clinical_metadata.sqlite"
+export TCIA_V2_INSTALL_DIR="$TCIA_MCP_ROOT/cache/tcia-metadata-v2-latest"
+export TCIA_SNAPSHOT_DB="$TCIA_V2_INSTALL_DIR/tcia_snapshot.sqlite"
+export TCIA_PARTICIPANT_INVENTORY_DB="$TCIA_V2_INSTALL_DIR/participant_inventory.sqlite"
+export TCIA_PUBLIC_NON_DICOM_METADATA_DB="$TCIA_V2_INSTALL_DIR/public_non_dicom_metadata.sqlite"
+export TCIA_CONTROLLED_ACCESS_METADATA_DB="$TCIA_V2_INSTALL_DIR/controlled_access_metadata.sqlite"
+export TCIA_NIFTI_METADATA_DB="$TCIA_V2_INSTALL_DIR/nifti_metadata.sqlite"
+export TCIA_PATHOLOGY_METADATA_DB="$TCIA_V2_INSTALL_DIR/pathology_metadata.sqlite"
+export TCIA_CLINICAL_METADATA_DB="$TCIA_V2_INSTALL_DIR/clinical_metadata.sqlite"
+export TCIA_V2_BUNDLE_MANIFEST="$TCIA_V2_INSTALL_DIR/tcia_metadata_v2_bundle_manifest.json"
 ```
 
-Fetch and verify the current GitHub release artifacts:
+Install and verify the research core plus file-grain detail:
 
 ```bash
 cd "$TCIA_MCP_ROOT/tcia-query-skill"
-"$TCIA_MCP_ROOT/.venv/bin/python" scripts/tcia_snapshot.py ensure
-"$TCIA_MCP_ROOT/.venv/bin/python" scripts/tcia_controlled_access_metadata.py ensure
-"$TCIA_MCP_ROOT/.venv/bin/python" scripts/tcia_nifti_metadata.py ensure
-"$TCIA_MCP_ROOT/.venv/bin/python" scripts/tcia_pathology_metadata.py ensure
-"$TCIA_MCP_ROOT/.venv/bin/python" scripts/tcia_clinical_metadata.py ensure
+"$TCIA_MCP_ROOT/.venv/bin/python" scripts/tcia_v2_bundle.py install \
+  --profile research_core --install-dir "$TCIA_V2_INSTALL_DIR"
+"$TCIA_MCP_ROOT/.venv/bin/python" scripts/tcia_v2_bundle.py install \
+  --profile research_detail --install-dir "$TCIA_V2_INSTALL_DIR"
 ```
 
-The base snapshot is required. The controlled-access, NIfTI, pathology, and
-clinical sidecars are optional, but the full public MCP interface expects all four.
+The installer keeps the previous files live until all changed payloads validate.
+Research core is required. Research detail is optional, but required for the
+public non-DICOM, controlled, NIfTI, pathology, and clinical detail endpoints.
 
 ## 5. Smoke Test
 
@@ -87,9 +91,13 @@ cd "$TCIA_MCP_ROOT/tcia-query-skill"
 Check REST health and loaded snapshot metadata:
 
 ```bash
-curl -fsS http://127.0.0.1:8766/v1/health
-curl -fsS http://127.0.0.1:8766/v1/snapshot
+curl -fsS http://127.0.0.1:8766/v2/health
+curl -fsS http://127.0.0.1:8766/v2/bundle
 ```
+
+Confirm the returned bundle fingerprint, component schema versions,
+Participant Inventory counts, and installed detail capabilities before
+switching traffic. `/v1` remains available for compatibility checks.
 
 For MCP, connect a local MCP client to:
 
@@ -139,23 +147,22 @@ TCIA_MCP_ALLOWED_HOSTS=mcp.example.org
 TCIA_MCP_ALLOWED_ORIGINS=https://mcp.example.org
 ```
 
-## 8. Refresh Snapshots
+## 8. Refresh the V2 Bundle
 
 Refresh snapshots with the same environment variables used by the service:
 
 ```bash
 cd "$TCIA_MCP_ROOT/tcia-query-skill"
-"$TCIA_MCP_ROOT/.venv/bin/python" scripts/tcia_snapshot.py ensure
-"$TCIA_MCP_ROOT/.venv/bin/python" scripts/tcia_controlled_access_metadata.py ensure
-"$TCIA_MCP_ROOT/.venv/bin/python" scripts/tcia_nifti_metadata.py ensure
-"$TCIA_MCP_ROOT/.venv/bin/python" scripts/tcia_pathology_metadata.py ensure
-"$TCIA_MCP_ROOT/.venv/bin/python" scripts/tcia_clinical_metadata.py ensure
+"$TCIA_MCP_ROOT/.venv/bin/python" scripts/tcia_v2_bundle.py install \
+  --profile research_detail --install-dir "$TCIA_V2_INSTALL_DIR"
 sudo systemctl restart tcia-query-mcp
+sudo systemctl restart tcia-query-rest
 ```
 
 Use a systemd timer, cron, or your configuration-management system for scheduled
 refreshes. Avoid committing snapshots or copying stale local caches between
-servers; use the release `ensure` commands so checksums are verified.
+servers; use the bundle installer so the top-level fingerprint, component
+hashes, decompressed SQLite hashes, and integrity checks are verified together.
 
 ## Repository Vs Server State
 

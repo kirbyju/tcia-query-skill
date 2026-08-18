@@ -463,6 +463,113 @@ def create_clinical_db(path: Path) -> None:
         )
 
 
+def create_participant_db(path: Path) -> None:
+    with connect(path) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE participant_inventory_meta (key TEXT PRIMARY KEY, value TEXT);
+            INSERT INTO participant_inventory_meta VALUES ('schema_version', '6');
+            CREATE TABLE agent_participant_search (
+                participant_key TEXT, dataset_type TEXT, short_title TEXT,
+                display_participant_id TEXT, source_namespace_count INTEGER,
+                source_namespaces TEXT, inventory_rows INTEGER, has_open_data INTEGER,
+                has_controlled_data INTEGER, has_public_dicom INTEGER,
+                has_public_non_dicom INTEGER, has_clinical INTEGER, data_domains TEXT,
+                modalities TEXT, file_formats TEXT, managed_systems TEXT
+            );
+            INSERT INTO agent_participant_search VALUES (
+                'participant-1', 'Collection', 'TCGA-BRCA', 'BRCA-1', 2,
+                'tcia_subject_id,idc_patient_id', 3, 1, 1, 1, 1, 1,
+                'radiology,clinical', 'MR,CT', 'DICOM,NIfTI', 'tcia_wordpress,crdc_idc'
+            );
+            CREATE TABLE agent_participant_identifiers (
+                participant_identifier_id TEXT, participant_key TEXT, managed_system TEXT,
+                identifier_namespace TEXT, raw_identifier TEXT, normalized_identifier TEXT,
+                link_evidence TEXT, provenance_json TEXT, dataset_type TEXT,
+                short_title TEXT, display_participant_id TEXT
+            );
+            INSERT INTO agent_participant_identifiers VALUES (
+                'identifier-1', 'participant-1', 'tcia_wordpress', 'tcia_subject_id',
+                'BRCA-1', 'BRCA-1', 'source_identifier', '{}',
+                'Collection', 'TCGA-BRCA', 'BRCA-1'
+            );
+            CREATE TABLE agent_participant_assets (
+                participant_asset_id TEXT, participant_key TEXT, managed_system TEXT,
+                source_artifact TEXT, access_level TEXT, data_domain TEXT, media_kind TEXT,
+                modality TEXT, file_format TEXT, object_role TEXT, study_count INTEGER,
+                series_count INTEGER, file_count INTEGER, known_size_bytes INTEGER,
+                has_file_level_metadata INTEGER, detail_pointer TEXT, access_route TEXT,
+                inventory_status TEXT, source_version TEXT, provenance_json TEXT,
+                dataset_type TEXT, short_title TEXT, display_participant_id TEXT
+            );
+            INSERT INTO agent_participant_assets VALUES (
+                'asset-1', 'participant-1', 'crdc_idc', 'idc_metadata', 'open',
+                'radiology', 'volume', 'MR', 'DICOM', 'source_image', 1, 2, 20,
+                1000, 1, 'idc', 'https://example.org/idc', 'known', 'v24', '{}',
+                'Collection', 'TCGA-BRCA', 'BRCA-1'
+            );
+            CREATE TABLE agent_dataset_assets_without_participant_crosswalk (
+                dataset_asset_id TEXT, dataset_type TEXT, short_title TEXT,
+                managed_system TEXT, access_level TEXT, data_domain TEXT, media_kind TEXT,
+                modality TEXT, file_format TEXT, object_role TEXT, asset_count INTEGER,
+                explanation TEXT, detail_pointer TEXT, provenance_json TEXT
+            );
+            INSERT INTO agent_dataset_assets_without_participant_crosswalk VALUES (
+                'unlinked-1', 'Collection', 'TCGA-BRCA', 'tcia_aspera', 'open',
+                'radiology', 'volume', 'MR', 'MHA', 'source_image', 2,
+                'No participant crosswalk.', 'public_non_dicom', '{}'
+            );
+            CREATE TABLE agent_participant_link_issues (
+                issue_id TEXT, dataset_type TEXT, short_title TEXT, raw_identifier TEXT,
+                issue_code TEXT, status TEXT, description TEXT, evidence_json TEXT
+            );
+            INSERT INTO agent_participant_link_issues VALUES (
+                'issue-1', 'Collection', 'TCGA-BRCA', '', 'missing_crosswalk',
+                'review_required', 'Participant mapping is unavailable.', '{}'
+            );
+            CREATE TABLE participant_inventory_sources (
+                source_name TEXT, source_path TEXT, present INTEGER, source_sha256 TEXT,
+                imported_rows INTEGER, coverage_note TEXT
+            );
+            INSERT INTO participant_inventory_sources VALUES (
+                'public_non_dicom_metadata', '/tmp/public.sqlite', 1, 'abc', 1,
+                'Participant-linked rows imported.'
+            );
+            """
+        )
+
+
+def create_public_non_dicom_db(path: Path) -> None:
+    with connect(path) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE artifact_meta (key TEXT PRIMARY KEY, value TEXT);
+            INSERT INTO artifact_meta VALUES ('schema_version', '7');
+            CREATE TABLE agent_public_non_dicom_dataset_summary (short_title TEXT);
+            INSERT INTO agent_public_non_dicom_dataset_summary VALUES ('TCGA-BRCA');
+            CREATE TABLE agent_public_non_dicom_assets (
+                asset_id TEXT, dataset_type TEXT, short_title TEXT, subject_id TEXT,
+                asset_name TEXT, asset_granularity TEXT, download_id TEXT,
+                file_name TEXT, package_path TEXT, file_format TEXT, media_kind TEXT,
+                imaging_domain TEXT, modality TEXT, object_role TEXT, source_system TEXT,
+                source_url TEXT, participant_link_count INTEGER, location_count INTEGER,
+                managed_systems TEXT
+            );
+            INSERT INTO agent_public_non_dicom_assets VALUES (
+                'pnd-1', 'Collection', 'TCGA-BRCA', 'BRCA-1', 'volume', 'file',
+                '7', 'image.nii.gz', 'BRCA-1/image.nii.gz', 'NIfTI', 'volume',
+                'radiology', 'MR', 'source_image', 'tcia_aspera',
+                'https://example.org/package', 1, 1, 'tcia_aspera'
+            );
+            CREATE TABLE agent_public_non_dicom_asset_participants (
+                asset_id TEXT, subject_id TEXT
+            );
+            INSERT INTO agent_public_non_dicom_asset_participants VALUES ('pnd-1', 'BRCA-1');
+            CREATE TABLE agent_public_non_dicom_review_issues (issue_id TEXT);
+            """
+        )
+
+
 class TciaQueryServiceTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
@@ -472,17 +579,34 @@ class TciaQueryServiceTests(unittest.TestCase):
         self.nifti = root / "nifti_metadata.sqlite"
         self.pathology = root / "pathology_metadata.sqlite"
         self.clinical = root / "clinical_metadata.sqlite"
+        self.participants = root / "participant_inventory.sqlite"
+        self.public_non_dicom = root / "public_non_dicom_metadata.sqlite"
+        self.bundle_manifest = root / "tcia_metadata_v2_bundle_manifest.json"
         create_base_snapshot(self.snapshot)
         create_controlled_db(self.controlled)
         create_nifti_db(self.nifti)
         create_pathology_db(self.pathology)
         create_clinical_db(self.clinical)
+        create_participant_db(self.participants)
+        create_public_non_dicom_db(self.public_non_dicom)
+        self.bundle_manifest.write_text(json.dumps({
+            "artifact": "tcia_metadata_v2_bundle",
+            "schema_version": 2,
+            "release_channel": "stable",
+            "release_tag": "tcia-metadata-v2-latest",
+            "release_fingerprint": "test-fingerprint",
+            "producer": {"commit": "test"},
+            "components": {},
+        }))
         self.service = TciaQueryService(
             snapshot_db=self.snapshot,
             controlled_db=self.controlled,
             nifti_db=self.nifti,
             pathology_db=self.pathology,
             clinical_db=self.clinical,
+            participant_db=self.participants,
+            public_non_dicom_db=self.public_non_dicom,
+            bundle_manifest=self.bundle_manifest,
         )
 
     def tearDown(self) -> None:
@@ -495,6 +619,10 @@ class TciaQueryServiceTests(unittest.TestCase):
         self.assertTrue(info["nifti_metadata_db_exists"])
         self.assertTrue(info["pathology_metadata_db_exists"])
         self.assertTrue(info["clinical_metadata_db_exists"])
+        self.assertTrue(info["participant_inventory_db_exists"])
+        self.assertTrue(info["public_non_dicom_metadata_db_exists"])
+        self.assertEqual(info["v2_bundle"]["release_channel"], "stable")
+        self.assertEqual(info["participant_counts"]["participants"], 1)
         self.assertEqual(info["clinical_counts"]["image_linked_subjects"], 1)
         self.assertTrue(info["capabilities"]["release_history"])
         self.assertTrue(info["capabilities"]["external_resource_labels"])
@@ -600,6 +728,36 @@ class TciaQueryServiceTests(unittest.TestCase):
         )
         self.assertEqual(conflicts["count"], 1)
         self.assertEqual(conflicts["conflicts"][0]["values_seen"], ["Yes", "pCR"])
+
+    def test_v2_participant_queries_preserve_identity_and_coverage(self) -> None:
+        participants = self.service.search_participants(
+            query="brca-1", modalities=["MR"], access_levels=["open"]
+        )
+        self.assertEqual(participants["count"], 1)
+        self.assertEqual(participants["participants"][0]["source_namespaces"], [
+            "tcia_subject_id", "idc_patient_id"
+        ])
+        detail = self.service.get_participant(
+            short_title="TCGA-BRCA", participant_id="brca-1"
+        )
+        self.assertEqual(detail["participant"]["participant_key"], "participant-1")
+        assets = self.service.get_participant_assets(
+            "participant-1", data_domains=["radiology"]
+        )
+        self.assertEqual(assets["assets"][0]["file_format"], "DICOM")
+        coverage = self.service.get_dataset_participant_coverage("TCGA-BRCA")
+        self.assertFalse(coverage["coverage_complete"])
+        self.assertEqual(len(coverage["unlinked_dataset_assets"]), 1)
+        issues = self.service.find_participant_link_issues(statuses=["review_required"])
+        self.assertEqual(issues["count"], 1)
+
+    def test_v2_public_non_dicom_query(self) -> None:
+        result = self.service.find_public_non_dicom_assets(
+            short_titles=["TCGA-BRCA"], participant_id="brca-1", file_formats=["NIfTI"]
+        )
+        self.assertEqual(result["count"], 1)
+        self.assertEqual(result["assets"][0]["file_name"], "image.nii.gz")
+        self.assertEqual(result["public_dicom_detail_route"], "IDC/idc-index")
 
 
 if __name__ == "__main__":
