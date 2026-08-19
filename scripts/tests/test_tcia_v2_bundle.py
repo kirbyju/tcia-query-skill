@@ -54,6 +54,36 @@ class V2BundleTests(unittest.TestCase):
             self.assertEqual(first["release_channel"], "stable")
             self.assertEqual(first["release_tag"], "tcia-metadata-v2-latest")
 
+    def test_streamlined_candidate_has_nine_payloads_and_one_bundle_manifest(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.create_bundle_files(root)
+            payload = BUNDLE.build_bundle_manifest(
+                root,
+                release_contract=BUNDLE.STREAMLINED_CANDIDATE_CONTRACT,
+                release_channel="candidate",
+                release_tag="tcia-metadata-v2-streamlined-candidate",
+            )
+            self.assertEqual(payload["asset_count"], 9)
+            self.assertEqual(payload["release_channel"], "candidate")
+            self.assertEqual(set(payload["components"]), set(BUNDLE.STREAMLINED_COMPONENTS))
+            self.assertNotIn("nifti_metadata.sqlite.gz", payload["assets"])
+            self.assertNotIn("pathology_metadata.sqlite.gz", payload["assets"])
+            self.assertNotIn("clinical_qc_manual_review.csv", payload["assets"])
+            self.assertNotIn("tcia_snapshot_manifest.json", payload["assets"])
+            manifest = root / BUNDLE.BUNDLE_MANIFEST_ASSET
+            manifest.write_text(json.dumps(payload))
+            result = BUNDLE.validate_bundle(root, manifest)
+            self.assertTrue(result["ok"], result["errors"])
+            self.assertEqual(BUNDLE.validate_manifest_contract(payload), [])
+            candidate = root / "candidate"
+            materialized = BUNDLE.materialize_bundle(root, manifest, candidate)
+            self.assertEqual(materialized["asset_count"], 10)
+            self.assertEqual(
+                sorted(path.name for path in candidate.iterdir()),
+                sorted([*payload["assets"], BUNDLE.BUNDLE_MANIFEST_ASSET]),
+            )
+
     def test_producer_version_changes_bundle_fingerprint(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -209,6 +239,50 @@ class V2BundleTests(unittest.TestCase):
             self.assertTrue((install_dir / BUNDLE.INSTALL_STATE_ASSET).is_file())
             with closing(sqlite3.connect(install_dir / "participant_inventory.sqlite")) as conn:
                 self.assertEqual(conn.execute("PRAGMA integrity_check").fetchone()[0], "ok")
+
+    def test_install_streamlined_core_uses_inline_component_hashes(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            assets = root / "assets"
+            install_dir = root / "installed"
+            assets.mkdir()
+            self.create_bundle_files(assets)
+            for component in ("snapshot", "participant_inventory"):
+                details = BUNDLE.COMPONENTS[component]
+                sqlite_path = root / f"{component}.sqlite"
+                with closing(sqlite3.connect(sqlite_path)) as conn:
+                    conn.execute("CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT)")
+                    conn.execute("INSERT INTO metadata VALUES ('component', ?)", (component,))
+                raw = sqlite_path.read_bytes()
+                compressed = gzip.compress(raw)
+                (assets / details["database"]).write_bytes(compressed)
+                manifest = json.loads((assets / details["manifest"]).read_text())
+                manifest["sqlite_sha256"] = BUNDLE.hashlib.sha256(raw).hexdigest()
+                manifest["gzip_sha256"] = BUNDLE.hashlib.sha256(compressed).hexdigest()
+                (assets / details["manifest"]).write_text(json.dumps(manifest))
+            payload = BUNDLE.build_bundle_manifest(
+                assets,
+                release_contract=BUNDLE.STREAMLINED_CANDIDATE_CONTRACT,
+                release_channel="candidate",
+                release_tag="tcia-metadata-v2-streamlined-candidate",
+            )
+            bundle_body = json.dumps(payload).encode()
+
+            def fake_fetch(url: str) -> bytes:
+                name = url.rsplit("/", 1)[-1]
+                if name == BUNDLE.BUNDLE_MANIFEST_ASSET:
+                    return bundle_body
+                return (assets / name).read_bytes()
+
+            with mock.patch.object(BUNDLE, "fetch_bytes", side_effect=fake_fetch):
+                result = BUNDLE.install_bundle(
+                    tag="tcia-metadata-v2-streamlined-candidate",
+                    install_dir=install_dir,
+                )
+            self.assertEqual(result["status"], "downloaded")
+            self.assertTrue((install_dir / "tcia_snapshot.sqlite").is_file())
+            self.assertTrue((install_dir / "participant_inventory.sqlite").is_file())
+            self.assertFalse((install_dir / "tcia_snapshot_manifest.json").exists())
 
 
 if __name__ == "__main__":

@@ -163,6 +163,9 @@ Run scripts from the skill root.
 | `scripts/tcia_public_non_dicom_metadata.py` | Build, validate, summarize, and query the V2 public non-DICOM logical-asset and managed-location artifact. |
 | `scripts/tcia_participant_inventory.py` | Compose dataset-scoped participant availability from public non-DICOM, controlled, clinical, and IDC participant projections. |
 | `scripts/tcia_v2_bundle.py` | Install a manifest-pinned V2 profile, regenerate compatibility exports, and build or validate the complete V2 release contract. |
+| `scripts/tcia_v2_staging.py` | Build and validate the runner-local, hash-pinned source ledger used by V2 producers. |
+| `scripts/tcia_v2_checkpoint.py` | Preserve exact specialized NIfTI/pathology source rows inside a candidate V2 audit checkpoint before retiring separate detail artifacts. |
+| `scripts/tcia_v2_parity.py` | Gate legacy-detail retirement on complete unified file projection and exact specialized checkpoint row counts. |
 | `scripts/tcia_v2_audit.py` | Split verbose provenance and troubleshooting payloads into optional V2 audit companions, then validate both sides of the join contract. |
 | `scripts/tcia_controlled_access_metadata.py` | Build/download, validate, summarize, and query the optional release SQLite for public controlled-access WordPress manifests, metadata spreadsheets, `drs_uri` rows, and IDC-shaped radiology indexes. |
 | `scripts/tcia_clinical_metadata.py` | Build/download and validate the optional patient-level clinical SQLite from official TCIA artifacts, IDC collection clinical tables, strict TCIA-matched CDA rows, and DICOM fallback. |

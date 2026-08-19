@@ -24,6 +24,36 @@ audit = load("tcia_v2_audit")
 
 
 class V2AuditSplitTests(unittest.TestCase):
+    def test_participant_audit_embeds_clinical_qc_csv(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            database = root / "participant.sqlite"
+            audit_database = root / "participant_audit.sqlite"
+            clinical_qc = root / "clinical_qc.csv"
+            clinical_qc.write_text(
+                "short_title,subject_id,review_note\nTEST,P1,check value\n",
+                encoding="utf-8",
+            )
+            with sqlite3.connect(database) as conn:
+                conn.executescript(participants.SCHEMA)
+                conn.execute(
+                    "INSERT INTO participant_inventory_meta VALUES ('schema_version', '6')"
+                )
+            result = audit.split_database(
+                database,
+                audit_database,
+                artifact="participant_inventory",
+                clinical_qc_csv=clinical_qc,
+                replace=True,
+            )
+            self.assertTrue(result["audit_validation"]["ok"])
+            with sqlite3.connect(audit_database) as conn:
+                source_row, row_json = conn.execute(
+                    "SELECT source_row_number, row_json FROM clinical_qc_manual_review"
+                ).fetchone()
+                self.assertEqual(source_row, 2)
+                self.assertEqual(__import__("json").loads(row_json)["subject_id"], "P1")
+
     def test_public_research_artifact_keeps_root_source_and_moves_verbose_evidence(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

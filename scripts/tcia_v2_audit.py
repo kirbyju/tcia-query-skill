@@ -4,9 +4,11 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import gzip
 import hashlib
 import json
+import os
 import shutil
 import sqlite3
 from datetime import datetime, timezone
@@ -21,7 +23,7 @@ except ModuleNotFoundError:
     from scripts import tcia_public_non_dicom_metadata as public_non_dicom
 
 
-AUDIT_SCHEMA_VERSION = 1
+AUDIT_SCHEMA_VERSION = 2
 
 CONFIGS: dict[str, dict[str, Any]] = {
     "public_non_dicom": {
@@ -126,6 +128,10 @@ def split_database(
     audit_database: Path,
     *,
     artifact: str,
+    staging_database: Path | None = None,
+    checkpoint_database: Path | None = None,
+    consume_checkpoint: bool = False,
+    clinical_qc_csv: Path | None = None,
     replace: bool = False,
 ) -> dict[str, Any]:
     if artifact not in CONFIGS:
@@ -137,6 +143,15 @@ def split_database(
             raise FileExistsError(f"Audit output exists: {audit_database}; pass --replace")
         audit_database.unlink()
     audit_database.parent.mkdir(parents=True, exist_ok=True)
+    if checkpoint_database is not None:
+        if artifact != "public_non_dicom":
+            raise ValueError("The legacy-detail checkpoint belongs to public non-DICOM audit")
+        if not checkpoint_database.is_file():
+            raise FileNotFoundError(checkpoint_database)
+        if consume_checkpoint:
+            os.replace(checkpoint_database, audit_database)
+        else:
+            shutil.copy2(checkpoint_database, audit_database)
     config = CONFIGS[artifact]
     counts: dict[str, int] = {}
     with sqlite3.connect(database) as conn:
@@ -177,6 +192,68 @@ def split_database(
             JOIN payloads p USING(payload_id);
             """
         )
+        staging_fingerprint = ""
+        if staging_database is not None:
+            if artifact != "public_non_dicom":
+                raise ValueError("The staging checkpoint belongs to the public non-DICOM audit artifact")
+            if not staging_database.is_file():
+                raise FileNotFoundError(staging_database)
+            conn.execute("ATTACH DATABASE ? AS staging", (str(staging_database),))
+            required_staging = (
+                "staging_meta",
+                "staging_sources",
+                "staging_object_inventory",
+            )
+            missing_staging = [
+                table for table in required_staging if not table_exists(conn, table, "staging")
+            ]
+            if missing_staging:
+                raise RuntimeError(
+                    "Staging ledger is missing: " + ", ".join(missing_staging)
+                )
+            for table in required_staging:
+                conn.execute(
+                    f"CREATE TABLE audit.{quote_identifier(table)} AS "
+                    f"SELECT * FROM staging.{quote_identifier(table)}"
+                )
+                counts[table] = int(
+                    conn.execute(
+                        f"SELECT COUNT(*) FROM audit.{quote_identifier(table)}"
+                    ).fetchone()[0]
+                )
+            row = conn.execute(
+                "SELECT value FROM staging.staging_meta WHERE key='source_fingerprint'"
+            ).fetchone()
+            staging_fingerprint = str(row[0]) if row else ""
+        checkpoint_fingerprint = ""
+        if table_exists(conn, "checkpoint_meta", "audit"):
+            row = conn.execute(
+                "SELECT value FROM audit.checkpoint_meta "
+                "WHERE key='checkpoint_fingerprint'"
+            ).fetchone()
+            checkpoint_fingerprint = str(row[0]) if row else ""
+        if clinical_qc_csv is not None:
+            if artifact != "participant_inventory":
+                raise ValueError("Clinical QC rows belong to Participant Inventory audit")
+            if not clinical_qc_csv.is_file():
+                raise FileNotFoundError(clinical_qc_csv)
+            conn.execute(
+                "CREATE TABLE audit.clinical_qc_manual_review ("
+                "source_row_number INTEGER PRIMARY KEY, row_json TEXT NOT NULL)"
+            )
+            with clinical_qc_csv.open(newline="", encoding="utf-8-sig") as handle:
+                reader = csv.DictReader(handle)
+                rows = [
+                    (
+                        index,
+                        json.dumps(row, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+                    )
+                    for index, row in enumerate(reader, start=2)
+                ]
+            conn.executemany(
+                "INSERT INTO audit.clinical_qc_manual_review VALUES (?, ?)", rows
+            )
+            counts["clinical_qc_manual_review"] = len(rows)
         for table, (id_column, fields) in config["json_fields"].items():
             if not table_exists(conn, table):
                 continue
@@ -230,6 +307,16 @@ def split_database(
             "join_contract": "Join entity_payloads.entity_id to the stable primary identifier in entity_table.",
             "counts": json.dumps(counts, sort_keys=True, separators=(",", ":")),
         }
+        if staging_fingerprint:
+            audit_meta["staging_source_fingerprint"] = staging_fingerprint
+            audit_meta["staging_checkpoint_contract"] = (
+                "Path-independent source and schema ledger; build inputs remain external."
+            )
+        if checkpoint_fingerprint:
+            audit_meta["legacy_detail_checkpoint_fingerprint"] = checkpoint_fingerprint
+            audit_meta["legacy_detail_checkpoint_contract"] = (
+                "Exact specialized NIfTI and pathology source rows retained in source_* tables."
+            )
         conn.executemany(
             "INSERT INTO audit.audit_meta VALUES (?, ?)", audit_meta.items()
         )
@@ -243,6 +330,8 @@ def split_database(
             main_meta.items(),
         )
         conn.commit()
+        if staging_database is not None:
+            conn.execute("DETACH DATABASE staging")
         conn.execute("DETACH DATABASE audit")
         conn.execute("VACUUM")
         conn.execute("ANALYZE")
@@ -292,6 +381,54 @@ def validate_audit_database(path: Path, *, artifact: str | None = None) -> dict[
                 counts[table] = conn.execute(
                     f"SELECT COUNT(*) FROM {quote_identifier(table)}"
                 ).fetchone()[0]
+        staging_objects = {
+            "staging_meta", "staging_sources", "staging_object_inventory"
+        }
+        present_staging = staging_objects & objects
+        if present_staging and present_staging != staging_objects:
+            errors.append(
+                "incomplete staging checkpoint: "
+                + ", ".join(sorted(staging_objects - present_staging))
+            )
+        if present_staging == staging_objects:
+            counts["staging_sources"] = conn.execute(
+                "SELECT COUNT(*) FROM staging_sources"
+            ).fetchone()[0]
+            counts["staging_objects"] = conn.execute(
+                "SELECT COUNT(*) FROM staging_object_inventory"
+            ).fetchone()[0]
+        checkpoint_objects = {"checkpoint_meta", "checkpoint_inventory"}
+        present_checkpoint = checkpoint_objects & objects
+        if present_checkpoint and present_checkpoint != checkpoint_objects:
+            errors.append(
+                "incomplete legacy-detail checkpoint: "
+                + ", ".join(sorted(checkpoint_objects - present_checkpoint))
+            )
+        if present_checkpoint == checkpoint_objects:
+            checkpoint_rows = list(
+                conn.execute(
+                    "SELECT checkpoint_table, checkpoint_rows FROM checkpoint_inventory"
+                )
+            )
+            counts["checkpoint_tables"] = len(checkpoint_rows)
+            counts["checkpoint_rows"] = sum(int(row[1]) for row in checkpoint_rows)
+            for table, expected_rows in checkpoint_rows:
+                if str(table) not in objects:
+                    errors.append(f"missing checkpoint table: {table}")
+                    continue
+                actual_rows = int(
+                    conn.execute(
+                        f"SELECT COUNT(*) FROM {quote_identifier(str(table))}"
+                    ).fetchone()[0]
+                )
+                if actual_rows != int(expected_rows):
+                    errors.append(
+                        f"checkpoint row mismatch: {table}={actual_rows}/{expected_rows}"
+                    )
+        if "clinical_qc_manual_review" in objects:
+            counts["clinical_qc_manual_review"] = conn.execute(
+                "SELECT COUNT(*) FROM clinical_qc_manual_review"
+            ).fetchone()[0]
     return {"ok": not errors, "errors": errors, "integrity_check": integrity, "counts": counts}
 
 
@@ -340,6 +477,23 @@ def parser() -> argparse.ArgumentParser:
     split.add_argument("--research-manifest-out")
     split.add_argument("--audit-gzip-out")
     split.add_argument("--audit-manifest-out")
+    split.add_argument(
+        "--staging-db",
+        help="Embed the path-independent runner staging ledger in public non-DICOM audit output.",
+    )
+    split.add_argument(
+        "--checkpoint-db",
+        help="Seed public non-DICOM audit with exact specialized legacy-detail source rows.",
+    )
+    split.add_argument(
+        "--consume-checkpoint",
+        action="store_true",
+        help="Move the runner-local checkpoint into the audit output to avoid a multi-GB copy.",
+    )
+    split.add_argument(
+        "--clinical-qc-csv",
+        help="Embed the clinical manual-review CSV losslessly in Participant Inventory audit.",
+    )
     split.add_argument("--replace", action="store_true")
     validate = sub.add_parser("validate")
     validate.add_argument("--artifact", choices=sorted(CONFIGS))
@@ -359,6 +513,10 @@ def main() -> int:
         database,
         audit_database,
         artifact=args.artifact,
+        staging_database=Path(args.staging_db) if args.staging_db else None,
+        checkpoint_database=Path(args.checkpoint_db) if args.checkpoint_db else None,
+        consume_checkpoint=args.consume_checkpoint,
+        clinical_qc_csv=Path(args.clinical_qc_csv) if args.clinical_qc_csv else None,
         replace=args.replace,
     )
     research_gzip = Path(args.research_gzip_out) if args.research_gzip_out else None

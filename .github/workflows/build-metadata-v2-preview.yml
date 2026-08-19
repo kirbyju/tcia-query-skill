@@ -27,6 +27,22 @@ on:
         options:
           - "true"
           - "false"
+      checkpoint_legacy_detail:
+        description: "Embed exact specialized NIfTI/pathology rows in the public audit candidate"
+        required: true
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+      release_contract:
+        description: "Build the current release contract or a non-publishing streamlined candidate"
+        required: true
+        default: "full"
+        type: choice
+        options:
+          - "full"
+          - "streamlined_candidate"
 
 permissions:
   contents: write
@@ -47,6 +63,18 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+
+      - name: Validate transition candidate inputs
+        if: github.event_name == 'workflow_dispatch' && inputs.release_contract == 'streamlined_candidate'
+        run: |
+          if [ "${{ inputs.checkpoint_legacy_detail }}" != "true" ]; then
+            echo "::error::The streamlined candidate requires checkpoint_legacy_detail=true."
+            exit 1
+          fi
+          if [ "${{ inputs.publish_channel }}" != "none" ]; then
+            echo "::error::The streamlined contract is evaluation-only and cannot be published."
+            exit 1
+          fi
 
       - name: Capture and download the source release without changing it
         env:
@@ -82,6 +110,26 @@ jobs:
             gzip -dc "dist/$asset" > "cache/${asset%.gz}"
           done
 
+      - name: Build the runner-local V2 staging ledger
+        run: |
+          python scripts/tcia_v2_staging.py build \
+            --snapshot-db cache/tcia_snapshot.sqlite \
+            --snapshot-manifest dist/tcia_snapshot_manifest.json \
+            --nifti-db cache/nifti_metadata.sqlite \
+            --nifti-manifest dist/nifti_metadata_manifest.json \
+            --pathology-db cache/pathology_metadata.sqlite \
+            --pathology-manifest dist/pathology_metadata_manifest.json \
+            --controlled-access-db cache/controlled_access_metadata.sqlite \
+            --controlled-access-manifest dist/controlled_access_metadata_manifest.json \
+            --clinical-db cache/clinical_metadata.sqlite \
+            --clinical-manifest dist/clinical_metadata_manifest.json \
+            --source-release-json cache/source_release.json \
+            --out cache/tcia_metadata_v2_staging.sqlite \
+            --replace
+          python scripts/tcia_v2_staging.py validate \
+            --db cache/tcia_metadata_v2_staging.sqlite \
+            --verify-sources
+
       - name: Regenerate the complete web export set from the bundled snapshot
         run: |
           python scripts/tcia_v2_bundle.py exports \
@@ -96,10 +144,7 @@ jobs:
             pathdb_args+=(--no-pathdb-files)
           fi
           python scripts/tcia_public_non_dicom_metadata.py build \
-            --snapshot-db cache/tcia_snapshot.sqlite \
-            --nifti-db cache/nifti_metadata.sqlite \
-            --pathology-db cache/pathology_metadata.sqlite \
-            --clinical-db cache/clinical_metadata.sqlite \
+            --staging-db cache/tcia_metadata_v2_staging.sqlite \
             --crosswalk-csv references/public_non_dicom_crosswalks_v1.csv \
             --crosswalk-curation references/public-non-dicom-crosswalk-curation-v1.json \
             --image-metadata-csv references/public_non_dicom_image_metadata_v1.csv \
@@ -108,6 +153,29 @@ jobs:
             "${pathdb_args[@]}"
           python scripts/tcia_public_non_dicom_metadata.py validate \
             --db cache/public_non_dicom_metadata.sqlite
+          mkdir -p cache/reports
+          checkpoint_args=()
+          parity_args=()
+          if [ "${{ inputs.checkpoint_legacy_detail }}" = "true" ]; then
+            python scripts/tcia_v2_checkpoint.py build \
+              --staging-db cache/tcia_metadata_v2_staging.sqlite \
+              --out cache/tcia_v2_legacy_detail_checkpoint.sqlite \
+              --replace
+            python scripts/tcia_v2_checkpoint.py validate \
+              --db cache/tcia_v2_legacy_detail_checkpoint.sqlite
+            checkpoint_args+=(--checkpoint-db cache/tcia_v2_legacy_detail_checkpoint.sqlite)
+            checkpoint_args+=(--consume-checkpoint)
+            parity_args+=(
+              --audit-db cache/tcia_v2_legacy_detail_checkpoint.sqlite
+              --require-retirement-ready
+            )
+          fi
+          python scripts/tcia_v2_parity.py \
+            --public-db cache/public_non_dicom_metadata.sqlite \
+            --nifti-db cache/nifti_metadata.sqlite \
+            --pathology-db cache/pathology_metadata.sqlite \
+            --out cache/reports/tcia_v2_legacy_detail_parity.json \
+            "${parity_args[@]}"
           # The public artifact has absorbed these sources; free runner space
           # before audit extraction and VACUUM rewrite the multi-GB database.
           rm -f cache/nifti_metadata.sqlite cache/pathology_metadata.sqlite
@@ -119,6 +187,8 @@ jobs:
             --research-manifest-out dist/public_non_dicom_metadata_manifest.json \
             --audit-gzip-out dist/public_non_dicom_audit.sqlite.gz \
             --audit-manifest-out dist/public_non_dicom_audit_manifest.json \
+            --staging-db cache/tcia_metadata_v2_staging.sqlite \
+            "${checkpoint_args[@]}" \
             --replace
           python scripts/tcia_public_non_dicom_metadata.py validate \
             --db cache/public_non_dicom_metadata.sqlite
@@ -143,6 +213,7 @@ jobs:
             --artifact participant_inventory \
             --db cache/participant_inventory.sqlite \
             --audit-out cache/participant_inventory_audit.sqlite \
+            --clinical-qc-csv dist/clinical_qc_manual_review.csv \
             --research-gzip-out dist/participant_inventory.sqlite.gz \
             --research-manifest-out dist/participant_inventory_manifest.json \
             --audit-gzip-out dist/participant_inventory_audit.sqlite.gz \
@@ -159,15 +230,34 @@ jobs:
           python -m unittest \
             scripts.tests.test_tcia_artifact_model \
             scripts.tests.test_tcia_v2_audit \
+            scripts.tests.test_tcia_v2_checkpoint \
+            scripts.tests.test_tcia_v2_parity \
+            scripts.tests.test_tcia_v2_staging \
             scripts.tests.test_tcia_v2_bundle
+
+      - name: Retain staging diagnostics for maintainers
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: tcia-metadata-v2-staging-diagnostics
+          path: |
+            cache/tcia_metadata_v2_staging.sqlite
+            cache/reports/tcia_v2_legacy_detail_parity.json
+          if-no-files-found: ignore
+          retention-days: 30
 
       - name: Build and validate the complete V2 bundle contract
         run: |
           release_channel="stable"
           release_tag="tcia-metadata-v2-latest"
+          release_contract="${{ inputs.release_contract || 'full' }}"
           if [ "${{ inputs.publish_channel }}" = "preview" ]; then
             release_channel="preview"
             release_tag="tcia-metadata-v2-preview"
+          fi
+          if [ "$release_contract" = "streamlined_candidate" ]; then
+            release_channel="candidate"
+            release_tag="tcia-metadata-v2-streamlined-candidate"
           fi
           python scripts/tcia_v2_bundle.py build \
             --asset-dir dist \
@@ -176,10 +266,25 @@ jobs:
             --release-tag "$release_tag" \
             --producer-commit "$GITHUB_SHA" \
             --producer-skill-version "$(python -c 'import json; print(json.load(open("skill_version.json"))["skill_version"])')" \
+            --release-contract "$release_contract" \
             --out dist/tcia_metadata_v2_bundle_manifest.json
           python scripts/tcia_v2_bundle.py validate \
             --asset-dir dist \
             --manifest dist/tcia_metadata_v2_bundle_manifest.json
+          if [ "$release_contract" = "streamlined_candidate" ]; then
+            if [ "${{ inputs.checkpoint_legacy_detail }}" != "true" ]; then
+              echo "::error::The streamlined candidate requires checkpoint_legacy_detail=true."
+              exit 1
+            fi
+            if [ "${{ inputs.publish_channel }}" != "none" ]; then
+              echo "::error::The streamlined contract is evaluation-only and cannot be published."
+              exit 1
+            fi
+            python scripts/tcia_v2_bundle.py materialize \
+              --asset-dir dist \
+              --manifest dist/tcia_metadata_v2_bundle_manifest.json \
+              --out-dir candidate-dist
+          fi
 
       - name: Decide whether to publish V2 release assets
         id: release
@@ -240,12 +345,21 @@ jobs:
           echo "- Publish: $publish" >> "$GITHUB_STEP_SUMMARY"
           echo "- Reason: $reason" >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload complete workflow artifact for evaluation
-        if: github.event_name == 'workflow_dispatch' && inputs.publish_channel == 'none'
+      - name: Upload complete current-contract workflow artifact for evaluation
+        if: github.event_name == 'workflow_dispatch' && inputs.publish_channel == 'none' && inputs.release_contract == 'full'
         uses: actions/upload-artifact@v6
         with:
           name: tcia-metadata-v2-candidate
           path: dist/*
+          compression-level: 0
+          retention-days: 30
+
+      - name: Upload streamlined workflow artifact for evaluation
+        if: github.event_name == 'workflow_dispatch' && inputs.publish_channel == 'none' && inputs.release_contract == 'streamlined_candidate'
+        uses: actions/upload-artifact@v6
+        with:
+          name: tcia-metadata-v2-streamlined-candidate
+          path: candidate-dist/*
           compression-level: 0
           retention-days: 30
 

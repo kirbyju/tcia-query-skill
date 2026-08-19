@@ -28,6 +28,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
+try:
+    from tcia_v2_staging import resolve_component as resolve_staging_component
+except ModuleNotFoundError:
+    from scripts.tcia_v2_staging import resolve_component as resolve_staging_component
+
 from tcia_public_non_dicom_crosswalk_discovery import (
     build_candidate_index,
     match_path,
@@ -2909,6 +2914,7 @@ def build_database(
     crosswalk_csv: Path | None = None,
     crosswalk_curation: Path | None = None,
     image_metadata_csv: Path | None = None,
+    staging_db: Path | None = None,
 ) -> dict[str, Any]:
     if not snapshot_db.exists():
         raise FileNotFoundError(f"Base snapshot not found: {snapshot_db}")
@@ -2959,6 +2965,7 @@ def build_database(
             "source_crosswalk_csv": source_meta(crosswalk_csv) if crosswalk_csv else {"enabled": False},
             "source_crosswalk_curation": source_meta(crosswalk_curation) if crosswalk_curation else {"enabled": False},
             "source_image_metadata_csv": source_meta(image_metadata_csv) if image_metadata_csv else {"enabled": False},
+            "source_staging_ledger": source_meta(staging_db) if staging_db else {"enabled": False},
             "include_pathdb_files": include_pathdb_files,
             "ingest_counts": counts,
         }
@@ -3185,6 +3192,13 @@ def parser() -> argparse.ArgumentParser:
     build.add_argument("--nifti-db", default=str(DEFAULT_NIFTI_DB))
     build.add_argument("--pathology-db", default=str(DEFAULT_PATHOLOGY_DB))
     build.add_argument("--clinical-db", default=str(DEFAULT_CLINICAL_DB))
+    build.add_argument(
+        "--staging-db",
+        help=(
+            "Resolve snapshot, NIfTI, pathology, and clinical inputs from a validated "
+            "runner-local V2 staging ledger. Explicit component paths are ignored."
+        ),
+    )
     build.add_argument("--crosswalk-csv", default=str(DEFAULT_CROSSWALK_CSV))
     build.add_argument("--crosswalk-curation", default=str(DEFAULT_CROSSWALK_CURATION))
     build.add_argument("--image-metadata-csv", default=str(DEFAULT_IMAGE_METADATA_CSV))
@@ -3230,16 +3244,28 @@ def main() -> int:
     args = parser().parse_args()
     if args.command == "build":
         out = Path(args.out)
+        staging_db = Path(args.staging_db) if args.staging_db else None
+        if staging_db:
+            snapshot_db = resolve_staging_component(staging_db, "snapshot", verify_hash=False)
+            nifti_db = resolve_staging_component(staging_db, "nifti", verify_hash=False)
+            pathology_db = resolve_staging_component(staging_db, "pathology", verify_hash=False)
+            clinical_db = resolve_staging_component(staging_db, "clinical", verify_hash=False)
+        else:
+            snapshot_db = Path(args.snapshot_db)
+            nifti_db = Path(args.nifti_db) if args.nifti_db else None
+            pathology_db = Path(args.pathology_db) if args.pathology_db else None
+            clinical_db = Path(args.clinical_db) if args.clinical_db else None
         result = build_database(
-            Path(args.snapshot_db), out,
-            nifti_db=Path(args.nifti_db) if args.nifti_db else None,
-            pathology_db=Path(args.pathology_db) if args.pathology_db else None,
-            clinical_db=Path(args.clinical_db) if args.clinical_db else None,
+            snapshot_db, out,
+            nifti_db=nifti_db,
+            pathology_db=pathology_db,
+            clinical_db=clinical_db,
             crosswalk_csv=Path(args.crosswalk_csv) if args.crosswalk_csv else None,
             crosswalk_curation=Path(args.crosswalk_curation) if args.crosswalk_curation else None,
             image_metadata_csv=Path(args.image_metadata_csv) if args.image_metadata_csv else None,
             include_pathdb_files=not args.no_pathdb_files,
             replace=args.replace,
+            staging_db=staging_db,
         )
         if args.gzip_out:
             gzip_database(out, Path(args.gzip_out))

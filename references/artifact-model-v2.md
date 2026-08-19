@@ -380,6 +380,70 @@ validation. A manually supplied immutable stable tag is created only if it
 does not already exist. The workflow never uploads to
 `tcia-snapshot-latest` and does not deploy, restart, or reconfigure MCP/REST.
 
+### Build-time staging and legacy-detail retirement
+
+Source release assets are first resolved into an explicit build contract rather
+than passed to V2 builders as an implicit collection of unrelated inputs. After
+the source components are downloaded and verified, the workflow builds
+the runner-local `cache/tcia_metadata_v2_staging.sqlite` ledger with
+`scripts/tcia_v2_staging.py`. The ledger pins each source database and manifest
+hash, component schema/fingerprint, release identity, SQLite integrity result,
+and a row-count/schema inventory. Component database names are relative to the
+ledger directory; machine-specific paths are never retained.
+
+The public non-DICOM builder accepts `--staging-db` and resolves its snapshot,
+NIfTI, pathology, and clinical inputs through that contract. The ledger itself
+is not a release asset. A path-independent copy of its tables is embedded in
+`public_non_dicom_audit.sqlite.gz`, while a short-lived GitHub Actions artifact
+retains the ledger and parity report for maintainer diagnostics. Expiration of
+that workflow artifact does not affect a published release.
+
+Run the staging contract directly with:
+
+```bash
+python3 scripts/tcia_v2_staging.py validate \
+  --db cache/tcia_metadata_v2_staging.sqlite \
+  --verify-sources
+```
+
+`scripts/tcia_v2_parity.py` is the removal gate for the legacy NIfTI and
+pathology detail assets. It separately verifies that every eligible source
+file is represented in the unified artifact and that specialized capabilities
+such as derived-object relationships, reviewed NIfTI characteristics,
+pathology package inventories, slide crosswalks, and QC rows have a durable
+checkpoint. A successful file projection alone is not permission to remove
+the source artifacts. The moving V2 contract must retain them until the report
+sets `retirement_ready` to true. Existing immutable releases are never revised
+by this transition.
+
+For candidate evaluation, manually dispatch the workflow with
+`checkpoint_legacy_detail=true`, `release_contract=streamlined_candidate`, and
+`publish_channel=none`. `scripts/tcia_v2_checkpoint.py` then copies
+the exact specialized source rows into path-independent `source_nifti__*` and
+`source_pathology__*` tables, validates source-versus-checkpoint row counts,
+and seeds the public non-DICOM audit companion. The workflow requires the
+parity report to set `retirement_ready=true` before accepting that candidate.
+This option defaults to false so scheduled moving-release builds do not change
+the release contract or increase runner disk use until a candidate has been
+reviewed. The checkpoint is an intermediate file, not an additional release
+asset; only its tables embedded in the audit companion persist.
+
+The materialized streamlined candidate contains exactly ten files: seven
+compressed SQLite databases (`tcia_snapshot`, Participant Inventory, public
+non-DICOM, clinical, controlled-access, and both audit companions), the two
+compressed current dataset/download JSONL exports, and the authoritative bundle
+manifest. NIfTI/pathology specialized rows live in the public non-DICOM audit
+checkpoint, and the clinical manual-review CSV is retained losslessly as a
+Participant Inventory audit table. Component hashes, decompressed SQLite
+hashes, schemas, fingerprints, profiles, and provenance are inline in the
+bundle manifest, so per-component manifests are unnecessary. The installer
+supports both the existing full contract and this inline streamlined contract.
+
+The streamlined contract is deliberately non-publishing until its workflow
+artifact has been reviewed for combined audit size, runner disk headroom,
+installer behavior, and parity. Publication requires a separate code change
+and explicit approval; the candidate path cannot update either moving release.
+
 Component helpers remain available for targeted and compatibility workflows,
 but new integrations should prefer the bundle installer:
 
