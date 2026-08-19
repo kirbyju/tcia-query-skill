@@ -607,6 +607,17 @@ def _store_normalized_field_provenance(
 def reconstruct_field_provenance(
     conn: sqlite3.Connection, *, entity_table: str, entity_id: str
 ) -> dict[str, Any] | None:
+    source_rows = list(
+        conn.execute(
+            "SELECT s.source_label, p.source_json "
+            "FROM entity_provenance_sources s "
+            "JOIN provenance_source_payloads p USING(source_payload_id) "
+            "JOIN entities e USING(entity_key_id) "
+            "JOIN entity_types t USING(entity_type_id) "
+            "WHERE t.entity_table=? AND e.entity_id=? ORDER BY s.source_label",
+            (entity_table, entity_id),
+        )
+    )
     rows = list(
         conn.execute(
             "SELECT field_name, source_label, source_json, identifier_json, decision_json "
@@ -615,16 +626,20 @@ def reconstruct_field_provenance(
             (entity_table, entity_id),
         )
     )
-    if not rows:
+    if not source_rows and not rows:
         row = conn.execute(
             "SELECT payload_json FROM agent_entity_payloads "
             "WHERE entity_table=? AND entity_id=? AND field_name='field_provenance_json'",
             (entity_table, entity_id),
         ).fetchone()
         return json.loads(str(row[0])) if row else None
-    result: dict[str, Any] = {"_sources": {}}
+    result: dict[str, Any] = {
+        "_sources": {
+            str(source_label): json.loads(str(source_json))
+            for source_label, source_json in source_rows
+        }
+    }
     for metadata_field, source_label, source_json, identifier_json, decision_json in rows:
-        result["_sources"][str(source_label)] = json.loads(str(source_json))
         decision = json.loads(str(decision_json))
         decision["source_id"] = json.loads(str(identifier_json))
         result[str(metadata_field)] = decision

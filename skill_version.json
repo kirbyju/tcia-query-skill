@@ -62,7 +62,7 @@
     "scripts/tcia_publications.py": "fcd1aa1e5abd48d0f556165bbee85af7d30030ba4ece1af573c8a441b720659a",
     "scripts/tcia_skill_version.py": "022626ade6a21b225cc0974c7e0593afb4bc158bc6850c41966205a5a41f796b",
     "scripts/tcia_snapshot.py": "283942a4e495d6ce66c75f8f45c51263edff4e5febfc27f79d6cc822d61e2e0b",
-    "scripts/tcia_v2_audit.py": "737cd2d302ee78c8078e522227bbb138ff46bf68ffb282453e4be5566c873f57",
+    "scripts/tcia_v2_audit.py": "9588a29026056490fd64b90bf875f58ed131b266dc1d6e2debc0cc73742392e8",
     "scripts/tcia_v2_bundle.py": "ce5c7fc0e51aa613142f4ab15368925227b620f90f6e3c7110247f512c939f65",
     "scripts/tcia_v2_checkpoint.py": "da0818f0ede8b9e158f37752c66817d6ac86ebd5f887d8977f4f9d9b57c06f0b",
     "scripts/tcia_v2_parity.py": "0a651d86c0bce64ee82c0bb8da3e4fe848bf7738f6a305c4f65da37cbe9f7e69",
@@ -74,13 +74,13 @@
     "scripts/tests/test_tcia_nifti_metadata_harvest.py": "836af097f5f755ca2383c9433c8b219faf2814c8b4e282826319ae2ee5a4c926",
     "scripts/tests/test_tcia_skill_version.py": "a1106ca1f6736252d4c81a040cb98a5b9cff706437708df96bb6418189b18dbe",
     "scripts/tests/test_tcia_snapshot.py": "35dbe7b25518c09a6160cda5981cc5fd0a5e13e66c544dc19364f04bef059641",
-    "scripts/tests/test_tcia_v2_audit.py": "ddd900ee5ffd556ab57b37c8fa12053511dc76decdbc8596c78059240d6d82f0",
+    "scripts/tests/test_tcia_v2_audit.py": "46c7c3f4a45a4c4dade6eb72c205b6ebff4a03abed7e02f9a21dc1023ff07a70",
     "scripts/tests/test_tcia_v2_bundle.py": "b7b94295922e522842173b1325bc14970dbb4c3e0980b1352a0b6ef369ec68d1",
     "scripts/tests/test_tcia_v2_checkpoint.py": "4a297497537bc6f6a00463cc2880b056802e5b4b9d3d580020ebce4e042f8983",
     "scripts/tests/test_tcia_v2_parity.py": "27f51ddd8bbc200eb85327cd716db37f2f7d12393bb25445ba4f5d6b6f8301ae",
     "scripts/tests/test_tcia_v2_staging.py": "3ae42e023e3a75432fc546d31da5a4c39b09fde561378516dda1d01e0e04f4de"
   },
   "schema_version": 1,
-  "skill_version": "2026.08.19.3",
-  "updated_at_utc": "2026-08-19T17:00:59.416019+00:00"
+  "skill_version": "2026.08.19.4",
+  "updated_at_utc": "2026-08-19T17:29:45.233791+00:00"
 }

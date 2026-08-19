@@ -345,7 +345,10 @@ class V2AuditSplitTests(unittest.TestCase):
                 ).fetchone()
                 numeric_source = __import__("json").loads(row[1])
                 old_label, source_value = next(iter(numeric_source["_sources"].items()))
-                numeric_source["_sources"] = {"1": source_value}
+                numeric_source["_sources"] = {
+                    "1": source_value,
+                    "unused-source": {"source_kind": "supplemental"},
+                }
                 for key, decision in numeric_source.items():
                     if key != "_sources" and decision.get("source_id") == old_label:
                         decision["source_id"] = 1
