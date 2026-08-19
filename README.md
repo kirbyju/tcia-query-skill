@@ -203,8 +203,8 @@ optional `*_audit.sqlite.gz` companions by stable entity ID.
 - [references/artifact-model-v2.md](./references/artifact-model-v2.md): public non-DICOM and Participant Inventory contracts
 - [references/clinical.md](./references/clinical.md): patient-level clinical data
 - [references/controlled-access.md](./references/controlled-access.md): controlled-access policy and authorized Data Retriever use
-- [references/nifti.md](./references/nifti.md): optional NIfTI metadata
-- [references/pathology.md](./references/pathology.md): PathDB and Aspera-derived pathology metadata
+- [references/nifti.md](./references/nifti.md): unified V2 NIfTI metadata and legacy helper guidance
+- [references/pathology.md](./references/pathology.md): unified V2 PathDB/Aspera pathology metadata and legacy helper guidance
 - [references/publications.md](./references/publications.md): verified publication searches
 - [references/visualization.md](./references/visualization.md): viewer routing
 - [mcp_server/README.md](./mcp_server/README.md): local MCP/REST service

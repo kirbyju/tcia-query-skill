@@ -84,6 +84,24 @@ class V2BundleTests(unittest.TestCase):
                 sorted([*payload["assets"], BUNDLE.BUNDLE_MANIFEST_ASSET]),
             )
 
+    def test_streamlined_contract_is_publishable_on_stable_channel(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.create_bundle_files(root)
+            payload = BUNDLE.build_bundle_manifest(
+                root,
+                release_contract=BUNDLE.STREAMLINED_RELEASE_CONTRACT,
+                release_channel="stable",
+                release_tag="tcia-metadata-v2-latest",
+            )
+            self.assertEqual(payload["asset_count"], 9)
+            self.assertEqual(payload["release_contract"], "streamlined")
+            self.assertEqual(payload["release_channel"], "stable")
+            self.assertEqual(set(payload["components"]), set(BUNDLE.STREAMLINED_COMPONENTS))
+            manifest = root / BUNDLE.BUNDLE_MANIFEST_ASSET
+            manifest.write_text(json.dumps(payload))
+            self.assertTrue(BUNDLE.validate_bundle(root, manifest)["ok"])
+
     def test_producer_version_changes_bundle_fingerprint(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

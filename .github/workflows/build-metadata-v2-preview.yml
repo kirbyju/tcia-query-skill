@@ -36,12 +36,13 @@ on:
           - "false"
           - "true"
       release_contract:
-        description: "Build the current release contract or a non-publishing streamlined candidate"
+        description: "Build the full, publishable streamlined, or evaluation-only streamlined contract"
         required: true
         default: "full"
         type: choice
         options:
           - "full"
+          - "streamlined"
           - "streamlined_candidate"
 
 permissions:
@@ -65,13 +66,14 @@ jobs:
           python-version: "3.12"
 
       - name: Validate transition candidate inputs
-        if: github.event_name == 'workflow_dispatch' && inputs.release_contract == 'streamlined_candidate'
+        if: github.event_name == 'workflow_dispatch' && (inputs.release_contract == 'streamlined' || inputs.release_contract == 'streamlined_candidate')
         run: |
           if [ "${{ inputs.checkpoint_legacy_detail }}" != "true" ]; then
             echo "::error::The streamlined candidate requires checkpoint_legacy_detail=true."
             exit 1
           fi
-          if [ "${{ inputs.publish_channel }}" != "none" ]; then
+          if [ "${{ inputs.release_contract }}" = "streamlined_candidate" ] \
+             && [ "${{ inputs.publish_channel }}" != "none" ]; then
             echo "::error::The streamlined contract is evaluation-only and cannot be published."
             exit 1
           fi
@@ -193,7 +195,8 @@ jobs:
           # The public artifact has absorbed these sources; free runner space
           # before producing the research and audit outputs.
           rm -f cache/nifti_metadata.sqlite cache/pathology_metadata.sqlite
-          if [ "${{ inputs.release_contract }}" = "streamlined_candidate" ]; then
+          if [ "${{ inputs.release_contract }}" = "streamlined" ] \
+             || [ "${{ inputs.release_contract }}" = "streamlined_candidate" ]; then
             mv cache/public_non_dicom_metadata.sqlite cache/public_non_dicom_assembly.sqlite
             python scripts/tcia_v2_audit.py project-v3 \
               --artifact public_non_dicom \
@@ -315,19 +318,21 @@ jobs:
           python scripts/tcia_v2_bundle.py validate \
             --asset-dir dist \
             --manifest dist/tcia_metadata_v2_bundle_manifest.json
-          if [ "$release_contract" = "streamlined_candidate" ]; then
+          if [ "$release_contract" = "streamlined" ] \
+             || [ "$release_contract" = "streamlined_candidate" ]; then
             if [ "${{ inputs.checkpoint_legacy_detail }}" != "true" ]; then
               echo "::error::The streamlined candidate requires checkpoint_legacy_detail=true."
               exit 1
             fi
-            if [ "${{ inputs.publish_channel }}" != "none" ]; then
+            if [ "$release_contract" = "streamlined_candidate" ] \
+               && [ "${{ inputs.publish_channel }}" != "none" ]; then
               echo "::error::The streamlined contract is evaluation-only and cannot be published."
               exit 1
             fi
             python scripts/tcia_v2_bundle.py materialize \
               --asset-dir dist \
               --manifest dist/tcia_metadata_v2_bundle_manifest.json \
-              --out-dir candidate-dist
+              --out-dir release-dist
           fi
 
       - name: Decide whether to publish V2 release assets
@@ -368,7 +373,12 @@ jobs:
             if [ "$channel" = "preview" ]; then
               tag="tcia-metadata-v2-preview"
             fi
-            new_fingerprint="$(python -c 'import json; print(json.load(open("dist/tcia_metadata_v2_bundle_manifest.json"))["release_fingerprint"])')"
+            manifest_path="dist/tcia_metadata_v2_bundle_manifest.json"
+            if [ "${{ inputs.release_contract }}" = "streamlined" ] \
+               || [ "${{ inputs.release_contract }}" = "streamlined_candidate" ]; then
+              manifest_path="release-dist/tcia_metadata_v2_bundle_manifest.json"
+            fi
+            new_fingerprint="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["release_fingerprint"])' "$manifest_path")"
             old_fingerprint=""
             mkdir -p previous-v2
             if gh release download "$tag" --pattern tcia_metadata_v2_bundle_manifest.json --dir previous-v2 --clobber >/dev/null 2>&1; then
@@ -403,7 +413,7 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: tcia-metadata-v2-streamlined-candidate
-          path: candidate-dist/*
+          path: release-dist/*
           compression-level: 0
           retention-days: 30
 
@@ -415,6 +425,11 @@ jobs:
           set -euo pipefail
           tag="${{ steps.release.outputs.tag }}"
           channel="${{ steps.release.outputs.channel }}"
+          release_contract="${{ inputs.release_contract || 'full' }}"
+          publish_dir="dist"
+          if [ "$release_contract" = "streamlined" ]; then
+            publish_dir="release-dist"
+          fi
           notes="TCIA Metadata Artifact Model V2 bundle. The manifest defines research-core, research-detail, audit-support, and compatibility-export profiles. Participant Inventory is compact by default; file-grain metadata and verbose audit evidence are optional hash-pinned companions. Public DICOM detail remains authoritative in IDC. The legacy tcia-snapshot-latest release is retained as a compatibility line."
           prerelease_args=()
           title="TCIA metadata V2 latest"
@@ -435,12 +450,12 @@ jobs:
               echo "::error::Immutable release already exists: $immutable_tag"
               exit 1
             fi
-            gh release create "$immutable_tag" dist/* \
+            gh release create "$immutable_tag" "$publish_dir"/* \
               --title "TCIA metadata V2 ${immutable_tag#tcia-metadata-v2-}" \
               --notes "$notes"
             gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${immutable_tag}" > immutable-release.json
             python scripts/tcia_v2_bundle.py validate-published \
-              --manifest dist/tcia_metadata_v2_bundle_manifest.json \
+              --manifest "$publish_dir/tcia_metadata_v2_bundle_manifest.json" \
               --release-json immutable-release.json
           fi
           if ! gh release view "$tag" >/dev/null 2>&1; then
@@ -459,7 +474,7 @@ jobs:
             previous_manifest="previous-v2/tcia_metadata_v2_bundle_manifest.json"
           fi
           changed_args=(
-            --current dist/tcia_metadata_v2_bundle_manifest.json
+            --current "$publish_dir/tcia_metadata_v2_bundle_manifest.json"
           )
           if [ -n "$previous_manifest" ]; then
             changed_args+=(--previous "$previous_manifest")
@@ -468,26 +483,28 @@ jobs:
           payload_assets=()
           for asset in "${changed_names[@]}"; do
             if [ -n "$asset" ]; then
-              payload_assets+=("dist/$asset")
+              payload_assets+=("$publish_dir/$asset")
             fi
           done
           if [ "${#payload_assets[@]}" -gt 0 ]; then
             gh release upload "$tag" "${payload_assets[@]}" --clobber
           fi
           while read -r asset; do
-            if [ ! -f "dist/$asset" ]; then
+            if [ ! -f "$publish_dir/$asset" ]; then
               gh release delete-asset "$tag" "$asset" --yes
             fi
           done < <(gh release view "$tag" --json assets --jq '.assets[].name')
-          gh release upload "$tag" dist/tcia_metadata_v2_bundle_manifest.json --clobber
+          gh release upload "$tag" "$publish_dir/tcia_metadata_v2_bundle_manifest.json" --clobber
 
-          python scripts/tcia_v2_bundle.py expected-assets --include-bundle-manifest | sort > expected-assets.txt
+          python scripts/tcia_v2_bundle.py expected-assets \
+            --release-contract "$release_contract" \
+            --include-bundle-manifest | sort > expected-assets.txt
           gh release view "$tag" --json assets --jq '.assets[].name' | sort > published-assets.txt
           diff -u expected-assets.txt published-assets.txt
           for attempt in 1 2 3 4 5; do
             gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" > published-release.json
             if python scripts/tcia_v2_bundle.py validate-published \
-              --manifest dist/tcia_metadata_v2_bundle_manifest.json \
+              --manifest "$publish_dir/tcia_metadata_v2_bundle_manifest.json" \
               --release-json published-release.json; then
               break
             fi

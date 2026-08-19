@@ -1,12 +1,12 @@
 # TCIA NIfTI Metadata
 
-TCIA's WordPress snapshot is the authority for whether a NIfTI package is a current, visible, TCIA-published download. The optional NIfTI SQLite release adds file-grain metadata mined from current visible, non-controlled NIfTI download records, companion spreadsheets, root `.sums` files, and accepted Aspera package listings.
+TCIA's WordPress snapshot is the authority for whether a NIfTI package is a current, visible, TCIA-published download. The moving V2 release exposes file-grain NIfTI discovery through the unified public non-DICOM research artifact and retains specialized legacy NIfTI tables inside its audit companion.
 
 Use this reference when a user asks about TCIA NIfTI file counts, NIfTI modalities, NIfTI filenames, package inventories, or NIfTI segmentation/source-image relationships.
 
 ## Optional Release Asset
 
-The NIfTI SQLite is intentionally not downloaded when the skill is installed or when the normal TCIA snapshot is refreshed. Only users or agents that need NIfTI file-grain metadata should download it:
+The following standalone helper remains a maintainer/legacy compatibility tool; `tcia-metadata-v2-latest` no longer publishes its SQLite as a separate asset:
 
 ```bash
 python scripts/tcia_nifti_metadata.py ensure
@@ -32,7 +32,7 @@ Release URLs:
 
 ## When To Use
 
-Use the normal TCIA snapshot first to confirm TCIA provenance, visibility, access level, and user-facing download URLs. Then use the NIfTI SQLite only for file-level questions.
+Use the normal TCIA snapshot first to confirm TCIA provenance, visibility, access level, and user-facing download URLs. Then use the unified public non-DICOM artifact for file-level questions and the audit companion for specialized source rows and QC.
 
 Good NIfTI SQLite use cases:
 
@@ -61,7 +61,7 @@ python scripts/tcia_nifti_metadata.py characteristics --collection Vestibular-Sc
 python scripts/tcia_nifti_metadata.py derived --collection BCBM-RadioGenomics --with-sources
 ```
 
-The helper downloads and verifies `nifti_metadata.sqlite.gz` only when `ensure` is run. Query commands expect the local SQLite to exist and will ask the user to run `ensure` if it does not.
+The helper can still download and verify `nifti_metadata.sqlite.gz` from a legacy release that contains it. It is not a supported asset of the streamlined moving V2 contract.
 
 Maintainer commands:
 
@@ -280,7 +280,7 @@ Scheduled workflow should:
 3. Run `scripts/tcia_nifti_metadata.py drift-check` against the fresh snapshot.
 4. Warn maintainers if current visible, non-controlled NIfTI download records no longer match the released NIfTI manifest.
 
-When drift is detected, run a manual maintainer refresh using the existing release SQLite and harvested file caches as the baseline, then upload refreshed `nifti_metadata.sqlite.gz` and `nifti_metadata_manifest.json` release assets.
+When drift is detected, rebuild the unified public non-DICOM artifact and its checkpoint-backed audit companion; do not add the retired standalone NIfTI assets back to the moving V2 contract.
 
 For patient-coverage refreshes, include Aspera metadata files as well as NIfTI package listings when the runtime can safely browse/download the packages:
 

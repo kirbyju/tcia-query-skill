@@ -33,8 +33,13 @@ PREVIEW_RELEASE_TAG = "tcia-metadata-v2-preview"
 DEFAULT_INSTALL_DIR = Path(__file__).resolve().parents[1] / "cache" / DEFAULT_RELEASE_TAG
 INSTALL_STATE_ASSET = "tcia_metadata_v2_install.json"
 FULL_RELEASE_CONTRACT = "full"
+STREAMLINED_RELEASE_CONTRACT = "streamlined"
 STREAMLINED_CANDIDATE_CONTRACT = "streamlined_candidate"
-RELEASE_CONTRACTS = (FULL_RELEASE_CONTRACT, STREAMLINED_CANDIDATE_CONTRACT)
+RELEASE_CONTRACTS = (
+    FULL_RELEASE_CONTRACT,
+    STREAMLINED_RELEASE_CONTRACT,
+    STREAMLINED_CANDIDATE_CONTRACT,
+)
 
 COMPONENTS = {
     "snapshot": {
@@ -161,13 +166,19 @@ def installed_asset_name(asset: str) -> str:
 def component_names_for_contract(release_contract: str) -> tuple[str, ...]:
     if release_contract == FULL_RELEASE_CONTRACT:
         return tuple(COMPONENTS)
-    if release_contract == STREAMLINED_CANDIDATE_CONTRACT:
+    if release_contract in (
+        STREAMLINED_RELEASE_CONTRACT,
+        STREAMLINED_CANDIDATE_CONTRACT,
+    ):
         return STREAMLINED_COMPONENTS
     raise ValueError(f"Unknown V2 release contract: {release_contract}")
 
 
 def expected_payload_assets(release_contract: str = FULL_RELEASE_CONTRACT) -> list[str]:
-    if release_contract == STREAMLINED_CANDIDATE_CONTRACT:
+    if release_contract in (
+        STREAMLINED_RELEASE_CONTRACT,
+        STREAMLINED_CANDIDATE_CONTRACT,
+    ):
         assets = set(STREAMLINED_WEB_EXPORTS)
         for name in STREAMLINED_COMPONENTS:
             assets.add(str(COMPONENTS[name]["database"]))

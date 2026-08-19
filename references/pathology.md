@@ -1,12 +1,12 @@
 # TCIA Pathology Aspera Metadata
 
-TCIA's WordPress/Collection Manager snapshot is the authority for which non-DICOM pathology Aspera downloads are current, visible, non-controlled, and TCIA-published. The optional pathology SQLite release adds a download-level scope table, Aspera-derived package inventory tables, and a PathDB crosswalk for enrichment/disparity review.
+TCIA's WordPress/Collection Manager snapshot is the authority for which non-DICOM pathology Aspera downloads are current, visible, non-controlled, and TCIA-published. The moving V2 release exposes pathology discovery through the unified public non-DICOM artifact and retains the specialized package inventory and PathDB crosswalk tables inside its audit companion.
 
 Use this reference when a user asks about public TCIA pathology Aspera packages, package/download scope, PathDB coverage gaps, or curator-facing PathDB/package disparities.
 
 ## Optional Release Asset
 
-The pathology SQLite is intentionally not downloaded when the skill is installed or when the normal TCIA snapshot is refreshed. Users or agents that need pathology Aspera package/download metadata can download it on demand:
+The standalone pathology SQLite helper remains available against the legacy compatibility release, but `tcia-metadata-v2-latest` no longer publishes it as a separate asset:
 
 ```bash
 python scripts/tcia_pathology_metadata.py ensure
@@ -32,7 +32,7 @@ Release URLs:
 
 ## When To Use
 
-Use the normal TCIA snapshot first to confirm TCIA provenance, visibility, access level, and user-facing download URLs. Then use the pathology SQLite for pathology Aspera package scope and PathDB reconciliation details.
+Use the normal TCIA snapshot first to confirm TCIA provenance, visibility, access level, and user-facing download URLs. Then use the unified public non-DICOM artifact for discovery and its audit companion for package scope and PathDB reconciliation details.
 
 Good pathology SQLite use cases:
 
@@ -58,7 +58,7 @@ python scripts/tcia_pathology_metadata.py pathdb --collection CPTAC-STAD --limit
 python scripts/tcia_pathology_metadata.py disparities
 ```
 
-The helper downloads and verifies `pathology_metadata.sqlite.gz` only when `ensure` is run. Query commands expect the local SQLite to exist and will ask the user to run `ensure` if it does not.
+The helper downloads and verifies `pathology_metadata.sqlite.gz` only from a legacy release that still contains it. It is not part of the streamlined moving V2 contract.
 
 Maintainer commands for a download-scope-only build without package inventory:
 

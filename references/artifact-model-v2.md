@@ -314,20 +314,18 @@ Use `tcia-metadata-v2-latest` as the moving default release contract and retain
 immutable `tcia-metadata-v2-YYYY.MM...` releases for reproducibility. Keep
 `tcia-metadata-v2-preview` for explicit schema-changing candidates. Do not
 replace or delete `tcia-snapshot-latest`; it remains the May 2026-compatible
-legacy line. Every V2 channel contains these asset groups:
+legacy line. The moving stable channel uses the streamlined contract with
+these asset groups:
 
 - Research core: `tcia_snapshot.sqlite.gz`, compact
-  `participant_inventory.sqlite.gz`, their manifests, and the compressed
+  `participant_inventory.sqlite.gz`, and the compressed
   current dataset/download exports. This is the default install profile.
-- Research detail: public non-DICOM, NIfTI, pathology, controlled-access, and
-  clinical SQLite databases and manifests. These are fetched only for relevant
-  drill-down workflows.
-- Audit support: `public_non_dicom_audit.sqlite.gz`,
-  `participant_inventory_audit.sqlite.gz`, their manifests, and the clinical
-  manual-review queue. Audit companions hold verbose JSON provenance and
+- Research detail: unified public non-DICOM, controlled-access, and clinical
+  SQLite databases. These are fetched only for relevant drill-down workflows.
+- Audit support: `public_non_dicom_audit.sqlite.gz` and
+  `participant_inventory_audit.sqlite.gz`. Audit companions hold verbose JSON provenance and
   detailed crosswalk evidence keyed by stable research-artifact identifiers.
-- Compatibility exports: uncompressed and historical JSONL exports retained
-  for specialized consumers, but excluded from ordinary downloads.
+- Compatibility exports: the two compressed current JSONL exports.
 - Bundle contract: `tcia_metadata_v2_bundle_manifest.json`, which pins the
   SHA-256, size, profile, category, source, and default-download status of every
   payload and records each component schema and release fingerprint.
@@ -435,9 +433,14 @@ runner-local and is consumed by the audit build. This cache is an optimization,
 not an authority or release surface, and a component hash change necessarily
 creates a new cache key.
 
-The streamlined candidate uses compact public audit schema 3. The ordinary
-full/stable contract continues to use audit schema 2 until a compact candidate
-is explicitly promoted. Schema 3 treats the original public non-DICOM database
+After the candidate passes parity, reconstruction, and bundle validation,
+promote the same path with `release_contract=streamlined`,
+`checkpoint_legacy_detail=true`, and `publish_channel=stable`. The
+`streamlined_candidate` value remains non-publishing by design. The `full`
+contract remains available as a compatibility build path.
+
+The streamlined release uses compact public audit schema 3. Schema 3 treats
+the original public non-DICOM database
 as a short-lived assembly database and projects fresh research and audit
 outputs rather than clearing columns and vacuuming that multi-GB file in place.
 It uses integer entity/field links, 32-byte digest BLOBs, and `WITHOUT ROWID`
@@ -463,7 +466,7 @@ parallel at level 3 for the candidate, using `pigz` when present and a portable
 Python gzip fallback otherwise. The stable schema-2 path retains its existing
 sequential level-6 compression behavior.
 
-The materialized streamlined candidate contains exactly ten files: seven
+The materialized streamlined release contains exactly ten files: seven
 compressed SQLite databases (`tcia_snapshot`, Participant Inventory, public
 non-DICOM, clinical, controlled-access, and both audit companions), the two
 compressed current dataset/download JSONL exports, and the authoritative bundle
@@ -474,11 +477,10 @@ hashes, schemas, fingerprints, profiles, and provenance are inline in the
 bundle manifest, so per-component manifests are unnecessary. The installer
 supports both the existing full contract and this inline streamlined contract.
 
-The streamlined contract is deliberately non-publishing until its workflow
-artifact has been reviewed for combined audit size, runner disk headroom,
-installer behavior, parity, reconstruction, and schema-3 consumer impact.
-Publication requires a separate code change and explicit approval; the
-candidate path cannot update either moving release.
+The evaluation-only `streamlined_candidate` path cannot update either moving
+release. Stable publication uses the separately named `streamlined` contract
+after combined audit size, runner disk headroom, installer behavior, parity,
+reconstruction, and schema-3 consumer impact have passed review.
 
 Component helpers remain available for targeted and compatibility workflows,
 but new integrations should prefer the bundle installer:
@@ -500,9 +502,12 @@ release by overriding their tag, for example:
 python3 scripts/tcia_snapshot.py ensure --tag tcia-metadata-v2-latest
 python3 scripts/tcia_clinical_metadata.py ensure --tag tcia-metadata-v2-latest
 python3 scripts/tcia_controlled_access_metadata.py ensure --tag tcia-metadata-v2-latest
-python3 scripts/tcia_nifti_metadata.py ensure --tag tcia-metadata-v2-latest
-python3 scripts/tcia_pathology_metadata.py ensure --tag tcia-metadata-v2-latest
 ```
+
+NIfTI and pathology discovery now comes through the unified public non-DICOM
+research artifact. Their specialized source rows remain losslessly embedded in
+the public non-DICOM audit companion rather than published as separate SQLite
+assets.
 
 The stable asset URLs are:
 
