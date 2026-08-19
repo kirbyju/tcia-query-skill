@@ -1,7 +1,7 @@
 {
   "files": {
     "README.md": "eda62f4637d641d5f5f75e7eb73df59a1544feef5584939eb6bb73b39cb06ade",
-    "SKILL.md": "94084a475680c325506c9d4bc1a8ea5c6e72c4aba8469889cc725a6dc9d139f5",
+    "SKILL.md": "699e28cac8cc2a2849a599e3203f4c6636a5056017333cb1b67e25db2ef47f5c",
     "agents/openai.yaml": "62abab563a5e72e05651ae6ff5fbb8eb04d0013dec47dc30ab83722d9baa1eb4",
     "mcp_server/DEPLOYMENT.md": "af2ffdaa40b3928f95df7f50b1f3b5aef6853ccd3af98f8e5156b945b793141a",
     "mcp_server/IMPLEMENTATION_PLAN.md": "3bb219d4f4d09c254a87cea423a0b41c90f235908496641782c99230c81cdba4",
@@ -15,15 +15,15 @@
     "mcp_server/tcia_query_mcp/service.py": "f8d4c107f51bf23f7bd0ce1f2051a6eea4dcae5f3b4e5e0819296e70b847027f",
     "mcp_server/tests/test_rest.py": "53e5df6ab7f6861a534400e5e71c85aa424dab772031d6b04c436ecbe116e7c6",
     "mcp_server/tests/test_service.py": "b267297d338332e1212e64d8f5b90d1e43309f2d6b9e80ed30ae7e28633261bb",
-    "references/artifact-model-v2.md": "58ef46b3c762de1e6867f792fc0a9aea735b264383bd543a778c763406966d93",
+    "references/artifact-model-v2.md": "e0a07489e08da03c599674145d9a6f9349e7aada21e01fff76ebfa6f105b60ff",
     "references/aspera.md": "095b86fb43ae4f99bb521bbc1f83f5d5bc9caf0f35d739f318cd168a7eefd93b",
     "references/cda.md": "3c840c39f5c3fd8c892ce91842a6120bd6be873612bdf7f47d42f6612a9b181d",
     "references/clinical.md": "9ea2c551068ac1cd4d595205c9512d26fe0022791d6dc1f728f51b46d55a6f35",
-    "references/controlled-access.md": "6410077b99f4340bdc51213a1cc32fb5fac0e8664b50fdf0c11eee6488fb8dca",
+    "references/controlled-access.md": "ecb83d6826282371af2eac22b02d7adcd39a287064d3adb151622964e9dd1fa0",
     "references/datacite-relationships.md": "f6debe949a144e8d487cbf211d5a4a6c73fa02ef1651d9a3a7982cc127fa3c9f",
     "references/general-commons-graphql.md": "cff8741c5163782e995ec23c51476056d4db989eedf7751416ac5b814c014f68",
     "references/idc-dicom-downloads.md": "55498f1a8d2768febf820a223eb79f6203ca498ac50ef4d1f9fc2ca5ebeacfa0",
-    "references/mcp-and-web-llms.md": "c446510d3ffe64587b746b7bc5b4f5b03212e870cf3809f092f6fd4400ab62ac",
+    "references/mcp-and-web-llms.md": "5bad0a10e1264ba0f616a5ce00909691b8241c882facaaf07a8cdab8b30d04f7",
     "references/nifti.md": "2ca40289fc61abfb6b6578590b756f4aab24a195fa1d249cc6099433ee69bcef",
     "references/pathdb.md": "8b3f5d27ff341c19261545609c27a3061cf39af020ab6992bda1cf307a84ede5",
     "references/pathology.md": "55683f98cb1372a82b00de846e336116ef1875353311f7c5bd0d8d3078bba0a2",
@@ -33,8 +33,8 @@
     "references/public_non_dicom_image_metadata_v1.csv": "99b181382885cc1e6f3b828e3bb877eb9a1acca2eba66ab51a233744e48665f7",
     "references/publications.md": "dae8f6260f369e072d2e13fcdeba6b4248857d78484b573d0f38f11e7dfe0e19",
     "references/routing.md": "1784c471d1bd78aed5ed7b094a0e4db8cdbda046fd7d6a028c8d638ce611c765",
-    "references/schema.md": "8c33036e2280a792f8ae75ffb65ea5ee0fc826fe0d41ad323272d9a89c16b37e",
-    "references/snapshots.md": "0d0a5aa6c8c9a9586ff8e645bcb56bffb32cc718af2a634c42cdd06e87ed69d1",
+    "references/schema.md": "8ea180c06f273aafb6573d56ff24a6a64b88fd55b9bba1aad0328ddced9bd11b",
+    "references/snapshots.md": "cdec7cb6aec72403ebe70a554618804279cd1743734f8c39d5ab25dfd7c0fa2b",
     "references/visualization.md": "782c82700d9a7b0702ea22be41c9c2fcd3a452bd95ac753365940de29ba344d0",
     "scripts/check_aspera_root_sums.py": "0dc0d3e0e9815303f10d54074bb320dd1faf461171e58953e17c065ca5ea4b02",
     "scripts/crawl_yale_nifti_aspera.py": "9e4017c3d1f1e3f09f59de9d4216cd601ef1da0a57e23856755e8cb32db8a8be",
@@ -81,6 +81,6 @@
     "scripts/tests/test_tcia_v2_staging.py": "3ae42e023e3a75432fc546d31da5a4c39b09fde561378516dda1d01e0e04f4de"
   },
   "schema_version": 1,
-  "skill_version": "2026.08.19.5",
-  "updated_at_utc": "2026-08-19T18:05:16.456846+00:00"
+  "skill_version": "2026.08.19.6",
+  "updated_at_utc": "2026-08-19T18:49:14.715923+00:00"
 }

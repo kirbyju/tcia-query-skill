@@ -2,7 +2,7 @@
 
 Use this reference when querying `cache/tcia_snapshot.sqlite` or a database selected by `TCIA_SNAPSHOT_DB`.
 
-The GitHub Release web exports mirror the most useful agent-facing views for environments that cannot run SQLite. Use `agent_datasets.jsonl` or `agent_datasets.jsonl.gz` for `agent_dataset_access_summary`, `agent_current_downloads.jsonl` or `agent_current_downloads.jsonl.gz` for `agent_current_downloads`, `agent_dataset_versions.jsonl` or `.gz` for matched version history, and `agent_dataset_v1_releases.jsonl` or `.gz` for first-release dates. Prefer plain `.jsonl` for web LLM browse tools that cannot decompress gzip. Filter these generic JSONL tables for controlled/mixed access, modalities, DICOM annotation labels, download routes, or release dates instead of relying on prompt-specific precomputed exports.
+The default V2 release exposes two compressed web exports: `agent_datasets.jsonl.gz` for `agent_dataset_access_summary` and `agent_current_downloads.jsonl.gz` for `agent_current_downloads`. Query `agent_dataset_versions` and `agent_dataset_v1_releases` inside `tcia_snapshot.sqlite` (or through MCP/REST); the streamlined release does not publish separate timeline JSONL files or plain JSONL copies. The legacy `tcia-snapshot-latest` release retains its broader compatibility export set. Filter the V2 exports for controlled/mixed access, modalities, DICOM annotation labels, and download routes instead of relying on prompt-specific precomputed answers.
 
 The optional NIfTI file-grain SQLite is separate from `cache/tcia_snapshot.sqlite`. It is downloaded only when needed with `python scripts/tcia_nifti_metadata.py ensure`, defaults to `cache/nifti_metadata.sqlite`, and is documented in `references/nifti.md`.
 

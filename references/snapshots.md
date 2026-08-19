@@ -1,11 +1,12 @@
 # SQLite Metadata Snapshots
 
 For the default V2 bundle contract, load `references/artifact-model-v2.md`.
-After successful scheduled base-snapshot
-updates, the V2 workflow copies the base snapshot and optional sidecars,
-regenerates all eight web exports, builds the two V2 research databases and
-their optional audit companions, and publishes the complete profile-based,
-hash-pinned bundle only when its fingerprint changes. The moving stable tag is
+After successful scheduled base-snapshot updates, the V2 workflow resolves the
+source components into a build-time staging contract, builds the compact V2
+research databases and audit companions, and publishes the streamlined
+profile-based bundle only when its fingerprint changes. The stable bundle has
+nine payload assets plus one authoritative manifest; only the current dataset
+and download JSONL exports remain, both gzip-compressed. The moving stable tag is
 `tcia-metadata-v2-latest`; immutable tags preserve reproducible releases and
 `tcia-metadata-v2-preview` remains available for explicit candidates. The
 workflow leaves `tcia-snapshot-latest` and its May 2026-compatible contracts

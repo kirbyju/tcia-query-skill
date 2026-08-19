@@ -349,9 +349,9 @@ companions before publishing.
 Inspect an additive download plan without fetching assets:
 
 ```bash
-python3 scripts/tcia_v2_bundle.py expected-assets --profile research_core
-python3 scripts/tcia_v2_bundle.py expected-assets --profile research_detail
-python3 scripts/tcia_v2_bundle.py expected-assets --profile audit_support
+python3 scripts/tcia_v2_bundle.py expected-assets --release-contract streamlined --profile research_core
+python3 scripts/tcia_v2_bundle.py expected-assets --release-contract streamlined --profile research_detail
+python3 scripts/tcia_v2_bundle.py expected-assets --release-contract streamlined --profile audit_support
 ```
 
 Install the stable research core with the bundle-level installer:
@@ -495,14 +495,10 @@ Verbose provenance and troubleshooting payloads are distributed separately as
 Use the `audit_support` profile in the bundle manifest when those companions are
 needed; stable entity IDs provide the join back to the research databases.
 
-Existing helpers can use compatibility artifacts from the same stable V2
-release by overriding their tag, for example:
-
-```bash
-python3 scripts/tcia_snapshot.py ensure --tag tcia-metadata-v2-latest
-python3 scripts/tcia_clinical_metadata.py ensure --tag tcia-metadata-v2-latest
-python3 scripts/tcia_controlled_access_metadata.py ensure --tag tcia-metadata-v2-latest
-```
+Do not point individual legacy `ensure` helpers at the streamlined stable V2
+tag: its per-component manifests are inline in the bundle manifest rather than
+separate release assets. Use `scripts/tcia_v2_bundle.py install` for stable V2;
+retain individual helpers for the legacy release and maintainer workflows.
 
 NIfTI and pathology discovery now comes through the unified public non-DICOM
 research artifact. Their specialized source rows remain losslessly embedded in
@@ -517,6 +513,7 @@ The stable asset URLs are:
 - `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-metadata-v2-latest/participant_inventory_audit.sqlite.gz`
 - `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-metadata-v2-latest/tcia_metadata_v2_bundle_manifest.json`
 
-Use the corresponding JSON manifest from the same release to verify schema,
-release fingerprint, compressed SHA-256, and SQLite SHA-256 before replacing a
-local copy.
+Use `tcia_metadata_v2_bundle_manifest.json` to verify each selected asset's
+schema, release fingerprint, compressed SHA-256, and decompressed SQLite
+SHA-256 before replacing a local copy. Per-component JSON manifests are not
+separate streamlined-release assets.

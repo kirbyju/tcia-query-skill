@@ -12,60 +12,53 @@ Use these sources in order:
 
 1. A hosted read-only MCP server backed by the latest validated V2 bundle.
 2. The GitHub Release V2 research core, if the environment can download and query SQLite.
-3. The GitHub Release JSONL exports, if the environment can fetch and inspect line-delimited JSON but cannot run SQLite. Use plain `.jsonl` for web browse tools that cannot decompress gzip, or `.jsonl.gz` for tools that can.
+3. The two compressed GitHub Release JSONL exports, if the environment can decompress gzip and inspect line-delimited JSON but cannot run SQLite.
 4. Live source APIs only for maintainers building or debugging the snapshot, not for normal dataset discovery.
 
 Before using any surface, verify freshness:
 
 1. Fetch `https://api.github.com/repos/kirbyju/tcia-query-skill/contents/skill_version.json?ref=main` and compare its `skill_version` with the installed/local `skill_version.json`. If it differs, load the current skill from GitHub or ask the user to update it before proceeding.
 2. Fetch the current release record from `https://api.github.com/repos/kirbyju/tcia-query-skill/releases/tags/tcia-metadata-v2-latest`, then fetch `tcia_metadata_v2_bundle_manifest.json` from that release.
-3. Select SQLite or JSON/JSONL assets from that same release record. Verify every selected asset against the top-level manifest and verify decompressed SQLite against its component manifest.
+3. Select SQLite or compressed JSONL assets from that same release record. Verify every selected asset against the top-level manifest; for SQLite, also verify the decompressed hash recorded inline under `components`.
 
 Do not treat a previously downloaded SQLite or JSON/JSONL file as current merely because it exists. Do not silently continue when the skill version or release manifest cannot be checked; identify the results as unverified and ask whether offline use is acceptable.
 
-The release assets are:
+The stable streamlined release has nine payload assets plus the authoritative bundle manifest:
 
 - `tcia_metadata_v2_bundle_manifest.json`: authoritative release fingerprint, profiles, component versions, hashes, sizes, and provenance.
 - `tcia_snapshot.sqlite.gz`: authoritative snapshot for local SQL and MCP backends.
 - `participant_inventory.sqlite.gz`: compact dataset-scoped participant identity and availability for participant-first search.
-- `tcia_snapshot_manifest.json`: schema version, hashes, counts, and export metadata.
-- `agent_datasets.jsonl`: plain-text flattened dataset/access rows from `agent_dataset_access_summary`.
-- `agent_current_downloads.jsonl`: plain-text current WordPress download rows from `agent_current_downloads`.
-- `agent_dataset_versions.jsonl`: plain-text matched version rows from `agent_dataset_versions`.
-- `agent_dataset_v1_releases.jsonl`: plain-text first-release rows from `agent_dataset_v1_releases`.
-- `agent_datasets.jsonl.gz`: compressed copy of `agent_datasets.jsonl`.
-- `agent_current_downloads.jsonl.gz`: compressed copy of `agent_current_downloads.jsonl`.
-- `agent_dataset_versions.jsonl.gz`: compressed copy of `agent_dataset_versions.jsonl`.
-- `agent_dataset_v1_releases.jsonl.gz`: compressed copy of `agent_dataset_v1_releases.jsonl`.
+- `agent_datasets.jsonl.gz`: compressed flattened dataset/access rows from `agent_dataset_access_summary`.
+- `agent_current_downloads.jsonl.gz`: compressed current WordPress download rows from `agent_current_downloads`.
+- `public_non_dicom_metadata.sqlite.gz`: unified public non-DICOM file-grain research detail, including NIfTI and pathology discovery.
 - `controlled_access_metadata.sqlite.gz`: optional public controlled-access manifest/spreadsheet metadata for CTDC and General Commons routed downloads.
-- `controlled_access_metadata_manifest.json`: hashes, counts, and release fingerprint for the optional controlled-access SQLite.
 - `clinical_metadata.sqlite.gz`: optional patient-level resolved clinical facts, provenance, and conflicts.
-- `clinical_metadata_manifest.json`: hashes, counts, source coverage, and release fingerprint for the optional clinical SQLite.
+- `public_non_dicom_audit.sqlite.gz`: verbose non-DICOM provenance, specialized source checkpoints, crosswalk evidence, and QC.
+- `participant_inventory_audit.sqlite.gz`: verbose participant provenance, linkage evidence, and retained clinical-review material.
+
+Per-component manifests, plain JSONL files, release-timeline JSONL files, and standalone NIfTI/pathology SQLite files are not assets in the streamlined stable release. Their validation metadata is inline in the bundle manifest. Query release timelines from the base snapshot or through MCP/REST. If a web-only host cannot decompress gzip, use MCP rather than falling back to live WordPress or the legacy release.
 
 Direct release URLs:
 
 - `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-metadata-v2-latest/tcia_metadata_v2_bundle_manifest.json`
 - `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-metadata-v2-latest/tcia_snapshot.sqlite.gz`
-- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-metadata-v2-latest/tcia_snapshot_manifest.json`
 - `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-metadata-v2-latest/participant_inventory.sqlite.gz`
-- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-metadata-v2-latest/participant_inventory_manifest.json`
-- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-metadata-v2-latest/agent_datasets.jsonl`
-- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-metadata-v2-latest/agent_current_downloads.jsonl`
-- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-metadata-v2-latest/agent_dataset_versions.jsonl`
-- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-metadata-v2-latest/agent_dataset_v1_releases.jsonl`
 - `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-metadata-v2-latest/agent_datasets.jsonl.gz`
 - `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-metadata-v2-latest/agent_current_downloads.jsonl.gz`
-- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-metadata-v2-latest/agent_dataset_versions.jsonl.gz`
-- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-metadata-v2-latest/agent_dataset_v1_releases.jsonl.gz`
+- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-metadata-v2-latest/public_non_dicom_metadata.sqlite.gz`
+- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-metadata-v2-latest/controlled_access_metadata.sqlite.gz`
+- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-metadata-v2-latest/clinical_metadata.sqlite.gz`
+- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-metadata-v2-latest/public_non_dicom_audit.sqlite.gz`
+- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-metadata-v2-latest/participant_inventory_audit.sqlite.gz`
 
-The JSONL exports are generic table exports, not prompt-specific precomputed answer files. Filter `agent_datasets.jsonl` for dataset/access fields, `agent_current_downloads.jsonl` for modality/file/download/annotation labels, `agent_dataset_versions.jsonl` for all matched version rows, and `agent_dataset_v1_releases.jsonl` for first-release timelines. Use the `.gz` copies when the host can decompress gzip.
+The two JSONL exports are generic compressed table exports, not prompt-specific precomputed answer files. Decompress and filter `agent_datasets.jsonl.gz` for dataset/access fields and `agent_current_downloads.jsonl.gz` for modality/file/download/annotation labels.
 
 JSONL usage pattern:
 
 1. Resolve the current release and manifest as described above; fetch fresh asset URLs for each task instead of reusing saved JSONL files.
-2. Prefer plain `.jsonl` in web browse tools. Use `.jsonl.gz` only when the host can decompress gzip.
+2. Confirm the host can decompress gzip. Otherwise use MCP.
 3. Parse one JSON object per line.
-4. Treat `short_title` as the join key between dataset, current download, and version export rows.
+4. Treat `short_title` as the join key between dataset and current-download rows.
 5. Exclude rows where `hidden` is true unless the user explicitly asks for TCIA staff hidden/staged/retired records.
 6. Filter dataset rows by `access_level` or `resolved_access_level`, and filter download rows by `download_types`, `data_types`, and `file_types`.
 7. For mixed-access datasets, split controlled and noncontrolled downloads in the answer.
@@ -121,7 +114,7 @@ For patient-level clinical queries, confirm the dataset in the base snapshot fir
 If MCP is unavailable, web LLM prompts should point to the release exports explicitly. Suggested user prompt wording:
 
 ```text
-Use the latest manifest-pinned assets from https://github.com/kirbyju/tcia-query-skill/releases/tag/tcia-metadata-v2-latest. Read tcia_metadata_v2_bundle_manifest.json first. Prefer the research-core tcia_snapshot.sqlite.gz for dataset provenance/access and participant_inventory.sqlite.gz for participant availability. For release timelines, use agent_dataset_versions.jsonl and agent_dataset_v1_releases.jsonl. Fetch research-detail assets only when the question needs file-grain public non-DICOM, controlled, pathology, NIfTI, or clinical metadata. Use the .jsonl.gz copies only if you can decompress gzip. Do not query the live TCIA WordPress API.
+Use the latest manifest-pinned assets from https://github.com/kirbyju/tcia-query-skill/releases/tag/tcia-metadata-v2-latest. Read tcia_metadata_v2_bundle_manifest.json first and select only assets listed there. Prefer research-core tcia_snapshot.sqlite.gz for dataset provenance, access, and release timelines, and participant_inventory.sqlite.gz for participant availability. Fetch research-detail assets only when the question needs file-grain public non-DICOM, controlled, pathology, NIfTI, or clinical metadata. The only static JSONL assets are agent_datasets.jsonl.gz and agent_current_downloads.jsonl.gz; use them only if you can decompress gzip. Otherwise use the snapshot-backed MCP service. Do not query the live TCIA WordPress API.
 ```
 
-The static exports are intentionally redundant with SQLite views. They exist so web-only LLMs have a compact data plane even when they cannot install the skill or execute local code. If the host cannot fetch/decompress gzip or parse JSONL, it needs a remote MCP/data connector or user-supplied downloaded files; it should not fall back to broad web search or live WordPress scraping.
+The two static exports are intentionally redundant with SQLite views. They provide a compact data plane for hosts that can decompress gzip but cannot query SQLite. If the host cannot fetch/decompress gzip or parse JSONL, it needs a remote MCP/data connector or user-supplied downloaded files; it should not fall back to broad web search or live WordPress scraping.
