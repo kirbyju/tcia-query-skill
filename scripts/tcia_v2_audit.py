@@ -76,6 +76,10 @@ CREATE TABLE IF NOT EXISTS provenance_decision_payloads (
     payload_sha256 BLOB NOT NULL UNIQUE CHECK(length(payload_sha256) = 32),
     decision_json TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS provenance_source_identifiers (
+    source_identifier_id INTEGER PRIMARY KEY,
+    identifier_json TEXT NOT NULL UNIQUE
+);
 CREATE TABLE IF NOT EXISTS entity_provenance_sources (
     entity_source_id INTEGER PRIMARY KEY,
     entity_key_id INTEGER NOT NULL,
@@ -86,6 +90,7 @@ CREATE TABLE IF NOT EXISTS entity_provenance_sources (
 CREATE TABLE IF NOT EXISTS field_provenance (
     entity_source_id INTEGER NOT NULL,
     provenance_field_id INTEGER NOT NULL,
+    source_identifier_id INTEGER NOT NULL,
     decision_payload_id INTEGER NOT NULL,
     PRIMARY KEY(entity_source_id, provenance_field_id)
 ) WITHOUT ROWID;
@@ -95,10 +100,12 @@ SELECT t.entity_table,
        f.field_name,
        s.source_label,
        sp.source_json,
+       si.identifier_json,
        dp.decision_json
 FROM field_provenance fp
 JOIN entity_provenance_sources s USING(entity_source_id)
 JOIN provenance_source_payloads sp USING(source_payload_id)
+JOIN provenance_source_identifiers si USING(source_identifier_id)
 JOIN provenance_decision_payloads dp USING(decision_payload_id)
 JOIN provenance_fields f USING(provenance_field_id)
 JOIN entities e USING(entity_key_id)
@@ -372,7 +379,7 @@ def create_research_projection(
 def _flush_normalized_provenance(
     conn: sqlite3.Connection,
     sources: list[tuple[int, str, bytes, str]],
-    decisions: list[tuple[int, str, str, bytes, str]],
+    decisions: list[tuple[int, str, str, str, bytes, str]],
 ) -> None:
     if not sources and not decisions:
         return
@@ -380,7 +387,7 @@ def _flush_normalized_provenance(
         "INSERT INTO temp.provenance_source_stage VALUES (?,?,?,?)", sources
     )
     conn.executemany(
-        "INSERT INTO temp.provenance_decision_stage VALUES (?,?,?,?,?)", decisions
+        "INSERT INTO temp.provenance_decision_stage VALUES (?,?,?,?,?,?)", decisions
     )
     conn.execute(
         "INSERT OR IGNORE INTO provenance_source_payloads(payload_sha256, source_json) "
@@ -404,13 +411,19 @@ def _flush_normalized_provenance(
         "GROUP BY payload_sha256"
     )
     conn.execute(
+        "INSERT OR IGNORE INTO provenance_source_identifiers(identifier_json) "
+        "SELECT identifier_json FROM provenance_decision_stage GROUP BY identifier_json"
+    )
+    conn.execute(
         "INSERT OR REPLACE INTO field_provenance"
-        "(entity_source_id, provenance_field_id, decision_payload_id) "
-        "SELECT es.entity_source_id, f.provenance_field_id, p.decision_payload_id "
+        "(entity_source_id, provenance_field_id, source_identifier_id, decision_payload_id) "
+        "SELECT es.entity_source_id, f.provenance_field_id, si.source_identifier_id, "
+        "p.decision_payload_id "
         "FROM provenance_decision_stage d "
         "JOIN entity_provenance_sources es "
         "  ON es.entity_key_id=d.entity_key_id AND es.source_label=d.source_label "
         "JOIN provenance_fields f USING(field_name) "
+        "JOIN provenance_source_identifiers si USING(identifier_json) "
         "JOIN provenance_decision_payloads p USING(payload_sha256)"
     )
     conn.execute("DELETE FROM provenance_source_stage")
@@ -485,11 +498,12 @@ def _store_normalized_field_provenance(
         "payload_sha256 BLOB NOT NULL, source_json TEXT NOT NULL);"
         "CREATE TEMP TABLE provenance_decision_stage("
         "entity_key_id INTEGER NOT NULL, source_label TEXT NOT NULL, "
-        "field_name TEXT NOT NULL, payload_sha256 BLOB NOT NULL, "
+        "field_name TEXT NOT NULL, identifier_json TEXT NOT NULL, "
+        "payload_sha256 BLOB NOT NULL, "
         "decision_json TEXT NOT NULL);"
     )
     sources: list[tuple[int, str, bytes, str]] = []
-    decisions: list[tuple[int, str, str, bytes, str]] = []
+    decisions: list[tuple[int, str, str, str, bytes, str]] = []
     fallback: list[tuple[int, str]] = []
     documents = 0
     source_links = 0
@@ -509,12 +523,13 @@ def _store_normalized_field_provenance(
             source_map = document.pop("_sources")
             if not isinstance(document, dict) or not isinstance(source_map, dict):
                 raise ValueError("field provenance is not an object")
-            parsed_decisions: list[tuple[int, str, str, bytes, str]] = []
+            parsed_decisions: list[tuple[int, str, str, str, bytes, str]] = []
             for metadata_field, decision in document.items():
                 if not isinstance(decision, dict):
                     raise ValueError("field decision is not an object")
                 decision_body = dict(decision)
-                source_label = str(decision_body.pop("source_id", ""))
+                source_identifier = decision_body.pop("source_id", "")
+                source_label = str(source_identifier)
                 if not source_label or source_label not in source_map:
                     raise ValueError("field decision has no matching source")
                 decision_json = canonical_json(decision_body)
@@ -523,6 +538,7 @@ def _store_normalized_field_provenance(
                         int(entity_key_id),
                         source_label,
                         str(metadata_field),
+                        canonical_json(source_identifier),
                         hashlib.sha256(decision_json.encode("utf-8")).digest(),
                         decision_json,
                     )
@@ -593,7 +609,7 @@ def reconstruct_field_provenance(
 ) -> dict[str, Any] | None:
     rows = list(
         conn.execute(
-            "SELECT field_name, source_label, source_json, decision_json "
+            "SELECT field_name, source_label, source_json, identifier_json, decision_json "
             "FROM agent_normalized_field_provenance "
             "WHERE entity_table=? AND entity_id=? ORDER BY field_name, source_label",
             (entity_table, entity_id),
@@ -607,10 +623,10 @@ def reconstruct_field_provenance(
         ).fetchone()
         return json.loads(str(row[0])) if row else None
     result: dict[str, Any] = {"_sources": {}}
-    for metadata_field, source_label, source_json, decision_json in rows:
+    for metadata_field, source_label, source_json, identifier_json, decision_json in rows:
         result["_sources"][str(source_label)] = json.loads(str(source_json))
         decision = json.loads(str(decision_json))
-        decision["source_id"] = str(source_label)
+        decision["source_id"] = json.loads(str(identifier_json))
         result[str(metadata_field)] = decision
     return result
 
@@ -1163,6 +1179,7 @@ def validate_audit_database(path: Path, *, artifact: str | None = None) -> dict[
                 "entities",
                 "provenance_fields",
                 "provenance_source_payloads",
+                "provenance_source_identifiers",
                 "provenance_decision_payloads",
                 "entity_provenance_sources",
                 "field_provenance",
@@ -1198,6 +1215,9 @@ def validate_audit_database(path: Path, *, artifact: str | None = None) -> dict[
             counts["unique_decision_payloads"] = int(
                 conn.execute("SELECT COUNT(*) FROM provenance_decision_payloads").fetchone()[0]
             )
+            counts["unique_source_identifiers"] = int(
+                conn.execute("SELECT COUNT(*) FROM provenance_source_identifiers").fetchone()[0]
+            )
             orphan_sources = int(
                 conn.execute(
                     "SELECT COUNT(*) FROM entity_provenance_sources s "
@@ -1211,9 +1231,10 @@ def validate_audit_database(path: Path, *, artifact: str | None = None) -> dict[
                     "SELECT COUNT(*) FROM field_provenance f "
                     "LEFT JOIN entity_provenance_sources s USING(entity_source_id) "
                     "LEFT JOIN provenance_fields n USING(provenance_field_id) "
+                    "LEFT JOIN provenance_source_identifiers i USING(source_identifier_id) "
                     "LEFT JOIN provenance_decision_payloads p USING(decision_payload_id) "
                     "WHERE s.entity_source_id IS NULL OR n.provenance_field_id IS NULL "
-                    "OR p.decision_payload_id IS NULL"
+                    "OR i.source_identifier_id IS NULL OR p.decision_payload_id IS NULL"
                 ).fetchone()[0]
             )
             if orphan_sources or orphan_decisions:

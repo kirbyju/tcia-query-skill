@@ -339,6 +339,21 @@ class V2AuditSplitTests(unittest.TestCase):
                         assume_new=True,
                     )
                 conn.execute("INSERT INTO artifact_meta VALUES ('schema_version', '5')")
+                row = conn.execute(
+                    "SELECT asset_id, field_provenance_json "
+                    "FROM public_non_dicom_image_metadata ORDER BY asset_id LIMIT 1"
+                ).fetchone()
+                numeric_source = __import__("json").loads(row[1])
+                old_label, source_value = next(iter(numeric_source["_sources"].items()))
+                numeric_source["_sources"] = {"1": source_value}
+                for key, decision in numeric_source.items():
+                    if key != "_sources" and decision.get("source_id") == old_label:
+                        decision["source_id"] = 1
+                conn.execute(
+                    "UPDATE public_non_dicom_image_metadata "
+                    "SET field_provenance_json=? WHERE asset_id=?",
+                    (__import__("json").dumps(numeric_source, sort_keys=True), row[0]),
+                )
                 original = {
                     row[0]: __import__("json").loads(row[1])
                     for row in conn.execute(
