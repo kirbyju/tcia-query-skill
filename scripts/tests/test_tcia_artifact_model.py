@@ -630,6 +630,7 @@ class BuilderTests(unittest.TestCase):
             snapshot = base / "snapshot.sqlite"
             controlled = base / "controlled.sqlite"
             clinical = base / "clinical.sqlite"
+            idc_projection = base / "idc_participants.sqlite"
             output = base / "participants.sqlite"
 
             conn = sqlite3.connect(snapshot)
@@ -685,15 +686,36 @@ class BuilderTests(unittest.TestCase):
                     ("Outcome-Result", "CASE-001", "tcia"),
                 ],
             )
+            conn.commit()
+            conn.close()
+
+            conn = sqlite3.connect(idc_projection)
             conn.execute(
-                "CREATE TABLE clinical_imaging_subjects "
-                "(short_title TEXT, subject_id TEXT, imaging_source TEXT)"
+                """
+                CREATE TABLE agent_idc_dataset_participants (
+                  dataset_type TEXT, short_title TEXT, participant_id TEXT,
+                  source_collection_ids_json TEXT,
+                  source_analysis_result_ids_json TEXT,
+                  study_count INTEGER, series_count INTEGER, modalities TEXT,
+                  source_dois TEXT, idc_version TEXT
+                )
+                """
             )
             conn.executemany(
-                "INSERT INTO clinical_imaging_subjects VALUES (?,?,?)",
+                "INSERT INTO agent_idc_dataset_participants VALUES (?,?,?,?,?,?,?,?,?,?)",
                 [
-                    ("AAPM-RT-MAC", "rtmac-live-008", "idc_index"),
-                    ("AAPM-RT-MAC", "IDC-ONLY-009", "idc_index"),
+                    (
+                        "Collection", "AAPM-RT-MAC", "rtmac-live-008",
+                        '["aapm_rt_mac"]', "[]", 1, 2, "CT;MR", "", "v24",
+                    ),
+                    (
+                        "Collection", "AAPM-RT-MAC", "IDC-ONLY-009",
+                        '["aapm_rt_mac"]', "[]", 1, 1, "CT", "", "v24",
+                    ),
+                    (
+                        "Analysis Result", "Outcome-Result", "CASE-002",
+                        '["aapm_rt_mac"]', '["outcome_result"]', 1, 1, "SEG", "", "v24",
+                    ),
                 ],
             )
             conn.commit()
@@ -705,6 +727,7 @@ class BuilderTests(unittest.TestCase):
                 public_db=base / "missing-public.sqlite",
                 controlled_db=controlled,
                 clinical_db=clinical,
+                idc_db=idc_projection,
                 replace=True,
             )
             self.assertEqual(result["counts"]["exact_cross_namespace_resolutions"], 1)
@@ -725,7 +748,7 @@ class BuilderTests(unittest.TestCase):
                 aapm,
                 [(
                     "Collection", "RTMAC-LIVE-008", "resolved",
-                    "casefolded_identifier_same_tcia_dataset", 2, "MR",
+                    "casefolded_identifier_same_tcia_dataset", 2, "MR,CT;MR",
                 )],
             )
             self.assertEqual(
@@ -785,7 +808,24 @@ class BuilderTests(unittest.TestCase):
                     "WHERE display_participant_id='IDC-ONLY-009'"
                 ).fetchone()[0], 0,
             )
+            self.assertEqual(
+                conn.execute(
+                    "SELECT dataset_type, modality, series_count "
+                    "FROM agent_participant_assets "
+                    "WHERE short_title='Outcome-Result' "
+                    "AND display_participant_id='CASE-002'"
+                ).fetchone(),
+                ("Analysis Result", "SEG", 1),
+            )
             conn.close()
+            regression = participants.validate_database(
+                output, minimum_analysis_result_participants=3
+            )
+            self.assertFalse(regression["ok"])
+            self.assertTrue(
+                any("analysis_result_participants coverage regression" in error
+                    for error in regression["errors"])
+            )
 
     def test_participant_key_casefolds_within_but_not_across_dataset_types(self):
         collection_upper = participants.participant_key("Collection", "TEST", "Case-001")

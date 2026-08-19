@@ -13,8 +13,15 @@ from pathlib import Path
 from typing import Any
 
 
-STAGING_SCHEMA_VERSION = 1
-COMPONENT_ORDER = ("snapshot", "nifti", "pathology", "controlled_access", "clinical")
+STAGING_SCHEMA_VERSION = 2
+COMPONENT_ORDER = (
+    "snapshot",
+    "nifti",
+    "pathology",
+    "controlled_access",
+    "clinical",
+    "idc_participants",
+)
 
 SCHEMA = """
 PRAGMA foreign_keys = ON;

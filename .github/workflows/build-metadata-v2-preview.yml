@@ -65,6 +65,9 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Install IDC projection dependency
+        run: python -m pip install --upgrade "idc-index>=0.12.3"
+
       - name: Validate transition candidate inputs
         if: github.event_name == 'workflow_dispatch' && (inputs.release_contract == 'streamlined' || inputs.release_contract == 'streamlined_candidate')
         run: |
@@ -112,6 +115,20 @@ jobs:
             gzip -dc "dist/$asset" > "cache/${asset%.gz}"
           done
 
+      - name: Build the direct IDC participant projection
+        run: |
+          python scripts/tcia_idc_participant_projection.py build \
+            --snapshot-db cache/tcia_snapshot.sqlite \
+            --out cache/idc_participant_projection.sqlite \
+            --manifest-out cache/idc_participant_projection_manifest.json \
+            --replace
+          python scripts/tcia_idc_participant_projection.py validate \
+            --db cache/idc_participant_projection.sqlite \
+            --min-collection-memberships 75000 \
+            --min-collections 145 \
+            --min-analysis-result-memberships 4337 \
+            --min-analysis-results 11
+
       - name: Build the runner-local V2 staging ledger
         run: |
           python scripts/tcia_v2_staging.py build \
@@ -125,6 +142,8 @@ jobs:
             --controlled-access-manifest dist/controlled_access_metadata_manifest.json \
             --clinical-db cache/clinical_metadata.sqlite \
             --clinical-manifest dist/clinical_metadata_manifest.json \
+            --idc-participants-db cache/idc_participant_projection.sqlite \
+            --idc-participants-manifest cache/idc_participant_projection_manifest.json \
             --source-release-json cache/source_release.json \
             --out cache/tcia_metadata_v2_staging.sqlite \
             --replace
@@ -244,14 +263,16 @@ jobs:
       - name: Build Participant Inventory
         run: |
           python scripts/tcia_participant_inventory.py build \
-            --snapshot-db cache/tcia_snapshot.sqlite \
+            --staging-db cache/tcia_metadata_v2_staging.sqlite \
             --public-db cache/public_non_dicom_metadata.sqlite \
-            --controlled-db cache/controlled_access_metadata.sqlite \
-            --clinical-db cache/clinical_metadata.sqlite \
             --out cache/participant_inventory.sqlite \
             --replace
           python scripts/tcia_participant_inventory.py validate \
-            --db cache/participant_inventory.sqlite
+            --db cache/participant_inventory.sqlite \
+            --min-collection-participants 125728 \
+            --min-collections 222 \
+            --min-analysis-result-participants 11730 \
+            --min-analysis-results 29
           # Participant Inventory is now self-contained for search/summary.
           rm -f cache/clinical_metadata.sqlite cache/controlled_access_metadata.sqlite
           python scripts/tcia_v2_audit.py split \
@@ -273,6 +294,7 @@ jobs:
       - name: Run V2 contract tests
         run: |
           python -m unittest \
+            scripts.tests.test_tcia_idc_participant_projection \
             scripts.tests.test_tcia_artifact_model \
             scripts.tests.test_tcia_v2_audit \
             scripts.tests.test_tcia_v2_checkpoint \
@@ -287,6 +309,8 @@ jobs:
           name: tcia-metadata-v2-staging-diagnostics
           path: |
             cache/tcia_metadata_v2_staging.sqlite
+            cache/idc_participant_projection.sqlite
+            cache/idc_participant_projection_manifest.json
             cache/reports/tcia_v2_legacy_detail_parity.json
             cache/reports/tcia_v2_compact_audit_metrics.json
             cache/reports/tcia_v2_compact_audit_reconstruction.json

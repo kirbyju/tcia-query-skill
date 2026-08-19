@@ -188,7 +188,9 @@ Participant Explorer integrations should query `agent_participant_search` for
 one row per canonical dataset-scoped, case-equivalent participant identifier,
 then download detail components only for drill-down. Every original identifier
 spelling remains available through `participant_identifiers`, and Collections
-remain distinct from Analysis Results. Accepted clinical facts are no longer copied
+remain distinct from Analysis Results. Public-DICOM participant presence for
+both dataset types is projected directly from IDC at build time while series
+and file detail stays in IDC. Accepted clinical facts are no longer copied
 into Participant Inventory by default; use the clinical detail artifact for
 those values. Root source, access, linkage, inference, and coverage states stay
 in the research artifacts, while verbose JSON evidence is joinable from the

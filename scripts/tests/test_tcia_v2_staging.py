@@ -57,7 +57,7 @@ class V2StagingTests(unittest.TestCase):
             result = staging.build_staging_database(
                 ledger, components=components, replace=True
             )
-            self.assertEqual(result["components"], 5)
+            self.assertEqual(result["components"], 6)
             validation = staging.validate_staging_database(
                 ledger, verify_sources=True
             )
@@ -102,7 +102,7 @@ class V2StagingTests(unittest.TestCase):
             with closing(sqlite3.connect(companion)) as conn:
                 self.assertEqual(
                     conn.execute("SELECT COUNT(*) FROM staging_sources").fetchone()[0],
-                    5,
+                    6,
                 )
                 database_files = {
                     row[0] for row in conn.execute("SELECT database_file FROM staging_sources")

@@ -162,6 +162,7 @@ Run scripts from the skill root.
 | `scripts/tcia_nifti_metadata.py` | Download, validate, summarize, and query the optional release SQLite for visible non-controlled TCIA NIfTI file-grain metadata. |
 | `scripts/tcia_public_non_dicom_metadata.py` | Build, validate, summarize, and query the V2 public non-DICOM logical-asset and managed-location artifact. |
 | `scripts/tcia_participant_inventory.py` | Compose dataset-scoped participant availability from public non-DICOM, controlled, clinical, and IDC participant projections. |
+| `scripts/tcia_idc_participant_projection.py` | Build the compact, WordPress-scoped Collection and Analysis Result participant projection directly from IDC for the V2 staging ledger. |
 | `scripts/tcia_v2_bundle.py` | Install a manifest-pinned V2 profile, regenerate compatibility exports, and build or validate the complete V2 release contract. |
 | `scripts/tcia_v2_staging.py` | Build and validate the runner-local, hash-pinned source ledger used by V2 producers. |
 | `scripts/tcia_v2_checkpoint.py` | Preserve exact specialized NIfTI/pathology source rows inside the V2 audit checkpoint after retiring separate detail artifacts. |

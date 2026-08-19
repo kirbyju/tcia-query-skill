@@ -21,6 +21,10 @@ from typing import Any
 
 from tcia_artifact_model import SCHEMA_VERSION as MODEL_SCHEMA_VERSION
 from tcia_artifact_model import json_dumps, stable_id
+try:
+    from tcia_v2_staging import resolve_component as resolve_staging_component
+except ImportError:
+    from scripts.tcia_v2_staging import resolve_component as resolve_staging_component
 
 
 SKILL_ROOT = Path(__file__).resolve().parents[1]
@@ -28,6 +32,7 @@ DEFAULT_SNAPSHOT_DB = SKILL_ROOT / "cache" / "tcia_snapshot.sqlite"
 DEFAULT_PUBLIC_DB = SKILL_ROOT / "cache" / "public_non_dicom_metadata.sqlite"
 DEFAULT_CONTROLLED_DB = SKILL_ROOT / "cache" / "controlled_access_metadata.sqlite"
 DEFAULT_CLINICAL_DB = SKILL_ROOT / "cache" / "clinical_metadata.sqlite"
+DEFAULT_IDC_DB = SKILL_ROOT / "cache" / "idc_participant_projection.sqlite"
 DEFAULT_DB = SKILL_ROOT / "cache" / "participant_inventory.sqlite"
 DEFAULT_MANIFEST = SKILL_ROOT / "cache" / "participant_inventory_manifest.json"
 DEFAULT_RELEASE_TAG = "tcia-metadata-v2-latest"
@@ -634,45 +639,6 @@ def ingest_clinical(
                     "provenance_json": json_dumps({"source_view": "agent_clinical_all_subjects"}),
                 })
                 imported += 1
-        if table_exists(source, "clinical_imaging_subjects"):
-            for row in source.execute(
-                "SELECT short_title, subject_id, imaging_source FROM clinical_imaging_subjects WHERE imaging_source LIKE '%idc_index%'"
-            ):
-                raw_id = str(row["subject_id"] or "").strip()
-                if not raw_id:
-                    continue
-                dataset_type, short_title = resolve_dataset_identity(
-                    dataset_types, str(row["short_title"]), "Collection"
-                )
-                key = ensure_participant(
-                    conn, dataset_type, short_title, raw_id,
-                    managed_system="crdc_idc",
-                    namespace=f"tcia_dataset:{row['short_title']}",
-                    evidence="idc_index_participant_projection",
-                    provenance={"source_artifact": "clinical_metadata", "imaging_source": row["imaging_source"]},
-                )
-                add_asset(conn, {
-                    "participant_asset_id": stable_id("pa", key, "crdc_idc", "public_dicom"),
-                    "participant_key": key,
-                    "managed_system": "crdc_idc",
-                    "source_artifact": "clinical_metadata",
-                    "access_level": "open",
-                    "data_domain": "radiology",
-                    "media_kind": "dicom_series",
-                    "modality": "",
-                    "file_format": "DICOM",
-                    "object_role": "source_image_or_annotation",
-                    "study_count": None,
-                    "series_count": None,
-                    "file_count": None,
-                    "known_size_bytes": None,
-                    "has_file_level_metadata": 0,
-                    "detail_pointer": f"crdc_idc:{row['short_title']}:{raw_id}",
-                    "access_route": "",
-                    "inventory_status": "participant_presence_known_query_idc_for_detail",
-                    "source_version": "",
-                    "provenance_json": json_dumps({"source_table": "clinical_imaging_subjects", "imaging_source": row["imaging_source"]}),
-                })
         if include_clinical_values and table_exists(source, "agent_clinical_facts"):
             for row in source.execute(
                 """
@@ -732,7 +698,187 @@ def ingest_clinical(
                         }),
                     ),
                 )
-    record_source(conn, "clinical_metadata", path, True, imported, "Clinical availability and the compact IDC participant projection imported; IDC remains authoritative for DICOM detail.")
+        # Preserve previously observed IDC Collection membership only when the
+        # clinical artifact explicitly marks it as legacy. Current IDC presence
+        # is supplied exclusively by the direct build-time projection above.
+        if table_exists(source, "clinical_imaging_subjects"):
+            for row in source.execute(
+                """
+                SELECT short_title, subject_id, imaging_source
+                FROM clinical_imaging_subjects
+                WHERE imaging_source = 'legacy_idc_index'
+                """
+            ):
+                raw_id = str(row["subject_id"] or "").strip()
+                if not raw_id:
+                    continue
+                dataset_type, short_title = resolve_dataset_identity(
+                    dataset_types, str(row["short_title"]), "Collection"
+                )
+                if dataset_type != "Collection":
+                    continue
+                key = ensure_participant(
+                    conn,
+                    dataset_type,
+                    short_title,
+                    raw_id,
+                    managed_system="crdc_idc",
+                    namespace=f"tcia_dataset:{short_title}",
+                    evidence="legacy_idc_index_participant_projection",
+                    provenance={
+                        "source_artifact": "clinical_metadata",
+                        "imaging_source": row["imaging_source"],
+                        "current_idc_presence": False,
+                    },
+                )
+                add_asset(
+                    conn,
+                    {
+                        "participant_asset_id": stable_id(
+                            "pa", key, "crdc_idc", "public_dicom"
+                        ),
+                        "participant_key": key,
+                        "managed_system": "crdc_idc",
+                        "source_artifact": "clinical_metadata",
+                        "access_level": "open",
+                        "data_domain": "radiology",
+                        "media_kind": "dicom_series",
+                        "modality": "",
+                        "file_format": "DICOM",
+                        "object_role": "source_image_or_annotation",
+                        "study_count": None,
+                        "series_count": None,
+                        "file_count": None,
+                        "known_size_bytes": None,
+                        "has_file_level_metadata": 0,
+                        "detail_pointer": f"crdc_idc_legacy:{short_title}:{raw_id}",
+                        "access_route": "",
+                        "inventory_status": (
+                            "historical_participant_presence_query_idc_or_tcia_for_detail"
+                        ),
+                        "source_version": "legacy",
+                        "provenance_json": json_dumps(
+                            {
+                                "source_table": "clinical_imaging_subjects",
+                                "imaging_source": row["imaging_source"],
+                                "current_idc_presence": False,
+                            }
+                        ),
+                    },
+                )
+                imported += 1
+    record_source(conn, "clinical_metadata", path, True, imported, "Clinical availability imported. Current public-DICOM presence comes directly from IDC; explicitly legacy IDC Collection memberships are retained as historical compatibility evidence.")
+    return imported
+
+
+def ingest_idc_participants(
+    conn: sqlite3.Connection,
+    path: Path,
+    dataset_types: dict[str, tuple[str, str]],
+) -> int:
+    if not path.exists():
+        record_source(
+            conn,
+            "idc_participant_projection",
+            path,
+            False,
+            0,
+            "Build-time IDC participant projection not installed.",
+        )
+        return 0
+    imported = 0
+    with closing(connect(path)) as source:
+        if not table_exists(source, "agent_idc_dataset_participants"):
+            raise RuntimeError(
+                "IDC participant projection is missing agent_idc_dataset_participants"
+            )
+        for row in source.execute(
+            """
+            SELECT dataset_type, short_title, participant_id,
+                   source_collection_ids_json,
+                   source_analysis_result_ids_json,
+                   study_count, series_count, modalities, source_dois,
+                   idc_version
+            FROM agent_idc_dataset_participants
+            """
+        ):
+            raw_id = str(row["participant_id"] or "").strip()
+            supplied_type = str(row["dataset_type"] or "Collection").strip()
+            dataset_type, short_title = resolve_dataset_identity(
+                dataset_types, str(row["short_title"]), supplied_type
+            )
+            if not raw_id or dataset_type != supplied_type:
+                continue
+            key = ensure_participant(
+                conn,
+                dataset_type,
+                short_title,
+                raw_id,
+                managed_system="crdc_idc",
+                namespace=f"tcia_dataset:{short_title}",
+                evidence="idc_index_participant_projection",
+                provenance={
+                    "source_artifact": "idc_participant_projection",
+                    "source_collection_ids": json.loads(
+                        row["source_collection_ids_json"] or "[]"
+                    ),
+                    "source_analysis_result_ids": json.loads(
+                        row["source_analysis_result_ids_json"] or "[]"
+                    ),
+                    "source_dois": row["source_dois"] or "",
+                    "idc_version": row["idc_version"] or "",
+                },
+            )
+            add_asset(
+                conn,
+                {
+                    "participant_asset_id": stable_id(
+                        "pa", key, "crdc_idc", "public_dicom"
+                    ),
+                    "participant_key": key,
+                    "managed_system": "crdc_idc",
+                    "source_artifact": "idc_participant_projection",
+                    "access_level": "open",
+                    "data_domain": "radiology",
+                    "media_kind": "dicom_series",
+                    "modality": row["modalities"] or "",
+                    "file_format": "DICOM",
+                    "object_role": "source_image_or_annotation",
+                    "study_count": row["study_count"],
+                    "series_count": row["series_count"],
+                    "file_count": None,
+                    "known_size_bytes": None,
+                    "has_file_level_metadata": 0,
+                    "detail_pointer": (
+                        f"crdc_idc:{dataset_type}:{short_title}:{raw_id}"
+                    ),
+                    "access_route": "",
+                    "inventory_status": (
+                        "participant_presence_known_query_idc_for_detail"
+                    ),
+                    "source_version": row["idc_version"] or "",
+                    "provenance_json": json_dumps(
+                        {
+                            "source_view": "agent_idc_dataset_participants",
+                            "source_collection_ids": json.loads(
+                                row["source_collection_ids_json"] or "[]"
+                            ),
+                            "source_analysis_result_ids": json.loads(
+                                row["source_analysis_result_ids_json"] or "[]"
+                            ),
+                        }
+                    ),
+                },
+            )
+            imported += 1
+    record_source(
+        conn,
+        "idc_participant_projection",
+        path,
+        True,
+        imported,
+        "Compact Collection and Analysis Result participant presence imported; IDC remains authoritative for public DICOM detail.",
+    )
     return imported
 
 
@@ -849,6 +995,7 @@ def build_database(
     controlled_db: Path,
     clinical_db: Path,
     replace: bool,
+    idc_db: Path = DEFAULT_IDC_DB,
     include_clinical_values: bool = False,
 ) -> dict[str, Any]:
     dataset_types = load_dataset_types(snapshot_db)
@@ -870,6 +1017,7 @@ def build_database(
         counts = {
             "public_non_dicom": ingest_public_non_dicom(conn, public_db, dataset_types),
             "controlled": ingest_controlled(conn, controlled_db, dataset_types),
+            "idc_participants": ingest_idc_participants(conn, idc_db, dataset_types),
             "clinical": ingest_clinical(
                 conn,
                 clinical_db,
@@ -915,7 +1063,14 @@ def build_database(
     return {"path": str(out), "schema_version": SCHEMA_VERSION, "integrity_check": integrity, "counts": counts}
 
 
-def validate_database(path: Path) -> dict[str, Any]:
+def validate_database(
+    path: Path,
+    *,
+    minimum_collection_participants: int = 0,
+    minimum_collections: int = 0,
+    minimum_analysis_result_participants: int = 0,
+    minimum_analysis_results: int = 0,
+) -> dict[str, Any]:
     required = {
         "participants", "participant_identifiers", "participant_assets",
         "participant_clinical_values", "participant_identity_evidence",
@@ -1014,7 +1169,32 @@ def validate_database(path: Path) -> dict[str, Any]:
             "identity_resolutions": conn.execute(
                 "SELECT COUNT(*) FROM participant_identity_evidence WHERE status = 'resolved'"
             ).fetchone()[0],
+            "collection_participants": conn.execute(
+                "SELECT COUNT(*) FROM participants WHERE dataset_type='Collection'"
+            ).fetchone()[0],
+            "collections": conn.execute(
+                "SELECT COUNT(DISTINCT short_title) FROM participants "
+                "WHERE dataset_type='Collection'"
+            ).fetchone()[0],
+            "analysis_result_participants": conn.execute(
+                "SELECT COUNT(*) FROM participants WHERE dataset_type='Analysis Result'"
+            ).fetchone()[0],
+            "analysis_results": conn.execute(
+                "SELECT COUNT(DISTINCT short_title) FROM participants "
+                "WHERE dataset_type='Analysis Result'"
+            ).fetchone()[0],
         }
+        thresholds = {
+            "collection_participants": minimum_collection_participants,
+            "collections": minimum_collections,
+            "analysis_result_participants": minimum_analysis_result_participants,
+            "analysis_results": minimum_analysis_results,
+        }
+        for name, minimum in thresholds.items():
+            if counts[name] < minimum:
+                errors.append(
+                    f"{name} coverage regression: {counts[name]} < required {minimum}"
+                )
     return {"ok": not errors, "errors": errors, "integrity_check": integrity, "counts": counts}
 
 
@@ -1115,6 +1295,14 @@ def parser() -> argparse.ArgumentParser:
     build.add_argument("--public-db", default=str(DEFAULT_PUBLIC_DB))
     build.add_argument("--controlled-db", default=str(DEFAULT_CONTROLLED_DB))
     build.add_argument("--clinical-db", default=str(DEFAULT_CLINICAL_DB))
+    build.add_argument("--idc-db", default=str(DEFAULT_IDC_DB))
+    build.add_argument(
+        "--staging-db",
+        help=(
+            "Resolve snapshot, controlled-access, clinical, and IDC participant "
+            "inputs from the canonical runner-local V2 staging ledger."
+        ),
+    )
     build.add_argument("--out", default=str(DEFAULT_DB))
     build.add_argument("--gzip-out")
     build.add_argument("--manifest-out")
@@ -1126,6 +1314,10 @@ def parser() -> argparse.ArgumentParser:
     )
     validate = sub.add_parser("validate")
     validate.add_argument("--db", default=str(DEFAULT_DB))
+    validate.add_argument("--min-collection-participants", type=int, default=0)
+    validate.add_argument("--min-collections", type=int, default=0)
+    validate.add_argument("--min-analysis-result-participants", type=int, default=0)
+    validate.add_argument("--min-analysis-results", type=int, default=0)
     info = sub.add_parser("info")
     info.add_argument("--db", default=str(DEFAULT_DB))
     ensure = sub.add_parser("ensure")
@@ -1145,12 +1337,27 @@ def main() -> int:
     args = parser().parse_args()
     if args.command == "build":
         out = Path(args.out)
+        staging_db = Path(args.staging_db) if args.staging_db else None
+        snapshot_db = Path(args.snapshot_db)
+        controlled_db = Path(args.controlled_db)
+        clinical_db = Path(args.clinical_db)
+        idc_db = Path(args.idc_db)
+        if staging_db:
+            snapshot_db = resolve_staging_component(staging_db, "snapshot", verify_hash=False)
+            controlled_db = resolve_staging_component(
+                staging_db, "controlled_access", verify_hash=False
+            )
+            clinical_db = resolve_staging_component(staging_db, "clinical", verify_hash=False)
+            idc_db = resolve_staging_component(
+                staging_db, "idc_participants", verify_hash=False
+            )
         result = build_database(
             out,
-            snapshot_db=Path(args.snapshot_db),
+            snapshot_db=snapshot_db,
             public_db=Path(args.public_db),
-            controlled_db=Path(args.controlled_db),
-            clinical_db=Path(args.clinical_db),
+            controlled_db=controlled_db,
+            clinical_db=clinical_db,
+            idc_db=idc_db,
             replace=args.replace,
             include_clinical_values=args.embed_clinical_values,
         )
@@ -1163,7 +1370,13 @@ def main() -> int:
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0
     if args.command == "validate":
-        result = validate_database(Path(args.db))
+        result = validate_database(
+            Path(args.db),
+            minimum_collection_participants=args.min_collection_participants,
+            minimum_collections=args.min_collections,
+            minimum_analysis_result_participants=args.min_analysis_result_participants,
+            minimum_analysis_results=args.min_analysis_results,
+        )
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0 if result["ok"] else 1
     if args.command == "ensure":

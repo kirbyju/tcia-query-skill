@@ -308,6 +308,17 @@ status, and reconciliation warnings.
 Query IDC for public DICOM detail. Query the public non-DICOM, controlled, or
 clinical detail artifacts only when the user drills down.
 
+For compact public-DICOM presence, project `collection_id`,
+`analysis_result_id`, and `PatientID` directly from the IDC index during the V2
+build. Include a Collection membership when IDC identifies a visible TCIA
+Collection and a distinct Analysis Result membership when IDC supplies a
+visible TCIA `analysis_result_id`. Do not pass this projection through the
+clinical artifact, and do not infer Analysis Result membership by copying every
+participant from a source Collection. Previously retained
+`legacy_idc_index` Collection memberships may remain as explicitly historical
+compatibility evidence, but they must not be presented as confirmed current IDC
+presence or used to create Analysis Result memberships.
+
 ## Release channels and compatibility
 
 Use `tcia-metadata-v2-latest` as the moving default release contract and retain
@@ -380,9 +391,13 @@ does not already exist. The workflow never uploads to
 
 ### Build-time staging and legacy-detail retirement
 
-Source release assets are first resolved into an explicit build contract rather
-than passed to V2 builders as an implicit collection of unrelated inputs. After
-the source components are downloaded and verified, the workflow builds
+Source release assets and the direct build-time IDC participant projection are
+first resolved into an explicit build contract rather than passed to V2
+builders as an implicit collection of unrelated inputs. The IDC projection is
+restricted to visible WordPress Collections and Analysis Results, retains both
+dataset identity dimensions, and contains participant/study/series summaries
+rather than file-level DICOM metadata. After the source components are
+downloaded and verified and the IDC projection is built, the workflow builds
 the runner-local `cache/tcia_metadata_v2_staging.sqlite` ledger with
 `scripts/tcia_v2_staging.py`. The ledger pins each source database and manifest
 hash, component schema/fingerprint, release identity, SQLite integrity result,
@@ -390,11 +405,13 @@ and a row-count/schema inventory. Component database names are relative to the
 ledger directory; machine-specific paths are never retained.
 
 The public non-DICOM builder accepts `--staging-db` and resolves its snapshot,
-NIfTI, pathology, and clinical inputs through that contract. The ledger itself
-is not a release asset. A path-independent copy of its tables is embedded in
+NIfTI, pathology, and clinical inputs through that contract. The Participant
+Inventory builder resolves its snapshot, controlled, clinical, and direct IDC
+participant inputs from the same ledger. Neither the ledger nor the IDC
+projection is a release asset. A path-independent copy of the ledger tables is embedded in
 `public_non_dicom_audit.sqlite.gz`, while a short-lived GitHub Actions artifact
-retains the ledger and parity report for maintainer diagnostics. Expiration of
-that workflow artifact does not affect a published release.
+retains the ledger, IDC projection, and parity report for maintainer diagnostics.
+Expiration of that workflow artifact does not affect a published release.
 
 Run the staging contract directly with:
 
