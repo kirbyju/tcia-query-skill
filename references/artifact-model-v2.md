@@ -428,6 +428,41 @@ the release contract or increase runner disk use until a candidate has been
 reviewed. The checkpoint is an intermediate file, not an additional release
 asset; only its tables embedded in the audit companion persist.
 
+The workflow caches a gzip-compressed copy of that transition checkpoint by
+the NIfTI and pathology component-manifest hashes. A cache hit restores and
+validates the exact checkpoint before use; the uncompressed database is still
+runner-local and is consumed by the audit build. This cache is an optimization,
+not an authority or release surface, and a component hash change necessarily
+creates a new cache key.
+
+The streamlined candidate uses compact public audit schema 3. The ordinary
+full/stable contract continues to use audit schema 2 until a compact candidate
+is explicitly promoted. Schema 3 treats the original public non-DICOM database
+as a short-lived assembly database and projects fresh research and audit
+outputs rather than clearing columns and vacuuming that multi-GB file in place.
+It uses integer entity/field links, 32-byte digest BLOBs, and `WITHOUT ROWID`
+link tables. It also removes the redundant entity index that duplicated the
+schema-2 composite primary key.
+
+File-level `field_provenance_json` remains lossless at the parsed-value level
+but is normalized instead of stored as one nearly unique document per asset:
+
+- `provenance_source_payloads` stores each canonical source payload once;
+- `provenance_decision_payloads` stores repeated decision attributes once;
+- `entity_provenance_sources` retains each entity-local source label;
+- `field_provenance` joins a field decision to its labeled source; and
+- `agent_normalized_field_provenance` exposes the joined audit rows.
+
+Use `scripts/tcia_v2_audit.py verify-reconstruction` to compare exact document,
+source-link, and field-decision totals and to reconstruct a deterministic sample
+against the assembly database. The candidate workflow requires this check to
+pass before deleting the assembly database. Its diagnostic artifact also
+retains projection/compression timings, output sizes, largest-table sizes, and
+the reconstruction report. Research and audit gzip outputs are compressed in
+parallel at level 3 for the candidate, using `pigz` when present and a portable
+Python gzip fallback otherwise. The stable schema-2 path retains its existing
+sequential level-6 compression behavior.
+
 The materialized streamlined candidate contains exactly ten files: seven
 compressed SQLite databases (`tcia_snapshot`, Participant Inventory, public
 non-DICOM, clinical, controlled-access, and both audit companions), the two
@@ -441,8 +476,9 @@ supports both the existing full contract and this inline streamlined contract.
 
 The streamlined contract is deliberately non-publishing until its workflow
 artifact has been reviewed for combined audit size, runner disk headroom,
-installer behavior, and parity. Publication requires a separate code change
-and explicit approval; the candidate path cannot update either moving release.
+installer behavior, parity, reconstruction, and schema-3 consumer impact.
+Publication requires a separate code change and explicit approval; the
+candidate path cannot update either moving release.
 
 Component helpers remain available for targeted and compatibility workflows,
 but new integrations should prefer the bundle installer:

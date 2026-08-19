@@ -130,6 +130,13 @@ jobs:
             --db cache/tcia_metadata_v2_staging.sqlite \
             --verify-sources
 
+      - name: Restore unchanged legacy-detail transition checkpoint
+        if: github.event_name == 'workflow_dispatch' && inputs.checkpoint_legacy_detail == 'true'
+        uses: actions/cache@v4
+        with:
+          path: cache/tcia_v2_legacy_detail_checkpoint.sqlite.gz
+          key: tcia-v2-legacy-detail-${{ hashFiles('dist/nifti_metadata_manifest.json', 'dist/pathology_metadata_manifest.json') }}
+
       - name: Regenerate the complete web export set from the bundled snapshot
         run: |
           python scripts/tcia_v2_bundle.py exports \
@@ -157,10 +164,17 @@ jobs:
           checkpoint_args=()
           parity_args=()
           if [ "${{ inputs.checkpoint_legacy_detail }}" = "true" ]; then
-            python scripts/tcia_v2_checkpoint.py build \
-              --staging-db cache/tcia_metadata_v2_staging.sqlite \
-              --out cache/tcia_v2_legacy_detail_checkpoint.sqlite \
-              --replace
+            if [ -s cache/tcia_v2_legacy_detail_checkpoint.sqlite.gz ]; then
+              gzip -dc cache/tcia_v2_legacy_detail_checkpoint.sqlite.gz \
+                > cache/tcia_v2_legacy_detail_checkpoint.sqlite
+            else
+              python scripts/tcia_v2_checkpoint.py build \
+                --staging-db cache/tcia_metadata_v2_staging.sqlite \
+                --out cache/tcia_v2_legacy_detail_checkpoint.sqlite \
+                --replace
+              gzip -1 -c cache/tcia_v2_legacy_detail_checkpoint.sqlite \
+                > cache/tcia_v2_legacy_detail_checkpoint.sqlite.gz
+            fi
             python scripts/tcia_v2_checkpoint.py validate \
               --db cache/tcia_v2_legacy_detail_checkpoint.sqlite
             checkpoint_args+=(--checkpoint-db cache/tcia_v2_legacy_detail_checkpoint.sqlite)
@@ -177,19 +191,47 @@ jobs:
             --out cache/reports/tcia_v2_legacy_detail_parity.json \
             "${parity_args[@]}"
           # The public artifact has absorbed these sources; free runner space
-          # before audit extraction and VACUUM rewrite the multi-GB database.
+          # before producing the research and audit outputs.
           rm -f cache/nifti_metadata.sqlite cache/pathology_metadata.sqlite
-          python scripts/tcia_v2_audit.py split \
-            --artifact public_non_dicom \
-            --db cache/public_non_dicom_metadata.sqlite \
-            --audit-out cache/public_non_dicom_audit.sqlite \
-            --research-gzip-out dist/public_non_dicom_metadata.sqlite.gz \
-            --research-manifest-out dist/public_non_dicom_metadata_manifest.json \
-            --audit-gzip-out dist/public_non_dicom_audit.sqlite.gz \
-            --audit-manifest-out dist/public_non_dicom_audit_manifest.json \
-            --staging-db cache/tcia_metadata_v2_staging.sqlite \
-            "${checkpoint_args[@]}" \
-            --replace
+          if [ "${{ inputs.release_contract }}" = "streamlined_candidate" ]; then
+            mv cache/public_non_dicom_metadata.sqlite cache/public_non_dicom_assembly.sqlite
+            python scripts/tcia_v2_audit.py project-v3 \
+              --artifact public_non_dicom \
+              --db cache/public_non_dicom_assembly.sqlite \
+              --research-out cache/public_non_dicom_metadata.sqlite \
+              --audit-out cache/public_non_dicom_audit.sqlite \
+              --research-gzip-out dist/public_non_dicom_metadata.sqlite.gz \
+              --research-manifest-out dist/public_non_dicom_metadata_manifest.json \
+              --audit-gzip-out dist/public_non_dicom_audit.sqlite.gz \
+              --audit-manifest-out dist/public_non_dicom_audit_manifest.json \
+              --staging-db cache/tcia_metadata_v2_staging.sqlite \
+              --gzip-level 3 \
+              --metrics-out cache/reports/tcia_v2_compact_audit_metrics.json \
+              "${checkpoint_args[@]}" \
+              --replace
+            python scripts/tcia_v2_audit.py verify-reconstruction \
+              --source-db cache/public_non_dicom_assembly.sqlite \
+              --audit-db cache/public_non_dicom_audit.sqlite \
+              --sample-size 1000 \
+              --out cache/reports/tcia_v2_compact_audit_reconstruction.json
+            rm -f cache/public_non_dicom_assembly.sqlite
+            {
+              echo "### Compact V2 audit candidate"
+              python -c 'import json; d=json.load(open("cache/reports/tcia_v2_compact_audit_metrics.json")); s=d["output_sizes"]; print("- Projection: {:.1f} seconds\n- Compression: {:.1f} seconds\n- Research SQLite/gzip: {:,} / {:,} bytes\n- Audit SQLite/gzip: {:,} / {:,} bytes".format(d["total_projection_seconds"],d["compression"]["compression_seconds"],s["research_sqlite_bytes"],s["research_gzip_bytes"],s["audit_sqlite_bytes"],s["audit_gzip_bytes"]))'
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            python scripts/tcia_v2_audit.py split \
+              --artifact public_non_dicom \
+              --db cache/public_non_dicom_metadata.sqlite \
+              --audit-out cache/public_non_dicom_audit.sqlite \
+              --research-gzip-out dist/public_non_dicom_metadata.sqlite.gz \
+              --research-manifest-out dist/public_non_dicom_metadata_manifest.json \
+              --audit-gzip-out dist/public_non_dicom_audit.sqlite.gz \
+              --audit-manifest-out dist/public_non_dicom_audit_manifest.json \
+              --staging-db cache/tcia_metadata_v2_staging.sqlite \
+              "${checkpoint_args[@]}" \
+              --replace
+          fi
           python scripts/tcia_public_non_dicom_metadata.py validate \
             --db cache/public_non_dicom_metadata.sqlite
           python scripts/tcia_v2_audit.py validate \
@@ -243,6 +285,8 @@ jobs:
           path: |
             cache/tcia_metadata_v2_staging.sqlite
             cache/reports/tcia_v2_legacy_detail_parity.json
+            cache/reports/tcia_v2_compact_audit_metrics.json
+            cache/reports/tcia_v2_compact_audit_reconstruction.json
           if-no-files-found: ignore
           retention-days: 30
 

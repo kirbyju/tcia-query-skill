@@ -277,6 +277,161 @@ class V2AuditSplitTests(unittest.TestCase):
                 self.assertEqual(row[:3], ("participant_identifiers", "pid1", "provenance_json"))
                 self.assertIn("clinical_metadata", row[3])
 
+    def test_compact_v3_projects_without_mutating_source_and_reconstructs_provenance(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "assembly.sqlite"
+            research = root / "research.sqlite"
+            audit_database = root / "audit.sqlite"
+            with sqlite3.connect(source) as conn:
+                conn.executescript(public.SCHEMA)
+                public.insert_vocab(conn)
+                for index in (1, 2):
+                    asset_id = f"asset-{index}"
+                    public.insert_asset(
+                        conn,
+                        {
+                            "asset_id": asset_id,
+                            "dataset_type": "Collection",
+                            "short_title": "TEST",
+                            "download_id": str(index),
+                            "subject_id": f"P{index}",
+                            "subject_id_namespace": "tcia_dataset:TEST",
+                            "participant_link_status": "unavailable",
+                            "asset_granularity": "file",
+                            "asset_name": f"image-{index}.nii.gz",
+                            "file_name": f"image-{index}.nii.gz",
+                            "package_path": f"P{index}/image-{index}.nii.gz",
+                            "file_format": "NIFTI",
+                            "media_kind": "image_volume",
+                            "spatial_dimensionality": "3D",
+                            "temporal_dimensionality": "static",
+                            "imaging_domain": "radiology",
+                            "modality": "MR",
+                            "object_role": "source_image",
+                            "representation_provenance_class": "submitted_original",
+                            "source_system": "tcia_aspera",
+                            "source_record_id": f"row-{index}",
+                            "source_url": "https://example.test/package",
+                            "raw_values_json": '{"source_column":"raw"}',
+                            "provenance_json": '{"source_artifact":"nifti_metadata"}',
+                            "quality_flag_json": "{}",
+                        },
+                    )
+                    self.assertEqual(
+                        conn.execute(
+                            "SELECT COUNT(*) FROM public_non_dicom_assets WHERE asset_id=?",
+                            (asset_id,),
+                        ).fetchone()[0],
+                        1,
+                    )
+                    public.merge_image_metadata(
+                        conn,
+                        asset_id,
+                        {"modality": "MR", "file_format": "NIFTI"},
+                        value_role="source_raw",
+                        source_kind="nifti_metadata",
+                        source_locator="agent_nifti_files",
+                        inference_method="direct",
+                        confidence="high",
+                        priority=100,
+                        short_title="TEST",
+                        assume_new=True,
+                    )
+                conn.execute("INSERT INTO artifact_meta VALUES ('schema_version', '5')")
+                original = {
+                    row[0]: __import__("json").loads(row[1])
+                    for row in conn.execute(
+                        "SELECT asset_id, field_provenance_json "
+                        "FROM public_non_dicom_image_metadata"
+                    )
+                }
+                conn.commit()
+            source_size = source.stat().st_size
+            result = audit.project_database_v3(
+                source,
+                research,
+                audit_database,
+                artifact="public_non_dicom",
+                replace=True,
+            )
+            self.assertEqual(result["schema_version"], 3)
+            self.assertTrue(result["audit"]["audit_validation"]["ok"])
+            self.assertTrue(public.validate_database(research)["ok"])
+            self.assertEqual(source.stat().st_size, source_size)
+            with sqlite3.connect(source) as conn:
+                self.assertNotEqual(
+                    conn.execute(
+                        "SELECT field_provenance_json "
+                        "FROM public_non_dicom_image_metadata LIMIT 1"
+                    ).fetchone()[0],
+                    "{}",
+                )
+            with sqlite3.connect(research) as conn:
+                self.assertEqual(
+                    conn.execute(
+                        "SELECT field_provenance_json "
+                        "FROM public_non_dicom_image_metadata LIMIT 1"
+                    ).fetchone()[0],
+                    "{}",
+                )
+                self.assertEqual(
+                    conn.execute(
+                        "SELECT value FROM artifact_meta WHERE key='audit_schema_version'"
+                    ).fetchone()[0],
+                    "3",
+                )
+            with sqlite3.connect(audit_database) as conn:
+                self.assertEqual(
+                    conn.execute(
+                        "SELECT value FROM audit_meta WHERE key='schema_version'"
+                    ).fetchone()[0],
+                    "3",
+                )
+                for asset_id, expected in original.items():
+                    self.assertEqual(
+                        audit.reconstruct_field_provenance(
+                            conn,
+                            entity_table="public_non_dicom_image_metadata",
+                            entity_id=asset_id,
+                        ),
+                        expected,
+                    )
+                self.assertEqual(
+                    conn.execute(
+                        "SELECT COUNT(*) FROM sqlite_master "
+                        "WHERE type='index' AND name='idx_entity_payloads_entity'"
+                    ).fetchone()[0],
+                    0,
+                )
+                self.assertEqual(
+                    conn.execute(
+                        "SELECT COUNT(*) FROM provenance_decision_payloads"
+                    ).fetchone()[0],
+                    1,
+                )
+                self.assertEqual(
+                    conn.execute("SELECT COUNT(*) FROM field_provenance").fetchone()[0],
+                    4,
+                )
+                self.assertTrue(
+                    all(
+                        row[0] == 32
+                        for row in conn.execute(
+                            "SELECT length(payload_sha256) FROM payloads"
+                        )
+                    )
+                )
+            reconstruction = audit.verify_field_provenance_reconstruction(
+                source, audit_database, sample_size=2
+            )
+            self.assertTrue(reconstruction["ok"], reconstruction["errors"])
+            self.assertEqual(reconstruction["sampled_documents"], 2)
+            manifest = audit.build_audit_manifest(
+                audit_database, None, artifact="public_non_dicom"
+            )
+            self.assertEqual(manifest["schema_version"], 3)
+
 
 if __name__ == "__main__":
     unittest.main()
