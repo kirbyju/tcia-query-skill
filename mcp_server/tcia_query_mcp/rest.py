@@ -86,7 +86,7 @@ def create_app(service: TciaQueryService | None = None) -> FastAPI:
 
     @app.get(f"{V2_API_PREFIX}/bundle")
     def v2_bundle_info() -> dict[str, Any]:
-        return S().snapshot_info()
+        return S().bundle_info()
 
     @app.post(f"{V2_API_PREFIX}/datasets/search")
     def v2_search_datasets(request: SearchDatasetsRequest) -> dict[str, Any]:

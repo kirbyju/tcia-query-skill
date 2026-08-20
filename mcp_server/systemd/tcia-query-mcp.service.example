@@ -19,8 +19,6 @@ Environment=TCIA_SNAPSHOT_DB=/srv/tcia-query-mcp/cache/tcia-metadata-v2-latest/t
 Environment=TCIA_PARTICIPANT_INVENTORY_DB=/srv/tcia-query-mcp/cache/tcia-metadata-v2-latest/participant_inventory.sqlite
 Environment=TCIA_PUBLIC_NON_DICOM_METADATA_DB=/srv/tcia-query-mcp/cache/tcia-metadata-v2-latest/public_non_dicom_metadata.sqlite
 Environment=TCIA_CONTROLLED_ACCESS_METADATA_DB=/srv/tcia-query-mcp/cache/tcia-metadata-v2-latest/controlled_access_metadata.sqlite
-Environment=TCIA_NIFTI_METADATA_DB=/srv/tcia-query-mcp/cache/tcia-metadata-v2-latest/nifti_metadata.sqlite
-Environment=TCIA_PATHOLOGY_METADATA_DB=/srv/tcia-query-mcp/cache/tcia-metadata-v2-latest/pathology_metadata.sqlite
 Environment=TCIA_CLINICAL_METADATA_DB=/srv/tcia-query-mcp/cache/tcia-metadata-v2-latest/clinical_metadata.sqlite
 Environment=TCIA_V2_BUNDLE_MANIFEST=/srv/tcia-query-mcp/cache/tcia-metadata-v2-latest/tcia_metadata_v2_bundle_manifest.json
 

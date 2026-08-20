@@ -175,7 +175,12 @@ CREATE TABLE participant_identity_evidence (
 );
 
 CREATE INDEX idx_pi_participants_dataset ON participants(short_title, display_participant_id);
+CREATE INDEX idx_pi_participants_short_title_nocase ON participants(short_title COLLATE NOCASE);
+CREATE INDEX idx_pi_participants_display_id_nocase ON participants(display_participant_id COLLATE NOCASE);
 CREATE INDEX idx_pi_identifiers_raw ON participant_identifiers(identifier_namespace, raw_identifier);
+CREATE INDEX idx_pi_identifiers_participant ON participant_identifiers(participant_key);
+CREATE INDEX idx_pi_identifiers_raw_nocase ON participant_identifiers(raw_identifier COLLATE NOCASE);
+CREATE INDEX idx_pi_identifiers_normalized_nocase ON participant_identifiers(normalized_identifier COLLATE NOCASE);
 CREATE INDEX idx_pi_assets_participant ON participant_assets(participant_key);
 CREATE INDEX idx_pi_assets_access ON participant_assets(access_level, data_domain);
 CREATE INDEX idx_pi_clinical_participant ON participant_clinical_values(participant_key, concept);

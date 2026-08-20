@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import tempfile
 import unittest
-from contextlib import contextmanager
 from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
+from unittest.mock import patch
 
 from mcp_server.tcia_query_mcp.service import TciaQueryService
 
@@ -469,6 +471,50 @@ def create_participant_db(path: Path) -> None:
             """
             CREATE TABLE participant_inventory_meta (key TEXT PRIMARY KEY, value TEXT);
             INSERT INTO participant_inventory_meta VALUES ('schema_version', '6');
+            CREATE TABLE participants (
+                participant_key TEXT PRIMARY KEY, dataset_type TEXT, short_title TEXT,
+                display_participant_id TEXT, identity_scope TEXT,
+                within_dataset_identity_status TEXT, identity_resolution_method TEXT,
+                cross_dataset_identity_status TEXT
+            );
+            INSERT INTO participants VALUES (
+                'participant-1', 'Collection', 'TCGA-BRCA', 'BRCA-1', 'dataset_scoped',
+                'resolved', 'source_identifier', 'not_asserted'
+            );
+            CREATE TABLE participant_identifiers (
+                participant_identifier_id TEXT PRIMARY KEY, participant_key TEXT,
+                managed_system TEXT, identifier_namespace TEXT, raw_identifier TEXT,
+                normalized_identifier TEXT, link_evidence TEXT, provenance_json TEXT
+            );
+            CREATE INDEX idx_test_identifiers_participant
+                ON participant_identifiers(participant_key);
+            INSERT INTO participant_identifiers VALUES
+              ('identifier-1', 'participant-1', 'tcia_wordpress', 'tcia_subject_id',
+               'BRCA-1', 'BRCA-1', 'source_identifier', '{}'),
+              ('identifier-2', 'participant-1', 'crdc_idc', 'idc_patient_id',
+               'brca-1', 'BRCA-1', 'casefolded_identifier_same_tcia_dataset', '{}');
+            CREATE TABLE participant_assets (
+                participant_asset_id TEXT PRIMARY KEY, participant_key TEXT,
+                managed_system TEXT, source_artifact TEXT, access_level TEXT,
+                data_domain TEXT, media_kind TEXT, modality TEXT, file_format TEXT,
+                object_role TEXT, study_count INTEGER, series_count INTEGER,
+                file_count INTEGER, known_size_bytes INTEGER,
+                has_file_level_metadata INTEGER, detail_pointer TEXT, access_route TEXT,
+                inventory_status TEXT, source_version TEXT, provenance_json TEXT
+            );
+            CREATE INDEX idx_test_assets_participant ON participant_assets(participant_key);
+            INSERT INTO participant_assets VALUES
+              ('base-asset-1', 'participant-1', 'crdc_idc', 'idc_metadata', 'open',
+               'radiology', 'volume', 'MR', 'DICOM', 'source_image', 1, 2, 20,
+               1000, 1, 'idc', 'https://example.org/idc', 'known', 'v24', '{}'),
+              ('base-asset-2', 'participant-1', 'tcia_aspera',
+               'public_non_dicom_metadata', 'open', 'radiology', 'volume', 'MR',
+               'NIfTI', 'source_image', 1, 1, 1, 500, 1, 'public_non_dicom',
+               'https://example.org/nifti', 'known', 'v2', '{}'),
+              ('base-asset-3', 'participant-1', 'tcia_wordpress',
+               'clinical_metadata', 'controlled', 'clinical', 'table', NULL, 'CSV',
+               'clinical_data', NULL, NULL, 1, 50, 1, 'clinical',
+               'https://example.org/clinical', 'known', 'v2', '{}');
             CREATE TABLE agent_participant_search (
                 participant_key TEXT, dataset_type TEXT, short_title TEXT,
                 display_participant_id TEXT, source_namespace_count INTEGER,
@@ -582,6 +628,7 @@ class TciaQueryServiceTests(unittest.TestCase):
         self.participants = root / "participant_inventory.sqlite"
         self.public_non_dicom = root / "public_non_dicom_metadata.sqlite"
         self.bundle_manifest = root / "tcia_metadata_v2_bundle_manifest.json"
+        self.bundle_install_state = root / "tcia_metadata_v2_install.json"
         create_base_snapshot(self.snapshot)
         create_controlled_db(self.controlled)
         create_nifti_db(self.nifti)
@@ -597,6 +644,27 @@ class TciaQueryServiceTests(unittest.TestCase):
             "release_fingerprint": "test-fingerprint",
             "producer": {"commit": "test"},
             "components": {},
+            "profiles": {
+                "research_detail": {
+                    "assets": [
+                        "tcia_snapshot.sqlite.gz",
+                        "participant_inventory.sqlite.gz",
+                        "public_non_dicom_metadata.sqlite.gz",
+                        "controlled_access_metadata.sqlite.gz",
+                        "clinical_metadata.sqlite.gz",
+                    ]
+                }
+            },
+        }))
+        self.bundle_install_state.write_text(json.dumps({
+            "installed_profile": "research_detail",
+            "installed_assets": [
+                "tcia_snapshot.sqlite.gz",
+                "participant_inventory.sqlite.gz",
+                "public_non_dicom_metadata.sqlite.gz",
+                "controlled_access_metadata.sqlite.gz",
+                "clinical_metadata.sqlite.gz",
+            ],
         }))
         self.service = TciaQueryService(
             snapshot_db=self.snapshot,
@@ -626,6 +694,34 @@ class TciaQueryServiceTests(unittest.TestCase):
         self.assertEqual(info["clinical_counts"]["image_linked_subjects"], 1)
         self.assertTrue(info["capabilities"]["release_history"])
         self.assertTrue(info["capabilities"]["external_resource_labels"])
+
+    def test_bundle_info_uses_manifest_without_sqlite_recounts(self) -> None:
+        for name in (
+            "_connect_snapshot",
+            "_connect_controlled",
+            "_connect_nifti",
+            "_connect_pathology",
+            "_connect_clinical",
+            "_connect_participants",
+            "_connect_public_non_dicom",
+        ):
+            setattr(self.service, name, lambda: self.fail("bundle_info opened SQLite"))
+        info = self.service.bundle_info()
+        self.assertEqual(info["v2_bundle"]["release_fingerprint"], "test-fingerprint")
+        self.assertTrue(info["v2_capabilities"]["participant_search"])
+        self.assertTrue(info["v2_capabilities"]["public_non_dicom_detail"])
+        self.assertNotIn("participant_counts", info)
+
+    def test_streamlined_defaults_ignore_legacy_files_in_v2_directory(self) -> None:
+        root = Path(self.tmp.name) / "isolated-skill"
+        v2_root = root / "cache" / "tcia-metadata-v2-latest"
+        v2_root.mkdir(parents=True)
+        (v2_root / "nifti_metadata.sqlite").touch()
+        (v2_root / "pathology_metadata.sqlite").touch()
+        with patch.dict(os.environ, {"TCIA_V2_INSTALL_DIR": str(v2_root)}, clear=False):
+            service = TciaQueryService(skill_root=root)
+        self.assertEqual(service.nifti_db, root / "cache" / "nifti_metadata.sqlite")
+        self.assertEqual(service.pathology_db, root / "cache" / "pathology_metadata.sqlite")
 
     def test_search_datasets_filters_external_clinical_resource(self) -> None:
         result = self.service.search_datasets(

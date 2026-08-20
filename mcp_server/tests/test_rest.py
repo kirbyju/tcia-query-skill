@@ -21,6 +21,20 @@ class RestV2ContractTests(unittest.TestCase):
         self.assertIn("/v1/datasets/search", paths)
         self.assertIn("/v1/snapshot", paths)
 
+    def test_v2_bundle_uses_lightweight_manifest_info(self) -> None:
+        class Service:
+            def bundle_info(self):
+                return {"v2_bundle": {"release_fingerprint": "test"}}
+
+            def snapshot_info(self):
+                raise AssertionError("V2 bundle endpoint must not recount SQLite views")
+
+        app = create_app(Service())
+        route = next(route for route in app.routes if route.path == "/v2/bundle")
+        self.assertEqual(
+            route.endpoint(), {"v2_bundle": {"release_fingerprint": "test"}}
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -48,7 +48,7 @@ Work this way:
    downloads.
 5. Use the optional detail tools only after confirming TCIA provenance in the
    base snapshot: patient-level clinical metadata, controlled-access files,
-   public non-DICOM metadata, and pathology Aspera/PathDB metadata. Public
+   and unified public non-DICOM metadata, including NIfTI and pathology. Public
    DICOM detail remains an IDC/idc-index responsibility.
 6. This MCP server is a read-only metadata service and does not transfer payloads.
    Return policy and manifest/DRS guidance. A capable client agent may invoke the
@@ -87,13 +87,9 @@ Recommended workflow:
 8. Use the clinical tools for patient-level resolved values, sourced facts, and
    conflicts. Subject identity is scoped by `(short_title, subject_id)`; retain
    source provenance and distinguish dataset-scope inferred values.
-9. Use `find_public_non_dicom_assets` for V2 non-DICOM detail. Use
-   `get_nifti_characteristics` for the legacy detailed NIfTI compatibility
-   surface and reviewed source relationships.
-   relationships, and `find_nifti_review_issues` for unresolved dataset-level QC.
-10. Use the pathology tools for PathDB/Aspera metadata. PathDB is optimized for
-   metadata/viewers and may use converted files; Aspera packages are the
-   original submitter-provided route.
+9. Use `find_public_non_dicom_assets` for V2 NIfTI, pathology, and other
+   non-DICOM detail. The NIfTI/pathology-specific tools are legacy compatibility
+   surfaces and require explicitly configured legacy databases.
 """
 
 
@@ -185,9 +181,9 @@ def guard(fn: Callable[..., Any]) -> Callable[..., Any]:
 @mcp.tool()
 @guard
 def get_snapshot_info() -> dict:
-    """Return configured snapshot paths, optional sidecar availability, row counts, and feature flags."""
+    """Return the installed V2 manifest, profile, component schemas, and capabilities."""
 
-    return service().snapshot_info()
+    return service().bundle_info()
 
 
 @mcp.tool()
@@ -802,9 +798,9 @@ def guide_resource() -> str:
 
 @mcp.resource("tcia://snapshot/info", mime_type="application/json")
 def snapshot_info_resource() -> str:
-    """Snapshot paths, metadata, row counts, and feature flags."""
+    """Installed V2 manifest, profile, component schemas, and capabilities."""
 
-    return json.dumps(service().snapshot_info(), indent=2, sort_keys=True)
+    return json.dumps(service().bundle_info(), indent=2, sort_keys=True)
 
 
 def http_app(server: FastMCP | None = None):

@@ -17,9 +17,11 @@ profiles:
 - `participant_inventory.sqlite`: required V2 dataset-scoped participant availability.
 - `public_non_dicom_metadata.sqlite`: optional V2 public non-DICOM file-grain detail.
 - `controlled_access_metadata.sqlite`: optional controlled-access file-grain public metadata.
-- `nifti_metadata.sqlite`: optional public non-DICOM NIfTI file-grain metadata.
-- `pathology_metadata.sqlite`: optional pathology, PathDB, and Aspera package metadata.
 - `clinical_metadata.sqlite`: optional patient-level resolved clinical facts, provenance, and conflicts.
+
+The streamlined V2 release does not contain standalone NIfTI or pathology
+databases. Their research detail is unified in `public_non_dicom_metadata.sqlite`;
+specialized source rows and QC evidence are retained in its audit companion.
 
 It does not expose arbitrary SQL, shell commands, live WordPress scraping, or
 direct controlled-data downloads.
@@ -42,7 +44,7 @@ Core MCP tools:
 - `get_dataset_participant_coverage`
 - `find_participant_link_issues`
 
-Optional sidecar tools:
+Optional detail tools:
 
 - `find_public_non_dicom_assets`
 - `find_controlled_access_datasets`
@@ -62,6 +64,11 @@ Optional sidecar tools:
 - `get_clinical_subjects`
 - `get_clinical_facts`
 - `get_clinical_conflicts`
+
+The NIfTI/pathology-specific MCP tools and REST `/v1` routes are legacy
+compatibility surfaces and require explicitly configured databases from the
+legacy release. They are not enabled by `TCIA_V2_INSTALL_DIR` in a streamlined
+deployment.
 
 MCP resources:
 
@@ -92,10 +99,14 @@ python3 scripts/tcia_v2_bundle.py install --profile research_core
 python3 scripts/tcia_v2_bundle.py install --profile research_detail
 ```
 
-By default the service prefers validated files under
-`cache/tcia-metadata-v2-latest/`, then falls back to the legacy cache for
-compatibility. Production deployments can set `TCIA_V2_INSTALL_DIR`, or set
-the individual paths explicitly:
+`research_detail` already includes `research_core`; production hosts that need
+detail can run only the second command.
+
+By default the V2 service prefers validated files under
+`cache/tcia-metadata-v2-latest/`. Legacy NIfTI/pathology compatibility files
+remain isolated under `cache/` and are never inferred from the V2 directory.
+Production deployments can set `TCIA_V2_INSTALL_DIR`, or set the individual
+streamlined paths explicitly:
 
 ```bash
 export TCIA_V2_INSTALL_DIR=/path/to/cache/tcia-metadata-v2-latest

@@ -656,12 +656,12 @@ class TciaQueryService:
         self.nifti_db = Path(
             nifti_db
             or os.environ.get("TCIA_NIFTI_METADATA_DB", "")
-            or preferred_v2("nifti_metadata.sqlite")
+            or self.skill_root / "cache" / "nifti_metadata.sqlite"
         )
         self.pathology_db = Path(
             pathology_db
             or os.environ.get("TCIA_PATHOLOGY_METADATA_DB", "")
-            or preferred_v2("pathology_metadata.sqlite")
+            or self.skill_root / "cache" / "pathology_metadata.sqlite"
         )
         self.clinical_db = Path(
             clinical_db
@@ -788,6 +788,65 @@ class TciaQueryService:
             except (json.JSONDecodeError, TypeError):
                 output[row["key"]] = row["value"]
         return output
+
+    def bundle_info(self) -> dict[str, Any]:
+        """Return the installed V2 contract without scanning SQLite payloads."""
+        info: dict[str, Any] = {
+            "v2_bundle_manifest": str(self.bundle_manifest),
+            "v2_bundle_manifest_exists": self.bundle_manifest.exists(),
+            "v2_install_state": str(self.v2_install_state),
+            "v2_install_state_exists": self.v2_install_state.exists(),
+            "count_policy": "Build-time metadata only; request-time SQLite recounts are intentionally omitted.",
+        }
+        bundle: dict[str, Any] = {}
+        if self.bundle_manifest.exists():
+            try:
+                bundle = json.loads(self.bundle_manifest.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                info["v2_bundle_error"] = str(exc)
+            else:
+                info["v2_bundle"] = {
+                    "artifact": bundle.get("artifact"),
+                    "schema_version": bundle.get("schema_version"),
+                    "release_channel": bundle.get("release_channel"),
+                    "release_tag": bundle.get("release_tag"),
+                    "release_contract": bundle.get("release_contract"),
+                    "release_fingerprint": bundle.get("release_fingerprint"),
+                    "generated_at_utc": bundle.get("generated_at_utc"),
+                    "producer": bundle.get("producer"),
+                    "components": bundle.get("components"),
+                    "profiles": bundle.get("profiles"),
+                }
+        install: dict[str, Any] = {}
+        if self.v2_install_state.exists():
+            try:
+                install = json.loads(self.v2_install_state.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                info["v2_install_state_error"] = str(exc)
+            else:
+                info["v2_install"] = install
+
+        installed_assets = set(install.get("installed_assets") or [])
+        if not installed_assets:
+            installed_profile = str(install.get("installed_profile") or "")
+            installed_assets.update(
+                ((bundle.get("profiles") or {}).get(installed_profile) or {}).get("assets") or []
+            )
+        info["v2_capabilities"] = {
+            "participant_search": "participant_inventory.sqlite.gz" in installed_assets,
+            "public_non_dicom_detail": "public_non_dicom_metadata.sqlite.gz" in installed_assets,
+            "controlled_access_detail": "controlled_access_metadata.sqlite.gz" in installed_assets,
+            "clinical_detail": "clinical_metadata.sqlite.gz" in installed_assets,
+            "audit_support": {
+                "public_non_dicom_audit.sqlite.gz",
+                "participant_inventory_audit.sqlite.gz",
+            }.issubset(installed_assets),
+            "bundle_manifest": self.bundle_manifest.exists(),
+            "install_state": self.v2_install_state.exists(),
+            "public_dicom_authority": "IDC",
+            "publication_authority": "TCIA WordPress snapshot",
+        }
+        return info
 
     def snapshot_info(self) -> dict[str, Any]:
         info: dict[str, Any] = {
@@ -2060,6 +2119,30 @@ class TciaQueryService:
         modalities = [item.lower() for item in as_list(filters.get("modalities"))]
         access_levels = [item.lower() for item in as_list(filters.get("access_levels"))]
         with self._connect_participants() as conn:
+            if all(
+                self._object_exists(conn, name)
+                for name in ("participants", "participant_identifiers", "participant_assets")
+            ):
+                keys = self._find_participant_keys(
+                    conn,
+                    query=query,
+                    short_titles=short_titles,
+                    dataset_type=dataset_type,
+                    modalities=modalities,
+                    access_levels=access_levels,
+                    limit=limit,
+                )
+                rows = [
+                    normalize_v2_row(row)
+                    for row in self._participant_summary_rows(conn, keys)
+                ]
+                return {
+                    "participants": rows,
+                    "count": len(rows),
+                    "limit": limit,
+                    "identity_scope": "Dataset-scoped; Collections and Analysis Results remain distinct.",
+                    "public_dicom_detail_route": "IDC/idc-index",
+                }
             sql = "SELECT * FROM agent_participant_search WHERE 1 = 1"
             params: list[Any] = []
             if query:
@@ -2097,6 +2180,151 @@ class TciaQueryService:
             "identity_scope": "Dataset-scoped; Collections and Analysis Results remain distinct.",
             "public_dicom_detail_route": "IDC/idc-index",
         }
+
+    def _find_participant_keys(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        query: str,
+        short_titles: list[str],
+        dataset_type: str,
+        modalities: list[str],
+        access_levels: list[str],
+        limit: int,
+    ) -> list[str]:
+        """Find participant keys without expanding the aggregate search view."""
+        def select_keys(match_sql: str, match_params: list[Any]) -> list[str]:
+            params = list(match_params)
+            sql = f"SELECT p.participant_key FROM participants p {match_sql} WHERE 1 = 1"
+            if short_titles:
+                sql += (
+                    f" AND p.short_title COLLATE NOCASE IN "
+                    f"({','.join('?' for _ in short_titles)})"
+                )
+                params.extend(short_titles)
+            if dataset_type in {"collection", "analysis result"}:
+                sql += " AND p.dataset_type = ? COLLATE NOCASE"
+                params.append(dataset_type)
+            if "open" in access_levels and "controlled" not in access_levels:
+                sql += (
+                    " AND EXISTS (SELECT 1 FROM participant_assets a "
+                    "WHERE a.participant_key = p.participant_key AND a.access_level = 'open')"
+                )
+            elif "controlled" in access_levels and "open" not in access_levels:
+                sql += (
+                    " AND EXISTS (SELECT 1 FROM participant_assets a "
+                    "WHERE a.participant_key = p.participant_key AND a.access_level = 'controlled')"
+                )
+            for modality in modalities:
+                sql += (
+                    " AND EXISTS (SELECT 1 FROM participant_assets a "
+                    "WHERE a.participant_key = p.participant_key "
+                    "AND instr(',' || lower(replace(COALESCE(a.modality, ''), ' ', '')) || ',', "
+                    "',' || replace(?, ' ', '') || ',') > 0)"
+                )
+                params.append(modality)
+            sql += (
+                " ORDER BY p.short_title COLLATE NOCASE, "
+                "p.display_participant_id COLLATE NOCASE LIMIT ?"
+            )
+            params.append(limit)
+            return [str(row[0]) for row in conn.execute(sql, params)]
+
+        if not query:
+            return select_keys("", [])
+
+        exact_match_sql = """
+            JOIN (
+                SELECT participant_key
+                FROM participants
+                WHERE short_title = ? COLLATE NOCASE
+                   OR display_participant_id = ? COLLATE NOCASE
+                UNION
+                SELECT participant_key
+                FROM participant_identifiers
+                WHERE raw_identifier = ? COLLATE NOCASE
+                   OR normalized_identifier = ? COLLATE NOCASE
+            ) matches USING(participant_key)
+        """
+        exact_keys = select_keys(exact_match_sql, [query, query, query, query])
+        if exact_keys:
+            return exact_keys
+
+        pattern = f"%{query}%"
+        substring_match_sql = """
+                JOIN (
+                    SELECT participant_key
+                    FROM participants
+                    WHERE short_title LIKE ? COLLATE NOCASE
+                       OR display_participant_id LIKE ? COLLATE NOCASE
+                    UNION
+                    SELECT participant_key
+                    FROM participant_identifiers
+                    WHERE raw_identifier LIKE ? COLLATE NOCASE
+                       OR normalized_identifier LIKE ? COLLATE NOCASE
+                ) matches USING(participant_key)
+        """
+        return select_keys(substring_match_sql, [pattern, pattern, pattern, pattern])
+
+    def _participant_summary_rows(
+        self, conn: sqlite3.Connection, participant_keys: list[str]
+    ) -> list[sqlite3.Row]:
+        """Aggregate only the matched participants, preserving the public view shape."""
+        if not participant_keys:
+            return []
+        values = ",".join(
+            f"(?, {ordinal})" for ordinal, _key in enumerate(participant_keys)
+        )
+        params: list[Any] = list(participant_keys)
+        sql = f"""
+            WITH requested(participant_key, ordinal) AS (VALUES {values}),
+            identifier_summary AS (
+                SELECT i.participant_key,
+                       COUNT(DISTINCT i.identifier_namespace) AS source_namespace_count,
+                       group_concat(DISTINCT i.identifier_namespace) AS source_namespaces
+                FROM participant_identifiers i
+                JOIN requested r USING(participant_key)
+                GROUP BY i.participant_key
+            ),
+            asset_summary AS (
+                SELECT a.participant_key,
+                       COUNT(DISTINCT a.participant_asset_id) AS inventory_rows,
+                       MAX(CASE WHEN a.access_level = 'open' THEN 1 ELSE 0 END) AS has_open_data,
+                       MAX(CASE WHEN a.access_level = 'controlled' THEN 1 ELSE 0 END) AS has_controlled_data,
+                       MAX(CASE WHEN a.access_level = 'open'
+                                     AND instr(upper(COALESCE(a.file_format, '')), 'DICOM') > 0
+                                THEN 1 ELSE 0 END) AS has_public_dicom,
+                       MAX(CASE WHEN a.source_artifact = 'public_non_dicom_metadata'
+                                     AND (COALESCE(a.file_format, '') = ''
+                                          OR instr(upper(a.file_format), 'DICOM') = 0
+                                          OR instr(upper(a.file_format), 'NIFTI') > 0)
+                                THEN 1 ELSE 0 END) AS has_public_non_dicom,
+                       MAX(CASE WHEN a.data_domain = 'clinical' THEN 1 ELSE 0 END) AS has_clinical,
+                       group_concat(DISTINCT NULLIF(a.data_domain, '')) AS data_domains,
+                       group_concat(DISTINCT NULLIF(a.modality, '')) AS modalities,
+                       group_concat(DISTINCT NULLIF(a.file_format, '')) AS file_formats,
+                       group_concat(DISTINCT a.managed_system) AS managed_systems
+                FROM participant_assets a
+                JOIN requested r USING(participant_key)
+                GROUP BY a.participant_key
+            )
+            SELECT p.*,
+                   COALESCE(i.source_namespace_count, 0) AS source_namespace_count,
+                   i.source_namespaces,
+                   COALESCE(a.inventory_rows, 0) AS inventory_rows,
+                   COALESCE(a.has_open_data, 0) AS has_open_data,
+                   COALESCE(a.has_controlled_data, 0) AS has_controlled_data,
+                   COALESCE(a.has_public_dicom, 0) AS has_public_dicom,
+                   COALESCE(a.has_public_non_dicom, 0) AS has_public_non_dicom,
+                   COALESCE(a.has_clinical, 0) AS has_clinical,
+                   a.data_domains, a.modalities, a.file_formats, a.managed_systems
+            FROM requested r
+            JOIN participants p USING(participant_key)
+            LEFT JOIN identifier_summary i USING(participant_key)
+            LEFT JOIN asset_summary a USING(participant_key)
+            ORDER BY r.ordinal
+        """
+        return conn.execute(sql, params).fetchall()
 
     def get_participant(
         self,

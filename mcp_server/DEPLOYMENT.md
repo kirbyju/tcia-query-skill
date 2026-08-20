@@ -50,8 +50,6 @@ export TCIA_SNAPSHOT_DB="$TCIA_V2_INSTALL_DIR/tcia_snapshot.sqlite"
 export TCIA_PARTICIPANT_INVENTORY_DB="$TCIA_V2_INSTALL_DIR/participant_inventory.sqlite"
 export TCIA_PUBLIC_NON_DICOM_METADATA_DB="$TCIA_V2_INSTALL_DIR/public_non_dicom_metadata.sqlite"
 export TCIA_CONTROLLED_ACCESS_METADATA_DB="$TCIA_V2_INSTALL_DIR/controlled_access_metadata.sqlite"
-export TCIA_NIFTI_METADATA_DB="$TCIA_V2_INSTALL_DIR/nifti_metadata.sqlite"
-export TCIA_PATHOLOGY_METADATA_DB="$TCIA_V2_INSTALL_DIR/pathology_metadata.sqlite"
 export TCIA_CLINICAL_METADATA_DB="$TCIA_V2_INSTALL_DIR/clinical_metadata.sqlite"
 export TCIA_V2_BUNDLE_MANIFEST="$TCIA_V2_INSTALL_DIR/tcia_metadata_v2_bundle_manifest.json"
 ```
@@ -61,14 +59,21 @@ Install and verify the research core plus file-grain detail:
 ```bash
 cd "$TCIA_MCP_ROOT/tcia-query-skill"
 "$TCIA_MCP_ROOT/.venv/bin/python" scripts/tcia_v2_bundle.py install \
-  --profile research_core --install-dir "$TCIA_V2_INSTALL_DIR"
-"$TCIA_MCP_ROOT/.venv/bin/python" scripts/tcia_v2_bundle.py install \
   --profile research_detail --install-dir "$TCIA_V2_INSTALL_DIR"
 ```
 
 The installer keeps the previous files live until all changed payloads validate.
-Research core is required. Research detail is optional, but required for the
-public non-DICOM, controlled, NIfTI, pathology, and clinical detail endpoints.
+`research_detail` includes its required `research_core` dependency. It adds the
+unified public non-DICOM, controlled-access, and clinical detail artifacts.
+NIfTI and pathology discovery are provided by the unified public non-DICOM
+artifact; the streamlined release does not publish standalone NIfTI or pathology
+SQLite files. Do not export `TCIA_NIFTI_METADATA_DB` or
+`TCIA_PATHOLOGY_METADATA_DB` for this V2 installation.
+
+Use a clean V2 installation directory when migrating from the legacy full
+contract. The service intentionally ignores legacy NIfTI/pathology files left
+under `TCIA_V2_INSTALL_DIR`; move those files out of the directory rather than
+treating them as streamlined assets.
 
 ## 5. Smoke Test
 
@@ -88,16 +93,17 @@ cd "$TCIA_MCP_ROOT/tcia-query-skill"
   --host 127.0.0.1 --port 8766
 ```
 
-Check REST health and loaded snapshot metadata:
+Check REST health and the installed bundle contract:
 
 ```bash
 curl -fsS http://127.0.0.1:8766/v2/health
 curl -fsS http://127.0.0.1:8766/v2/bundle
 ```
 
-Confirm the returned bundle fingerprint, component schema versions,
-Participant Inventory counts, and installed detail capabilities before
-switching traffic. `/v1` remains available for compatibility checks.
+Confirm the returned bundle fingerprint, component schema versions, installed
+profile, and detail capabilities before switching traffic. The endpoint reads
+only the manifest and installer state; it does not recount large SQLite views.
+`/v1` remains available for compatibility checks.
 
 For MCP, connect a local MCP client to:
 

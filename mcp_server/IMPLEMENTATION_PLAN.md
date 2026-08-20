@@ -24,15 +24,15 @@ Follow the IDC-REST-MCP pattern:
   `participant_inventory.sqlite`, and the top-level bundle manifest.
 - Optional V2 detail: `public_non_dicom_metadata.sqlite`.
 - Optional but supported: `controlled_access_metadata.sqlite`.
-- Optional but supported: `nifti_metadata.sqlite`.
-- Optional but supported: `pathology_metadata.sqlite`.
 - Optional but supported: `clinical_metadata.sqlite`.
 
 The base snapshot remains the TCIA provenance, visibility, release-history,
 DOI, and access/license authority. Participant Inventory is the participant
 identity and availability surface. Optional detail artifacts add file-grain
-public non-DICOM, controlled-access, NIfTI, pathology, PathDB, Aspera inventory,
-and patient-level clinical metadata. Public DICOM detail stays in IDC.
+public non-DICOM, controlled-access, and patient-level clinical metadata.
+NIfTI/pathology research detail is unified in the public non-DICOM artifact;
+standalone databases remain legacy compatibility inputs only. Public DICOM
+detail stays in IDC.
 
 ## Tool Families
 
