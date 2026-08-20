@@ -62,6 +62,40 @@ def decisions_by_title(curation: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return {item["short_title"]: item for item in curation["decisions"]}
 
 
+def explicit_mapping_rows(curation: dict[str, Any]) -> list[dict[str, Any]]:
+    """Project curator-approved one-off mappings into the generated CSV."""
+    output = []
+    for decision in curation.get("decisions") or []:
+        for mapping in decision.get("explicit_mappings") or []:
+            package_path = str(mapping["package_path"])
+            subject_id = str(mapping["subject_id"])
+            output.append(row(
+                dataset_type=decision["dataset_type"],
+                short_title=decision["short_title"],
+                download_id=str((decision.get("download_ids") or [""])[0]),
+                subject_id=subject_id,
+                raw_subject_id=subject_id,
+                subject_id_namespace=f"tcia_dataset:{decision['short_title']}",
+                participant_link_status="reviewed_source_crosswalk",
+                package_path=package_path,
+                file_name=Path(package_path).name,
+                file_format=normalize_extension(package_path),
+                media_kind="whole_slide_image",
+                imaging_domain="pathology",
+                modality="SM",
+                object_role="whole_slide_image",
+                source_system="tcia_aspera",
+                crosswalk_source_url=mapping["crosswalk_source_url"],
+                crosswalk_method="exact_pathdb_source_url_suffix",
+                crosswalk_confidence="high",
+                reviewer_note=decision["reviewer_note"],
+                raw_values_json={"pathdb_subject_id": subject_id},
+                provenance_json={"evidence_relation": "exact_pathdb_source_url_suffix"},
+                quality_flag_json={},
+            ))
+    return output
+
+
 def breast_rows(source_dir: Path, decision: dict[str, Any], workbook_json: dict[str, Any]) -> list[dict[str, Any]]:
     sheets = workbook_json["breast_clinical.xlsx"]
     values = next(sheet["values"] for sheet in sheets if sheet["name"].startswith("BrEaST-Lesions-USG"))
@@ -411,7 +445,7 @@ def write_rows(path: Path, rows: Iterable[dict[str, Any]]) -> int:
     materialized = list(rows)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=FIELDS)
+        writer = csv.DictWriter(handle, fieldnames=FIELDS, lineterminator="\n")
         writer.writeheader()
         writer.writerows(materialized)
     return len(materialized)
@@ -430,6 +464,7 @@ def build(source_dir: Path, curation_path: Path, out: Path, manifest_path: Path)
     rows.extend(ldct_rows(source_dir, decisions["LDCT-and-Projection-data"], workbook_json))
     rows.extend(prostate_rows(source_dir, decisions))
     rows.extend(aurora_rows(source_dir, decisions["AURORA-Metastatic-Breast-Multiomics"]))
+    rows.extend(explicit_mapping_rows(curation))
     rows.sort(key=lambda item: (item["short_title"].casefold(), item["subject_id"], item["package_path"]))
     count = write_rows(out, rows)
     source_files = sorted({
@@ -448,7 +483,10 @@ def build(source_dir: Path, curation_path: Path, out: Path, manifest_path: Path)
         counts[title]["participants"] = len({item["subject_id"] for item in rows if item["short_title"] == title})
     manifest = {
         "schema_version": 1,
-        "reviewed_at": curation["reviewed_at"],
+        "reviewed_at": max(
+            [str(curation["reviewed_at"])]
+            + [str(item.get("reviewed_at")) for item in curation["decisions"] if item.get("reviewed_at")]
+        ),
         "row_count": count,
         "crosswalk_csv": {"path": str(out), "sha256": sha256(out), "bytes": out.stat().st_size},
         "curation": {"path": str(curation_path), "sha256": sha256(curation_path)},

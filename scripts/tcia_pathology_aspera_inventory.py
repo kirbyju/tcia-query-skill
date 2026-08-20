@@ -4,13 +4,17 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import csv
 import json
 import re
 import sqlite3
 import subprocess
 import sys
+import threading
 import time
+import urllib.parse
+import urllib.request
 from collections import deque
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from datetime import datetime, timezone
@@ -54,6 +58,200 @@ CHECKSUM_MANIFEST_TOKENS = (
     "checksum",
     "checksums",
 )
+
+
+class FaspexPublicClient:
+    """Browse a Faspex 5 public package using its OAuth public-link flow."""
+
+    def __init__(
+        self,
+        *,
+        api_url: str,
+        auth_url: str,
+        client_id: str,
+        redirect_uri: str,
+        context: str,
+        package_id: str,
+        timeout: int,
+    ) -> None:
+        self.api_url = api_url.rstrip("/")
+        self.auth_url = auth_url.rstrip("/")
+        self.client_id = client_id
+        self.redirect_uri = redirect_uri
+        self.context = context
+        self.package_id = package_id
+        self.timeout = timeout
+        self._authorization = ""
+        self._pagination_browsing: bool | None = None
+        self._auth_lock = threading.Lock()
+
+    @staticmethod
+    def _decode_context(context: str) -> dict[str, Any]:
+        padded = context + "=" * (-len(context) % 4)
+        return json.loads(base64.b64decode(padded).decode("utf-8"))
+
+    @staticmethod
+    def _config_value(config_text: str, name: str) -> str:
+        match = re.search(rf"\b{re.escape(name)}\s*:\s*['\"]([^'\"]+)['\"]", config_text)
+        if not match:
+            raise ValueError(f"Faspex config.js did not define {name}")
+        return match.group(1)
+
+    @classmethod
+    def from_public_url(cls, url: str, timeout: int) -> "FaspexPublicClient | None":
+        parsed = urllib.parse.urlparse(url)
+        context = urllib.parse.parse_qs(parsed.query).get("context", [""])[0]
+        if not context or not parsed.scheme or not parsed.netloc:
+            return None
+        try:
+            context_data = cls._decode_context(context)
+        except (ValueError, UnicodeDecodeError, json.JSONDecodeError):
+            return None
+        if context_data.get("resource") != "packages" or not str(context_data.get("type") or "").startswith("external_"):
+            return None
+        package_id = str(context_data.get("id") or context_data.get("package_id") or "")
+        if not package_id:
+            return None
+
+        origin = f"{parsed.scheme}://{parsed.netloc}"
+        route_prefix = "/aspera/faspex"
+        config_url = f"{origin}{route_prefix}/config.js"
+        try:
+            with urllib.request.urlopen(config_url, timeout=timeout) as response:
+                config_text = response.read().decode("utf-8", errors="replace")
+        except OSError as exc:
+            raise OSError(f"unable to read Faspex public configuration: {exc}") from exc
+        api_path = cls._config_value(config_text, "api_url")
+        client_id = cls._config_value(config_text, "client_id")
+        redirect_path = cls._config_value(config_text, "redirect_uri")
+        api_url = api_path if "://" in api_path else f"{origin}{api_path}"
+        redirect_uri = redirect_path if "://" in redirect_path else f"{origin}{redirect_path}"
+        auth_url = api_url.replace("/api/v5", "/auth")
+        return cls(
+            api_url=api_url,
+            auth_url=auth_url,
+            client_id=client_id,
+            redirect_uri=redirect_uri,
+            context=context,
+            package_id=package_id,
+            timeout=timeout,
+        )
+
+    def _request_json(
+        self,
+        url: str,
+        *,
+        data: dict[str, Any] | None = None,
+        authorization: str = "",
+    ) -> tuple[dict[str, Any], Any]:
+        headers = {"Accept": "application/json"}
+        body = None
+        if data is not None:
+            headers["Content-Type"] = "application/json"
+            body = json.dumps(data, separators=(",", ":")).encode("utf-8")
+        if authorization:
+            headers["Authorization"] = authorization
+        request = urllib.request.Request(url, data=body, headers=headers)
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                return json.load(response), response.headers
+        except OSError as exc:
+            safe_url = urllib.parse.urlsplit(url)._replace(query="").geturl()
+            raise OSError(f"Faspex request failed for {safe_url}: {exc}") from exc
+
+    def authorize(self) -> None:
+        with self._auth_lock:
+            if self._authorization:
+                return
+            authorize_query = urllib.parse.urlencode(
+                {
+                    "response_type": "code",
+                    "client_id": self.client_id,
+                    "redirect_uri": self.redirect_uri,
+                    # Faspex expects the encoded public-link context in OAuth state.
+                    "state": self.context,
+                }
+            )
+            authorize_url = f"{self.auth_url}/authorize_public_link?{authorize_query}"
+            try:
+                with urllib.request.urlopen(authorize_url, timeout=self.timeout) as response:
+                    redirect_url = response.geturl()
+            except OSError as exc:
+                raise OSError(f"Faspex public-link authorization failed: {exc}") from exc
+            redirect_query = urllib.parse.parse_qs(urllib.parse.urlparse(redirect_url).query)
+            code = redirect_query.get("code", [""])[0]
+            state = redirect_query.get("state", [""])[0]
+            if not code:
+                raise OSError("Faspex public-link authorization returned no code")
+            token, _headers = self._request_json(
+                f"{self.auth_url}/token",
+                data={
+                    "code": code,
+                    "state": state,
+                    "grant_type": "authorization_code",
+                    "client_id": self.client_id,
+                    "redirect_uri": self.redirect_uri,
+                },
+            )
+            access_token = str(token.get("access_token") or "")
+            if not access_token:
+                raise OSError("Faspex public-link token response had no access_token")
+            token_type = str(token.get("token_type") or "").strip()
+            if token_type and not access_token.lower().startswith(token_type.lower() + " "):
+                access_token = f"{token_type} {access_token}"
+            self._authorization = access_token
+
+    def pagination_browsing(self) -> bool:
+        self.authorize()
+        if self._pagination_browsing is None:
+            package, _headers = self._request_json(
+                f"{self.api_url}/packages/{self.package_id}",
+                authorization=self._authorization,
+            )
+            self._pagination_browsing = bool(package.get("pagination_browsing"))
+        return self._pagination_browsing
+
+    def browse(self, package_path: str, page_limit: int = 1000) -> list[dict[str, Any]]:
+        self.authorize()
+        normalized = "/" + normalize_package_path(package_path) if normalize_package_path(package_path) else "/"
+        paged = self.pagination_browsing()
+        page_suffix = "/page" if paged else ""
+        endpoint = f"{self.api_url}/packages/{self.package_id}/files/received{page_suffix}"
+        items: list[dict[str, Any]] = []
+        offset = 0
+        iteration_token = ""
+        while True:
+            query: dict[str, Any] = {}
+            if paged and iteration_token:
+                query["iteration_token"] = iteration_token
+            elif not paged:
+                query["limit"] = max(1, page_limit)
+                query["offset"] = offset
+            request_url = endpoint
+            if query:
+                request_url += "?" + urllib.parse.urlencode(query)
+            payload, headers = self._request_json(
+                request_url,
+                data={"path": normalized, "filters": {}},
+                authorization=self._authorization,
+            )
+            page = payload.get("items") or []
+            for item in page:
+                if isinstance(item, dict):
+                    item = dict(item)
+                    item["_inventory_source"] = "faspex public API"
+                    items.append(item)
+            next_token = str(headers.get("x-aspera-next-iteration-token") or "") if paged else ""
+            if next_token:
+                if next_token == iteration_token:
+                    break
+                iteration_token = next_token
+                continue
+            total_count = int(payload.get("total_count") or len(items))
+            if not page or len(items) >= total_count:
+                break
+            offset += len(page)
+        return items
 
 
 def utc_now() -> str:
@@ -161,7 +359,11 @@ def browse_package_path(
     query: dict[str, Any] | None = None,
     retries: int = 0,
     retry_sleep: float = 0.0,
+    public_client: FaspexPublicClient | None = None,
 ) -> list[dict[str, Any]]:
+    if public_client is not None:
+        page_limit = int((query or {}).get("limit") or 1000)
+        return public_client.browse(package_path, page_limit=page_limit)
     command = [
         ascli,
         "--format=csv",
@@ -185,7 +387,10 @@ def browse_package_recursive(
     query: dict[str, Any] | None = None,
     retries: int = 0,
     retry_sleep: float = 0.0,
+    public_client: FaspexPublicClient | None = None,
 ) -> list[dict[str, Any]]:
+    if public_client is not None:
+        raise OSError("recursive browse is not available through the Faspex public API")
     recursive_query = {"recursive": True, **(query or {})}
     command = [
         ascli,
@@ -351,7 +556,10 @@ def file_row(download: dict[str, Any], entry: dict[str, Any], browsed_at: str) -
         entry,
         "target_modified_time",
         "target_modified_at",
+        "mtime",
     )
+    inventory_source = str(entry.get("_inventory_source") or "ascli browse")
+    source_entry = {key: value for key, value in entry.items() if not str(key).startswith("_")}
     return {
         "download_row_id": download["download_row_id"],
         "short_title": download["short_title"],
@@ -366,10 +574,10 @@ def file_row(download: dict[str, Any], entry: dict[str, Any], browsed_at: str) -
         "checksum": "",
         "checksum_algorithm": "",
         "modified_time": modified_time,
-        "inventory_source": "ascli browse",
+        "inventory_source": inventory_source,
         "inventory_status": "available",
         "browsed_at": browsed_at,
-        "row_json": json.dumps(entry, ensure_ascii=False, sort_keys=True),
+        "row_json": json.dumps(source_entry, ensure_ascii=False, sort_keys=True),
     }
 
 
@@ -420,6 +628,7 @@ def try_browse_download_from_sums(
     retry_sleep: float,
     sums_cache_dir: Path,
     fail_fast: bool,
+    public_client: FaspexPublicClient | None = None,
 ) -> dict[str, Any] | None:
     url = download["download_url"]
     browsed_at = utc_now()
@@ -432,6 +641,7 @@ def try_browse_download_from_sums(
             query,
             retries,
             retry_sleep,
+            public_client,
         )
     except (subprocess.SubprocessError, OSError) as exc:
         error = {
@@ -529,6 +739,7 @@ def browse_download(
 ) -> dict[str, Any]:
     url = download["download_url"]
     browsed_at = utc_now()
+    public_client = FaspexPublicClient.from_public_url(url, timeout)
     if prefer_sums:
         sums_result = try_browse_download_from_sums(
             ascli,
@@ -540,13 +751,22 @@ def browse_download(
             retry_sleep,
             sums_cache_dir,
             fail_fast,
+            public_client,
         )
         if sums_result:
             return sums_result
 
     if recursive:
         try:
-            entries = browse_package_recursive(ascli, url, timeout, query, retries, retry_sleep)
+            entries = browse_package_recursive(
+                ascli,
+                url,
+                timeout,
+                query,
+                retries,
+                retry_sleep,
+                public_client,
+            )
             files = 0
             directories = 0
             for entry in entries:
@@ -614,6 +834,7 @@ def browse_download(
                     query,
                     retries,
                     retry_sleep,
+                    public_client,
                 )
                 active[future] = (package_path, depth)
             if not active:
@@ -660,7 +881,7 @@ def browse_download(
     return {
         "short_title": download["short_title"],
         "download_id": download.get("download_id") or "",
-        "method": "staged",
+        "method": "staged_public_oauth" if public_client is not None else "staged",
         "files": files,
         "directories": directories,
         "errors": errors,

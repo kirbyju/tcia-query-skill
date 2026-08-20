@@ -23,6 +23,7 @@ import sqlite3
 import tempfile
 import urllib.parse
 import urllib.request
+from collections import defaultdict
 from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
@@ -326,7 +327,7 @@ SELECT
     a.short_title,
     COUNT(*) AS asset_rows,
     SUM(CASE WHEN asset_granularity = 'file' THEN 1 ELSE 0 END) AS file_assets,
-    SUM(CASE WHEN asset_granularity IN ('file', 'participant_modality')
+    SUM(CASE WHEN asset_granularity IN ('file', 'participant_modality', 'participant_file_group')
              THEN COALESCE(represented_file_count, 1) ELSE 0 END) AS represented_files,
     SUM(CASE WHEN asset_granularity = 'download' THEN 1 ELSE 0 END) AS download_assets,
     (SELECT COUNT(DISTINCT ap.subject_id)
@@ -352,7 +353,7 @@ SELECT
     ap.link_status AS participant_link_status,
     COUNT(*) AS asset_rows,
     SUM(CASE WHEN a.asset_granularity = 'file' THEN 1 ELSE 0 END) AS file_assets,
-    SUM(CASE WHEN a.asset_granularity IN ('file', 'participant_modality')
+    SUM(CASE WHEN a.asset_granularity IN ('file', 'participant_modality', 'participant_file_group')
              THEN COALESCE(a.represented_file_count, 1) ELSE 0 END) AS represented_files,
     group_concat(DISTINCT a.file_format) AS file_formats,
     group_concat(DISTINCT a.media_kind) AS media_kinds,
@@ -1818,10 +1819,16 @@ def ingest_reviewed_crosswalks(
         return {"decisions": 0, "file_assets": 0, "evidence_rows": 0}
 
     curation = json.loads(curation_path.read_text())
-    reviewed_at = str(curation.get("reviewed_at") or "")
+    default_reviewed_at = str(curation.get("reviewed_at") or "")
     decisions = curation.get("decisions") or []
+    decision_review_dates: dict[tuple[str, str, str], str] = {}
     for decision in decisions:
         download_ids = [str(value) for value in decision.get("download_ids") or []]
+        decision_reviewed_at = str(decision.get("reviewed_at") or default_reviewed_at)
+        for download_id in download_ids or [""]:
+            decision_review_dates[
+                (str(decision["dataset_type"]), str(decision["short_title"]), download_id)
+            ] = decision_reviewed_at
         decision_id = stable_id(
             "crosswalk_decision", decision["dataset_type"], decision["short_title"],
             decision.get("resolution_type"), *download_ids,
@@ -1840,7 +1847,7 @@ def ingest_reviewed_crosswalks(
                 decision["resolution_type"],
                 decision.get("reviewer_note") or "",
                 decision.get("evidence_url") or "",
-                reviewed_at,
+                decision_reviewed_at,
                 json_dumps({"source_file": str(curation_path), "review_source": curation.get("review_source")}),
             ),
         )
@@ -1875,6 +1882,13 @@ def ingest_reviewed_crosswalks(
     evidence_rows = 0
     with crosswalk_csv.open(newline="") as handle:
         for source_row in csv.DictReader(handle):
+            reviewed_at = decision_review_dates.get(
+                (
+                    source_row["dataset_type"], source_row["short_title"],
+                    str(source_row["download_id"] or ""),
+                ),
+                default_reviewed_at,
+            )
             key = (
                 source_row["dataset_type"], source_row["short_title"],
                 str(source_row["download_id"] or ""), source_row["file_format"],
@@ -2155,6 +2169,872 @@ def ingest_reviewed_crosswalks(
         """
     )
     return {"decisions": len(decisions), "file_assets": assets, "evidence_rows": evidence_rows}
+
+
+def apply_reviewed_path_contracts(
+    conn: sqlite3.Connection,
+    clinical_db: Path | None,
+    curation_path: Path | None,
+    pathology_db: Path | None = None,
+) -> dict[str, int]:
+    """Apply curator-approved path rules against official clinical IDs.
+
+    These mappings are reviewed source contracts, not heuristic discovery.
+    Each extracted identifier must resolve uniquely, case-insensitively, to an
+    identifier in the dataset's official clinical participant list. Assets not
+    covered by a rule remain unmodified and continue to surface for review.
+    """
+    empty = {
+        "decisions": 0,
+        "file_assets": 0,
+        "compact_assets": 0,
+        "represented_files": 0,
+        "evidence_rows": 0,
+        "unmatched_assets": 0,
+        "unmatched_source_files": 0,
+    }
+    if not clinical_db or not clinical_db.exists() or not curation_path or not curation_path.exists():
+        return empty
+
+    curation = json.loads(curation_path.read_text())
+    default_reviewed_at = str(curation.get("reviewed_at") or "")
+    decisions = [
+        item for item in curation.get("decisions") or []
+        if item.get("resolution_type") == "participant_path_contract"
+    ]
+    if not decisions:
+        return empty
+
+    matched_assets = compact_assets = represented_files = 0
+    evidence_rows = unmatched_assets = unmatched_source_files = 0
+    with closing(connect(clinical_db)) as clinical:
+        if not table_exists(clinical, "agent_clinical_all_subjects"):
+            return empty
+        for decision in decisions:
+            dataset_type = str(decision["dataset_type"])
+            short_title = str(decision["short_title"])
+            download_ids = [str(value) for value in decision.get("download_ids") or []]
+            reviewed_at = str(decision.get("reviewed_at") or default_reviewed_at)
+            rules = [
+                (str(rule["name"]), re.compile(str(rule["pattern"]), re.IGNORECASE))
+                for rule in decision.get("path_rules") or []
+            ]
+            compact_rules = [
+                (rule, re.compile(str(rule["pattern"]), re.IGNORECASE))
+                for rule in decision.get("compact_path_rules") or []
+            ]
+            identifiers: dict[str, set[str]] = defaultdict(set)
+            for row in clinical.execute(
+                """
+                SELECT subject_id
+                FROM agent_clinical_all_subjects
+                WHERE short_title = ? AND NULLIF(trim(subject_id), '') IS NOT NULL
+                """,
+                (short_title,),
+            ):
+                raw_identifier = str(row["subject_id"]).strip()
+                identifiers[raw_identifier.casefold()].add(raw_identifier)
+
+            placeholders = ",".join("?" for _ in download_ids)
+            download_clause = (
+                f"AND COALESCE(download_id, '') IN ({placeholders})" if download_ids else ""
+            )
+            assets = conn.execute(
+                f"""
+                SELECT *
+                FROM public_non_dicom_assets
+                WHERE dataset_type = ? AND short_title = ?
+                  AND asset_granularity = 'file'
+                  AND participant_link_status IN ('dataset_only', 'unavailable')
+                  {download_clause}
+                ORDER BY package_path, file_name
+                """,
+                (dataset_type, short_title, *download_ids),
+            ).fetchall()
+            decision_id = stable_id(
+                "crosswalk_decision", dataset_type, short_title,
+                decision["resolution_type"], *download_ids,
+            )
+            decision_matched = decision_unmatched = 0
+            decision_compact_assets = decision_represented_files = 0
+            decision_unmatched_source_files = 0
+            for asset in assets:
+                path = str(asset["package_path"] or asset["file_name"] or "")
+                matches: set[tuple[str, str]] = set()
+                for rule_name, pattern in rules:
+                    match = pattern.fullmatch(path)
+                    if not match:
+                        continue
+                    extracted = str(match.groupdict().get("participant_id") or "").strip()
+                    canonical = identifiers.get(extracted.casefold(), set())
+                    if len(canonical) == 1:
+                        matches.add((rule_name, next(iter(canonical))))
+                resolved_ids = {item[1] for item in matches}
+                if len(resolved_ids) != 1:
+                    decision_unmatched += 1
+                    continue
+                subject_id = next(iter(resolved_ids))
+                mapping_methods = sorted(item[0] for item in matches if item[1] == subject_id)
+                mapping_method = "reviewed_wordpress_path_contract:" + "+".join(mapping_methods)
+                crosswalk_id = stable_id("crosswalk", asset["asset_id"], mapping_method, reviewed_at)
+                conn.execute(
+                    """
+                    UPDATE public_non_dicom_assets
+                    SET subject_id = ?, subject_id_namespace = ?,
+                        participant_link_status = 'reviewed_source_crosswalk',
+                        raw_values_json = json_set(
+                            COALESCE(NULLIF(raw_values_json, ''), '{}'),
+                            '$.reviewed_path_contract.raw_subject_id', ?
+                        ),
+                        quality_flag_json = json_set(
+                            COALESCE(NULLIF(quality_flag_json, ''), '{}'),
+                            '$.participant_inventory', 'reviewed_source_crosswalk',
+                            '$.crosswalk_decision_id', ?
+                        )
+                    WHERE asset_id = ?
+                    """,
+                    (
+                        subject_id, f"tcia_dataset:{short_title}", subject_id,
+                        decision_id, asset["asset_id"],
+                    ),
+                )
+                conn.execute(
+                    "DELETE FROM public_non_dicom_asset_participants WHERE asset_id = ?",
+                    (asset["asset_id"],),
+                )
+                insert_asset_participant(
+                    conn,
+                    asset_id=str(asset["asset_id"]),
+                    short_title=short_title,
+                    subject_id=subject_id,
+                    namespace=f"tcia_dataset:{short_title}",
+                    raw_subject_id=subject_id,
+                    participant_role="depicted_subject",
+                    link_status="reviewed_source_crosswalk",
+                    evidence={"decision_id": decision_id, "mapping_method": mapping_method},
+                )
+                conn.execute(
+                    """
+                    INSERT OR REPLACE INTO public_non_dicom_crosswalk_evidence
+                    VALUES (?, ?, ?, ?, ?, ?, 'high', ?, ?, '', ?, ?)
+                    """,
+                    (
+                        crosswalk_id, asset["asset_id"], short_title, subject_id, subject_id,
+                        mapping_method, decision.get("evidence_url") or "",
+                        decision.get("reviewer_note") or "", reviewed_at,
+                        json_dumps({
+                            "decision_id": decision_id,
+                            "identifier_source": decision.get("identifier_source") or "",
+                            "identifier_source_url": decision.get("identifier_source_url") or "",
+                            "package_path": path,
+                        }),
+                    ),
+                )
+                decision_matched += 1
+            decision_unmatched += len(assets) - decision_matched - decision_unmatched
+
+            if compact_rules and pathology_db and pathology_db.exists():
+                grouped: dict[tuple[str, str, str], dict[str, Any]] = {}
+                with closing(connect(pathology_db)) as pathology:
+                    if table_exists(pathology, "agent_pathology_file_objects"):
+                        urls: dict[tuple[str, str], str] = {}
+                        if table_exists(pathology, "agent_pathology_downloads"):
+                            for row in pathology.execute(
+                                "SELECT short_title, download_id, download_url FROM agent_pathology_downloads"
+                            ):
+                                urls[(str(row["short_title"]), str(row["download_id"] or ""))] = str(
+                                    row["download_url"] or ""
+                                )
+                        source_rows = pathology.execute(
+                            """
+                            SELECT * FROM agent_pathology_file_objects
+                            WHERE dataset_type = ? AND short_title = ?
+                            ORDER BY package_path
+                            """,
+                            (dataset_type, short_title),
+                        )
+                        for source_row in source_rows:
+                            source_download_id = str(source_row["download_id"] or "")
+                            if download_ids and source_download_id not in download_ids:
+                                continue
+                            path = str(source_row["package_path"] or source_row["file_name"] or "")
+                            source_format = normalize_format(
+                                source_row["image_format"] or source_row["file_ext"]
+                            )
+                            source_matches: set[tuple[str, str, str]] = set()
+                            matched_rule: dict[str, Any] | None = None
+                            for rule, pattern in compact_rules:
+                                if source_row["is_metadata"] and not rule.get("include_metadata"):
+                                    continue
+                                if source_format != normalize_format(rule.get("source_file_format")):
+                                    continue
+                                match = pattern.fullmatch(path)
+                                if not match:
+                                    continue
+                                extracted = str(match.groupdict().get("participant_id") or "").strip()
+                                canonical = identifiers.get(extracted.casefold(), set())
+                                if len(canonical) == 1:
+                                    subject_id = next(iter(canonical))
+                                    source_matches.add((str(rule["name"]), subject_id, extracted))
+                                    matched_rule = rule
+                            resolved_ids = {item[1] for item in source_matches}
+                            if len(resolved_ids) != 1 or matched_rule is None:
+                                if any(pattern.fullmatch(path) for _, pattern in compact_rules):
+                                    decision_unmatched_source_files += 1
+                                continue
+                            subject_id = next(iter(resolved_ids))
+                            rule_name = sorted(item[0] for item in source_matches if item[1] == subject_id)[0]
+                            group_key = (
+                                source_download_id,
+                                subject_id,
+                                str(matched_rule.get("asset_group") or rule_name),
+                            )
+                            group = grouped.setdefault(group_key, {
+                                "rule": matched_rule,
+                                "rule_name": rule_name,
+                                "file_count": 0,
+                                "size_bytes": 0,
+                                "known_size_count": 0,
+                                "sample_path": path,
+                                "source_url": urls.get((short_title, source_download_id), ""),
+                            })
+                            group["file_count"] += 1
+                            if source_row["bytes"] is not None:
+                                group["size_bytes"] += int(source_row["bytes"])
+                                group["known_size_count"] += 1
+
+                for (source_download_id, subject_id, asset_group), group in sorted(grouped.items()):
+                    rule = group["rule"]
+                    mapping_method = "reviewed_wordpress_path_contract:" + group["rule_name"]
+                    asset_id = stable_id(
+                        "asset", "reviewed_compact_path_group", dataset_type, short_title,
+                        source_download_id, subject_id, asset_group,
+                    )
+                    source_url = str(group["source_url"])
+                    represented_count = int(group["file_count"])
+                    insert_asset(conn, {
+                        "asset_id": asset_id,
+                        "dataset_type": dataset_type,
+                        "short_title": short_title,
+                        "download_id": source_download_id,
+                        "subject_id": subject_id,
+                        "subject_id_namespace": f"tcia_dataset:{short_title}",
+                        "participant_link_status": "reviewed_source_crosswalk",
+                        "asset_granularity": "participant_file_group",
+                        "asset_name": f"{subject_id} {rule.get('asset_label') or asset_group}",
+                        "file_name": "",
+                        "package_path": str(group["sample_path"]).rsplit("/", 2)[0] + "/",
+                        "file_format": normalize_format(rule.get("source_file_format")),
+                        "container_format": "",
+                        "media_kind": rule.get("media_kind") or "unknown",
+                        "spatial_dimensionality": rule.get("spatial_dimensionality") or "unknown",
+                        "temporal_dimensionality": rule.get("temporal_dimensionality") or "unknown",
+                        "imaging_domain": rule.get("imaging_domain") or "unknown",
+                        "modality": rule.get("modality") or "",
+                        "object_role": rule.get("object_role") or "derived_asset",
+                        "represented_file_count": represented_count,
+                        "size_bytes": group["size_bytes"] if group["known_size_count"] == represented_count else None,
+                        "checksum": "",
+                        "checksum_algorithm": "",
+                        "representation_provenance_class": (
+                            rule.get("representation_provenance_class") or "derived_asset"
+                        ),
+                        "source_system": managed_system_for_url(source_url),
+                        "source_record_id": f"{source_download_id}:{subject_id}:{asset_group}",
+                        "source_url": source_url,
+                        "raw_values_json": json_dumps({
+                            "represented_file_count": represented_count,
+                            "sample_package_path": group["sample_path"],
+                            "source_file_format": normalize_format(rule.get("source_file_format")),
+                        }),
+                        "provenance_json": json_dumps({
+                            "source_artifact": "pathology_metadata",
+                            "source_view": "agent_pathology_file_objects",
+                            "projection": "reviewed_compact_path_group",
+                            "decision_id": decision_id,
+                            "mapping_method": mapping_method,
+                        }),
+                        "quality_flag_json": json_dumps({
+                            "participant_inventory": "reviewed_source_crosswalk",
+                            "file_detail_pointer": "pathology_metadata.agent_pathology_file_objects",
+                        }),
+                    })
+                    insert_asset_participant(
+                        conn,
+                        asset_id=asset_id,
+                        short_title=short_title,
+                        subject_id=subject_id,
+                        namespace=f"tcia_dataset:{short_title}",
+                        raw_subject_id=subject_id,
+                        participant_role="depicted_subject",
+                        link_status="reviewed_source_crosswalk",
+                        evidence={"decision_id": decision_id, "mapping_method": mapping_method},
+                    )
+                    if source_url:
+                        insert_location(conn, location_values(
+                            asset_id,
+                            source_url,
+                            provenance={
+                                "source_artifact": "pathology_metadata",
+                                "projection": "reviewed_compact_path_group",
+                            },
+                        ))
+                    crosswalk_id = stable_id("crosswalk", asset_id, mapping_method, reviewed_at)
+                    conn.execute(
+                        """
+                        INSERT OR REPLACE INTO public_non_dicom_crosswalk_evidence
+                        VALUES (?, ?, ?, ?, ?, ?, 'high', ?, ?, '', ?, ?)
+                        """,
+                        (
+                            crosswalk_id, asset_id, short_title, subject_id, subject_id,
+                            mapping_method, decision.get("evidence_url") or "",
+                            decision.get("reviewer_note") or "", reviewed_at,
+                            json_dumps({
+                                "decision_id": decision_id,
+                                "identifier_source": decision.get("identifier_source") or "",
+                                "identifier_source_url": decision.get("identifier_source_url") or "",
+                                "sample_package_path": group["sample_path"],
+                                "represented_file_count": represented_count,
+                            }),
+                        ),
+                    )
+                    decision_compact_assets += 1
+                    decision_represented_files += represented_count
+                    evidence_rows += 1
+            matched_assets += decision_matched
+            compact_assets += decision_compact_assets
+            represented_files += decision_represented_files
+            evidence_rows += decision_matched
+            unmatched_assets += decision_unmatched
+            unmatched_source_files += decision_unmatched_source_files
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO public_non_dicom_crosswalk_decisions
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    decision_id, dataset_type, short_title, json_dumps(download_ids),
+                    decision["decision_status"], decision["resolution_type"],
+                    decision.get("reviewer_note") or "", decision.get("evidence_url") or "",
+                    reviewed_at,
+                    json_dumps({
+                        "source_file": str(curation_path),
+                        "review_source": curation.get("review_source"),
+                        "identifier_source": decision.get("identifier_source") or "",
+                        "identifier_source_url": decision.get("identifier_source_url") or "",
+                        "path_rules": decision.get("path_rules") or [],
+                        "compact_path_rules": decision.get("compact_path_rules") or [],
+                        "matched_assets": decision_matched,
+                        "compact_assets": decision_compact_assets,
+                        "represented_files": decision_represented_files,
+                        "unmatched_assets": decision_unmatched,
+                        "unmatched_source_files": decision_unmatched_source_files,
+                    }),
+                ),
+            )
+    return {
+        "decisions": len(decisions),
+        "file_assets": matched_assets,
+        "compact_assets": compact_assets,
+        "represented_files": represented_files,
+        "evidence_rows": evidence_rows,
+        "unmatched_assets": unmatched_assets,
+        "unmatched_source_files": unmatched_source_files,
+    }
+
+
+def apply_reviewed_pathdb_contracts(
+    conn: sqlite3.Connection,
+    curation_path: Path | None,
+) -> dict[str, int]:
+    """Apply reviewed filename and converted-PathDB participant contracts.
+
+    These contracts are useful when a published README defines a filename
+    subject token, or when a renamed split can be joined to PathDB by an exact
+    relative path while preserving the distinction between the Aspera original
+    and PathDB's converted representation.
+    """
+    empty = {
+        "decisions": 0,
+        "file_assets": 0,
+        "evidence_rows": 0,
+        "source_confirmed_unavailable_assets": 0,
+        "pathdb_non_participant_assets": 0,
+        "unmatched_assets": 0,
+    }
+    if not curation_path or not curation_path.exists():
+        return empty
+
+    curation = json.loads(curation_path.read_text())
+    default_reviewed_at = str(curation.get("reviewed_at") or "")
+    decisions = [
+        item for item in curation.get("decisions") or []
+        if item.get("resolution_type") == "participant_pathdb_contract"
+    ]
+    if not decisions:
+        return empty
+
+    matched_assets = evidence_rows = unavailable_assets = 0
+    pathdb_non_participant_assets = unmatched_assets = 0
+    for decision in decisions:
+        dataset_type = str(decision["dataset_type"])
+        short_title = str(decision["short_title"])
+        download_ids = [str(value) for value in decision.get("download_ids") or []]
+        reviewed_at = str(decision.get("reviewed_at") or default_reviewed_at)
+        decision_id = stable_id(
+            "crosswalk_decision", dataset_type, short_title,
+            decision["resolution_type"], *download_ids,
+        )
+
+        non_participant_ids = {
+            str(value).casefold() for value in decision.get("pathdb_non_participant_ids") or []
+        }
+        decision_pathdb_non_participants = 0
+        if non_participant_ids:
+            for pathdb_asset in conn.execute(
+                """
+                SELECT asset_id, subject_id
+                FROM public_non_dicom_assets
+                WHERE dataset_type = ? AND short_title = ?
+                  AND source_system = 'tcia_pathdb'
+                  AND NULLIF(trim(COALESCE(subject_id, '')), '') IS NOT NULL
+                """,
+                (dataset_type, short_title),
+            ).fetchall():
+                raw_subject_id = str(pathdb_asset["subject_id"])
+                if raw_subject_id.casefold() not in non_participant_ids:
+                    continue
+                conn.execute(
+                    """
+                    UPDATE public_non_dicom_assets
+                    SET subject_id = '', subject_id_namespace = '',
+                        participant_link_status = 'source_confirmed_unavailable',
+                        raw_values_json = json_set(
+                            COALESCE(NULLIF(raw_values_json, ''), '{}'),
+                            '$.pathdb_non_participant_label', ?
+                        ),
+                        quality_flag_json = json_set(
+                            COALESCE(NULLIF(quality_flag_json, ''), '{}'),
+                            '$.participant_inventory', 'source_confirmed_unavailable',
+                            '$.crosswalk_decision_id', ?,
+                            '$.source_unavailable_reason', 'pathdb_placeholder_is_not_participant'
+                        )
+                    WHERE asset_id = ?
+                    """,
+                    (raw_subject_id, decision_id, pathdb_asset["asset_id"]),
+                )
+                conn.execute(
+                    "DELETE FROM public_non_dicom_asset_participants WHERE asset_id = ?",
+                    (pathdb_asset["asset_id"],),
+                )
+                decision_pathdb_non_participants += 1
+
+        identifiers: dict[str, set[str]] = defaultdict(set)
+        for row in conn.execute(
+            """
+            SELECT DISTINCT subject_id FROM (
+                SELECT a.subject_id AS subject_id
+                FROM public_non_dicom_assets a
+                WHERE a.dataset_type = ? AND a.short_title = ?
+                  AND a.source_system = 'tcia_pathdb'
+                UNION ALL
+                SELECT ap.subject_id AS subject_id
+                FROM public_non_dicom_asset_participants ap
+                JOIN public_non_dicom_assets a USING (asset_id)
+                WHERE a.dataset_type = ? AND a.short_title = ?
+                  AND a.source_system = 'tcia_pathdb'
+            )
+            WHERE NULLIF(trim(COALESCE(subject_id, '')), '') IS NOT NULL
+            """,
+            (dataset_type, short_title, dataset_type, short_title),
+        ):
+            subject_id = str(row["subject_id"]).strip()
+            identifiers[subject_id.casefold()].add(subject_id)
+
+        path_rules = [
+            (rule, re.compile(str(rule["pattern"]), re.IGNORECASE))
+            for rule in decision.get("path_rules") or []
+        ]
+        pathdb_rules = [
+            (rule, re.compile(str(rule["pattern"]), re.IGNORECASE))
+            for rule in decision.get("pathdb_file_rules") or []
+        ]
+        pathdb_asset_rules = [
+            (rule, re.compile(str(rule["pattern"]), re.IGNORECASE))
+            for rule in decision.get("pathdb_asset_rules") or []
+        ]
+        unavailable_rules = [
+            (rule, re.compile(str(rule["pattern"]), re.IGNORECASE))
+            for rule in decision.get("source_unavailable_rules") or []
+        ]
+
+        pathdb_relative: dict[tuple[str, str], list[sqlite3.Row]] = defaultdict(list)
+        if pathdb_rules:
+            pathdb_assets = conn.execute(
+                """
+                SELECT asset_id, subject_id, source_url
+                FROM public_non_dicom_assets
+                WHERE dataset_type = ? AND short_title = ?
+                  AND source_system = 'tcia_pathdb'
+                  AND NULLIF(trim(COALESCE(subject_id, '')), '') IS NOT NULL
+                  AND NULLIF(trim(COALESCE(source_url, '')), '') IS NOT NULL
+                """,
+                (dataset_type, short_title),
+            ).fetchall()
+            for rule, _ in pathdb_rules:
+                rule_name = str(rule["name"])
+                marker = str(rule["pathdb_url_marker"]).casefold()
+                for pathdb_asset in pathdb_assets:
+                    url = str(pathdb_asset["source_url"] or "")
+                    position = url.casefold().find(marker)
+                    if position < 0:
+                        continue
+                    relative_path = url[position + len(marker):].lstrip("/").casefold()
+                    pathdb_relative[(rule_name, relative_path)].append(pathdb_asset)
+
+        pathdb_named_assets: dict[tuple[str, str], list[sqlite3.Row]] = defaultdict(list)
+        if pathdb_asset_rules:
+            pathdb_assets = conn.execute(
+                """
+                SELECT asset_id, asset_name, file_name, subject_id
+                FROM public_non_dicom_assets
+                WHERE dataset_type = ? AND short_title = ?
+                  AND source_system = 'tcia_pathdb'
+                """,
+                (dataset_type, short_title),
+            ).fetchall()
+            for rule, _ in pathdb_asset_rules:
+                rule_name = str(rule["name"])
+                for pathdb_asset in pathdb_assets:
+                    asset_name = str(
+                        pathdb_asset["asset_name"] or pathdb_asset["file_name"] or ""
+                    ).strip()
+                    if asset_name:
+                        pathdb_named_assets[(rule_name, asset_name.casefold())].append(pathdb_asset)
+
+        placeholders = ",".join("?" for _ in download_ids)
+        download_clause = (
+            f"AND COALESCE(download_id, '') IN ({placeholders})" if download_ids else ""
+        )
+        assets = conn.execute(
+            f"""
+            SELECT *
+            FROM public_non_dicom_assets
+            WHERE dataset_type = ? AND short_title = ?
+              AND source_system = 'tcia_aspera'
+              AND asset_granularity = 'file'
+              AND participant_link_status IN ('dataset_only', 'unavailable')
+              {download_clause}
+            ORDER BY package_path, file_name
+            """,
+            (dataset_type, short_title, *download_ids),
+        ).fetchall()
+
+        decision_matched = decision_evidence = decision_unavailable = decision_unmatched = 0
+        for asset in assets:
+            path = str(asset["package_path"] or asset["file_name"] or "")
+            unavailable_rule = next(
+                (rule for rule, pattern in unavailable_rules if pattern.fullmatch(path)),
+                None,
+            )
+            if unavailable_rule is not None:
+                conn.execute(
+                    """
+                    UPDATE public_non_dicom_assets
+                    SET participant_link_status = 'source_confirmed_unavailable',
+                        quality_flag_json = json_set(
+                            COALESCE(NULLIF(quality_flag_json, ''), '{}'),
+                            '$.participant_inventory', 'source_confirmed_unavailable',
+                            '$.crosswalk_decision_id', ?,
+                            '$.source_unavailable_reason', ?
+                        )
+                    WHERE asset_id = ?
+                    """,
+                    (
+                        decision_id,
+                        unavailable_rule.get("reason") or "participant_file_mapping_not_published",
+                        asset["asset_id"],
+                    ),
+                )
+                decision_unavailable += 1
+                continue
+
+            named_matches: list[tuple[dict[str, Any], sqlite3.Row, dict[str, str]]] = []
+            for rule, pattern in pathdb_asset_rules:
+                match = pattern.fullmatch(path)
+                if not match:
+                    continue
+                values = {key: str(value or "") for key, value in match.groupdict().items()}
+                pathdb_asset_name = str(rule["pathdb_asset_name_template"]).format_map(values)
+                pathdb_matches = pathdb_named_assets.get(
+                    (str(rule["name"]), pathdb_asset_name.casefold()),
+                    [],
+                )
+                if len(pathdb_matches) == 1:
+                    named_matches.append((rule, pathdb_matches[0], values))
+
+            named_asset_ids = {str(item[1]["asset_id"]) for item in named_matches}
+            if named_matches and len(named_asset_ids) != 1:
+                decision_unmatched += 1
+                continue
+            if len(named_asset_ids) == 1:
+                rule, pathdb_asset, values = sorted(
+                    named_matches,
+                    key=lambda item: str(item[0]["name"]),
+                )[0]
+                participant_rows = conn.execute(
+                    """
+                    SELECT subject_id, raw_subject_id, participant_role
+                    FROM public_non_dicom_asset_participants
+                    WHERE asset_id = ?
+                    ORDER BY subject_id, raw_subject_id
+                    """,
+                    (pathdb_asset["asset_id"],),
+                ).fetchall()
+                if not participant_rows and str(pathdb_asset["subject_id"] or "").strip():
+                    participant_rows = [{
+                        "subject_id": str(pathdb_asset["subject_id"]),
+                        "raw_subject_id": str(pathdb_asset["subject_id"]),
+                        "participant_role": "depicted_subject",
+                    }]
+                resolved_ids = {str(row["subject_id"]) for row in participant_rows}
+                if not resolved_ids:
+                    decision_unmatched += 1
+                    continue
+
+                rule_name = str(rule["name"])
+                mapping_method = f"reviewed_pathdb_asset_contract:{rule_name}"
+                scalar_subject_id = next(iter(resolved_ids)) if len(resolved_ids) == 1 else ""
+                conn.execute(
+                    """
+                    UPDATE public_non_dicom_assets
+                    SET subject_id = ?, subject_id_namespace = ?,
+                        participant_link_status = 'reviewed_source_crosswalk',
+                        raw_values_json = json_set(
+                            COALESCE(NULLIF(raw_values_json, ''), '{}'),
+                            '$.reviewed_pathdb_asset_contract.pathdb_asset_id', ?,
+                            '$.reviewed_pathdb_asset_contract.pathdb_asset_name', ?,
+                            '$.reviewed_pathdb_asset_contract.participant_count', ?
+                        ),
+                        quality_flag_json = json_set(
+                            COALESCE(NULLIF(quality_flag_json, ''), '{}'),
+                            '$.participant_inventory', 'reviewed_source_crosswalk',
+                            '$.crosswalk_decision_id', ?,
+                            '$.representation_equivalence', 'not_asserted'
+                        )
+                    WHERE asset_id = ?
+                    """,
+                    (
+                        scalar_subject_id, f"tcia_dataset:{short_title}",
+                        pathdb_asset["asset_id"],
+                        pathdb_asset["asset_name"] or pathdb_asset["file_name"],
+                        len(resolved_ids), decision_id, asset["asset_id"],
+                    ),
+                )
+                conn.execute(
+                    "DELETE FROM public_non_dicom_asset_participants WHERE asset_id = ?",
+                    (asset["asset_id"],),
+                )
+                for participant_row in participant_rows:
+                    subject_id = str(participant_row["subject_id"])
+                    raw_subject_id = str(participant_row["raw_subject_id"] or subject_id)
+                    participant_role = str(
+                        participant_row["participant_role"] or "depicted_subject"
+                    )
+                    insert_asset_participant(
+                        conn,
+                        asset_id=str(asset["asset_id"]),
+                        short_title=short_title,
+                        subject_id=subject_id,
+                        namespace=f"tcia_dataset:{short_title}",
+                        raw_subject_id=raw_subject_id,
+                        participant_role=participant_role,
+                        link_status="reviewed_source_crosswalk",
+                        evidence={
+                            "decision_id": decision_id,
+                            "mapping_method": mapping_method,
+                            "pathdb_asset_id": str(pathdb_asset["asset_id"]),
+                        },
+                    )
+                    crosswalk_id = stable_id(
+                        "crosswalk", asset["asset_id"], subject_id, mapping_method, reviewed_at,
+                    )
+                    conn.execute(
+                        """
+                        INSERT OR REPLACE INTO public_non_dicom_crosswalk_evidence
+                        VALUES (?, ?, ?, ?, ?, ?, 'high', ?, ?, '', ?, ?)
+                        """,
+                        (
+                            crosswalk_id, asset["asset_id"], short_title, raw_subject_id,
+                            subject_id, mapping_method, decision.get("evidence_url") or "",
+                            decision.get("reviewer_note") or "", reviewed_at,
+                            json_dumps({
+                                "decision_id": decision_id,
+                                "package_path": path,
+                                "path_groups": values,
+                                "pathdb_asset_id": str(pathdb_asset["asset_id"]),
+                                "pathdb_asset_name": str(
+                                    pathdb_asset["asset_name"] or pathdb_asset["file_name"]
+                                ),
+                                "representation_equivalence": "not_asserted",
+                            }),
+                        ),
+                    )
+                    decision_evidence += 1
+                decision_matched += 1
+                continue
+
+            matches: list[tuple[str, str, str, dict[str, Any]]] = []
+            for rule, pattern in path_rules:
+                match = pattern.fullmatch(path)
+                if not match:
+                    continue
+                values = {key: str(value or "") for key, value in match.groupdict().items()}
+                extracted = str(rule["participant_id_template"]).format_map(values)
+                canonical = identifiers.get(extracted.casefold(), set())
+                if len(canonical) == 1:
+                    matches.append((
+                        str(rule["name"]), next(iter(canonical)), extracted,
+                        {
+                            "package_path": path,
+                            "extracted_subject_id": extracted,
+                            "path_groups": values,
+                        },
+                    ))
+
+            for rule, pattern in pathdb_rules:
+                match = pattern.fullmatch(path)
+                if not match:
+                    continue
+                values = {key: str(value or "") for key, value in match.groupdict().items()}
+                relative_path = str(rule["pathdb_relative_path_template"]).format_map(values)
+                pathdb_matches = pathdb_relative.get(
+                    (str(rule["name"]), relative_path.casefold()),
+                    [],
+                )
+                resolved = {str(row["subject_id"]) for row in pathdb_matches}
+                if len(pathdb_matches) == 1 and len(resolved) == 1:
+                    subject_id = next(iter(resolved))
+                    if subject_id.casefold() not in {
+                        str(value).casefold() for value in rule.get("excluded_subject_ids") or []
+                    }:
+                        matches.append((
+                            str(rule["name"]), subject_id, subject_id,
+                            {
+                                "package_path": path,
+                                "pathdb_relative_path": relative_path,
+                                "pathdb_asset_id": str(pathdb_matches[0]["asset_id"]),
+                                "pathdb_source_url": str(pathdb_matches[0]["source_url"]),
+                            },
+                        ))
+
+            resolved_ids = {item[1] for item in matches}
+            if len(resolved_ids) != 1:
+                decision_unmatched += 1
+                continue
+            subject_id = next(iter(resolved_ids))
+            selected = sorted(
+                (item for item in matches if item[1] == subject_id),
+                key=lambda item: item[0],
+            )
+            raw_subject_id = selected[0][2]
+            rule_names = sorted({item[0] for item in selected})
+            mapping_method = "reviewed_pdf_path_contract:" + "+".join(rule_names)
+            crosswalk_id = stable_id("crosswalk", asset["asset_id"], mapping_method, reviewed_at)
+            conn.execute(
+                """
+                UPDATE public_non_dicom_assets
+                SET subject_id = ?, subject_id_namespace = ?,
+                    participant_link_status = 'reviewed_source_crosswalk',
+                    raw_values_json = json_set(
+                        COALESCE(NULLIF(raw_values_json, ''), '{}'),
+                        '$.reviewed_path_contract.raw_subject_id', ?
+                    ),
+                    quality_flag_json = json_set(
+                        COALESCE(NULLIF(quality_flag_json, ''), '{}'),
+                        '$.participant_inventory', 'reviewed_source_crosswalk',
+                        '$.crosswalk_decision_id', ?
+                    )
+                WHERE asset_id = ?
+                """,
+                (
+                    subject_id, f"tcia_dataset:{short_title}", raw_subject_id,
+                    decision_id, asset["asset_id"],
+                ),
+            )
+            conn.execute(
+                "DELETE FROM public_non_dicom_asset_participants WHERE asset_id = ?",
+                (asset["asset_id"],),
+            )
+            insert_asset_participant(
+                conn,
+                asset_id=str(asset["asset_id"]),
+                short_title=short_title,
+                subject_id=subject_id,
+                namespace=f"tcia_dataset:{short_title}",
+                raw_subject_id=raw_subject_id,
+                participant_role="depicted_subject",
+                link_status="reviewed_source_crosswalk",
+                evidence={"decision_id": decision_id, "mapping_method": mapping_method},
+            )
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO public_non_dicom_crosswalk_evidence
+                VALUES (?, ?, ?, ?, ?, ?, 'high', ?, ?, '', ?, ?)
+                """,
+                (
+                    crosswalk_id, asset["asset_id"], short_title, raw_subject_id,
+                    subject_id, mapping_method, decision.get("evidence_url") or "",
+                    decision.get("reviewer_note") or "", reviewed_at,
+                    json_dumps({
+                        "decision_id": decision_id,
+                        "matching_evidence": [item[3] for item in selected],
+                        "representation_equivalence": "not_asserted",
+                    }),
+                ),
+            )
+            decision_matched += 1
+            decision_evidence += 1
+
+        matched_assets += decision_matched
+        evidence_rows += decision_evidence
+        unavailable_assets += decision_unavailable
+        pathdb_non_participant_assets += decision_pathdb_non_participants
+        unmatched_assets += decision_unmatched
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO public_non_dicom_crosswalk_decisions
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                decision_id, dataset_type, short_title, json_dumps(download_ids),
+                decision["decision_status"], decision["resolution_type"],
+                decision.get("reviewer_note") or "", decision.get("evidence_url") or "",
+                reviewed_at,
+                json_dumps({
+                    "source_file": str(curation_path),
+                    "review_source": curation.get("review_source"),
+                    "path_rules": decision.get("path_rules") or [],
+                    "pathdb_file_rules": decision.get("pathdb_file_rules") or [],
+                    "pathdb_asset_rules": decision.get("pathdb_asset_rules") or [],
+                    "source_unavailable_rules": decision.get("source_unavailable_rules") or [],
+                    "pathdb_non_participant_ids": decision.get("pathdb_non_participant_ids") or [],
+                    "matched_assets": decision_matched,
+                    "source_confirmed_unavailable_assets": decision_unavailable,
+                    "pathdb_non_participant_assets": decision_pathdb_non_participants,
+                    "unmatched_assets": decision_unmatched,
+                }),
+            ),
+        )
+
+    return {
+        "decisions": len(decisions),
+        "file_assets": matched_assets,
+        "evidence_rows": evidence_rows,
+        "source_confirmed_unavailable_assets": unavailable_assets,
+        "pathdb_non_participant_assets": pathdb_non_participant_assets,
+        "unmatched_assets": unmatched_assets,
+    }
 
 
 def apply_automated_pathdb_crosswalks(
@@ -2902,6 +3782,55 @@ def add_review_issues(conn: sqlite3.Connection) -> None:
     )
 
 
+def mark_downloads_with_linked_file_grain(conn: sqlite3.Connection) -> int:
+    """Resolve parent download placeholders when linked child files exist.
+
+    NIfTI file metadata can retain ``download_id`` as a JSON array because one
+    file record may be associated with more than one WordPress download.  The
+    WordPress parent asset stores one scalar download ID.  Compare both forms
+    so a dataset-level parent is not reported as an unlinked asset when the
+    participant crosswalk is already available on its file rows.
+    """
+    before = conn.total_changes
+    conn.execute(
+        """
+        UPDATE public_non_dicom_assets AS d
+        SET participant_link_status = 'crosswalk_available_at_file_grain',
+            quality_flag_json = json_set(
+                COALESCE(NULLIF(d.quality_flag_json, ''), '{}'),
+                '$.participant_inventory', 'crosswalk_available_at_file_grain'
+            )
+        WHERE d.asset_granularity = 'download'
+          AND d.participant_link_status IN ('dataset_only', 'unavailable')
+          AND NULLIF(trim(d.download_id), '') IS NOT NULL
+          AND EXISTS (
+              SELECT 1
+              FROM public_non_dicom_assets f
+              JOIN public_non_dicom_asset_participants ap
+                ON ap.asset_id = f.asset_id
+              WHERE f.dataset_type = d.dataset_type
+                AND f.short_title = d.short_title
+                AND f.file_format = d.file_format
+                AND f.asset_granularity = 'file'
+                AND (
+                    COALESCE(f.download_id, '') = COALESCE(d.download_id, '')
+                    OR EXISTS (
+                        SELECT 1
+                        FROM json_each(
+                            CASE
+                                WHEN json_valid(f.download_id) THEN f.download_id
+                                ELSE '[]'
+                            END
+                        ) AS linked_download
+                        WHERE CAST(linked_download.value AS TEXT) = CAST(d.download_id AS TEXT)
+                    )
+                )
+          )
+        """
+    )
+    return conn.total_changes - before
+
+
 def build_database(
     snapshot_db: Path,
     out: Path,
@@ -2941,6 +3870,15 @@ def build_database(
             else {"decisions": 0, "file_assets": 0, "evidence_rows": 0}
         )
         counts.update({f"reviewed_crosswalk_{key}": value for key, value in reviewed.items()})
+        path_contracts = apply_reviewed_path_contracts(
+            conn, clinical_db, crosswalk_curation, pathology_db=pathology_db
+        )
+        counts.update({f"reviewed_path_contract_{key}": value for key, value in path_contracts.items()})
+        pathdb_contracts = apply_reviewed_pathdb_contracts(conn, crosswalk_curation)
+        counts.update({
+            f"reviewed_pathdb_contract_{key}": value
+            for key, value in pathdb_contracts.items()
+        })
         automated = apply_automated_pathdb_crosswalks(conn, snapshot_db)
         counts.update({f"automated_crosswalk_{key}": value for key, value in automated.items()})
         curated_metadata = ingest_curated_image_metadata(conn, image_metadata_csv)
@@ -2953,6 +3891,9 @@ def build_database(
         counts["metadata_field_coverage_rows"] = build_metadata_field_coverage(conn)
         counts["metadata_assessment_note_changes"] = add_metadata_assessment_notes(conn, nifti_db)
         counts["asset_participant_links_projected"] = sync_scalar_asset_participants(conn)
+        counts["download_assets_with_file_grain_crosswalk"] = (
+            mark_downloads_with_linked_file_grain(conn)
+        )
         add_review_issues(conn)
         generated = datetime.now(timezone.utc).isoformat()
         metadata = {

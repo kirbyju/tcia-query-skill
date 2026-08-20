@@ -27,6 +27,29 @@ discovery = load("tcia_public_non_dicom_crosswalk_discovery")
 
 
 class VocabularyTests(unittest.TestCase):
+    def test_explicit_reviewed_mapping_generates_reproducible_crosswalk_row(self):
+        rows = crosswalks.explicit_mapping_rows({
+            "decisions": [{
+                "dataset_type": "Collection",
+                "short_title": "CPTAC-LUAD",
+                "download_ids": ["44839"],
+                "reviewer_note": "Exact PathDB path.",
+                "explicit_mappings": [{
+                    "subject_id": "11LU035",
+                    "package_path": "LUAD/example_D1_D1.svs",
+                    "crosswalk_source_url": "https://pathdb.example/LUAD/example_D1_D1.svs",
+                }],
+            }],
+        })
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["subject_id"], "11LU035")
+        self.assertEqual(rows[0]["file_format"], "SVS")
+        self.assertEqual(rows[0]["crosswalk_method"], "exact_pathdb_source_url_suffix")
+        self.assertEqual(
+            json.loads(rows[0]["provenance_json"])["evidence_relation"],
+            "exact_pathdb_source_url_suffix",
+        )
+
     def test_crosswalk_path_matcher_is_delimiter_aware(self):
         index = discovery.build_candidate_index({"AQK", "C3N-00123", "13952", "12"})
         self.assertEqual(
@@ -77,6 +100,510 @@ class VocabularyTests(unittest.TestCase):
 
 
 class BuilderTests(unittest.TestCase):
+    def test_reviewed_readme_and_pathdb_contract_links_partial_dataset(self):
+        import sqlite3
+
+        with tempfile.TemporaryDirectory() as directory:
+            curation = Path(directory) / "curation.json"
+            curation.write_text(json.dumps({
+                "reviewed_at": "2026-08-18",
+                "review_source": "unit test",
+                "decisions": [{
+                    "dataset_type": "Collection",
+                    "short_title": "C-NMC 2019",
+                    "download_ids": ["41841"],
+                    "decision_status": "resolved",
+                    "resolution_type": "participant_pathdb_contract",
+                    "reviewed_at": "2026-08-20",
+                    "reviewer_note": "Published README contract.",
+                    "evidence_url": "https://example.test/readme.pdf",
+                    "pathdb_non_participant_ids": ["NA_final"],
+                    "path_rules": [{
+                        "name": "training",
+                        "pattern": "^C-NMC_training_data/fold_(?P<fold>[0-2])/(?P<class_name>all|hem)/UID_(?P<subject_prefix>H?)(?P<subject_number>[0-9]+)_[0-9]+_[0-9]+_(?P=class_name)[.]bmp$",
+                        "participant_id_template": "{subject_prefix}{subject_number}_training_fold{fold}_{class_name}",
+                    }],
+                    "pathdb_file_rules": [{
+                        "name": "prelim",
+                        "pattern": "^C-NMC_test_prelim_phase_data/(?P<file_stem>[0-9]+)[.]bmp$",
+                        "pathdb_url_marker": "/converted/C-NMC_Leukemia/",
+                        "pathdb_relative_path_template": "C-NMC_test_prelim_phase_data/{file_stem}.tiff",
+                        "excluded_subject_ids": ["NA_final"],
+                    }],
+                    "source_unavailable_rules": [{
+                        "name": "final",
+                        "pattern": "^C-NMC_test_final_phase_data/[0-9]+[.]bmp$",
+                        "reason": "final_test_participant_mapping_not_published",
+                    }],
+                }],
+            }))
+            conn = sqlite3.connect(":memory:")
+            conn.row_factory = sqlite3.Row
+            conn.executescript(public.SCHEMA)
+            public.insert_vocab(conn)
+
+            def add_asset(asset_id, path, system, subject_id="", source_url=""):
+                public.insert_asset(conn, {
+                    "asset_id": asset_id,
+                    "dataset_type": "Collection",
+                    "short_title": "C-NMC 2019",
+                    "download_id": "41841" if system == "tcia_aspera" else "",
+                    "subject_id": subject_id,
+                    "subject_id_namespace": "tcia_dataset:C-NMC 2019" if subject_id else "",
+                    "participant_link_status": (
+                        "dataset_scoped_source_identifier" if subject_id else "unavailable"
+                    ),
+                    "asset_granularity": "file",
+                    "asset_name": Path(path).name,
+                    "file_name": Path(path).name,
+                    "package_path": path if system == "tcia_aspera" else "",
+                    "file_format": "BMP" if system == "tcia_aspera" else "TIFF",
+                    "media_kind": "still_image",
+                    "spatial_dimensionality": "2D",
+                    "temporal_dimensionality": "static",
+                    "imaging_domain": "pathology",
+                    "modality": "SM",
+                    "object_role": "source_image",
+                    "representation_provenance_class": "unknown",
+                    "source_system": system,
+                    "source_url": source_url,
+                    "raw_values_json": "{}",
+                    "provenance_json": "{}",
+                    "quality_flag_json": "{}",
+                })
+
+            add_asset(
+                "pathdb-training", "training.tiff", "tcia_pathdb",
+                "11_training_fold0_all", "https://pathdb.example/training.tiff",
+            )
+            add_asset(
+                "pathdb-prelim", "prelim.tiff", "tcia_pathdb",
+                "53_prelim_all",
+                "https://pathdb.example/converted/C-NMC_Leukemia/"
+                "C-NMC_test_prelim_phase_data/1.tiff",
+            )
+            add_asset(
+                "pathdb-final", "final.tiff", "tcia_pathdb", "NA_final",
+                "https://pathdb.example/converted/C-NMC_Leukemia/"
+                "C-NMC_test_final_phase_data/1.tiff",
+            )
+            add_asset(
+                "training", "C-NMC_training_data/fold_0/all/UID_11_10_1_all.bmp",
+                "tcia_aspera",
+            )
+            add_asset(
+                "prelim", "C-NMC_test_prelim_phase_data/1.bmp", "tcia_aspera",
+            )
+            add_asset(
+                "final", "C-NMC_test_final_phase_data/1.bmp", "tcia_aspera",
+            )
+
+            result = public.apply_reviewed_pathdb_contracts(conn, curation)
+            self.assertEqual(result, {
+                "decisions": 1,
+                "file_assets": 2,
+                "evidence_rows": 2,
+                "source_confirmed_unavailable_assets": 1,
+                "pathdb_non_participant_assets": 1,
+                "unmatched_assets": 0,
+            })
+            self.assertEqual(
+                [tuple(row) for row in conn.execute(
+                    "SELECT asset_id, subject_id, participant_link_status "
+                    "FROM public_non_dicom_assets "
+                    "WHERE asset_id IN ('training', 'prelim', 'final') ORDER BY asset_id"
+                )],
+                [
+                    ("final", "", "source_confirmed_unavailable"),
+                    ("prelim", "53_prelim_all", "reviewed_source_crosswalk"),
+                    ("training", "11_training_fold0_all", "reviewed_source_crosswalk"),
+                ],
+            )
+            self.assertEqual(
+                conn.execute(
+                    "SELECT COUNT(*) FROM public_non_dicom_crosswalk_evidence"
+                ).fetchone()[0],
+                2,
+            )
+            self.assertEqual(
+                tuple(conn.execute(
+                    "SELECT subject_id, participant_link_status, "
+                    "json_extract(raw_values_json, '$.pathdb_non_participant_label') "
+                    "FROM public_non_dicom_assets WHERE asset_id='pathdb-final'"
+                ).fetchone()),
+                ("", "source_confirmed_unavailable", "NA_final"),
+            )
+            conn.close()
+
+    def test_reviewed_hancock_contract_links_core_wsi_and_shared_tma_block(self):
+        import sqlite3
+
+        with tempfile.TemporaryDirectory() as directory:
+            curation = Path(directory) / "curation.json"
+            curation.write_text(json.dumps({
+                "reviewed_at": "2026-08-20",
+                "review_source": "unit test",
+                "decisions": [{
+                    "dataset_type": "Collection",
+                    "short_title": "HANCOCK",
+                    "download_ids": ["52636"],
+                    "decision_status": "resolved",
+                    "resolution_type": "participant_pathdb_contract",
+                    "reviewer_note": "Reviewed HANCOCK contract.",
+                    "evidence_url": "https://example.test/hancock",
+                    "path_rules": [
+                        {
+                            "name": "core",
+                            "pattern": "^Images/TMA_Cores/[^/]+/[^/]*_patient(?P<subject_number>[0-9]{3})[.]png$",
+                            "participant_id_template": "patient{subject_number}",
+                        },
+                        {
+                            "name": "wsi",
+                            "pattern": "^Images/WSI_[^/]+/(?:LymphNode|PrimaryTumor)_HE_(?P<subject_number>[0-9]{3})(?:_a)?[.]svs$",
+                            "participant_id_template": "patient{subject_number}",
+                        },
+                    ],
+                    "pathdb_asset_rules": [{
+                        "name": "tma",
+                        "pattern": "^Images/TMA_(?:InvasionFront|TumorCenter)/[^/]+/(?P<pathdb_asset_name>(?:InvasionFront|TumorCenter)_[^/]+_block[0-9]+)[.]svs$",
+                        "pathdb_asset_name_template": "{pathdb_asset_name}",
+                    }],
+                }],
+            }))
+            conn = sqlite3.connect(":memory:")
+            conn.row_factory = sqlite3.Row
+            conn.executescript(public.SCHEMA)
+            public.insert_vocab(conn)
+
+            def add_asset(asset_id, path, system, subject_id="", asset_name=""):
+                public.insert_asset(conn, {
+                    "asset_id": asset_id,
+                    "dataset_type": "Collection",
+                    "short_title": "HANCOCK",
+                    "download_id": "52636" if system == "tcia_aspera" else "",
+                    "subject_id": subject_id,
+                    "subject_id_namespace": "tcia_dataset:HANCOCK" if subject_id else "",
+                    "participant_link_status": (
+                        "dataset_scoped_source_identifier" if subject_id else "unavailable"
+                    ),
+                    "asset_granularity": "file",
+                    "asset_name": asset_name or Path(path).stem,
+                    "file_name": Path(path).name,
+                    "package_path": path if system == "tcia_aspera" else "",
+                    "file_format": Path(path).suffix.lstrip(".").upper(),
+                    "media_kind": "whole_slide_image" if path.endswith(".svs") else "still_image",
+                    "spatial_dimensionality": "2D",
+                    "temporal_dimensionality": "static",
+                    "imaging_domain": "pathology",
+                    "modality": "SM",
+                    "object_role": "source_image",
+                    "representation_provenance_class": "unknown",
+                    "source_system": system,
+                    "raw_values_json": "{}",
+                    "provenance_json": "{}",
+                    "quality_flag_json": "{}",
+                })
+
+            add_asset("pathdb-core", "core.png", "tcia_pathdb", "patient001")
+            add_asset("pathdb-wsi", "wsi.svs", "tcia_pathdb", "patient036")
+            add_asset(
+                "pathdb-tma", "tma.svs", "tcia_pathdb", "",
+                "InvasionFront_CD3_block2",
+            )
+            for raw_id in ("1", "74", "83"):
+                public.insert_asset_participant(
+                    conn,
+                    asset_id="pathdb-tma",
+                    short_title="HANCOCK",
+                    subject_id=f"patient{int(raw_id):03d}",
+                    namespace="tcia_dataset:HANCOCK",
+                    raw_subject_id=raw_id,
+                    participant_role="tma_block_member",
+                    link_status="multi_participant_source_list",
+                    evidence={"source": "PathDB"},
+                )
+            add_asset(
+                "core", "Images/TMA_Cores/tma_tumorcenter_CD3/"
+                "TumorCenter_CD3_block2_x3_y9_patient001.png", "tcia_aspera",
+            )
+            add_asset(
+                "wsi", "Images/WSI_PrimaryTumor_Hypopharynx/"
+                "PrimaryTumor_HE_036_a.svs", "tcia_aspera",
+            )
+            add_asset(
+                "tma", "Images/TMA_InvasionFront/CD3/"
+                "InvasionFront_CD3_block2.svs", "tcia_aspera",
+            )
+
+            result = public.apply_reviewed_pathdb_contracts(conn, curation)
+            self.assertEqual(result, {
+                "decisions": 1,
+                "file_assets": 3,
+                "evidence_rows": 5,
+                "source_confirmed_unavailable_assets": 0,
+                "pathdb_non_participant_assets": 0,
+                "unmatched_assets": 0,
+            })
+            self.assertEqual(
+                [tuple(row) for row in conn.execute(
+                    "SELECT asset_id, subject_id, participant_link_status "
+                    "FROM public_non_dicom_assets "
+                    "WHERE asset_id IN ('core', 'wsi', 'tma') ORDER BY asset_id"
+                )],
+                [
+                    ("core", "patient001", "reviewed_source_crosswalk"),
+                    ("tma", "", "reviewed_source_crosswalk"),
+                    ("wsi", "patient036", "reviewed_source_crosswalk"),
+                ],
+            )
+            self.assertEqual(
+                [tuple(row) for row in conn.execute(
+                    "SELECT subject_id, raw_subject_id, participant_role "
+                    "FROM public_non_dicom_asset_participants "
+                    "WHERE asset_id='tma' ORDER BY subject_id"
+                )],
+                [
+                    ("patient001", "1", "tma_block_member"),
+                    ("patient074", "74", "tma_block_member"),
+                    ("patient083", "83", "tma_block_member"),
+                ],
+            )
+            conn.close()
+
+    def test_reviewed_wordpress_path_contract_links_only_patient_paths(self):
+        import sqlite3
+
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            clinical_db = base / "clinical.sqlite"
+            pathology_db = base / "pathology.sqlite"
+            curation = base / "curation.json"
+            clinical = sqlite3.connect(clinical_db)
+            clinical.executescript(
+                """
+                CREATE TABLE clinical_subjects (short_title TEXT, subject_id TEXT);
+                INSERT INTO clinical_subjects VALUES ('DLBCL-Morphology', '13952');
+                CREATE VIEW agent_clinical_all_subjects AS
+                SELECT short_title, subject_id FROM clinical_subjects;
+                """
+            )
+            clinical.commit()
+            clinical.close()
+            pathology = sqlite3.connect(pathology_db)
+            pathology.executescript(
+                """
+                CREATE TABLE agent_pathology_file_objects (
+                    dataset_type TEXT, short_title TEXT, is_metadata INTEGER,
+                    package_path TEXT, file_name TEXT, image_format TEXT,
+                    file_ext TEXT, download_id TEXT, bytes INTEGER
+                );
+                INSERT INTO agent_pathology_file_objects VALUES
+                  ('Collection', 'DLBCL-Morphology', 0,
+                   'DLBCL-Morph/Cells/13952/44009/1.npy', '1.npy', 'NPY', '.npy', '42421', 8),
+                  ('Collection', 'DLBCL-Morphology', 0,
+                   'DLBCL-Morph/Cells/13952/44009/2.npy', '2.npy', 'NPY', '.npy', '42421', 12),
+                  ('Collection', 'DLBCL-Morphology', 1,
+                   'DLBCL-Morph/Cells/13952/44009/metadata.npy', 'metadata.npy', 'NPY', '.npy', '42421', 4),
+                  ('Collection', 'DLBCL-Morphology', 0,
+                   'DLBCL-Morph/Cells/99999/44010/1.npy', '1.npy', 'NPY', '.npy', '42421', 8);
+                CREATE TABLE agent_pathology_downloads (
+                    short_title TEXT, download_id TEXT, download_url TEXT
+                );
+                INSERT INTO agent_pathology_downloads VALUES
+                  ('DLBCL-Morphology', '42421', 'https://example.test/dlbcl-package');
+                """
+            )
+            pathology.commit()
+            pathology.close()
+            curation.write_text(json.dumps({
+                "reviewed_at": "2026-08-18",
+                "review_source": "unit test",
+                "decisions": [{
+                    "dataset_type": "Collection",
+                    "short_title": "DLBCL-Morphology",
+                    "download_ids": ["42421"],
+                    "decision_status": "resolved",
+                    "resolution_type": "participant_path_contract",
+                    "reviewed_at": "2026-08-20",
+                    "reviewer_note": "WordPress directory contract.",
+                    "evidence_url": "https://example.test/dlbcl",
+                    "identifier_source": "clinical_metadata.agent_clinical_all_subjects",
+                    "identifier_source_url": "https://example.test/clinical.csv",
+                    "path_rules": [
+                        {
+                            "name": "wsi",
+                            "pattern": "^DLBCL-Morph/WSI/(?P<participant_id>[0-9]+)(?:_[0-9]+)?[.]svs$",
+                        },
+                        {
+                            "name": "patch",
+                            "pattern": "^DLBCL-Morph/Patches/[^/]+/(?P<participant_id>[0-9]+)/[^/]+[.]png$",
+                        },
+                    ],
+                    "compact_path_rules": [{
+                        "name": "cells",
+                        "pattern": "^DLBCL-Morph/Cells/(?P<participant_id>[0-9]+)/[^/]+/[^/]+[.]npy$",
+                        "source_file_format": "NPY",
+                        "include_metadata": True,
+                        "asset_group": "cell_shape_arrays",
+                        "asset_label": "cell-shape arrays",
+                        "media_kind": "spectral_or_array",
+                        "spatial_dimensionality": "unknown",
+                        "temporal_dimensionality": "static",
+                        "imaging_domain": "pathology",
+                        "modality": "",
+                        "object_role": "cell_shape_array",
+                        "representation_provenance_class": "derived_asset",
+                    }],
+                }],
+            }))
+
+            conn = sqlite3.connect(":memory:")
+            conn.row_factory = sqlite3.Row
+            conn.executescript(public.SCHEMA)
+            public.insert_vocab(conn)
+            common = {
+                "dataset_type": "Collection",
+                "short_title": "DLBCL-Morphology",
+                "download_id": "42421",
+                "subject_id": "",
+                "subject_id_namespace": "",
+                "participant_link_status": "unavailable",
+                "asset_granularity": "file",
+                "media_kind": "whole_slide_image",
+                "spatial_dimensionality": "2D",
+                "temporal_dimensionality": "static",
+                "imaging_domain": "pathology",
+                "modality": "SM",
+                "object_role": "source_image",
+                "representation_provenance_class": "submitted_original",
+                "source_system": "tcia_aspera",
+                "raw_values_json": "{}",
+                "provenance_json": "{}",
+                "quality_flag_json": "{}",
+            }
+            for asset_id, path, file_format in (
+                ("wsi", "DLBCL-Morph/WSI/13952_0.svs", "SVS"),
+                ("patch", "DLBCL-Morph/Patches/BCL2/13952/44009.png", "PNG"),
+                ("tma", "DLBCL-Morph/TMA/BCL2/44009.svs", "SVS"),
+            ):
+                file_name = path.rsplit("/", 1)[-1]
+                public.insert_asset(conn, {
+                    **common,
+                    "asset_id": asset_id,
+                    "asset_name": file_name,
+                    "file_name": file_name,
+                    "package_path": path,
+                    "file_format": file_format,
+                })
+
+            result = public.apply_reviewed_path_contracts(
+                conn, clinical_db, curation, pathology_db=pathology_db
+            )
+            self.assertEqual(result, {
+                "decisions": 1,
+                "file_assets": 2,
+                "compact_assets": 1,
+                "represented_files": 3,
+                "evidence_rows": 3,
+                "unmatched_assets": 1,
+                "unmatched_source_files": 1,
+            })
+            self.assertEqual(
+                tuple(conn.execute(
+                    "SELECT participant_link_status, subject_id "
+                    "FROM public_non_dicom_assets WHERE asset_id='wsi'"
+                ).fetchone()),
+                ("reviewed_source_crosswalk", "13952"),
+            )
+            self.assertEqual(
+                tuple(conn.execute(
+                    "SELECT participant_link_status, subject_id "
+                    "FROM public_non_dicom_assets WHERE asset_id='patch'"
+                ).fetchone()),
+                ("reviewed_source_crosswalk", "13952"),
+            )
+            self.assertEqual(
+                tuple(conn.execute(
+                    "SELECT participant_link_status, subject_id "
+                    "FROM public_non_dicom_assets WHERE asset_id='tma'"
+                ).fetchone()),
+                ("unavailable", ""),
+            )
+            self.assertEqual(
+                tuple(conn.execute(
+                    "SELECT asset_granularity, subject_id, represented_file_count, size_bytes "
+                    "FROM public_non_dicom_assets WHERE file_format='NPY'"
+                ).fetchone()),
+                ("participant_file_group", "13952", 3, 24),
+            )
+            self.assertEqual(
+                conn.execute("SELECT COUNT(*) FROM public_non_dicom_crosswalk_evidence").fetchone()[0],
+                3,
+            )
+            conn.close()
+
+    def test_download_parent_resolves_from_json_array_file_association(self):
+        import sqlite3
+
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.executescript(public.SCHEMA)
+        public.insert_vocab(conn)
+        common = {
+            "dataset_type": "Collection",
+            "short_title": "Example-NIfTI",
+            "media_kind": "image_volume",
+            "spatial_dimensionality": "3D",
+            "temporal_dimensionality": "static",
+            "imaging_domain": "radiology",
+            "modality": "MR",
+            "object_role": "segmentation",
+            "representation_provenance_class": "submitted_original",
+            "source_system": "tcia_aspera",
+            "raw_values_json": "{}",
+            "provenance_json": "{}",
+            "quality_flag_json": "{}",
+        }
+        public.insert_asset(conn, {
+            **common,
+            "asset_id": "download-nifti",
+            "download_id": "51716",
+            "subject_id": "",
+            "subject_id_namespace": "",
+            "participant_link_status": "dataset_only",
+            "asset_granularity": "download",
+            "asset_name": "NIfTI package",
+            "file_name": "",
+            "package_path": "",
+            "file_format": "NIFTI",
+        })
+        public.insert_asset(conn, {
+            **common,
+            "asset_id": "file-nifti",
+            "download_id": '["51716"]',
+            "subject_id": "EXAMPLE-001",
+            "subject_id_namespace": "tcia_dataset:Example-NIfTI",
+            "participant_link_status": "dataset_scoped_source_identifier",
+            "asset_granularity": "file",
+            "asset_name": "EXAMPLE-001_seg.nii.gz",
+            "file_name": "EXAMPLE-001_seg.nii.gz",
+            "package_path": "Example-NIfTI/EXAMPLE-001_seg.nii.gz",
+            "file_format": "NIFTI",
+        })
+        public.sync_scalar_asset_participants(conn)
+
+        self.assertEqual(public.mark_downloads_with_linked_file_grain(conn), 1)
+        status, flags = conn.execute(
+            "SELECT participant_link_status, quality_flag_json "
+            "FROM public_non_dicom_assets WHERE asset_id='download-nifti'"
+        ).fetchone()
+        self.assertEqual(status, "crosswalk_available_at_file_grain")
+        self.assertEqual(
+            json.loads(flags)["participant_inventory"],
+            "crosswalk_available_at_file_grain",
+        )
+        conn.close()
+
     def test_yale_workbook_enriches_matching_nifti_asset(self):
         import sqlite3
 
@@ -323,6 +850,7 @@ class BuilderTests(unittest.TestCase):
                     "download_ids": ["52487"],
                     "decision_status": "resolved",
                     "resolution_type": "participant_crosswalk",
+                    "reviewed_at": "2026-08-20",
                     "reviewer_note": "reviewed",
                     "evidence_url": "https://example.test/usage-notes",
                 }],
@@ -354,6 +882,12 @@ class BuilderTests(unittest.TestCase):
             self.assertEqual(
                 [tuple(row) for row in participant_links],
                 [("AD9G",), ("AD9G",)],
+            )
+            self.assertEqual(
+                conn.execute(
+                    "SELECT reviewed_at FROM public_non_dicom_crosswalk_evidence"
+                ).fetchone()[0],
+                "2026-08-20",
             )
             conn.close()
 

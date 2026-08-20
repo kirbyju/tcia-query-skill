@@ -1,6 +1,6 @@
 {
   "reviewed_at": "2026-08-18",
-  "review_source": "tcia_participant_file_crosswalk_review.xlsx plus published TCIA WordPress and clinical updates",
+  "review_source": "tcia_participant_file_crosswalk_review.xlsx plus published TCIA WordPress and clinical updates and reviewed exact PathDB path assignments",
   "decisions": [
     {
       "dataset_type": "Collection",
@@ -47,6 +47,231 @@
       "resolution_type": "participant_crosswalk",
       "reviewer_note": "Image filenames begin with patient ID; the manual-annotations workbook supplies Patient_ID and Image_name.",
       "evidence_url": "https://www.cancerimagingarchive.net/wp-content/uploads/Radiology-manual-annotations.xlsx"
+    },
+    {
+      "dataset_type": "Collection",
+      "short_title": "C-NMC 2019",
+      "download_ids": ["41841"],
+      "decision_status": "resolved",
+      "resolution_type": "participant_pathdb_contract",
+      "reviewed_at": "2026-08-20",
+      "reviewer_note": "The published README defines non-overlapping subject membership and the UID subject token for training images. Training tokens resolve exactly to existing dataset-scoped PathDB participants. Preliminary-test BMP files resolve through an exact relative-path match to PathDB TIFF representations. Final-test files remain participant-unassigned because the published package uses numeric filenames and withholds the final ground truth.",
+      "evidence_url": "https://www.cancerimagingarchive.net/wp-content/uploads/CNMC_readme.pdf",
+      "supporting_evidence_url": "https://www.cancerimagingarchive.net/collection/c-nmc-2019/",
+      "pathdb_non_participant_ids": ["NA_final"],
+      "path_rules": [
+        {
+          "name": "readme_training_uid_subject",
+          "pattern": "^C-NMC_training_data/fold_(?P<fold>[0-2])/(?P<class_name>all|hem)/UID_(?P<subject_prefix>H?)(?P<subject_number>[0-9]+)_[0-9]+_[0-9]+_(?P=class_name)[.]bmp$",
+          "participant_id_template": "{subject_prefix}{subject_number}_training_fold{fold}_{class_name}"
+        }
+      ],
+      "pathdb_file_rules": [
+        {
+          "name": "preliminary_exact_converted_pathdb_path",
+          "pattern": "^C-NMC_test_prelim_phase_data/(?P<file_stem>[0-9]+)[.]bmp$",
+          "pathdb_url_marker": "/converted/C-NMC_Leukemia/",
+          "pathdb_relative_path_template": "C-NMC_test_prelim_phase_data/{file_stem}.tiff",
+          "excluded_subject_ids": ["NA_final"]
+        }
+      ],
+      "source_unavailable_rules": [
+        {
+          "name": "final_test_ground_truth_withheld",
+          "pattern": "^C-NMC_test_final_phase_data/[0-9]+[.]bmp$",
+          "reason": "final_test_participant_mapping_not_published"
+        }
+      ]
+    },
+    {
+      "dataset_type": "Collection",
+      "short_title": "CPTAC-BRCA",
+      "download_ids": ["44423"],
+      "decision_status": "resolved",
+      "resolution_type": "participant_crosswalk",
+      "reviewed_at": "2026-08-20",
+      "reviewer_note": "The leading CPTAC subject identifier and the exact PathDB source URL both map the affected Aspera slide to 20BR005. A separate PathDB row exposes the UUID prefix as a participant identifier and is not used for this mapping.",
+      "evidence_url": "https://www.cancerimagingarchive.net/collection/cptac-brca/",
+      "explicit_mappings": [
+        {
+          "subject_id": "20BR005",
+          "package_path": "BRCA/20BR005-0044700f-37cc-4f2e-81d6-90b367_D1_D1.svs",
+          "crosswalk_source_url": "http://pathdb.cancerimagingarchive.net/index.php/system/files/wsi/ross/CPTAC/BRCA/20BR005-0044700f-37cc-4f2e-81d6-90b367_D1_D1.svs"
+        }
+      ]
+    },
+    {
+      "dataset_type": "Collection",
+      "short_title": "CPTAC-LUAD",
+      "download_ids": ["44839"],
+      "decision_status": "resolved",
+      "resolution_type": "participant_crosswalk",
+      "reviewed_at": "2026-08-20",
+      "reviewer_note": "Four UUID-only Aspera filenames were matched to existing CPTAC-LUAD participants by exact PathDB source URL suffix. Filename text alone was not used to infer the participant identifiers.",
+      "evidence_url": "https://www.cancerimagingarchive.net/collection/cptac-luad/",
+      "explicit_mappings": [
+        {
+          "subject_id": "11LU035",
+          "package_path": "LUAD/2f2e5477-42a4-4906-a943-bf7f80_D1_D1.svs",
+          "crosswalk_source_url": "http://pathdb.cancerimagingarchive.net/index.php/system/files/wsi/ross/CPTAC/LUAD/2f2e5477-42a4-4906-a943-bf7f80_D1_D1.svs"
+        },
+        {
+          "subject_id": "11LU022",
+          "package_path": "LUAD/5a84eae1-197e-4463-ad65-59becc_D1_D1.svs",
+          "crosswalk_source_url": "http://pathdb.cancerimagingarchive.net/index.php/system/files/wsi/ross/CPTAC/LUAD/5a84eae1-197e-4463-ad65-59becc_D1_D1.svs"
+        },
+        {
+          "subject_id": "11LU016",
+          "package_path": "LUAD/93e30fd5-e57e-4503-a175-863c7d_D1_D1.svs",
+          "crosswalk_source_url": "http://pathdb.cancerimagingarchive.net/index.php/system/files/wsi/ross/CPTAC/LUAD/93e30fd5-e57e-4503-a175-863c7d_D1_D1.svs"
+        },
+        {
+          "subject_id": "11LU013",
+          "package_path": "LUAD/9f905736-f662-41d6-b3ac-16758d_D1_D1.svs",
+          "crosswalk_source_url": "http://pathdb.cancerimagingarchive.net/index.php/system/files/wsi/ross/CPTAC/LUAD/9f905736-f662-41d6-b3ac-16758d_D1_D1.svs"
+        }
+      ]
+    },
+    {
+      "dataset_type": "Collection",
+      "short_title": "CPTAC-OV",
+      "download_ids": ["45049"],
+      "decision_status": "resolved",
+      "resolution_type": "participant_crosswalk",
+      "reviewed_at": "2026-08-20",
+      "reviewer_note": "The leading CPTAC subject identifier and the exact PathDB source URL both map the affected Aspera slide to 04OV011. A separate PathDB row exposes the UUID prefix as a participant identifier and is not used for this mapping.",
+      "evidence_url": "https://www.cancerimagingarchive.net/collection/cptac-ov/",
+      "explicit_mappings": [
+        {
+          "subject_id": "04OV011",
+          "package_path": "OV/04OV011-00af6849-6be0-4e6d-8349-a5ee6e.svs",
+          "crosswalk_source_url": "http://pathdb.cancerimagingarchive.net/index.php/system/files/wsi/ross/CPTAC/OV/04OV011-00af6849-6be0-4e6d-8349-a5ee6e.svs"
+        }
+      ]
+    },
+    {
+      "dataset_type": "Collection",
+      "short_title": "DLBCL-Morphology",
+      "download_ids": ["42421"],
+      "decision_status": "resolved",
+      "resolution_type": "participant_path_contract",
+      "reviewed_at": "2026-08-20",
+      "reviewer_note": "The WordPress dataset organization identifies WSI filenames, patch directories, and cell-array directories by patient_id. Observed WSI filenames retain that patient ID before a slide-number suffix; extracted identifiers must exactly match the official clinical participant list. Cell arrays are projected as compact participant groups. TMA slide IDs are not patient IDs and are excluded from these rules.",
+      "evidence_url": "https://www.cancerimagingarchive.net/collection/dlbcl-morphology/",
+      "identifier_source": "clinical_metadata.agent_clinical_all_subjects",
+      "identifier_source_url": "https://www.cancerimagingarchive.net/wp-content/uploads/clinical_data_cleaned.csv",
+      "path_rules": [
+        {
+          "name": "wordpress_wsi_filename_patient_id",
+          "pattern": "^DLBCL-Morph/WSI/(?P<participant_id>[0-9]+)(?:_[0-9]+)?[.]svs$"
+        },
+        {
+          "name": "wordpress_patch_patient_directory",
+          "pattern": "^DLBCL-Morph/Patches/[^/]+/(?P<participant_id>[0-9]+)/[^/]+[.]png$"
+        }
+      ],
+      "compact_path_rules": [
+        {
+          "name": "wordpress_cell_array_patient_directory",
+          "pattern": "^DLBCL-Morph/Cells/(?P<participant_id>[0-9]+)/[^/]+/[^/]+[.]npy$",
+          "source_file_format": "NPY",
+          "asset_group": "cell_shape_arrays",
+          "asset_label": "cell-shape arrays",
+          "media_kind": "spectral_or_array",
+          "spatial_dimensionality": "unknown",
+          "temporal_dimensionality": "static",
+          "imaging_domain": "pathology",
+          "modality": "",
+          "object_role": "cell_shape_array",
+          "representation_provenance_class": "derived_asset"
+        }
+      ]
+    },
+    {
+      "dataset_type": "Collection",
+      "short_title": "HANCOCK",
+      "download_ids": ["52636"],
+      "decision_status": "resolved",
+      "resolution_type": "participant_pathdb_contract",
+      "reviewed_at": "2026-08-20",
+      "reviewer_note": "HANCOCK contains three pathology grains. Cropped TMA-core PNG filenames carry the patientNNN identifier directly. Patient-specific lymph-node and primary-tumor WSI filenames carry the zero-padded numeric patient identifier after the HE token, including eight additional _a slides. Whole TMA block SVS files resolve by exact slide name to PathDB, whose participant junction supplies either the block's multi-patient membership or the single patient in block23. These metadata relationships do not assert that Aspera and PathDB representations are byte-identical.",
+      "evidence_url": "https://www.cancerimagingarchive.net/collection/hancock/",
+      "path_rules": [
+        {
+          "name": "tma_core_filename_patient_id",
+          "pattern": "^Images/TMA_Cores/[^/]+/[^/]*_patient(?P<subject_number>[0-9]{3})[.]png$",
+          "participant_id_template": "patient{subject_number}"
+        },
+        {
+          "name": "patient_wsi_numeric_suffix",
+          "pattern": "^Images/WSI_[^/]+/(?:LymphNode|PrimaryTumor)_HE_(?P<subject_number>[0-9]{3})(?:_a)?[.]svs$",
+          "participant_id_template": "patient{subject_number}"
+        }
+      ],
+      "pathdb_asset_rules": [
+        {
+          "name": "tma_block_exact_pathdb_slide_name",
+          "pattern": "^Images/TMA_(?:InvasionFront|TumorCenter)/[^/]+/(?P<pathdb_asset_name>(?:InvasionFront|TumorCenter)_[^/]+_block[0-9]+)[.]svs$",
+          "pathdb_asset_name_template": "{pathdb_asset_name}"
+        }
+      ]
+    },
+    {
+      "dataset_type": "Collection",
+      "short_title": "Hungarian-Colorectal-Screening",
+      "download_ids": ["55034"],
+      "decision_status": "resolved",
+      "resolution_type": "participant_path_contract",
+      "reviewed_at": "2026-08-20",
+      "reviewer_note": "The live Faspex package contains ML_dataset/zoom_1_partA, zoom_1_partB, zoom_1_partC, and zoom_2 directories rather than four ZIP files. Each JPG patch and label CSV is nested under a zero-padded participant directory; overview PNG filenames use the same zero-padded identifier. IDs 001 through 200 normalize to the official clinical participant IDs 1 through 200. The CSV filename in zoom_1_partA/077 is 076_labels.csv, so participant assignment follows the containing 077 directory and the filename discrepancy remains preserved for curator review.",
+      "evidence_url": "https://www.cancerimagingarchive.net/collection/hungarian-colorectal-screening/",
+      "identifier_source": "clinical_metadata.agent_clinical_all_subjects",
+      "identifier_source_url": "https://www.cancerimagingarchive.net/wp-content/uploads/metadata_age_sex_icd10status.csv",
+      "compact_path_rules": [
+        {
+          "name": "faspex_jpg_participant_directory",
+          "pattern": "^ML_dataset/zoom_(?:1_part[ABC]|2)/0*(?P<participant_id>[1-9][0-9]{0,2})/[^/]+[.]jpg$",
+          "source_file_format": "JPG",
+          "asset_group": "jpg_patches",
+          "asset_label": "JPG patches",
+          "media_kind": "still_image",
+          "spatial_dimensionality": "2D",
+          "temporal_dimensionality": "static",
+          "imaging_domain": "pathology",
+          "modality": "SM",
+          "object_role": "image_patch",
+          "representation_provenance_class": "derived_asset"
+        },
+        {
+          "name": "faspex_csv_participant_directory",
+          "pattern": "^ML_dataset/zoom_(?:1_part[ABC]|2)/0*(?P<participant_id>[1-9][0-9]{0,2})/[^/]+[.]csv$",
+          "source_file_format": "CSV",
+          "include_metadata": true,
+          "asset_group": "patch_labels",
+          "asset_label": "patch labels",
+          "media_kind": "tabular",
+          "spatial_dimensionality": "unknown",
+          "temporal_dimensionality": "static",
+          "imaging_domain": "pathology",
+          "modality": "",
+          "object_role": "annotation_table",
+          "representation_provenance_class": "derived_asset"
+        },
+        {
+          "name": "faspex_overview_png_filename",
+          "pattern": "^ML_dataset/zoom_(?:1_part[ABC]|2)/overview_figures/0*(?P<participant_id>[1-9][0-9]{0,2})[.]png$",
+          "source_file_format": "PNG",
+          "asset_group": "overview_figures",
+          "asset_label": "overview figures",
+          "media_kind": "still_image",
+          "spatial_dimensionality": "2D",
+          "temporal_dimensionality": "static",
+          "imaging_domain": "pathology",
+          "modality": "SM",
+          "object_role": "overview_image",
+          "representation_provenance_class": "derived_asset"
+        }
+      ]
     },
     {
       "dataset_type": "Collection",

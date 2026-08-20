@@ -3,13 +3,13 @@
     "Bone-Marrow-Cytomorphology_MLL_Helmholtz_Fraunhofer"
   ],
   "crosswalk_csv": {
-    "bytes": 3725947,
+    "bytes": 3726361,
     "path": "/Users/kirbyju/github/tcia-query-skill/references/public_non_dicom_crosswalks_v1.csv",
-    "sha256": "ce5821a00184d6eb4c7c3529e58d6b596aa69ed26bc978b6389e093dcc1501d3"
+    "sha256": "88c013e8c4320c760f2bbaa19e2fba8c371fd217aa1906fb0b47125562a4073e"
   },
   "curation": {
     "path": "/Users/kirbyju/github/tcia-query-skill/references/public-non-dicom-crosswalk-curation-v1.json",
-    "sha256": "7c1288a75536d72a5d0659966a213045b0905f71449f19dde5d1529340b54403"
+    "sha256": "7226b7c5f7bd0c4970e7f21ced08fda69e6fa2cd2ee8d61c2ce62515ee81f20d"
   },
   "dataset_counts": {
     "AURORA-Metastatic-Breast-Multiomics": {
@@ -23,6 +23,18 @@
     "CDD-CESM": {
       "files": 2006,
       "participants": 326
+    },
+    "CPTAC-BRCA": {
+      "files": 1,
+      "participants": 1
+    },
+    "CPTAC-LUAD": {
+      "files": 4,
+      "participants": 4
+    },
+    "CPTAC-OV": {
+      "files": 1,
+      "participants": 1
     },
     "Capsule-Endoscopy-SB-NET": {
       "files": 270,
@@ -45,8 +57,8 @@
       "participants": 45
     }
   },
-  "reviewed_at": "2026-08-18",
-  "row_count": 3863,
+  "reviewed_at": "2026-08-20",
+  "row_count": 3869,
   "schema_version": 1,
   "source_files": [
     {

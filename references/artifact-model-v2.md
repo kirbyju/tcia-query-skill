@@ -73,6 +73,17 @@ Preserve the raw identifier attached to each junction row. A harmonized
 identifier may be stored separately when the source itself provides sufficient
 evidence. HANCOCK PathDB numeric IDs are normalized to the dataset's
 `patientNNN` form while retaining each raw numeric value and the mapping method.
+The reviewed HANCOCK contract resolves all 13,681 inventoried Aspera images:
+12,235 cropped TMA-core PNG filenames carry `patientNNN`; 1,078 patient-specific
+primary-tumor or lymph-node SVS filenames carry the zero-padded numeric patient
+suffix, including eight `_a` slides; and 368 whole TMA-block SVS files resolve
+by exact slide name to PathDB. Of the block slides, 352 link to 33--35 patients
+and 16 `block23` slides link to patient653. Preserve those block memberships in
+the asset-participant junction rather than duplicating the block or forcing a
+single scalar participant. This reviewed metadata relationship does not assert
+byte identity between the Aspera and PathDB representations. The separate
+WordPress aggregate of 13,684 images remains a curator-reported count
+discrepancy and is not resolved by inventing three file rows.
 
 Use these representation provenance classes:
 
@@ -128,6 +139,38 @@ reviewer note, evidence URL, review date, and source-artifact provenance in
 `public_non_dicom_crosswalk_evidence`. Use
 `participant_link_status='reviewed_source_crosswalk'` on mapped file rows and
 `crosswalk_available_at_file_grain` on the corresponding download declaration.
+An exact full package-path match to an existing PathDB source URL may support a
+reviewed mapping when a UUID-only filename does not encode the participant.
+Record that relationship as path evidence rather than claiming the Aspera and
+PathDB representations are byte-identical. If a shorter UUID token is also
+exposed as a PathDB participant identifier, the exact full-path assignment
+takes precedence only through an explicit reviewed decision.
+Published filename contracts can also support partial-dataset resolution. For
+`C-NMC 2019`, the README-defined training UID, fold, and class path resolves
+10,661 BMP cells to 73 existing dataset-scoped PathDB participants. The 1,867
+numbered preliminary-test BMP files resolve to 28 participants through exact
+relative-path matches to PathDB's converted TIFF representations; this path
+relationship does not assert byte identity. The 2,586 numbered final-test BMP
+files remain `source_confirmed_unavailable` because their 17 subject mappings
+and ground-truth labels were not published. Do not create a synthetic
+`NA_final` participant or infer those withheld associations.
+Reviewed WordPress directory contracts may be expressed as anchored path rules
+in `references/public-non-dicom-crosswalk-curation-v1.json`. Extracted values
+must resolve uniquely against an official dataset-scoped clinical participant
+list; unmatched paths remain explicit review issues. For
+`DLBCL-Morphology`, this resolves WSI filenames and patch patient directories,
+while TMA slide identifiers remain unassigned until `core.csv` establishes
+their multi-participant membership.
+
+Very high-cardinality derived objects covered by the same reviewed contract may
+be projected as one `participant_file_group` asset per participant, retaining
+the represented-file count and a pointer to the complete specialized package
+inventory. For `DLBCL-Morphology`, the
+`Cells/{patient_id}/{patch_id}/*.npy` contract projects 1,036,974 cell-shape
+arrays into 170 participant groups instead of duplicating more than one million
+file rows in the consumer-facing artifact. This compact projection does not
+replace or alter the source paths, sizes, and checksums in
+`pathology_metadata.sqlite`.
 
 The full builder also performs a conservative metadata-only Aspera-to-PathDB
 crosswalk pass. It accepts a download only when every imaging file matches
