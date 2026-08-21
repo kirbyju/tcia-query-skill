@@ -164,6 +164,20 @@ def create_base_snapshot(path: Path) -> None:
         )
         conn.execute(
             """
+            INSERT INTO agent_current_downloads VALUES (
+              'drow0', 'collections', 'Collection', '0', 'aaa', 'AAA',
+              'Plain CT collection', 0, 'download-0', 'download-0',
+              'DICOM CT images', 'https://example.org/ct.csv', '',
+              'https://example.org/ct-search', '2026-01-01', '', 'CT images',
+              'Creative Commons Attribution 4.0', 'https://creativecommons.org/licenses/by/4.0/',
+              '', '', '', '1', 'GB', 10, 1, 2, 200,
+              '["Radiology Images"]', '["CT"]', '["DICOM"]', '[]',
+              0, 0, 'open', '', '{}'
+            )
+            """
+        )
+        conn.execute(
+            """
             INSERT INTO agent_dataset_versions VALUES (
               'collections', 'Collection', '1', 'tcga-brca', 'TCGA-BRCA',
               'Breast cancer collection', '10.7937/test', 'https://example.org/tcga-brca',
@@ -610,10 +624,17 @@ def create_public_non_dicom_db(path: Path) -> None:
                 'radiology', 'MR', 'source_image', 'tcia_aspera',
                 'https://example.org/package', 1, 1, 'tcia_aspera'
             );
+            INSERT INTO agent_public_non_dicom_assets VALUES (
+                'pnd-2', 'Collection', 'TCGA-BRCA', 'BRCA-1', 'tumor mask', 'file',
+                '7', 'tumor-mask.png', 'BRCA-1/tumor-mask.png', 'PNG', 'label_map',
+                'radiology', 'MR', 'segmentation', 'tcia_aspera',
+                'https://example.org/package', 1, 1, 'tcia_aspera'
+            );
             CREATE TABLE agent_public_non_dicom_asset_participants (
                 asset_id TEXT, subject_id TEXT
             );
             INSERT INTO agent_public_non_dicom_asset_participants VALUES ('pnd-1', 'BRCA-1');
+            INSERT INTO agent_public_non_dicom_asset_participants VALUES ('pnd-2', 'BRCA-1');
             CREATE TABLE agent_public_non_dicom_review_issues (issue_id TEXT);
             """
         )
@@ -915,6 +936,27 @@ class TciaQueryServiceTests(unittest.TestCase):
         self.assertEqual(result["count"], 1)
         self.assertEqual(result["assets"][0]["file_name"], "image.nii.gz")
         self.assertEqual(result["public_dicom_detail_route"], "IDC/idc-index")
+
+        annotations = self.service.find_public_non_dicom_assets(
+            short_titles=["TCGA-BRCA"], requires_annotations=True
+        )
+        self.assertEqual(annotations["count"], 1)
+        self.assertEqual(annotations["assets"][0]["object_role"], "segmentation")
+        self.assertEqual(
+            annotations["annotation_roles"],
+            ["annotation", "annotation_snapshot", "segmentation"],
+        )
+        self.assertIn("does not infer", annotations["annotation_relationship_scope"])
+
+    def test_dicom_annotation_limit_is_applied_after_annotation_filter(self) -> None:
+        result = self.service.find_dicom_annotations(limit=1)
+        self.assertEqual(result["count"], 1)
+        self.assertEqual(result["downloads"][0]["short_title"], "TCGA-BRCA")
+        self.assertIn("does not model", result["scope"])
+        self.assertEqual(
+            result["public_dicom_annotation_detail"]["SEG"],
+            "IDC idc-index seg_index",
+        )
 
 
 if __name__ == "__main__":

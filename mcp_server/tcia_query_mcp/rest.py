@@ -169,6 +169,7 @@ def create_app(service: TciaQueryService | None = None) -> FastAPI:
         file_formats: Annotated[list[str] | None, Query()] = None,
         media_kinds: Annotated[list[str] | None, Query()] = None,
         object_roles: Annotated[list[str] | None, Query()] = None,
+        requires_annotations: bool = False,
         limit: int = Query(default=50, ge=1, le=500),
     ) -> dict[str, Any]:
         return S().find_public_non_dicom_assets(
@@ -177,6 +178,161 @@ def create_app(service: TciaQueryService | None = None) -> FastAPI:
             file_formats=file_formats,
             media_kinds=media_kinds,
             object_roles=object_roles,
+            requires_annotations=requires_annotations,
+            limit=limit,
+        )
+
+    @app.get(f"{V2_API_PREFIX}/datasets/{{short_title}}/versions")
+    def v2_get_dataset_versions(
+        short_title: str,
+        include_hidden: bool = False,
+        limit: int = Query(default=100, ge=1, le=500),
+    ) -> dict[str, Any]:
+        return S().get_dataset_versions(
+            short_title=short_title, include_hidden=include_hidden, limit=limit
+        )
+
+    @app.get(f"{V2_API_PREFIX}/release-history/v1-releases")
+    def v2_get_dataset_v1_releases(
+        short_titles: Annotated[list[str] | None, Query()] = None,
+        dataset_type: str = "both",
+        released_since: str | None = None,
+        released_before: str | None = None,
+        include_hidden: bool = False,
+        limit: int = Query(default=50, ge=1, le=500),
+    ) -> dict[str, Any]:
+        return S().get_dataset_v1_releases(
+            short_titles=short_titles,
+            dataset_type=dataset_type,
+            released_since=released_since,
+            released_before=released_before,
+            include_hidden=include_hidden,
+            limit=limit,
+        )
+
+    @app.get(f"{V2_API_PREFIX}/controlled-access/datasets")
+    def v2_find_controlled_access_datasets(
+        modalities: Annotated[list[str] | None, Query()] = None,
+        file_types: Annotated[list[str] | None, Query()] = None,
+        requires_annotations: bool = False,
+        include_mixed: bool = True,
+        limit: int = Query(default=25, ge=1, le=200),
+    ) -> dict[str, Any]:
+        return S().find_controlled_access_datasets(
+            modalities=modalities,
+            file_types=file_types,
+            requires_annotations=requires_annotations,
+            include_mixed=include_mixed,
+            limit=limit,
+        )
+
+    @app.get(f"{V2_API_PREFIX}/controlled-access/{{short_title}}/files")
+    def v2_get_controlled_access_files(
+        short_title: str,
+        route_systems: Annotated[list[str] | None, Query()] = None,
+        modalities: Annotated[list[str] | None, Query()] = None,
+        file_types: Annotated[list[str] | None, Query()] = None,
+        body_part: str | None = None,
+        participant_id: str | None = None,
+        patient_id: str | None = None,
+        has_drs_uri: bool | None = None,
+        limit: int = Query(default=50, ge=1, le=500),
+    ) -> dict[str, Any]:
+        return S().get_controlled_access_files(
+            short_title=short_title,
+            route_systems=route_systems,
+            modalities=modalities,
+            file_types=file_types,
+            body_part=body_part,
+            participant_id=participant_id,
+            patient_id=patient_id,
+            has_drs_uri=has_drs_uri,
+            limit=limit,
+        )
+
+    @app.get(f"{V2_API_PREFIX}/dicom/annotation-downloads")
+    def v2_find_dicom_annotations(
+        query: str | None = None,
+        short_titles: Annotated[list[str] | None, Query()] = None,
+        modalities: Annotated[list[str] | None, Query()] = None,
+        access_levels: Annotated[list[str] | None, Query()] = None,
+        include_hidden: bool = False,
+        limit: int = Query(default=25, ge=1, le=200),
+    ) -> dict[str, Any]:
+        return S().find_dicom_annotations(
+            query=query,
+            short_titles=short_titles,
+            modalities=modalities,
+            access_levels=access_levels,
+            include_hidden=include_hidden,
+            limit=limit,
+        )
+
+    @app.get(f"{V2_API_PREFIX}/clinical/datasets")
+    def v2_find_clinical_datasets(
+        short_titles: Annotated[list[str] | None, Query()] = None,
+        source_kinds: Annotated[list[str] | None, Query()] = None,
+        concepts: Annotated[list[str] | None, Query()] = None,
+        has_conflicts: bool | None = None,
+        has_clinical_only_subjects: bool | None = None,
+        limit: int = Query(default=25, ge=1, le=200),
+    ) -> dict[str, Any]:
+        return S().find_clinical_datasets(
+            short_titles=short_titles,
+            source_kinds=source_kinds,
+            concepts=concepts,
+            has_conflicts=has_conflicts,
+            has_clinical_only_subjects=has_clinical_only_subjects,
+            limit=limit,
+        )
+
+    @app.get(f"{V2_API_PREFIX}/clinical/{{short_title}}/subjects")
+    def v2_get_clinical_subjects(
+        short_title: str,
+        subject_ids: Annotated[list[str] | None, Query()] = None,
+        include_clinical_only: bool = False,
+        has_conflicts: bool | None = None,
+        include_inferred: bool = True,
+        limit: int = Query(default=50, ge=1, le=500),
+    ) -> dict[str, Any]:
+        return S().get_clinical_subjects(
+            short_title=short_title,
+            subject_ids=subject_ids,
+            include_clinical_only=include_clinical_only,
+            has_conflicts=has_conflicts,
+            include_inferred=include_inferred,
+            limit=limit,
+        )
+
+    @app.get(f"{V2_API_PREFIX}/clinical/{{short_title}}/facts")
+    def v2_get_clinical_facts(
+        short_title: str,
+        subject_id: str | None = None,
+        concepts: Annotated[list[str] | None, Query()] = None,
+        source_kinds: Annotated[list[str] | None, Query()] = None,
+        inferred: bool | None = None,
+        limit: int = Query(default=100, ge=1, le=500),
+    ) -> dict[str, Any]:
+        return S().get_clinical_facts(
+            short_title=short_title,
+            subject_id=subject_id,
+            concepts=concepts,
+            source_kinds=source_kinds,
+            inferred=inferred,
+            limit=limit,
+        )
+
+    @app.get(f"{V2_API_PREFIX}/clinical/{{short_title}}/conflicts")
+    def v2_get_clinical_conflicts(
+        short_title: str,
+        subject_id: str | None = None,
+        concepts: Annotated[list[str] | None, Query()] = None,
+        limit: int = Query(default=100, ge=1, le=500),
+    ) -> dict[str, Any]:
+        return S().get_clinical_conflicts(
+            short_title=short_title,
+            subject_id=subject_id,
+            concepts=concepts,
             limit=limit,
         )
 

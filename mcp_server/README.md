@@ -56,7 +56,15 @@ Optional detail tools:
 
 The default public MCP surface contains these 20 supported V2 tools. NIfTI,
 pathology, and other public non-DICOM discovery uses
-`find_public_non_dicom_assets`.
+`find_public_non_dicom_assets`. Set `requires_annotations=true` to select
+non-DICOM `segmentation`, `annotation`, and `annotation_snapshot` roles. This
+discovers annotation-like assets but does not infer source-image relationships.
+
+The default REST documentation is under `/v2/docs`. V2 routes cover dataset and
+release history, participants, public non-DICOM detail, controlled-access public
+metadata, clinical detail, and TCIA DICOM annotation-download signals. Public
+DICOM series relationships remain an IDC/idc-index concern; legacy specialized
+NIfTI and pathology routes remain compatibility-only under `/v1/`.
 
 MCP resources:
 

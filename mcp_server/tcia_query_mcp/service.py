@@ -37,6 +37,11 @@ ANNOTATION_LABELS = {
     "labels",
     "radiotherapy structure set",
 }
+NON_DICOM_ANNOTATION_ROLES = {
+    "annotation",
+    "annotation_snapshot",
+    "segmentation",
+}
 DEFAULT_LIMIT = 25
 MAX_LIMIT = 200
 V2_RELEASE_TAG = "tcia-metadata-v2-latest"
@@ -1472,8 +1477,7 @@ class TciaQueryService:
                 " OR lower(COALESCE(description, '')) LIKE ?)"
             )
             params.extend([like] * 4)
-        sql += " ORDER BY lower(short_title), download_id, download_title LIMIT ?"
-        params.append(limit)
+        sql += " ORDER BY lower(short_title), download_id, download_title"
         with self._connect_snapshot() as conn:
             rows = [compact_download(row) for row in conn.execute(sql, params).fetchall()]
         rows = [row for row in rows if self._download_has_annotation(row)]
@@ -1485,6 +1489,16 @@ class TciaQueryService:
                 "For open/public DICOM, use IDC/idc-index after TCIA provenance and access are confirmed. "
                 "For controlled DICOM, do not generate public IDC/NBIA viewer or download routes."
             ),
+            "scope": (
+                "TCIA WordPress download-level annotation signals; this operation does not model "
+                "DICOM series relationships."
+            ),
+            "public_dicom_annotation_detail": {
+                "SEG": "IDC idc-index seg_index",
+                "RTSTRUCT": "IDC idc-index rtstruct_index",
+                "ANN": "IDC idc-index ann_index and ann_group_index",
+                "SR": "IDC discovery metadata and BigQuery measurement tables",
+            },
         }
 
     def _nifti_dataset_rows(self, conn: sqlite3.Connection) -> list[dict[str, Any]]:
@@ -2496,6 +2510,7 @@ class TciaQueryService:
         file_formats = [item.lower() for item in as_list(filters.get("file_formats"))]
         media_kinds = [item.lower() for item in as_list(filters.get("media_kinds"))]
         object_roles = [item.lower() for item in as_list(filters.get("object_roles"))]
+        requires_annotations = is_truthy(filters.get("requires_annotations"))
         with self._connect_public_non_dicom() as conn:
             sql = "SELECT * FROM agent_public_non_dicom_assets a WHERE 1 = 1"
             params: list[Any] = []
@@ -2516,6 +2531,13 @@ class TciaQueryService:
                 if values:
                     sql += f" AND lower(COALESCE(a.{column}, '')) IN ({','.join('?' for _ in values)})"
                     params.extend(values)
+            if requires_annotations:
+                annotation_roles = sorted(NON_DICOM_ANNOTATION_ROLES)
+                sql += (
+                    " AND lower(COALESCE(a.object_role, '')) IN "
+                    f"({','.join('?' for _ in annotation_roles)})"
+                )
+                params.extend(annotation_roles)
             sql += " ORDER BY lower(a.short_title), a.asset_id LIMIT ?"
             params.append(limit)
             rows = [normalize_v2_row(row) for row in conn.execute(sql, params).fetchall()]
@@ -2525,6 +2547,11 @@ class TciaQueryService:
             "limit": limit,
             "scope": "Public non-DICOM and narrowly reviewed IDC-missing DICOM exceptions.",
             "public_dicom_detail_route": "IDC/idc-index",
+            "annotation_roles": sorted(NON_DICOM_ANNOTATION_ROLES),
+            "annotation_relationship_scope": (
+                "Annotation and segmentation assets are discoverable by object_role. This endpoint "
+                "does not infer or expose source-to-annotation relationships."
+            ),
         }
 
     def _download_has_annotation(self, row: dict[str, Any]) -> bool:

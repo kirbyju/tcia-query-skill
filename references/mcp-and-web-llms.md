@@ -78,7 +78,7 @@ Recommended tools:
 - `get_participant(participant_key)`: return one participant plus every retained source identifier spelling.
 - `get_participant_assets(participant_key, filters)`: return compact holdings and drill-down pointers.
 - `get_dataset_participant_coverage(short_title)`: return unlinked dataset assets, source coverage, and linkage-review states.
-- `find_public_non_dicom_assets(filters)`: query optional V2 non-DICOM file-grain detail while keeping public DICOM in IDC.
+- `find_public_non_dicom_assets(filters)`: query optional V2 non-DICOM file-grain detail. Use `requires_annotations=true` for `segmentation`, `annotation`, and `annotation_snapshot` roles; do not infer source relationships. Keep public DICOM in IDC.
 - `search_datasets(filters)`: query visible TCIA Collections and Analysis Results by cancer type, body site, modality, access level, DOI, program, and free text.
 - `get_dataset(short_title)`: return one dataset with access/license, DOI, page link, counts, summary, and current downloads.
 - `get_current_downloads(short_title, filters)`: return current download records filtered by modality, download type, file type, access level, or annotation labels.
@@ -91,7 +91,7 @@ Recommended tools:
 - `get_clinical_facts(short_title, filters)`: return long-form facts with source priority, provenance, evidence scope, and inference flags.
 - `get_clinical_conflicts(short_title, filters)`: return retained patient/concept disagreements for review before analysis.
 - `summarize_access(short_title)`: split open, open-noncommercial, controlled, and mixed downloads and include the TCIA controlled-access policy link when needed.
-- `find_dicom_annotations(filters)`: return DICOM annotation/result downloads, with TCIA provenance and access caveats.
+- `find_dicom_annotations(filters)`: return TCIA WordPress download-level DICOM annotation signals, with provenance and access caveats; use IDC specialized indexes for series relationships.
 - `idc_series_summary(short_title_or_series_uids)`: optional IDC/idc-index-backed lookup for public DICOM only after TCIA provenance and license checks.
 
 For example, a web model asked to "summarize all controlled access datasets that include CT, PET, and annotation data" should call a typed tool such as:
@@ -108,7 +108,7 @@ The MCP response should include short title, title, dataset type, DOI, TCIA page
 
 ## DICOM Routing
 
-For public DICOM metadata and series-level details, route through IDC/idc-index after TCIA provenance and access/license status are confirmed by the snapshot. Do not ask hosted LLMs to query live WordPress for DICOM series/file details.
+For public DICOM metadata and series-level details, route through IDC/idc-index after TCIA provenance and access/license status are confirmed by the snapshot. Use `seg_index` for SEG, `rtstruct_index` for RTSTRUCT, and `ann_index`/`ann_group_index` for ANN; use IDC discovery metadata and BigQuery measurement tables for SR content when needed. Do not ask hosted LLMs to query live WordPress for DICOM series/file details.
 
 For controlled-access DICOM, do not generate public IDC/NBIA download or viewer routes. Return TCIA controlled-access policy and Data Retriever manifest guidance. A web LLM may invoke an authorized download only when its host can securely run the official TCIA Data Retriever and the user explicitly supplies a readable JSON-key path; follow `controlled-access.md`. If the host cannot execute local tools or protect credential files, stop at manifest guidance. If file-grain public metadata are needed and the host can query SQLite, use `controlled_access_metadata.sqlite.gz`.
 

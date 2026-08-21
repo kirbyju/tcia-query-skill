@@ -128,6 +128,21 @@ parallel `*Set_dcm` trees are the initial reviewed exception; their companion
 NIfTI trees are marked `standardized_representation`, while the package DICOM
 trees are marked `submitted_original`.
 
+### Non-DICOM annotations
+
+The unified artifact represents annotation-like files as ordinary logical
+assets with `object_role` values `segmentation`, `annotation`, or
+`annotation_snapshot`. MCP callers can use
+`find_public_non_dicom_assets(requires_annotations=true)`; REST callers can use
+`GET /v2/public-non-dicom/assets?requires_annotations=true`. Exact
+`object_roles` filters remain available when one class is required.
+
+Discovery does not establish what image an annotation targets. Do not infer a
+source-to-annotation relationship from filenames, directory proximity, or a
+shared participant. Return a relationship only when the artifact contains
+source-supported relationship evidence; otherwise report the annotation asset
+without a target linkage.
+
 Retain `participant_link_status='dataset_only'` when a download is known but no
 source-supported participant-to-file crosswalk exists. Never spread a
 dataset-level file count across every participant.

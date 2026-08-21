@@ -14,6 +14,23 @@ If an IDC skill is available, use it for IDC-specific query, visualization, lice
 
 IDC skill reference: `https://github.com/ImagingDataCommons/idc-claude-skill/blob/main/SKILL.md`
 
+## DICOM Annotation Relationships
+
+TCIA `find_dicom_annotations` and REST
+`/v2/dicom/annotation-downloads` identify WordPress download-level annotation
+signals; they do not model DICOM series relationships. After confirming TCIA
+provenance and public access, use IDC's specialized indexes:
+
+| Object | IDC detail source |
+| --- | --- |
+| SEG | `seg_index`, including the segmented Series Instance UID |
+| RTSTRUCT | `rtstruct_index`, including referenced series and ROI detail |
+| ANN | `ann_index` and `ann_group_index` |
+| SR | IDC discovery metadata; use IDC BigQuery measurement tables when extracted measurement content is needed |
+
+Keep these details in IDC rather than copying them into the TCIA release
+artifact. Controlled-access DICOM remains outside public IDC routing.
+
 ## Package Guidance
 
 For IDC and DICOM workflows, prefer established Python packages over custom code:

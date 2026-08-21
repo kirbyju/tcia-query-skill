@@ -308,15 +308,17 @@ def find_public_non_dicom_assets(
     file_formats: list[str] | None = None,
     media_kinds: list[str] | None = None,
     object_roles: list[str] | None = None,
+    requires_annotations: bool = False,
     limit: int = 50,
 ) -> dict:
-    """Query V2 public non-DICOM detail; use IDC/idc-index for public DICOM detail."""
+    """Query V2 public non-DICOM files, including annotation-like object roles."""
     return service().find_public_non_dicom_assets(
         short_titles=short_titles,
         participant_id=participant_id,
         file_formats=file_formats,
         media_kinds=media_kinds,
         object_roles=object_roles,
+        requires_annotations=requires_annotations,
         limit=limit,
     )
 
@@ -514,7 +516,7 @@ def find_dicom_annotations(
     include_hidden: bool = False,
     limit: int = 25,
 ) -> dict:
-    """Find TCIA DICOM annotation/result downloads with provenance and access caveats."""
+    """Find TCIA DICOM annotation download signals; use IDC for series relationships."""
 
     return service().find_dicom_annotations(
         query=query,
