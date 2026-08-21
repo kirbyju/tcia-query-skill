@@ -2166,8 +2166,9 @@ class TciaQueryService:
                 sql += " AND has_controlled_data = 1"
             for modality in modalities:
                 sql += (
-                    " AND instr(',' || lower(replace(COALESCE(modalities, ''), ' ', '')) || ',', "
-                    "',' || replace(?, ' ', '') || ',') > 0"
+                    " AND instr(',' || lower(replace(replace(COALESCE(modalities, ''), "
+                    "';', ','), ' ', '')) || ',', "
+                    "',' || replace(replace(?, ';', ','), ' ', '') || ',') > 0"
                 )
                 params.append(modality)
             sql += " ORDER BY lower(short_title), lower(display_participant_id) LIMIT ?"
@@ -2219,8 +2220,9 @@ class TciaQueryService:
                 sql += (
                     " AND EXISTS (SELECT 1 FROM participant_assets a "
                     "WHERE a.participant_key = p.participant_key "
-                    "AND instr(',' || lower(replace(COALESCE(a.modality, ''), ' ', '')) || ',', "
-                    "',' || replace(?, ' ', '') || ',') > 0)"
+                    "AND instr(',' || lower(replace(replace(COALESCE(a.modality, ''), "
+                    "';', ','), ' ', '')) || ',', "
+                    "',' || replace(replace(?, ';', ','), ' ', '') || ',') > 0)"
                 )
                 params.append(modality)
             sql += (
@@ -2422,8 +2424,13 @@ class TciaQueryService:
         with self._connect_participants() as conn:
             type_sql = " AND lower(dataset_type) = lower(?)" if dataset_type else ""
             type_params: list[Any] = [dataset_type] if dataset_type else []
+            participant_count_source = (
+                "participants"
+                if self._object_exists(conn, "participants")
+                else "agent_participant_search"
+            )
             participant_count = conn.execute(
-                "SELECT COUNT(*) FROM agent_participant_search "
+                f"SELECT COUNT(*) FROM {participant_count_source} "
                 "WHERE lower(short_title) = lower(?)" + type_sql,
                 [title, *type_params],
             ).fetchone()[0]

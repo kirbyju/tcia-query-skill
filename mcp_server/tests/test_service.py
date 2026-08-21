@@ -480,6 +480,9 @@ def create_participant_db(path: Path) -> None:
             INSERT INTO participants VALUES (
                 'participant-1', 'Collection', 'TCGA-BRCA', 'BRCA-1', 'dataset_scoped',
                 'resolved', 'source_identifier', 'not_asserted'
+            ), (
+                'participant-2', 'Collection', 'TCGA-BRCA', 'BRCA-2', 'dataset_scoped',
+                'resolved', 'source_identifier', 'not_asserted'
             );
             CREATE TABLE participant_identifiers (
                 participant_identifier_id TEXT PRIMARY KEY, participant_key TEXT,
@@ -508,7 +511,7 @@ def create_participant_db(path: Path) -> None:
                'radiology', 'volume', 'MR', 'DICOM', 'source_image', 1, 2, 20,
                1000, 1, 'idc', 'https://example.org/idc', 'known', 'v24', '{}'),
               ('base-asset-2', 'participant-1', 'tcia_aspera',
-               'public_non_dicom_metadata', 'open', 'radiology', 'volume', 'MR',
+               'public_non_dicom_metadata', 'open', 'radiology', 'volume', 'CT;SEG;SR',
                'NIfTI', 'source_image', 1, 1, 1, 500, 1, 'public_non_dicom',
                'https://example.org/nifti', 'known', 'v2', '{}'),
               ('base-asset-3', 'participant-1', 'tcia_wordpress',
@@ -833,6 +836,10 @@ class TciaQueryServiceTests(unittest.TestCase):
         self.assertEqual(participants["participants"][0]["source_namespaces"], [
             "tcia_subject_id", "idc_patient_id"
         ])
+        ct_participants = self.service.search_participants(
+            query="brca-1", modalities=["CT"], access_levels=["open"]
+        )
+        self.assertEqual(ct_participants["count"], 1)
         detail = self.service.get_participant(
             short_title="TCGA-BRCA", participant_id="brca-1"
         )
@@ -842,10 +849,27 @@ class TciaQueryServiceTests(unittest.TestCase):
         )
         self.assertEqual(assets["assets"][0]["file_format"], "DICOM")
         coverage = self.service.get_dataset_participant_coverage("TCGA-BRCA")
+        self.assertEqual(coverage["participant_count"], 2)
         self.assertFalse(coverage["coverage_complete"])
         self.assertEqual(len(coverage["unlinked_dataset_assets"]), 1)
         issues = self.service.find_participant_link_issues(statuses=["review_required"])
         self.assertEqual(issues["count"], 1)
+
+    def test_compatibility_participant_queries_use_normalized_modalities(self) -> None:
+        with connect(self.participants) as conn:
+            conn.execute(
+                "UPDATE agent_participant_search SET modalities = 'CT;SEG;SR' "
+                "WHERE participant_key = 'participant-1'"
+            )
+            conn.execute("DROP TABLE participant_assets")
+            conn.execute("DROP TABLE participants")
+
+        participants = self.service.search_participants(
+            query="brca-1", modalities=["CT"], access_levels=["open"]
+        )
+        self.assertEqual(participants["count"], 1)
+        coverage = self.service.get_dataset_participant_coverage("TCGA-BRCA")
+        self.assertEqual(coverage["participant_count"], 1)
 
     def test_v2_public_non_dicom_query(self) -> None:
         result = self.service.find_public_non_dicom_assets(

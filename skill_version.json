@@ -12,9 +12,9 @@
     "mcp_server/tcia_query_mcp/__init__.py": "436b1b13b5e6ae3ead1f0bfdeabc974d74897f8a42edf8f5a3a443840dcef281",
     "mcp_server/tcia_query_mcp/rest.py": "4e9844d31ca2f46b7f724c50009d3059f6b785cf3768dc2bdad35f5d0af4892d",
     "mcp_server/tcia_query_mcp/server.py": "5c5de6f9ebb37fe7219a2ace43cd810f946c813d2585c52c0ac9371492a8ee49",
-    "mcp_server/tcia_query_mcp/service.py": "7ff3e8318cadd13924e3ec0289e813aaa7f89ab37c80f7176c5fdf66df4a3a0f",
+    "mcp_server/tcia_query_mcp/service.py": "25991078af123ebc661d1ea8183aebb0372076ca947b2f2e054755eb61e57248",
     "mcp_server/tests/test_rest.py": "305accb018ffa1a4d3e7e6faf6fae33bb8d8ddbf3f77513cccce0019dbc1f9b5",
-    "mcp_server/tests/test_service.py": "3e78a23b41c9b3362525d0bffe65f12b160f9932f01c5d2782141cfa09fab2cf",
+    "mcp_server/tests/test_service.py": "ee2e5a57ad97e93e3b2b90e404e64dbd5b3d3ff9d80d059e19b3718184ea8d70",
     "references/artifact-model-v2.md": "30b4661ce09a322c3a912d03dc87600875170141a55236b2cffddbf0f9d86aef",
     "references/aspera.md": "095b86fb43ae4f99bb521bbc1f83f5d5bc9caf0f35d739f318cd168a7eefd93b",
     "references/cda.md": "3c840c39f5c3fd8c892ce91842a6120bd6be873612bdf7f47d42f6612a9b181d",
@@ -84,6 +84,6 @@
     "scripts/tests/test_tcia_v2_staging.py": "46b4285ce2f7aa4c7aace37ecc68455820b0e23ebfa8a82550e04610c4568ff2"
   },
   "schema_version": 1,
-  "skill_version": "2026.08.20.2",
-  "updated_at_utc": "2026-08-20T20:51:17.973227+00:00"
+  "skill_version": "2026.08.20.3",
+  "updated_at_utc": "2026-08-21T00:18:02.816256+00:00"
 }
