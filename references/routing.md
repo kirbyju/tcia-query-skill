@@ -2,13 +2,10 @@
 
 ## Authority And Keys
 
-Use TCIA WordPress as the authoritative allowlist. For normal agent work, query the local SQLite snapshot and its agent-facing views first. For web-only environments without SQLite execution, use the release JSON/JSONL exports before any live API. The endpoints below are source inputs for the snapshot builder.
+Use TCIA WordPress as the authoritative allowlist. For normal agent work, query the local SQLite snapshot and its agent-facing views first. For web-only environments without SQLite execution, use the V2 release exports before any live API. The snapshot builder uses the current WordPress V2 source endpoints:
 
-- Collections endpoint: `https://cancerimagingarchive.net/api/v1/collections/`
-- Analysis Results endpoint: `https://cancerimagingarchive.net/api/v1/analysis-results/`
-- Preferred v2 endpoints used by the snapshot builder:
-  - `https://cancerimagingarchive.net/api/v2/collections`
-  - `https://cancerimagingarchive.net/api/v2/analysis-results`
+- `https://cancerimagingarchive.net/api/v2/collections`
+- `https://cancerimagingarchive.net/api/v2/analysis-results`
 
 Exclude records where `hide_from_browse_table = "1"` unless the user explicitly says they are a TCIA staff member and asks to include hidden, staged, retired, or internal-review datasets. Hidden records may be pre-release staging pages for submitter review or retired/outdated datasets that TCIA does not want users to accidentally select.
 
@@ -57,13 +54,21 @@ For non-DOI discovery:
 6. Flag controlled access from license metadata only. Creative Commons means open; Creative Commons NonCommercial means open with noncommercial restriction; controlled/restricted license text means controlled access.
 7. Enrich only the filtered candidate set through IDC, CDA, the controlled-access SQLite, CTDC, General Commons, PathDB, or DataCite.
 8. If a candidate does not appear in WordPress, exclude it from TCIA-published results. If useful, mention it separately as related or derived.
-9. If a named dataset is absent after refreshing the local snapshot, say the published snapshot may not include the newest TCIA metadata yet. Ask the user to try again after the next 7:17 AM or 7:17 PM America/New_York snapshot run has had time to finish, then rerun `python scripts/tcia_freshness.py ensure`.
+9. If a named dataset is absent after refreshing the local snapshot, say the published snapshot may not include the newest TCIA metadata yet. Ask the user to try again after the next 7:17 AM or 7:17 PM America/New_York snapshot run has had time to finish, then rerun `python scripts/tcia_v2_bundle.py install --profile research_core`.
 
 ## Snapshot Querying
 
 Prefer direct SQL against the agent-facing views when the user asks for precise criteria, joins, or counts. Prefer `scripts/tcia_wordpress_search.py`, `scripts/pathdb_metadata.py`, and `scripts/datacite_tcia_dois.py` for lightweight command-line searches.
 
-Before discovery, run `python scripts/tcia_freshness.py ensure` from the skill root. It verifies the operational skill files against `skill_version.json` on GitHub `main` before refreshing the base SQLite cache from the checksum-verified release. Add only the sidecars needed for the task with `--sidecar`; `--installed-sidecars` refreshes all optional SQLite files already present. If skill verification reports `update_required`, stop and direct the user to update the installed skill instead of silently overwriting it. If network verification is unavailable, do not describe the local cache as current without the user's explicit acceptance of offline/unverified results.
+Before discovery, run `python scripts/tcia_freshness.py check`, then
+`python scripts/tcia_v2_bundle.py install --profile research_core` from the
+skill root. The first command verifies operational files against GitHub
+`main`; the second refreshes the checksum-verified V2 contract. Install
+`research_detail` only when the task needs file-grain detail. If skill
+verification reports `update_required`, stop and direct the user to update the
+installed skill instead of silently overwriting it. If network verification is
+unavailable, do not describe the local cache as current without the user's
+explicit acceptance of offline/unverified results.
 
 Live source API details are maintainer/developer context for `scripts/tcia_snapshot.py build`, not the normal end-user discovery path. If an agent cannot query SQLite, it should use the release exports documented in `snapshots.md` and `mcp-and-web-llms.md`, not live WordPress API calls.
 
@@ -199,7 +204,7 @@ For exact dataset questions, give a short prose summary first, then a table of a
 
 - WordPress metadata can contain HTML; strip tags before quoting or matching.
 - WordPress `hide_from_browse_table = "1"` means hidden. Treat hidden records as out of scope for public user-facing discovery unless the explicit TCIA staff exception applies.
-- The snapshot is built from verbose WordPress source metadata. If a very recent field is absent, ask the user to try again after the next scheduled snapshot run and refresh with `python scripts/tcia_snapshot.py ensure`.
+- The snapshot is built from verbose WordPress source metadata. If a very recent field is absent, ask the user to try again after the next scheduled snapshot run and refresh with `python scripts/tcia_v2_bundle.py install --profile research_core`.
 - Controlled-access metadata can be visible even when file downloads require approval. Determine controlled status from license metadata, then link to the TCIA NIH Controlled Data Access Policy for current request, dbGaP approval, JSON API key, and TCIA Data Retriever configuration steps. An authorized agent-run transfer requires an explicit user request, an official CRDC manifest, and the path to the user's own key.
 - Controlled-access data cannot be previewed through public browser viewers before download. Report metadata and access guidance instead of constructing OHIF, SliM, VolView, IDC, NBIA, PathDB, or other public viewer URLs.
 - Visualization answers should provide links for users to open in their own browser. Do not install Playwright or other browser automation just to demonstrate viewer links.

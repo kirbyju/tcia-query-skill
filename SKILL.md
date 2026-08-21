@@ -99,7 +99,7 @@ Prefer these package APIs over custom implementations where possible:
 
 The bundled standard-library scripts support snapshot refresh/querying, Data Retriever CSV creation, legacy manifest parsing, and viewer URL construction. They do not replace `idc-index` for IDC workflows, `pydicom` for local DICOM parsing, or `cdapython` for CDA workflows. Live source API details belong to `scripts/tcia_snapshot.py build` and the maintainer guidance in `references/snapshots.md`, not normal end-user discovery.
 
-For controlled-access evidence, inspect WordPress download/license metadata through `agent_datasets`, `agent_current_downloads`, and `agent_dataset_access_summary`. When file-grain controlled metadata are needed, use the optional controlled-access SQLite release from `scripts/tcia_controlled_access_metadata.py ensure`; it is derived from public WordPress manifest and metadata spreadsheet URLs and does not require a user account. Do not use `collection_page_accessibility` or `result_page_accessibility` to decide controlled access; those fields are being phased out. Creative Commons licenses mean open access. Creative Commons NonCommercial licenses are open access with a noncommercial-use restriction. When `controlled_access` is true or `resolved_access_level` is `controlled` or `mixed`, link users to `https://www.cancerimagingarchive.net/nih-controlled-data-access-policy/`, which contains current access-request, dbGaP approval, JSON API-key, and TCIA Data Retriever configuration guidance. Download controlled payloads only after the user explicitly requests the transfer and supplies the path to their own valid key; follow `references/controlled-access.md`.
+For controlled-access evidence, inspect WordPress download/license metadata through `agent_datasets`, `agent_current_downloads`, and `agent_dataset_access_summary`. When file-grain controlled metadata are needed, install the V2 `research_detail` profile and query its controlled-access SQLite; it is derived from public WordPress manifest and metadata spreadsheet URLs and does not require a user account. Do not use `collection_page_accessibility` or `result_page_accessibility` to decide controlled access; those fields are being phased out. Creative Commons licenses mean open access. Creative Commons NonCommercial licenses are open access with a noncommercial-use restriction. When `controlled_access` is true or `resolved_access_level` is `controlled` or `mixed`, link users to `https://www.cancerimagingarchive.net/nih-controlled-data-access-policy/`, which contains current access-request, dbGaP approval, JSON API-key, and TCIA Data Retriever configuration guidance. Download controlled payloads only after the user explicitly requests the transfer and supplies the path to their own valid key; follow `references/controlled-access.md`.
 
 Use `idc-index` for public DICOM only after confirming that the dataset is TCIA-published through WordPress or is clearly an external derived dataset through DataCite relationships.
 
@@ -186,22 +186,13 @@ Examples:
 python scripts/tcia_freshness.py check
 python scripts/tcia_v2_bundle.py install --profile research_core
 python scripts/tcia_v2_bundle.py install --profile research_detail
-# Legacy compatibility refreshes:
-python scripts/tcia_freshness.py ensure
-python scripts/tcia_freshness.py ensure --sidecar clinical
-python scripts/tcia_freshness.py ensure --installed-sidecars
-python scripts/tcia_snapshot.py ensure
 python scripts/tcia_snapshot.py info
 python scripts/tcia_snapshot.py build --out cache/tcia_snapshot.sqlite --gzip-out dist/tcia_snapshot.sqlite.gz --manifest-out dist/tcia_snapshot_manifest.json --exports-dir dist
 python scripts/tcia_snapshot.py validate --db cache/tcia_snapshot.sqlite
-python scripts/tcia_nifti_metadata.py ensure
-python scripts/tcia_nifti_metadata.py datasets --limit 20
-python scripts/tcia_nifti_metadata.py derived --collection BCBM-RadioGenomics --with-sources
-python scripts/tcia_public_non_dicom_metadata.py datasets --limit 20
-python scripts/tcia_participant_inventory.py participants --collection CT-ORG --limit 20
-python scripts/tcia_controlled_access_metadata.py ensure
-python scripts/tcia_controlled_access_metadata.py datasets --limit 20
-python scripts/tcia_controlled_access_metadata.py files --collection CMB-MEL --limit 10
+python scripts/tcia_public_non_dicom_metadata.py datasets --db cache/tcia-metadata-v2-latest/public_non_dicom_metadata.sqlite --limit 20
+python scripts/tcia_participant_inventory.py participants --db cache/tcia-metadata-v2-latest/participant_inventory.sqlite --collection CT-ORG --limit 20
+python scripts/tcia_controlled_access_metadata.py datasets --db cache/tcia-metadata-v2-latest/controlled_access_metadata.sqlite --limit 20
+python scripts/tcia_controlled_access_metadata.py files --db cache/tcia-metadata-v2-latest/controlled_access_metadata.sqlite --collection CMB-MEL --limit 10
 python scripts/tcia_wordpress_search.py --query breast --limit 10
 python scripts/tcia_wordpress_search.py --short-title TCGA-BRCA --json
 python scripts/tcia_wordpress_search.py --query retired --include-hidden
@@ -216,9 +207,8 @@ python scripts/datacite_tcia_dois.py --doi 10.7937/4qad-4280 --json
 python scripts/tcia_publications.py --query radiogenomics --limit 10
 python scripts/tcia_publications.py --dataset-doi 10.7937/K9/TCIA.2016.RNYFUYE9 --json
 python scripts/pathdb_metadata.py --collection CPTAC-STAD --summary
-python scripts/tcia_clinical_metadata.py ensure
-python scripts/tcia_clinical_metadata.py info
-python scripts/tcia_clinical_metadata.py export-qc --out clinical_qc_manual_review.csv
+python scripts/tcia_clinical_metadata.py info --db cache/tcia-metadata-v2-latest/clinical_metadata.sqlite
+python scripts/tcia_clinical_metadata.py export-qc --db cache/tcia-metadata-v2-latest/clinical_metadata.sqlite --out clinical_qc_manual_review.csv
 ```
 
 ## General Commons
@@ -247,7 +237,7 @@ dataset-specific transformations.
 
 Load `references/controlled-access.md` when a user asks about controlled-access datasets, face data with controlled/restricted licenses, NCTN trials, Biobank data, API-key access, or configuring or invoking TCIA Data Retriever for restricted downloads. Always point users to the TCIA NIH Controlled Data Access Policy page for current instructions: `https://www.cancerimagingarchive.net/nih-controlled-data-access-policy/`. Explain that permission comes from dbGaP/its designated access process, not from possession of a manifest. For Biobank controlled-access face data, tell users to request dbGaP access to `phs002192` and use the current WordPress CTDC manifests/download/view links after authorization.
 
-Use the controlled-access SQLite only after the base snapshot confirms TCIA provenance and controlled/restricted access. In the default V2 line it is installed through `python scripts/tcia_v2_bundle.py install --profile research_detail`; its hashes, schema, and fingerprint are inline in the authoritative bundle manifest. The standalone `ensure` command and per-component manifest remain legacy/maintainer compatibility paths.
+Use the controlled-access SQLite only after the base snapshot confirms TCIA provenance and controlled/restricted access. Install it through `python scripts/tcia_v2_bundle.py install --profile research_detail`; its hashes, schema, and fingerprint are inline in the authoritative V2 bundle manifest.
 
 ## IDC DICOM Downloads
 
@@ -283,7 +273,7 @@ The moving V2 release no longer publishes a separate NIfTI SQLite. Use the unifi
 
 ## Metadata Artifact Model V2
 
-Load `references/artifact-model-v2.md` for public non-DICOM inventory, managed-system provenance, original-versus-standardized representations, Participant Explorer integration, or the V2 release line. Treat `tcia_metadata_v2_bundle_manifest.json` as the complete contract instead of maintaining an independent asset list. The streamlined stable release currently selects nine payloads: the base snapshot, compact Participant Inventory, two compressed current dataset/download exports, unified public non-DICOM detail, controlled-access detail, clinical detail, and two audit companions. Component hashes, decompressed SQLite hashes, schemas, fingerprints, profiles, and provenance are inline in the bundle manifest; per-component manifests and standalone NIfTI/pathology databases are not release assets. Participant search should start with the Participant Inventory `agent_participant_search` view, which returns one canonical row for a case-equivalent participant identifier within one authoritative WordPress dataset while retaining every original TCIA/IDC, GC, and CTDC spelling and namespace as identifier provenance. Collection and Analysis Result identity scopes remain distinct. Keep `tcia-snapshot-latest` and REST `/v1` as compatibility surfaces; do not use either as the default for new integrations.
+Load `references/artifact-model-v2.md` for public non-DICOM inventory, managed-system provenance, original-versus-standardized representations, Participant Explorer integration, or the V2 release line. Treat `tcia_metadata_v2_bundle_manifest.json` as the complete contract instead of maintaining an independent asset list. The streamlined stable release currently selects nine payloads: the base snapshot, compact Participant Inventory, two compressed current dataset/download exports, unified public non-DICOM detail, controlled-access detail, clinical detail, and two audit companions. Component hashes, decompressed SQLite hashes, schemas, fingerprints, profiles, and provenance are inline in the bundle manifest; per-component manifests and standalone NIfTI/pathology databases are not release assets. Participant search should start with the Participant Inventory `agent_participant_search` view, which returns one canonical row for a case-equivalent participant identifier within one authoritative WordPress dataset while retaining every original TCIA/IDC, GC, and CTDC spelling and namespace as identifier provenance. Collection and Analysis Result identity scopes remain distinct. Use the V2 bundle and REST `/v2/` routes for all integrations.
 
 ## PathDB Metadata
 

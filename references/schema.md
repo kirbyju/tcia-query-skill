@@ -1,15 +1,18 @@
 # SQLite Snapshot Schema
 
-Use this reference when querying `cache/tcia_snapshot.sqlite` or a database selected by `TCIA_SNAPSHOT_DB`.
+Use this reference when querying
+`cache/tcia-metadata-v2-latest/tcia_snapshot.sqlite` or a database selected by
+`TCIA_SNAPSHOT_DB`.
 
-The default V2 release exposes two compressed web exports: `agent_datasets.jsonl.gz` for `agent_dataset_access_summary` and `agent_current_downloads.jsonl.gz` for `agent_current_downloads`. Query `agent_dataset_versions` and `agent_dataset_v1_releases` inside `tcia_snapshot.sqlite` (or through MCP/REST); the streamlined release does not publish separate timeline JSONL files or plain JSONL copies. The legacy `tcia-snapshot-latest` release retains its broader compatibility export set. Filter the V2 exports for controlled/mixed access, modalities, DICOM annotation labels, and download routes instead of relying on prompt-specific precomputed answers.
+The default V2 release exposes two compressed web exports: `agent_datasets.jsonl.gz` for `agent_dataset_access_summary` and `agent_current_downloads.jsonl.gz` for `agent_current_downloads`. Query `agent_dataset_versions` and `agent_dataset_v1_releases` inside `tcia_snapshot.sqlite` (or through MCP/REST); the streamlined release does not publish separate timeline JSONL files or plain JSONL copies. Filter the V2 exports for controlled/mixed access, modalities, DICOM annotation labels, and download routes instead of relying on prompt-specific precomputed answers.
 
-The optional NIfTI file-grain SQLite is separate from `cache/tcia_snapshot.sqlite`. It is downloaded only when needed with `python scripts/tcia_nifti_metadata.py ensure`, defaults to `cache/nifti_metadata.sqlite`, and is documented in `references/nifti.md`.
+NIfTI and pathology file-grain rows are unified in
+`public_non_dicom_metadata.sqlite`, installed with the V2 `research_detail`
+profile. Specialized retained source rows and QC are in its audit companion.
 
 The V2 public non-DICOM and Participant Inventory contracts are documented in
-`references/artifact-model-v2.md`. They use a separate preview release line,
-profile-based downloads, and optional audit companions; they do not replace the
-existing sidecars during migration.
+`references/artifact-model-v2.md`. They use profile-based downloads and
+optional audit companions under one manifest-pinned release contract.
 
 During a full build, reviewed and automated public non-DICOM crosswalks are
 exposed by `agent_public_non_dicom_crosswalk_evidence` at mapped-file grain and
@@ -37,15 +40,9 @@ DICOM trees that are available through Aspera but absent from IDC; these rows
 remain distinguishable with `file_format='DICOM'` and
 `source_system='tcia_aspera'`.
 
-The optional pathology Aspera SQLite is also separate from `cache/tcia_snapshot.sqlite`. It is downloaded only when needed with `python scripts/tcia_pathology_metadata.py ensure`, defaults to `cache/pathology_metadata.sqlite`, and is documented in `references/pathology.md`.
-
-The optional controlled-access SQLite is also separate from `cache/tcia_snapshot.sqlite`. It is downloaded only when needed with `python scripts/tcia_controlled_access_metadata.py ensure`, defaults to `cache/controlled_access_metadata.sqlite`, and is documented in `references/controlled-access.md`.
-
-The optional patient-level clinical SQLite is separate from
-`cache/tcia_snapshot.sqlite`. Download it with
-`python scripts/tcia_clinical_metadata.py ensure`; it defaults to
-`cache/clinical_metadata.sqlite` and is documented in
-`references/clinical.md`.
+The controlled-access and clinical SQLite databases are installed with the V2
+`research_detail` profile and documented in `references/controlled-access.md`
+and `references/clinical.md`.
 
 ## Agent-Facing Views
 
@@ -331,9 +328,12 @@ Use base tables when the views do not expose a needed detail.
 - `pathdb_collection_summary`: collection-level PathDB patient/slide summaries.
 - `datacite_dois`: TCIA DOI prefix records from DataCite.
 
-## Optional Pathology SQLite
+## Pathology Audit Tables
 
-Use `cache/pathology_metadata.sqlite` only after the base snapshot has confirmed TCIA provenance, visibility, and access/license metadata. Important tables:
+Install the V2 `audit_support` profile and query the retained pathology tables
+in `cache/tcia-metadata-v2-latest/public_non_dicom_audit.sqlite` only after the
+base snapshot has confirmed TCIA provenance, visibility, and access/license
+metadata. Important tables:
 
 - `pathology_downloads`: visible, non-controlled, current pathology Aspera download records selected from Collection Manager/WordPress metadata.
 - `pathology_download_label_matches`: label/title evidence for why a download was selected as pathology-related.
@@ -360,9 +360,9 @@ FROM agent_pathology_dataset_summary
 ORDER BY lower(short_title);
 ```
 
-## Optional Controlled-Access SQLite
+## V2 Controlled-Access Detail
 
-Use `cache/controlled_access_metadata.sqlite` only after the base snapshot has confirmed TCIA provenance and controlled/restricted access. The data are public metadata extracted from WordPress-controlled download records, public manifests, public spreadsheet metadata URLs, and WordPress `download_metadata` fields. The SQLite does not grant file access and must not be used to download controlled data directly.
+Use `cache/tcia-metadata-v2-latest/controlled_access_metadata.sqlite` only after the base snapshot has confirmed TCIA provenance and controlled/restricted access. The data are public metadata extracted from WordPress-controlled download records, public manifests, public spreadsheet metadata URLs, and WordPress `download_metadata` fields. The SQLite does not grant file access and must not be used to download controlled data directly.
 
 Important tables:
 
@@ -405,9 +405,9 @@ WHERE route_system = 'ctdc'
 LIMIT 25;
 ```
 
-## Optional Patient-Level Clinical SQLite
+## V2 Patient-Level Clinical Detail
 
-Use `cache/clinical_metadata.sqlite` only after the base snapshot confirms
+Use `cache/tcia-metadata-v2-latest/clinical_metadata.sqlite` only after the base snapshot confirms
 TCIA provenance, visibility, and access/license metadata. Important tables:
 
 - `clinical_downloads`: official clinical-download candidates and ingest status.
@@ -593,9 +593,12 @@ WHERE eligible = 1
 ORDER BY subjects_applied DESC;
 ```
 
-## Optional NIfTI SQLite
+## NIfTI Audit Tables
 
-Use `cache/nifti_metadata.sqlite` only after the base snapshot has confirmed TCIA provenance, visibility, and access/license metadata. Prefer these agent-facing views:
+Install the V2 `audit_support` profile and query the retained NIfTI tables in
+`cache/tcia-metadata-v2-latest/public_non_dicom_audit.sqlite` only after the
+base snapshot has confirmed TCIA provenance, visibility, and access/license
+metadata. Prefer these agent-facing views:
 
 - `agent_nifti_downloads`: WordPress NIfTI download provenance with `download_label` fallback text.
 - `agent_nifti_dataset_summary`: all NIfTI download scope plus file/radiology/derived-object counts.

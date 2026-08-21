@@ -76,18 +76,19 @@ Use `scripts/tcia_controlled_access_metadata.py` when the user needs public file
 - IDC-parquet-shaped radiology metadata columns for controlled datasets.
 - Review rows explaining manifest/spreadsheet mismatches.
 
-Fetch it on demand:
+Install it through the manifest-pinned V2 research-detail profile, then query it:
 
 ```bash
-python scripts/tcia_controlled_access_metadata.py ensure
-python scripts/tcia_controlled_access_metadata.py datasets --limit 20
-python scripts/tcia_controlled_access_metadata.py files --collection CMB-MEL --limit 10
+python scripts/tcia_v2_bundle.py install --profile research_detail
+python scripts/tcia_controlled_access_metadata.py datasets --db cache/tcia-metadata-v2-latest/controlled_access_metadata.sqlite --limit 20
+python scripts/tcia_controlled_access_metadata.py files --db cache/tcia-metadata-v2-latest/controlled_access_metadata.sqlite --collection CMB-MEL --limit 10
 ```
 
-The SQLite defaults to `cache/controlled_access_metadata.sqlite` and is distributed as:
+The SQLite is installed under `cache/tcia-metadata-v2-latest/` and its hash,
+schema, and provenance are recorded in the bundle manifest:
 
-- `controlled_access_metadata.sqlite.gz`
-- `controlled_access_metadata_manifest.json`
+- `controlled_access_metadata.sqlite`
+- `tcia_metadata_v2_bundle_manifest.json`
 
 The data source is public metadata only. The builder reads current controlled/restricted WordPress download records from the base snapshot, follows public manifest/spreadsheet URLs attached to those records, and stores normalized rows. It does not require a General Commons or CTDC account, does not use the user's TCIA Data Retriever JSON API key, and does not download controlled files.
 
@@ -129,4 +130,4 @@ Do not treat `idc_index` rows in this SQLite as open IDC availability. They are 
 - Controlled-access face datasets: route access questions to the policy page. For Biobank controlled-access face data, use the current WordPress CTDC manifests/download/view links and tell users to request dbGaP study `phs002192`; use the controlled-access SQLite for public manifest/spreadsheet metadata when available. For non-Biobank face datasets, use General Commons metadata for `phs004225` only when WordPress or GC metadata indicate that route.
 - NCTN trials or Biobank data: use WordPress license metadata and current TCIA access statements. Biobank controlled-access face data are now available in CTDC through the relevant WordPress manifests/links and require dbGaP study `phs002192`; for other controlled datasets, do not invent CTDC routing unless WordPress identifies it. Use the controlled-access SQLite when WordPress identifies a controlled download route and file-grain public metadata are needed.
 - Public subsets of a mixed collection can be described separately from controlled/restricted subsets. For mixed datasets, use `agent_dataset_access_summary` to identify controlled download titles, licenses, IDs, and URLs before answering.
-- Web-only agents that cannot query SQLite may decompress and filter `agent_datasets.jsonl.gz` from the latest V2 release for `resolved_access_level` values such as `controlled` and `mixed`. If the host cannot decompress gzip, use MCP; do not switch to live API lookup or the legacy release.
+- Web-only agents that cannot query SQLite may decompress and filter `agent_datasets.jsonl.gz` from the latest V2 release for `resolved_access_level` values such as `controlled` and `mixed`. If the host cannot decompress gzip, use MCP; do not switch to live API lookup.

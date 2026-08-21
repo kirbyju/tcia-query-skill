@@ -31,9 +31,8 @@ DOI, and access/license authority. Participant Inventory is the participant
 identity and availability surface. Optional detail artifacts add file-grain
 public non-DICOM, controlled-access, and patient-level clinical metadata.
 NIfTI/pathology research detail is unified in the public non-DICOM artifact.
-Standalone databases and their specialized tool families are explicit
-self-hosted compatibility inputs only; the default public MCP does not
-advertise them. Public DICOM detail stays in IDC.
+Standalone NIfTI and pathology databases are not part of the supported V2
+service. Public DICOM detail stays in IDC.
 
 ## Tool Families
 
@@ -50,15 +49,6 @@ advertise them. Public DICOM detail stays in IDC.
   `get_controlled_access_files`.
 - Clinical: `find_clinical_datasets`, `get_clinical_subjects`,
   `get_clinical_facts`, `get_clinical_conflicts`.
-
-Legacy self-hosted MCP only, disabled by default:
-
-- NIfTI: `find_nifti_datasets`, `get_nifti_files`,
-  `get_nifti_derived_objects`, `get_nifti_characteristics`,
-  `find_nifti_review_issues`, `get_nifti_package_files`.
-- Pathology/Aspera: `find_pathology_datasets`, `get_pathology_downloads`,
-  `get_pathology_package_files`, `get_pathology_file_objects`,
-  `get_pathology_disparities`.
 
 ## Guardrails
 
@@ -77,7 +67,7 @@ Legacy self-hosted MCP only, disabled by default:
   provenance/conflicts, and flag dataset-scope inferred values.
 - Use `scripts/tcia_v2_bundle.py install` so the top-level release fingerprint,
   component hashes, decompressed SQLite hashes, and integrity checks are
-  validated together. Keep individual `ensure` commands for compatibility.
+  validated together.
 
 ## Deployment Shape
 

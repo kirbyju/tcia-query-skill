@@ -93,15 +93,15 @@ Export the open manual-review queue with:
 
 ```bash
 python scripts/tcia_clinical_metadata.py export-qc \\
-  --db cache/clinical_metadata.sqlite \\
+  --db cache/tcia-metadata-v2-latest/clinical_metadata.sqlite \\
   --out clinical_qc_manual_review.csv
 ```
 
 Add `--all` to include accepted automatic normalizations and exclusions.
 Use `--collection RADCURE` (or another exact Collection short title) to
-produce a dataset-specific review queue.
-Scheduled release builds publish `clinical_qc_manual_review.csv` beside the
-clinical SQLite and manifest whenever the clinical release changes.
+produce a dataset-specific review queue. The V2 release retains detailed
+clinical-review material in the Participant Inventory audit companion; export
+a CSV locally only when a separate review file is useful.
 Use `--all` when auditing accepted automatic findings, including
 `accepted_skip` coverage classifications; the default export contains only
 open `manual_review` findings.
@@ -474,19 +474,18 @@ Treat them as a regression baseline for that snapshot, not timeless constants.
 ## Local use
 
 ```bash
-python scripts/tcia_clinical_metadata.py ensure
-python scripts/tcia_clinical_metadata.py info
-python scripts/tcia_clinical_metadata.py validate
+python scripts/tcia_v2_bundle.py install --profile research_detail
+python scripts/tcia_clinical_metadata.py info --db cache/tcia-metadata-v2-latest/clinical_metadata.sqlite
+python scripts/tcia_clinical_metadata.py validate --db cache/tcia-metadata-v2-latest/clinical_metadata.sqlite
 ```
 
 Default files:
 
 ```text
-cache/clinical_metadata.sqlite
-cache/clinical_metadata_manifest.json
+cache/tcia-metadata-v2-latest/clinical_metadata.sqlite
 ```
 
-Override the query path with:
+MCP/REST deployments can override the query path with:
 
 ```bash
 export TCIA_CLINICAL_METADATA_DB=/path/to/clinical_metadata.sqlite

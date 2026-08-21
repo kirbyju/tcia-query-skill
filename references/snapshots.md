@@ -9,8 +9,7 @@ nine payload assets plus one authoritative manifest; only the current dataset
 and download JSONL exports remain, both gzip-compressed. The moving stable tag is
 `tcia-metadata-v2-latest`; immutable tags preserve reproducible releases and
 `tcia-metadata-v2-preview` remains available for explicit candidates. The
-workflow leaves `tcia-snapshot-latest` and its May 2026-compatible contracts
-unchanged. Publication does not itself deploy or restart MCP/REST.
+release workflow does not itself deploy or restart MCP/REST.
 
 The skill uses a local SQLite snapshot for routine TCIA discovery instead of querying public APIs during end-user tasks. The snapshot contains:
 
@@ -20,42 +19,29 @@ The skill uses a local SQLite snapshot for routine TCIA discovery instead of que
 - PathDB cohort-builder slide metadata, trimmed to TCIA query fields.
 - DataCite records under the TCIA DOI prefix `10.7937`.
 
-Generated snapshot files are intentionally not committed to the repository. GitHub Actions builds them twice daily at 7:17 AM and 7:17 PM America/New_York and publishes changed content as release assets:
+Generated snapshot files are intentionally not committed to the repository.
+GitHub Actions builds them twice daily at 7:17 AM and 7:17 PM
+America/New_York and publishes changed content through the V2 bundle:
 
 - `tcia_snapshot.sqlite.gz`
-- `tcia_snapshot_manifest.json`
-- `agent_datasets.jsonl`
-- `agent_current_downloads.jsonl`
-- `agent_dataset_versions.jsonl`
-- `agent_dataset_v1_releases.jsonl`
+- `participant_inventory.sqlite.gz`
 - `agent_datasets.jsonl.gz`
 - `agent_current_downloads.jsonl.gz`
-- `agent_dataset_versions.jsonl.gz`
-- `agent_dataset_v1_releases.jsonl.gz`
-
-Large optional derived metadata assets may also be published on the same release tag. They are not part of `python scripts/tcia_snapshot.py ensure` and are not downloaded during skill install or normal snapshot refresh.
-
-Optional NIfTI assets:
-
-- `nifti_metadata.sqlite.gz`
-- `nifti_metadata_manifest.json`
-
-Optional pathology Aspera assets:
-
-- `pathology_metadata.sqlite.gz`
-- `pathology_metadata_manifest.json`
-
-Optional controlled-access public manifest/spreadsheet assets:
-
+- `public_non_dicom_metadata.sqlite.gz`
 - `controlled_access_metadata.sqlite.gz`
-- `controlled_access_metadata_manifest.json`
-
-Optional patient-level clinical assets:
-
 - `clinical_metadata.sqlite.gz`
-- `clinical_metadata_manifest.json`
+- `public_non_dicom_audit.sqlite.gz`
+- `participant_inventory_audit.sqlite.gz`
+- `tcia_metadata_v2_bundle_manifest.json`
 
-The controlled-access SQLite is rebuilt by the scheduled workflow from the fresh base snapshot plus public WordPress manifest and metadata spreadsheet URLs. The clinical SQLite uses a hybrid refresh: unchanged direct official artifacts and same-version IDC clinical tables are reused, while a new clinical schema or IDC version triggers complete reprocessing so revised column mappings take effect. Small TCIA-linked external clinical sources, currently Allen Institute IvyGAP tumor details and FDA DIDSR VICTRE lesion-location archives, are fetched on every scheduled build and matched to current TCIA/IDC imaging identifiers so source additions change the release fingerprint and appear in the metadata change report. The prior strict CDA/DICOM seed is carried forward. Single-label WordPress Collection diagnosis/site fallbacks are recomputed locally from every fresh base snapshot. The workflow uploads either sidecar only when its release fingerprint changes. NIfTI and pathology assets are larger/manual sidecars: the scheduled workflow checks their source download signatures and optional SQLite schema versions, then warns when they need a manual refresh.
+The controlled-access artifact is rebuilt from the fresh base snapshot plus
+public WordPress manifest and metadata spreadsheet URLs. The clinical artifact
+uses a hybrid refresh: unchanged direct official artifacts and same-version IDC
+clinical tables are reused, while schema or IDC version changes trigger full
+reprocessing. NIfTI and pathology research rows are unified in the public
+non-DICOM artifact, with specialized source rows and QC retained in its audit
+companion. Every published component is selected and hash-pinned by the same V2
+bundle manifest.
 
 The imaging-subject allowlist is built from every IDC collection that maps
 unambiguously to a visible TCIA short title, including collections without an
@@ -89,72 +75,25 @@ GitHub scheduled workflows can start late. If a user asks about a dataset that a
 
 ## Local Cache
 
-Default local cache paths:
+The V2 installer stores validated artifacts together under one release directory:
 
 ```text
-cache/tcia_snapshot.sqlite
-cache/tcia_snapshot_manifest.json
+cache/tcia-metadata-v2-latest/tcia_metadata_v2_bundle_manifest.json
+cache/tcia-metadata-v2-latest/tcia_snapshot.sqlite
+cache/tcia-metadata-v2-latest/participant_inventory.sqlite
+cache/tcia-metadata-v2-latest/public_non_dicom_metadata.sqlite
+cache/tcia-metadata-v2-latest/controlled_access_metadata.sqlite
+cache/tcia-metadata-v2-latest/clinical_metadata.sqlite
 ```
 
-Users or agents can override the SQLite path with:
+Set the shared install directory for MCP/REST or other consumers:
 
 ```bash
-export TCIA_SNAPSHOT_DB=/path/to/tcia_snapshot.sqlite
+export TCIA_V2_INSTALL_DIR=/path/to/cache/tcia-metadata-v2-latest
 ```
 
-The helper scripts use the local snapshot. They do not fall back to live public APIs for normal end-user discovery.
-
-The optional NIfTI SQLite uses separate cache paths and is downloaded only on demand:
-
-```text
-cache/nifti_metadata.sqlite
-cache/nifti_metadata_manifest.json
-```
-
-Users or agents can override the NIfTI SQLite path with:
-
-```bash
-export TCIA_NIFTI_METADATA_DB=/path/to/nifti_metadata.sqlite
-```
-
-The optional pathology SQLite uses separate cache paths and is downloaded only on demand:
-
-```text
-cache/pathology_metadata.sqlite
-cache/pathology_metadata_manifest.json
-```
-
-Users or agents can override the pathology SQLite path with:
-
-```bash
-export TCIA_PATHOLOGY_METADATA_DB=/path/to/pathology_metadata.sqlite
-```
-
-The optional controlled-access SQLite uses separate cache paths and is downloaded only on demand:
-
-```text
-cache/controlled_access_metadata.sqlite
-cache/controlled_access_metadata_manifest.json
-```
-
-Users or agents can override the controlled-access SQLite path with:
-
-```bash
-export TCIA_CONTROLLED_ACCESS_METADATA_DB=/path/to/controlled_access_metadata.sqlite
-```
-
-The optional patient-level clinical SQLite also uses separate on-demand paths:
-
-```text
-cache/clinical_metadata.sqlite
-cache/clinical_metadata_manifest.json
-```
-
-Users or agents can override the clinical SQLite path with:
-
-```bash
-export TCIA_CLINICAL_METADATA_DB=/path/to/clinical_metadata.sqlite
-```
+The helper scripts use the installed V2 snapshot and detail artifacts. They do
+not fall back to live public APIs for normal end-user discovery.
 
 ## Refresh Local Metadata
 
@@ -177,52 +116,16 @@ compressed and decompressed hashes plus SQLite integrity checks pass. Run this
 preflight at the start of each discovery task; having a local database is not
 evidence that it is still the newest published artifact.
 
-Install only the additional profiles needed for the task:
+Install only the additional profiles needed for the task. `research_detail`
+adds NIfTI, pathology, controlled-access, and clinical file-grain metadata;
+`audit_support` adds verbose provenance, retained source rows, and QC evidence:
 
 ```bash
 python scripts/tcia_v2_bundle.py install --profile research_detail
 python scripts/tcia_v2_bundle.py install --profile audit_support
 ```
 
-The individual `python scripts/tcia_snapshot.py ensure`, sidecar `ensure`, and
-`tcia_freshness.py ensure` commands remain available for legacy compatibility,
-maintainers, and troubleshooting. New integrations should start with the V2
-bundle contract so components cannot drift across releases.
-
 If GitHub cannot be reached, freshness is unverified. Do not claim that cached results are current. Report the local manifest's `generated_at_utc` and ask whether the user wants to continue offline with potentially outdated metadata.
-
-For NIfTI file-grain metadata, use the separate on-demand helper:
-
-```bash
-python scripts/tcia_nifti_metadata.py ensure
-```
-
-This downloads and verifies only the optional NIfTI release assets. It is not run by the base snapshot refresh command.
-
-For pathology Aspera package/download metadata, use the separate on-demand helper:
-
-```bash
-python scripts/tcia_pathology_metadata.py ensure
-```
-
-This downloads and verifies only the optional pathology release assets. It is not run by the base snapshot refresh command.
-
-For controlled-access file-grain public metadata, use the separate on-demand helper:
-
-```bash
-python scripts/tcia_controlled_access_metadata.py ensure
-```
-
-This downloads and verifies only the optional controlled-access release assets. It is not run by the base snapshot refresh command.
-
-For patient-level clinical metadata, use:
-
-```bash
-python scripts/tcia_clinical_metadata.py ensure
-```
-
-This downloads and verifies only the optional clinical release assets. It is
-not run by the base snapshot refresh command.
 
 ## Skill Code Versioning
 
@@ -237,7 +140,9 @@ The validation workflow checks this manifest on pushes and pull requests. A mism
 
 ## Build A Snapshot
 
-This section is for maintainers and developers improving the skill. End users trying to find or download TCIA data should use the published release snapshot through `ensure`, not live API queries.
+This section is for maintainers and developers improving the skill. End users
+trying to find or download TCIA data should use the published V2 bundle, not
+live API queries.
 
 From the skill root:
 
@@ -278,49 +183,20 @@ These assets are generated from the same agent-facing views for hosted/web LLMs 
 
 | Asset | Use |
 | --- | --- |
-| `agent_datasets.jsonl` | Plain-text dataset/access export for web LLMs and browse tools that cannot decompress gzip. |
-| `agent_current_downloads.jsonl` | Plain-text current WordPress download export for web LLMs and browse tools that cannot decompress gzip. |
-| `agent_dataset_versions.jsonl` | Plain-text matched version-history export for web LLMs and browse tools that cannot decompress gzip. |
-| `agent_dataset_v1_releases.jsonl` | Plain-text first-release date export for web LLMs and browse tools that cannot decompress gzip. |
 | `agent_datasets.jsonl.gz` | General flattened dataset/access discovery from `agent_dataset_access_summary`. |
 | `agent_current_downloads.jsonl.gz` | Current WordPress download records from `agent_current_downloads`. |
-| `agent_dataset_versions.jsonl.gz` | Matched `/api/v2/versions` records from `agent_dataset_versions`. |
-| `agent_dataset_v1_releases.jsonl.gz` | Best available dataset v1 release dates from `agent_dataset_v1_releases`. |
 
 Direct release URLs:
 
-- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/tcia_snapshot.sqlite.gz`
-- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/tcia_snapshot_manifest.json`
-- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/agent_datasets.jsonl`
-- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/agent_current_downloads.jsonl`
-- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/agent_dataset_versions.jsonl`
-- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/agent_dataset_v1_releases.jsonl`
-- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/agent_datasets.jsonl.gz`
-- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/agent_current_downloads.jsonl.gz`
-- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/agent_dataset_versions.jsonl.gz`
-- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/agent_dataset_v1_releases.jsonl.gz`
+- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-metadata-v2-latest/tcia_metadata_v2_bundle_manifest.json`
+- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-metadata-v2-latest/tcia_snapshot.sqlite.gz`
+- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-metadata-v2-latest/participant_inventory.sqlite.gz`
+- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-metadata-v2-latest/agent_datasets.jsonl.gz`
+- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-metadata-v2-latest/agent_current_downloads.jsonl.gz`
 
-Optional NIfTI release URLs:
-
-- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/nifti_metadata.sqlite.gz`
-- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/nifti_metadata_manifest.json`
-
-Optional pathology release URLs:
-
-- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/pathology_metadata.sqlite.gz`
-- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/pathology_metadata_manifest.json`
-
-Optional controlled-access release URLs:
-
-- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/controlled_access_metadata.sqlite.gz`
-- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/controlled_access_metadata_manifest.json`
-
-Optional patient-level clinical release URLs:
-
-- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/clinical_metadata.sqlite.gz`
-- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/clinical_metadata_manifest.json`
-
-When an environment has no SQLite execution path, prefer these generic release exports before considering any live API. Use plain `.jsonl` for web LLM browse tools that cannot decompress gzip, and `.jsonl.gz` for local or connector tools that can. They are intentionally table-shaped rather than prompt-specific precomputed answer files. For MCP guidance, see `references/mcp-and-web-llms.md`.
+When an environment has no SQLite execution path, use the compressed exports
+only if it can decompress gzip; otherwise use the hosted MCP reference
+implementation. For MCP guidance, see `references/mcp-and-web-llms.md`.
 
 ## WordPress Version Tables
 

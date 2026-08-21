@@ -70,12 +70,9 @@ artifact; the streamlined release does not publish standalone NIfTI or pathology
 SQLite files. Do not export `TCIA_NIFTI_METADATA_DB` or
 `TCIA_PATHOLOGY_METADATA_DB` for this V2 installation.
 
-The default MCP server advertises only the 20 supported V2 tools and never
-falls back to legacy NIfTI/pathology databases under the repository `cache/`
-directory. A self-hosted compatibility deployment must deliberately set
-`TCIA_ENABLE_LEGACY_MCP_TOOLS=true` plus `TCIA_NIFTI_METADATA_DB` and/or
-`TCIA_PATHOLOGY_METADATA_DB`. Do not set those variables for the streamlined
-public service.
+The MCP server advertises the 20 supported V2 tools. Do not configure standalone
+NIfTI or pathology databases for the streamlined public service; those domains
+are provided by the unified public non-DICOM detail artifact.
 
 ## 5. Smoke Test
 
@@ -105,8 +102,6 @@ curl -fsS http://127.0.0.1:8766/v2/bundle
 Confirm the returned bundle fingerprint, component schema versions, installed
 profile, and detail capabilities before switching traffic. The endpoint reads
 only the manifest and installer state; it does not recount large SQLite views.
-`/v1` remains available for compatibility checks.
-
 For MCP, connect a local MCP client to:
 
 ```text

@@ -362,14 +362,12 @@ participant from a source Collection. Previously retained
 compatibility evidence, but they must not be presented as confirmed current IDC
 presence or used to create Analysis Result memberships.
 
-## Release channels and compatibility
+## V2 Release Channels
 
 Use `tcia-metadata-v2-latest` as the moving default release contract and retain
 immutable `tcia-metadata-v2-YYYY.MM...` releases for reproducibility. Keep
-`tcia-metadata-v2-preview` for explicit schema-changing candidates. Do not
-replace or delete `tcia-snapshot-latest`; it remains the May 2026-compatible
-legacy line. The moving stable channel uses the streamlined contract with
-these asset groups:
+`tcia-metadata-v2-preview` for explicit schema-changing candidates. The moving
+stable channel uses the streamlined contract with these asset groups:
 
 - Research core: `tcia_snapshot.sqlite.gz`, compact
   `participant_inventory.sqlite.gz`, and the compressed
@@ -421,7 +419,7 @@ then replaces installed components. Add `research_detail` for drill-down or
 `cache/tcia-metadata-v2-latest/`.
 
 The V2 build runs after each successful scheduled base-snapshot workflow. It
-captures the V1 release record, verifies every copied source asset against the
+captures the source release record, verifies every copied source asset against the
 captured GitHub digest, regenerates all web exports from that exact bundled
 snapshot, validates every component, and publishes only when the complete
 bundle fingerprint changes. The top-level manifest is uploaded last so
@@ -429,8 +427,8 @@ consumers never accept an update without a complete hash contract. Stale assets
 are removed only from the selected V2 moving tag, and that tag is advanced to
 the producer commit only after the published bundle passes remote digest
 validation. A manually supplied immutable stable tag is created only if it
-does not already exist. The workflow never uploads to
-`tcia-snapshot-latest` and does not deploy, restart, or reconfigure MCP/REST.
+does not already exist. The workflow does not deploy, restart, or reconfigure
+MCP/REST.
 
 ### Build-time staging and legacy-detail retirement
 
@@ -542,23 +540,14 @@ release. Stable publication uses the separately named `streamlined` contract
 after combined audit size, runner disk headroom, installer behavior, parity,
 reconstruction, and schema-3 consumer impact have passed review.
 
-Component helpers remain available for targeted and compatibility workflows,
-but new integrations should prefer the bundle installer:
-
-```bash
-python3 scripts/tcia_public_non_dicom_metadata.py ensure
-python3 scripts/tcia_participant_inventory.py ensure
-```
-
 Verbose provenance and troubleshooting payloads are distributed separately as
 `public_non_dicom_audit.sqlite.gz` and `participant_inventory_audit.sqlite.gz`.
 Use the `audit_support` profile in the bundle manifest when those companions are
 needed; stable entity IDs provide the join back to the research databases.
 
-Do not point individual legacy `ensure` helpers at the streamlined stable V2
-tag: its per-component manifests are inline in the bundle manifest rather than
-separate release assets. Use `scripts/tcia_v2_bundle.py install` for stable V2;
-retain individual helpers for the legacy release and maintainer workflows.
+Use `scripts/tcia_v2_bundle.py install` for the stable V2 release. Its
+per-component validation metadata is inline in the bundle manifest rather than
+distributed as separate manifests.
 
 NIfTI and pathology discovery now comes through the unified public non-DICOM
 research artifact. Their specialized source rows remain losslessly embedded in

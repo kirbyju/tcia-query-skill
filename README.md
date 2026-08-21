@@ -38,17 +38,16 @@ A read-only demonstration server exposes the same snapshot-backed query layer:
 
 - **MCP endpoint:** [https://tcia.duckdns.org/mcp](https://tcia.duckdns.org/mcp)
 - **REST API and Swagger UI:**
-  [https://tcia.duckdns.org/v1/docs](https://tcia.duckdns.org/v1/docs)
+  [https://tcia.duckdns.org/v2/docs](https://tcia.duckdns.org/v2/docs)
 - **OpenAPI document:**
-  [https://tcia.duckdns.org/v1/openapi.json](https://tcia.duckdns.org/v1/openapi.json)
+  [https://tcia.duckdns.org/v2/openapi.json](https://tcia.duckdns.org/v2/openapi.json)
 
 The MCP URL is a protocol endpoint, not a normal web page; configure it in an
 MCP-capable client using streamable HTTP. The demo is intended for evaluation
 and read-only queries. It does not expose arbitrary SQL, shell access, live
 WordPress scraping, credentials, or controlled-data downloads. Availability
-and capacity are not guaranteed. These links continue to describe the currently
-deployed compatibility service; repository-local REST V2 becomes the documented
-default only after the separate host deployment is completed and verified.
+and capacity are not guaranteed. V2 is the supported and documented REST
+interface for new clients.
 
 See [mcp_server/README.md](./mcp_server/README.md) for the tool surface and
 instructions for running your own MCP/REST server.
@@ -109,9 +108,6 @@ Install file-grain detail or verbose audit support only when needed:
 python3 scripts/tcia_v2_bundle.py install --profile research_detail
 python3 scripts/tcia_v2_bundle.py install --profile audit_support
 ```
-
-`scripts/tcia_freshness.py` and the individual legacy `ensure` commands remain
-available for the `tcia-snapshot-latest` compatibility line.
 
 Most routine snapshot and manifest helpers use the Python standard library.
 Install task-specific packages such as `idc-index`, `pydicom`, or `cdapython`
@@ -174,8 +170,8 @@ immutable versioned V2 releases retained for reproducibility. It contains
 hash-pinned research-core, research-detail, audit-support, and
 compatibility-export profiles. The default research core contains the base
 snapshot and compact Participant Inventory; file-grain metadata and verbose
-audit evidence are optional. `tcia-snapshot-latest` remains available as the
-legacy compatibility line. See [references/artifact-model-v2.md](./references/artifact-model-v2.md).
+audit evidence are optional. See
+[references/artifact-model-v2.md](./references/artifact-model-v2.md).
 
 Install the default V2 core or add research detail:
 
@@ -205,8 +201,8 @@ optional `*_audit.sqlite.gz` companions by stable entity ID.
 - [references/artifact-model-v2.md](./references/artifact-model-v2.md): public non-DICOM and Participant Inventory contracts
 - [references/clinical.md](./references/clinical.md): patient-level clinical data
 - [references/controlled-access.md](./references/controlled-access.md): controlled-access policy and authorized Data Retriever use
-- [references/nifti.md](./references/nifti.md): unified V2 NIfTI metadata and legacy helper guidance
-- [references/pathology.md](./references/pathology.md): unified V2 PathDB/Aspera pathology metadata and legacy helper guidance
+- [references/nifti.md](./references/nifti.md): unified V2 NIfTI metadata
+- [references/pathology.md](./references/pathology.md): unified V2 PathDB/Aspera pathology metadata
 - [references/publications.md](./references/publications.md): verified publication searches
 - [references/visualization.md](./references/visualization.md): viewer routing
 - [mcp_server/README.md](./mcp_server/README.md): local MCP/REST service

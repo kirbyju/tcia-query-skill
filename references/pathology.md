@@ -4,37 +4,30 @@ TCIA's WordPress/Collection Manager snapshot is the authority for which non-DICO
 
 Use this reference when a user asks about public TCIA pathology Aspera packages, package/download scope, PathDB coverage gaps, or curator-facing PathDB/package disparities.
 
-## Optional Release Asset
+## Install V2 Detail
 
-The standalone pathology SQLite helper remains available against the legacy compatibility release, but `tcia-metadata-v2-latest` no longer publishes it as a separate asset:
+Install the manifest-pinned V2 detail and audit profiles from the skill root:
 
 ```bash
-python scripts/tcia_pathology_metadata.py ensure
+python scripts/tcia_v2_bundle.py install --profile research_detail
+python scripts/tcia_v2_bundle.py install --profile audit_support
 ```
 
-Default local cache paths:
+The file-grain research rows are installed at:
 
 ```text
-cache/pathology_metadata.sqlite
-cache/pathology_metadata_manifest.json
+cache/tcia-metadata-v2-latest/public_non_dicom_metadata.sqlite
 ```
 
-Override the SQLite path with:
-
-```bash
-export TCIA_PATHOLOGY_METADATA_DB=/path/to/pathology_metadata.sqlite
-```
-
-Release URLs:
-
-- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/pathology_metadata.sqlite.gz`
-- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/pathology_metadata_manifest.json`
+Specialized package inventory, PathDB crosswalk, and QC evidence are installed
+in `public_non_dicom_audit.sqlite` by the audit profile. Both databases are
+pinned by `tcia_metadata_v2_bundle_manifest.json`.
 
 ## When To Use
 
 Use the normal TCIA snapshot first to confirm TCIA provenance, visibility, access level, and user-facing download URLs. Then use the unified public non-DICOM artifact for discovery and its audit companion for package scope and PathDB reconciliation details.
 
-Good pathology SQLite use cases:
+Good V2 public non-DICOM and audit use cases:
 
 - List visible, non-controlled TCIA pathology Aspera download records.
 - Identify pathology Aspera downloads with PathDB coverage.
@@ -45,22 +38,18 @@ Good pathology SQLite use cases:
 
 Do not use this SQLite to authorize controlled data, replace WordPress licensing metadata, or infer clinical truth. Hidden and controlled downloads are excluded by design.
 
-## Helper Script
+## Query Examples
 
 Run from the skill root:
 
 ```bash
-python scripts/tcia_pathology_metadata.py ensure
-python scripts/tcia_pathology_metadata.py info
-python scripts/tcia_pathology_metadata.py datasets --limit 20
-python scripts/tcia_pathology_metadata.py downloads --collection CPTAC-CCRCC
-python scripts/tcia_pathology_metadata.py pathdb --collection CPTAC-STAD --limit 10
-python scripts/tcia_pathology_metadata.py disparities
+python scripts/tcia_public_non_dicom_metadata.py datasets --db cache/tcia-metadata-v2-latest/public_non_dicom_metadata.sqlite --limit 20
+python scripts/tcia_public_non_dicom_metadata.py files --db cache/tcia-metadata-v2-latest/public_non_dicom_metadata.sqlite --collection CPTAC-CCRCC --limit 20
 ```
 
-The helper downloads and verifies `pathology_metadata.sqlite.gz` only from a legacy release that still contains it. It is not part of the streamlined moving V2 contract.
-
-Maintainer commands for a download-scope-only build without package inventory:
+The specialized `tcia_pathology_metadata.py` commands below are for maintainers
+building and validating source inputs, not for downloading end-user artifacts.
+For a download-scope-only build without package inventory:
 
 ```bash
 python scripts/tcia_pathology_metadata.py build \

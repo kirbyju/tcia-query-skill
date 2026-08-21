@@ -58,13 +58,6 @@ The default public MCP surface contains these 20 supported V2 tools. NIfTI,
 pathology, and other public non-DICOM discovery uses
 `find_public_non_dicom_assets`.
 
-Eleven NIfTI/pathology-specific tools remain available only as an explicit
-self-hosted compatibility option. To register them, set
-`TCIA_ENABLE_LEGACY_MCP_TOOLS=true` and explicitly configure
-`TCIA_NIFTI_METADATA_DB` and/or `TCIA_PATHOLOGY_METADATA_DB`. The service never
-infers those databases from an old `cache/` directory. They are not part of the
-supported public V2 MCP contract.
-
 MCP resources:
 
 - `tcia://guide`
@@ -98,8 +91,8 @@ python3 scripts/tcia_v2_bundle.py install --profile research_detail
 detail can run only the second command.
 
 By default the V2 service prefers validated files under
-`cache/tcia-metadata-v2-latest/`. It does not discover legacy NIfTI/pathology
-databases implicitly. Production deployments can set `TCIA_V2_INSTALL_DIR`, or
+`cache/tcia-metadata-v2-latest/`. Production deployments can set
+`TCIA_V2_INSTALL_DIR`, or
 set the individual streamlined paths explicitly:
 
 ```bash
@@ -130,6 +123,10 @@ The HTTP MCP endpoint is:
 http://127.0.0.1:8765/mcp
 ```
 
+A public read-only reference implementation backed by the current V2 bundle is
+available at [https://tcia.duckdns.org/mcp](https://tcia.duckdns.org/mcp).
+This is a streamable HTTP MCP protocol endpoint, not a normal web page.
+
 Keep the process bound to `127.0.0.1` unless it is running only on a private
 network. Put HTTPS, authentication, and access controls in front of it with a
 reverse proxy or platform gateway.
@@ -149,10 +146,9 @@ V2 is the documented default. Interactive docs are available at:
 http://127.0.0.1:8766/v2/docs
 ```
 
-Existing `/v1` dataset, download, clinical, NIfTI, pathology, and controlled
-routes remain registered as compatibility endpoints. The legacy NIfTI and
-pathology routes require their corresponding explicit database variables and
-never fall back to repository-cache files.
+The OpenAPI document is available at
+`http://127.0.0.1:8766/v2/openapi.json`. New clients should use only `/v2/`
+routes.
 
 ## Source Control Boundary
 

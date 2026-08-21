@@ -10,7 +10,8 @@ Web LLMs can usually read GitHub files, but many cannot install a skill, run Pyt
 
 Use these sources in order:
 
-1. A hosted read-only MCP server backed by the latest validated V2 bundle.
+1. The hosted read-only MCP reference implementation at
+   `https://tcia.duckdns.org/mcp`, backed by the latest validated V2 bundle.
 2. The GitHub Release V2 research core, if the environment can download and query SQLite.
 3. The two compressed GitHub Release JSONL exports, if the environment can decompress gzip and inspect line-delimited JSON but cannot run SQLite.
 4. Live source APIs only for maintainers building or debugging the snapshot, not for normal dataset discovery.
@@ -36,7 +37,7 @@ The stable streamlined release has nine payload assets plus the authoritative bu
 - `public_non_dicom_audit.sqlite.gz`: verbose non-DICOM provenance, specialized source checkpoints, crosswalk evidence, and QC.
 - `participant_inventory_audit.sqlite.gz`: verbose participant provenance, linkage evidence, and retained clinical-review material.
 
-Per-component manifests, plain JSONL files, release-timeline JSONL files, and standalone NIfTI/pathology SQLite files are not assets in the streamlined stable release. Their validation metadata is inline in the bundle manifest. Query release timelines from the base snapshot or through MCP/REST. If a web-only host cannot decompress gzip, use MCP rather than falling back to live WordPress or the legacy release.
+Per-component manifests, plain JSONL files, release-timeline JSONL files, and standalone NIfTI/pathology SQLite files are not assets in the streamlined stable release. Their validation metadata is inline in the bundle manifest. Query release timelines from the base snapshot or through MCP/REST. If a web-only host cannot decompress gzip, use MCP rather than falling back to live WordPress.
 
 Direct release URLs:
 
@@ -67,11 +68,9 @@ JSONL usage pattern:
 
 A TCIA MCP server should be public or otherwise reachable by the hosted LLM product that will call it. Keep it read-only and snapshot-backed. Do not expose arbitrary shell, unrestricted SQL, or live WordPress scraping.
 
-The default public tool list should expose only supported V2 operations. Do not
-advertise the legacy NIfTI/pathology-specific compatibility tools; route those
-questions through `find_public_non_dicom_assets`. A self-hosted operator may
-enable the legacy surface explicitly while migrating, but the server must not
-infer legacy databases from an old cache directory.
+The public tool list should expose only supported V2 operations. Route NIfTI,
+pathology, and other public non-DICOM questions through
+`find_public_non_dicom_assets`.
 
 Recommended tools:
 

@@ -1,40 +1,33 @@
 # TCIA NIfTI Metadata
 
-TCIA's WordPress snapshot is the authority for whether a NIfTI package is a current, visible, TCIA-published download. The moving V2 release exposes file-grain NIfTI discovery through the unified public non-DICOM research artifact and retains specialized legacy NIfTI tables inside its audit companion.
+TCIA's WordPress snapshot is the authority for whether a NIfTI package is a current, visible, TCIA-published download. The moving V2 release exposes file-grain NIfTI discovery through the unified public non-DICOM research artifact and retains specialized source tables inside its audit companion.
 
 Use this reference when a user asks about TCIA NIfTI file counts, NIfTI modalities, NIfTI filenames, package inventories, or NIfTI segmentation/source-image relationships.
 
-## Optional Release Asset
+## Install V2 Detail
 
-The following standalone helper remains a maintainer/legacy compatibility tool; `tcia-metadata-v2-latest` no longer publishes its SQLite as a separate asset:
+Install the manifest-pinned V2 detail and audit profiles from the skill root:
 
 ```bash
-python scripts/tcia_nifti_metadata.py ensure
+python scripts/tcia_v2_bundle.py install --profile research_detail
+python scripts/tcia_v2_bundle.py install --profile audit_support
 ```
 
-Default local cache paths:
+The file-grain research rows are installed at:
 
 ```text
-cache/nifti_metadata.sqlite
-cache/nifti_metadata_manifest.json
+cache/tcia-metadata-v2-latest/public_non_dicom_metadata.sqlite
 ```
 
-Override the SQLite path with:
-
-```bash
-export TCIA_NIFTI_METADATA_DB=/path/to/nifti_metadata.sqlite
-```
-
-Release URLs:
-
-- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/nifti_metadata.sqlite.gz`
-- `https://github.com/kirbyju/tcia-query-skill/releases/download/tcia-snapshot-latest/nifti_metadata_manifest.json`
+Specialized retained NIfTI source rows and QC evidence are installed in
+`public_non_dicom_audit.sqlite` by the audit profile. Both databases are pinned
+by `tcia_metadata_v2_bundle_manifest.json`.
 
 ## When To Use
 
 Use the normal TCIA snapshot first to confirm TCIA provenance, visibility, access level, and user-facing download URLs. Then use the unified public non-DICOM artifact for file-level questions and the audit companion for specialized source rows and QC.
 
-Good NIfTI SQLite use cases:
+Good V2 public non-DICOM use cases:
 
 - Count NIfTI files by dataset.
 - List NIfTI package paths.
@@ -45,25 +38,18 @@ Good NIfTI SQLite use cases:
 
 Do not use this SQLite to authorize controlled data, replace WordPress licensing metadata, or infer clinical truth. Hidden and controlled records are excluded by design.
 
-## Helper Script
+## Query Examples
 
 Run from the skill root:
 
 ```bash
-python scripts/tcia_nifti_metadata.py ensure
-python scripts/tcia_nifti_metadata.py info
-python scripts/tcia_nifti_metadata.py datasets --limit 20
-python scripts/tcia_nifti_metadata.py files --collection UCSF-PDGM --limit 10
-python scripts/tcia_nifti_metadata.py files --collection CT-ORG --modality CT
-python scripts/tcia_nifti_metadata.py characteristics --collection CT-ORG --limit 10
-python scripts/tcia_nifti_metadata.py characteristics --collection BCBM-RadioGenomics --limit 10
-python scripts/tcia_nifti_metadata.py characteristics --collection Vestibular-Schwannoma-MC-RC2 --limit 10
-python scripts/tcia_nifti_metadata.py derived --collection BCBM-RadioGenomics --with-sources
+python scripts/tcia_public_non_dicom_metadata.py datasets --db cache/tcia-metadata-v2-latest/public_non_dicom_metadata.sqlite --limit 20
+python scripts/tcia_public_non_dicom_metadata.py files --db cache/tcia-metadata-v2-latest/public_non_dicom_metadata.sqlite --collection UCSF-PDGM --limit 10
+python scripts/tcia_public_non_dicom_metadata.py files --db cache/tcia-metadata-v2-latest/public_non_dicom_metadata.sqlite --collection CT-ORG --limit 10
 ```
 
-The helper can still download and verify `nifti_metadata.sqlite.gz` from a legacy release that contains it. It is not a supported asset of the streamlined moving V2 contract.
-
-Maintainer commands:
+The specialized `tcia_nifti_metadata.py` commands below are for maintainers
+building and validating source inputs, not for downloading end-user artifacts:
 
 ```bash
 python scripts/tcia_nifti_metadata.py validate --db outputs/nifti_metadata/nifti_metadata.sqlite
