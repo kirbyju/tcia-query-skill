@@ -1,5 +1,6 @@
 import importlib.util
 import gzip
+import io
 import json
 import sqlite3
 import tempfile
@@ -218,6 +219,50 @@ class V2BundleTests(unittest.TestCase):
             self.assertIn("tcia_snapshot_manifest.json", changed)
             self.assertNotIn("pathology_metadata.sqlite.gz", changed)
 
+    def test_download_to_path_streams_and_validates(self):
+        class Response(io.BytesIO):
+            def __init__(self, body: bytes):
+                super().__init__(body)
+                self.read_sizes: list[int] = []
+
+            def read(self, size: int = -1) -> bytes:
+                self.read_sizes.append(size)
+                return super().read(size)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                self.close()
+
+        body = b"streamed asset" * 200_000
+        response = Response(body)
+        details = {
+            "bytes": len(body),
+            "sha256": BUNDLE.hashlib.sha256(body).hexdigest(),
+        }
+        with tempfile.TemporaryDirectory() as temporary, mock.patch.object(
+            BUNDLE.urllib.request, "urlopen", return_value=response
+        ):
+            destination = Path(temporary) / "asset.gz"
+            BUNDLE.download_to_path("https://example.invalid/asset.gz", destination, details, "asset.gz")
+            self.assertEqual(destination.read_bytes(), body)
+        self.assertTrue(response.read_sizes)
+        self.assertEqual(set(response.read_sizes), {1024 * 1024})
+
+    def test_download_to_path_removes_invalid_asset(self):
+        body = b"invalid"
+        details = {"bytes": len(body), "sha256": "0" * 64}
+        with tempfile.TemporaryDirectory() as temporary, mock.patch.object(
+            BUNDLE.urllib.request, "urlopen", return_value=io.BytesIO(body)
+        ):
+            destination = Path(temporary) / "asset.gz"
+            with self.assertRaisesRegex(RuntimeError, "SHA-256 mismatch"):
+                BUNDLE.download_to_path(
+                    "https://example.invalid/asset.gz", destination, details, "asset.gz"
+                )
+            self.assertFalse(destination.exists())
+
     def test_install_research_core_validates_and_installs_databases(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -248,7 +293,18 @@ class V2BundleTests(unittest.TestCase):
                     return bundle_body
                 return (assets / name).read_bytes()
 
-            with mock.patch.object(BUNDLE, "fetch_bytes", side_effect=fake_fetch):
+            def fake_download(
+                url: str, destination: Path, details: dict, asset: str
+            ) -> None:
+                destination.write_bytes((assets / url.rsplit("/", 1)[-1]).read_bytes())
+                self.assertEqual(destination.stat().st_size, details["bytes"])
+                self.assertEqual(BUNDLE.file_sha256(destination), details["sha256"])
+
+            with mock.patch.object(BUNDLE, "fetch_bytes", side_effect=fake_fetch), mock.patch.object(
+                BUNDLE, "download_to_path", side_effect=fake_download
+            ), mock.patch.object(
+                BUNDLE.gzip, "decompress", side_effect=AssertionError("must stream")
+            ):
                 result = BUNDLE.install_bundle(install_dir=install_dir)
             self.assertEqual(result["status"], "downloaded")
             self.assertTrue((install_dir / "tcia_snapshot.sqlite").is_file())
@@ -292,7 +348,18 @@ class V2BundleTests(unittest.TestCase):
                     return bundle_body
                 return (assets / name).read_bytes()
 
-            with mock.patch.object(BUNDLE, "fetch_bytes", side_effect=fake_fetch):
+            def fake_download(
+                url: str, destination: Path, details: dict, asset: str
+            ) -> None:
+                destination.write_bytes((assets / url.rsplit("/", 1)[-1]).read_bytes())
+                self.assertEqual(destination.stat().st_size, details["bytes"])
+                self.assertEqual(BUNDLE.file_sha256(destination), details["sha256"])
+
+            with mock.patch.object(BUNDLE, "fetch_bytes", side_effect=fake_fetch), mock.patch.object(
+                BUNDLE, "download_to_path", side_effect=fake_download
+            ), mock.patch.object(
+                BUNDLE.gzip, "decompress", side_effect=AssertionError("must stream")
+            ):
                 result = BUNDLE.install_bundle(
                     tag="tcia-metadata-v2-streamlined-candidate",
                     install_dir=install_dir,

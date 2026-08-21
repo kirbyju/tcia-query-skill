@@ -64,7 +64,7 @@
     "scripts/tcia_skill_version.py": "022626ade6a21b225cc0974c7e0593afb4bc158bc6850c41966205a5a41f796b",
     "scripts/tcia_snapshot.py": "283942a4e495d6ce66c75f8f45c51263edff4e5febfc27f79d6cc822d61e2e0b",
     "scripts/tcia_v2_audit.py": "9588a29026056490fd64b90bf875f58ed131b266dc1d6e2debc0cc73742392e8",
-    "scripts/tcia_v2_bundle.py": "22ac0e55f91bc492a6371417fae89b71f6e9bf0c1ff5bfd93cbde95f72acb32f",
+    "scripts/tcia_v2_bundle.py": "4cbab59de5cd5711dc70a38eedd47f7072e45ac5a0fab67d0c433297ba2b6c08",
     "scripts/tcia_v2_checkpoint.py": "da0818f0ede8b9e158f37752c66817d6ac86ebd5f887d8977f4f9d9b57c06f0b",
     "scripts/tcia_v2_parity.py": "0a651d86c0bce64ee82c0bb8da3e4fe848bf7738f6a305c4f65da37cbe9f7e69",
     "scripts/tcia_v2_staging.py": "19c5c2badfb26c6633cfd2ab238fa304537d51be64894efe92f6fbdc1e564f62",
@@ -78,12 +78,12 @@
     "scripts/tests/test_tcia_skill_version.py": "a1106ca1f6736252d4c81a040cb98a5b9cff706437708df96bb6418189b18dbe",
     "scripts/tests/test_tcia_snapshot.py": "35dbe7b25518c09a6160cda5981cc5fd0a5e13e66c544dc19364f04bef059641",
     "scripts/tests/test_tcia_v2_audit.py": "46c7c3f4a45a4c4dade6eb72c205b6ebff4a03abed7e02f9a21dc1023ff07a70",
-    "scripts/tests/test_tcia_v2_bundle.py": "c39070765d62c35c28ae0f4726d6136720ee252e7f9c5969722019a87de37be2",
+    "scripts/tests/test_tcia_v2_bundle.py": "27306f9434cc7a4ec49142d87e14a196826b6e8234d6937ec4cf67d649508793",
     "scripts/tests/test_tcia_v2_checkpoint.py": "4a297497537bc6f6a00463cc2880b056802e5b4b9d3d580020ebce4e042f8983",
     "scripts/tests/test_tcia_v2_parity.py": "27f51ddd8bbc200eb85327cd716db37f2f7d12393bb25445ba4f5d6b6f8301ae",
     "scripts/tests/test_tcia_v2_staging.py": "46b4285ce2f7aa4c7aace37ecc68455820b0e23ebfa8a82550e04610c4568ff2"
   },
   "schema_version": 1,
-  "skill_version": "2026.08.20.3",
-  "updated_at_utc": "2026-08-21T00:18:02.816256+00:00"
+  "skill_version": "2026.08.21.1",
+  "updated_at_utc": "2026-08-21T13:45:04.656325+00:00"
 }

@@ -146,6 +146,50 @@ def fetch_bytes(url: str) -> bytes:
         return response.read()
 
 
+def download_to_path(
+    url: str,
+    destination: Path,
+    details: dict[str, Any],
+    asset: str,
+) -> None:
+    """Stream one release asset to disk while validating size and SHA-256."""
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    digest = hashlib.sha256()
+    downloaded_bytes = 0
+    with urllib.request.urlopen(url) as response, destination.open("wb") as handle:
+        for chunk in iter(lambda: response.read(1024 * 1024), b""):
+            handle.write(chunk)
+            digest.update(chunk)
+            downloaded_bytes += len(chunk)
+    if downloaded_bytes != details.get("bytes"):
+        destination.unlink(missing_ok=True)
+        raise RuntimeError(f"Downloaded V2 asset byte-size mismatch: {asset}")
+    if digest.hexdigest() != details.get("sha256"):
+        destination.unlink(missing_ok=True)
+        raise RuntimeError(f"Downloaded V2 asset SHA-256 mismatch: {asset}")
+
+
+def decompress_gzip_to_path(
+    compressed: Path,
+    destination: Path,
+    expected_sha256: str,
+    asset: str,
+) -> None:
+    """Stream a gzip payload to disk while validating decompressed SHA-256."""
+    digest = hashlib.sha256()
+    try:
+        with gzip.open(compressed, "rb") as source, destination.open("wb") as target:
+            for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                target.write(chunk)
+                digest.update(chunk)
+    except OSError as exc:
+        destination.unlink(missing_ok=True)
+        raise RuntimeError(f"Cannot decompress V2 database {asset}: {exc}") from exc
+    if not expected_sha256 or digest.hexdigest() != expected_sha256:
+        destination.unlink(missing_ok=True)
+        raise RuntimeError(f"Downloaded V2 SQLite SHA-256 mismatch: {asset}")
+
+
 def release_asset_url(repository: str, tag: str, asset: str) -> str:
     return f"https://github.com/{repository}/releases/download/{tag}/{asset}"
 
@@ -737,22 +781,27 @@ def install_bundle(
                 unchanged.append(asset)
                 continue
 
-            body = fetch_bytes(release_asset_url(repository, tag, asset))
-            _validate_download(body, details, asset)
             staged = stage / installed_asset_name(asset)
             staged.parent.mkdir(parents=True, exist_ok=True)
             if asset in component_by_database:
-                try:
-                    raw = gzip.decompress(body)
-                except OSError as exc:
-                    raise RuntimeError(f"Cannot decompress V2 database {asset}: {exc}") from exc
+                compressed = stage / asset
+                download_to_path(
+                    release_asset_url(repository, tag, asset),
+                    compressed,
+                    details,
+                    asset,
+                )
                 expected_sqlite = component_payloads[asset].get("sqlite_sha256")
-                if not expected_sqlite or hashlib.sha256(raw).hexdigest() != expected_sqlite:
-                    raise RuntimeError(f"Downloaded V2 SQLite SHA-256 mismatch: {asset}")
-                staged.write_bytes(raw)
+                decompress_gzip_to_path(compressed, staged, expected_sqlite, asset)
+                compressed.unlink()
                 _sqlite_integrity(staged, asset)
             else:
-                staged.write_bytes(body)
+                download_to_path(
+                    release_asset_url(repository, tag, asset),
+                    staged,
+                    details,
+                    asset,
+                )
             downloaded.append(asset)
 
         # Validate first, then replace changed payloads. Component manifests are refreshed
