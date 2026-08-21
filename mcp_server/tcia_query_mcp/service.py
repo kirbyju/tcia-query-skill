@@ -653,15 +653,16 @@ class TciaQueryService:
             or os.environ.get("TCIA_CONTROLLED_ACCESS_METADATA_DB", "")
             or preferred_v2("controlled_access_metadata.sqlite")
         )
+        legacy_root = v2_root / ".legacy-not-configured"
         self.nifti_db = Path(
             nifti_db
             or os.environ.get("TCIA_NIFTI_METADATA_DB", "")
-            or self.skill_root / "cache" / "nifti_metadata.sqlite"
+            or legacy_root / "nifti_metadata.sqlite"
         )
         self.pathology_db = Path(
             pathology_db
             or os.environ.get("TCIA_PATHOLOGY_METADATA_DB", "")
-            or self.skill_root / "cache" / "pathology_metadata.sqlite"
+            or legacy_root / "pathology_metadata.sqlite"
         )
         self.clinical_db = Path(
             clinical_db

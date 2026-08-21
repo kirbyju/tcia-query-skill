@@ -70,10 +70,12 @@ artifact; the streamlined release does not publish standalone NIfTI or pathology
 SQLite files. Do not export `TCIA_NIFTI_METADATA_DB` or
 `TCIA_PATHOLOGY_METADATA_DB` for this V2 installation.
 
-Use a clean V2 installation directory when migrating from the legacy full
-contract. The service intentionally ignores legacy NIfTI/pathology files left
-under `TCIA_V2_INSTALL_DIR`; move those files out of the directory rather than
-treating them as streamlined assets.
+The default MCP server advertises only the 20 supported V2 tools and never
+falls back to legacy NIfTI/pathology databases under the repository `cache/`
+directory. A self-hosted compatibility deployment must deliberately set
+`TCIA_ENABLE_LEGACY_MCP_TOOLS=true` plus `TCIA_NIFTI_METADATA_DB` and/or
+`TCIA_PATHOLOGY_METADATA_DB`. Do not set those variables for the streamlined
+public service.
 
 ## 5. Smoke Test
 

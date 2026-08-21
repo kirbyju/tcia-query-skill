@@ -30,9 +30,10 @@ The base snapshot remains the TCIA provenance, visibility, release-history,
 DOI, and access/license authority. Participant Inventory is the participant
 identity and availability surface. Optional detail artifacts add file-grain
 public non-DICOM, controlled-access, and patient-level clinical metadata.
-NIfTI/pathology research detail is unified in the public non-DICOM artifact;
-standalone databases remain legacy compatibility inputs only. Public DICOM
-detail stays in IDC.
+NIfTI/pathology research detail is unified in the public non-DICOM artifact.
+Standalone databases and their specialized tool families are explicit
+self-hosted compatibility inputs only; the default public MCP does not
+advertise them. Public DICOM detail stays in IDC.
 
 ## Tool Families
 
@@ -47,14 +48,17 @@ detail stays in IDC.
   `find_dicom_annotations`.
 - Controlled access: `find_controlled_access_datasets`,
   `get_controlled_access_files`.
+- Clinical: `find_clinical_datasets`, `get_clinical_subjects`,
+  `get_clinical_facts`, `get_clinical_conflicts`.
+
+Legacy self-hosted MCP only, disabled by default:
+
 - NIfTI: `find_nifti_datasets`, `get_nifti_files`,
   `get_nifti_derived_objects`, `get_nifti_characteristics`,
   `find_nifti_review_issues`, `get_nifti_package_files`.
 - Pathology/Aspera: `find_pathology_datasets`, `get_pathology_downloads`,
   `get_pathology_package_files`, `get_pathology_file_objects`,
   `get_pathology_disparities`.
-- Clinical: `find_clinical_datasets`, `get_clinical_subjects`,
-  `get_clinical_facts`, `get_clinical_conflicts`.
 
 ## Guardrails
 

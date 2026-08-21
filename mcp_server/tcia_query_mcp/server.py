@@ -88,9 +88,46 @@ Recommended workflow:
    conflicts. Subject identity is scoped by `(short_title, subject_id)`; retain
    source provenance and distinguish dataset-scope inferred values.
 9. Use `find_public_non_dicom_assets` for V2 NIfTI, pathology, and other
-   non-DICOM detail. The NIfTI/pathology-specific tools are legacy compatibility
-   surfaces and require explicitly configured legacy databases.
+   non-DICOM detail. Legacy NIfTI/pathology tools are not part of the default
+   public MCP surface.
 """
+
+PUBLIC_V2_TOOL_NAMES = (
+    "get_snapshot_info",
+    "search_participants",
+    "get_participant",
+    "get_participant_assets",
+    "get_dataset_participant_coverage",
+    "find_participant_link_issues",
+    "find_public_non_dicom_assets",
+    "search_datasets",
+    "get_dataset",
+    "get_dataset_versions",
+    "get_dataset_v1_releases",
+    "get_current_downloads",
+    "summarize_access",
+    "find_controlled_access_datasets",
+    "get_controlled_access_files",
+    "find_dicom_annotations",
+    "find_clinical_datasets",
+    "get_clinical_subjects",
+    "get_clinical_facts",
+    "get_clinical_conflicts",
+)
+
+LEGACY_MCP_TOOL_NAMES = (
+    "find_nifti_datasets",
+    "get_nifti_files",
+    "get_nifti_derived_objects",
+    "get_nifti_characteristics",
+    "find_nifti_review_issues",
+    "get_nifti_package_files",
+    "find_pathology_datasets",
+    "get_pathology_downloads",
+    "get_pathology_package_files",
+    "get_pathology_file_objects",
+    "get_pathology_disparities",
+)
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -489,7 +526,6 @@ def find_dicom_annotations(
     )
 
 
-@mcp.tool()
 @guard
 def find_nifti_datasets(
     short_titles: list[str] | None = None,
@@ -507,7 +543,6 @@ def find_nifti_datasets(
     )
 
 
-@mcp.tool()
 @guard
 def get_nifti_files(
     short_title: str,
@@ -531,7 +566,6 @@ def get_nifti_files(
     )
 
 
-@mcp.tool()
 @guard
 def get_nifti_derived_objects(
     short_title: str,
@@ -551,7 +585,6 @@ def get_nifti_derived_objects(
     )
 
 
-@mcp.tool()
 @guard
 def get_nifti_characteristics(
     short_title: str,
@@ -577,7 +610,6 @@ def get_nifti_characteristics(
     )
 
 
-@mcp.tool()
 @guard
 def find_nifti_review_issues(
     short_titles: list[str] | None = None,
@@ -595,7 +627,6 @@ def find_nifti_review_issues(
     )
 
 
-@mcp.tool()
 @guard
 def get_nifti_package_files(
     short_title: str,
@@ -615,7 +646,6 @@ def get_nifti_package_files(
     )
 
 
-@mcp.tool()
 @guard
 def find_pathology_datasets(
     short_titles: list[str] | None = None,
@@ -635,7 +665,6 @@ def find_pathology_datasets(
     )
 
 
-@mcp.tool()
 @guard
 def get_pathology_downloads(short_titles: list[str] | None = None, limit: int = 25) -> dict:
     """Return pathology Aspera download scope rows from the optional pathology sidecar."""
@@ -643,7 +672,6 @@ def get_pathology_downloads(short_titles: list[str] | None = None, limit: int = 
     return service().get_pathology_downloads(short_titles=short_titles, limit=limit)
 
 
-@mcp.tool()
 @guard
 def get_pathology_package_files(
     short_title: str,
@@ -665,7 +693,6 @@ def get_pathology_package_files(
     )
 
 
-@mcp.tool()
 @guard
 def get_pathology_file_objects(
     short_title: str,
@@ -685,7 +712,6 @@ def get_pathology_file_objects(
     )
 
 
-@mcp.tool()
 @guard
 def get_pathology_disparities(
     short_titles: list[str] | None = None,
@@ -787,6 +813,32 @@ def get_clinical_conflicts(
         concepts=concepts,
         limit=limit,
     )
+
+
+LEGACY_MCP_TOOLS = (
+    find_nifti_datasets,
+    get_nifti_files,
+    get_nifti_derived_objects,
+    get_nifti_characteristics,
+    find_nifti_review_issues,
+    get_nifti_package_files,
+    find_pathology_datasets,
+    get_pathology_downloads,
+    get_pathology_package_files,
+    get_pathology_file_objects,
+    get_pathology_disparities,
+)
+
+
+def register_legacy_mcp_tools(server: FastMCP) -> None:
+    """Register unsupported legacy tools for an explicitly opted-in host."""
+
+    for tool in LEGACY_MCP_TOOLS:
+        server.tool()(tool)
+
+
+if _env_bool("TCIA_ENABLE_LEGACY_MCP_TOOLS", default=False):
+    register_legacy_mcp_tools(mcp)
 
 
 @mcp.resource("tcia://guide", mime_type="text/markdown")

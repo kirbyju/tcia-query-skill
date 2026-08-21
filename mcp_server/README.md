@@ -49,26 +49,21 @@ Optional detail tools:
 - `find_public_non_dicom_assets`
 - `find_controlled_access_datasets`
 - `get_controlled_access_files`
-- `find_nifti_datasets`
-- `get_nifti_files`
-- `get_nifti_derived_objects`
-- `get_nifti_characteristics`
-- `find_nifti_review_issues`
-- `get_nifti_package_files`
-- `find_pathology_datasets`
-- `get_pathology_downloads`
-- `get_pathology_package_files`
-- `get_pathology_file_objects`
-- `get_pathology_disparities`
 - `find_clinical_datasets`
 - `get_clinical_subjects`
 - `get_clinical_facts`
 - `get_clinical_conflicts`
 
-The NIfTI/pathology-specific MCP tools and REST `/v1` routes are legacy
-compatibility surfaces and require explicitly configured databases from the
-legacy release. They are not enabled by `TCIA_V2_INSTALL_DIR` in a streamlined
-deployment.
+The default public MCP surface contains these 20 supported V2 tools. NIfTI,
+pathology, and other public non-DICOM discovery uses
+`find_public_non_dicom_assets`.
+
+Eleven NIfTI/pathology-specific tools remain available only as an explicit
+self-hosted compatibility option. To register them, set
+`TCIA_ENABLE_LEGACY_MCP_TOOLS=true` and explicitly configure
+`TCIA_NIFTI_METADATA_DB` and/or `TCIA_PATHOLOGY_METADATA_DB`. The service never
+infers those databases from an old `cache/` directory. They are not part of the
+supported public V2 MCP contract.
 
 MCP resources:
 
@@ -103,10 +98,9 @@ python3 scripts/tcia_v2_bundle.py install --profile research_detail
 detail can run only the second command.
 
 By default the V2 service prefers validated files under
-`cache/tcia-metadata-v2-latest/`. Legacy NIfTI/pathology compatibility files
-remain isolated under `cache/` and are never inferred from the V2 directory.
-Production deployments can set `TCIA_V2_INSTALL_DIR`, or set the individual
-streamlined paths explicitly:
+`cache/tcia-metadata-v2-latest/`. It does not discover legacy NIfTI/pathology
+databases implicitly. Production deployments can set `TCIA_V2_INSTALL_DIR`, or
+set the individual streamlined paths explicitly:
 
 ```bash
 export TCIA_V2_INSTALL_DIR=/path/to/cache/tcia-metadata-v2-latest
@@ -156,7 +150,9 @@ http://127.0.0.1:8766/v2/docs
 ```
 
 Existing `/v1` dataset, download, clinical, NIfTI, pathology, and controlled
-routes remain registered as compatibility endpoints.
+routes remain registered as compatibility endpoints. The legacy NIfTI and
+pathology routes require their corresponding explicit database variables and
+never fall back to repository-cache files.
 
 ## Source Control Boundary
 

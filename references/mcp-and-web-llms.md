@@ -67,6 +67,12 @@ JSONL usage pattern:
 
 A TCIA MCP server should be public or otherwise reachable by the hosted LLM product that will call it. Keep it read-only and snapshot-backed. Do not expose arbitrary shell, unrestricted SQL, or live WordPress scraping.
 
+The default public tool list should expose only supported V2 operations. Do not
+advertise the legacy NIfTI/pathology-specific compatibility tools; route those
+questions through `find_public_non_dicom_assets`. A self-hosted operator may
+enable the legacy surface explicitly while migrating, but the server must not
+infer legacy databases from an old cache directory.
+
 Recommended tools:
 
 - `search_participants(filters)`: search canonical dataset-scoped participants and compact availability from the V2 research core.

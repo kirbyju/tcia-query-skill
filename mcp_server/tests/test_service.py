@@ -683,6 +683,37 @@ class TciaQueryServiceTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.tmp.cleanup()
 
+    def test_v2_configuration_does_not_fall_back_to_legacy_cache_databases(self) -> None:
+        root = Path(self.tmp.name)
+        skill_root = root / "skill"
+        cache = skill_root / "cache"
+        cache.mkdir(parents=True)
+        (cache / "nifti_metadata.sqlite").touch()
+        (cache / "pathology_metadata.sqlite").touch()
+        v2_root = root / "v2"
+        v2_root.mkdir()
+
+        with patch.dict(
+            os.environ,
+            {
+                "TCIA_V2_INSTALL_DIR": str(v2_root),
+                "TCIA_NIFTI_METADATA_DB": "",
+                "TCIA_PATHOLOGY_METADATA_DB": "",
+            },
+        ):
+            service = TciaQueryService(skill_root=skill_root)
+
+        self.assertEqual(
+            service.nifti_db,
+            v2_root / ".legacy-not-configured" / "nifti_metadata.sqlite",
+        )
+        self.assertEqual(
+            service.pathology_db,
+            v2_root / ".legacy-not-configured" / "pathology_metadata.sqlite",
+        )
+        self.assertFalse(service.nifti_db.exists())
+        self.assertFalse(service.pathology_db.exists())
+
     def test_snapshot_info_reports_sidecars_and_new_capabilities(self) -> None:
         info = self.service.snapshot_info()
         self.assertTrue(info["snapshot_exists"])
@@ -723,8 +754,14 @@ class TciaQueryServiceTests(unittest.TestCase):
         (v2_root / "pathology_metadata.sqlite").touch()
         with patch.dict(os.environ, {"TCIA_V2_INSTALL_DIR": str(v2_root)}, clear=False):
             service = TciaQueryService(skill_root=root)
-        self.assertEqual(service.nifti_db, root / "cache" / "nifti_metadata.sqlite")
-        self.assertEqual(service.pathology_db, root / "cache" / "pathology_metadata.sqlite")
+        self.assertEqual(
+            service.nifti_db,
+            v2_root / ".legacy-not-configured" / "nifti_metadata.sqlite",
+        )
+        self.assertEqual(
+            service.pathology_db,
+            v2_root / ".legacy-not-configured" / "pathology_metadata.sqlite",
+        )
 
     def test_search_datasets_filters_external_clinical_resource(self) -> None:
         result = self.service.search_datasets(
