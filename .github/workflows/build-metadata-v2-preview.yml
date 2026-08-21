@@ -65,18 +65,52 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Resolve effective release configuration
+        id: release_config
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            publish_channel="stable"
+            include_pathdb_files="true"
+            checkpoint_legacy_detail="true"
+            release_contract="streamlined"
+            immutable_tag=""
+          else
+            publish_channel="${{ inputs.publish_channel }}"
+            include_pathdb_files="${{ inputs.include_pathdb_files }}"
+            checkpoint_legacy_detail="${{ inputs.checkpoint_legacy_detail }}"
+            release_contract="${{ inputs.release_contract }}"
+            immutable_tag="${{ inputs.immutable_tag }}"
+          fi
+          {
+            echo "publish_channel=$publish_channel"
+            echo "include_pathdb_files=$include_pathdb_files"
+            echo "checkpoint_legacy_detail=$checkpoint_legacy_detail"
+            echo "release_contract=$release_contract"
+            echo "immutable_tag=$immutable_tag"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "### Effective V2 release configuration"
+            echo "- Event: ${{ github.event_name }}"
+            echo "- Publish channel: $publish_channel"
+            echo "- Release contract: $release_contract"
+            echo "- Include PathDB files: $include_pathdb_files"
+            echo "- Checkpoint legacy detail: $checkpoint_legacy_detail"
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Install IDC projection dependency
         run: python -m pip install --upgrade "idc-index>=0.12.3"
 
       - name: Validate transition candidate inputs
-        if: github.event_name == 'workflow_dispatch' && (inputs.release_contract == 'streamlined' || inputs.release_contract == 'streamlined_candidate')
+        if: steps.release_config.outputs.release_contract == 'streamlined' || steps.release_config.outputs.release_contract == 'streamlined_candidate'
         run: |
-          if [ "${{ inputs.checkpoint_legacy_detail }}" != "true" ]; then
+          if [ "${{ steps.release_config.outputs.checkpoint_legacy_detail }}" != "true" ]; then
             echo "::error::The streamlined candidate requires checkpoint_legacy_detail=true."
             exit 1
           fi
-          if [ "${{ inputs.release_contract }}" = "streamlined_candidate" ] \
-             && [ "${{ inputs.publish_channel }}" != "none" ]; then
+          if [ "${{ steps.release_config.outputs.release_contract }}" = "streamlined_candidate" ] \
+             && [ "${{ steps.release_config.outputs.publish_channel }}" != "none" ]; then
             echo "::error::The streamlined contract is evaluation-only and cannot be published."
             exit 1
           fi
@@ -152,7 +186,7 @@ jobs:
             --verify-sources
 
       - name: Restore unchanged legacy-detail transition checkpoint
-        if: github.event_name == 'workflow_dispatch' && inputs.checkpoint_legacy_detail == 'true'
+        if: steps.release_config.outputs.checkpoint_legacy_detail == 'true'
         uses: actions/cache@v4
         with:
           path: cache/tcia_v2_legacy_detail_checkpoint.sqlite.gz
@@ -168,7 +202,7 @@ jobs:
         run: |
           set -euo pipefail
           pathdb_args=()
-          if [ "${{ inputs.include_pathdb_files }}" = "false" ]; then
+          if [ "${{ steps.release_config.outputs.include_pathdb_files }}" = "false" ]; then
             pathdb_args+=(--no-pathdb-files)
           fi
           python scripts/tcia_public_non_dicom_metadata.py build \
@@ -184,7 +218,7 @@ jobs:
           mkdir -p cache/reports
           checkpoint_args=()
           parity_args=()
-          if [ "${{ inputs.checkpoint_legacy_detail }}" = "true" ]; then
+          if [ "${{ steps.release_config.outputs.checkpoint_legacy_detail }}" = "true" ]; then
             if [ -s cache/tcia_v2_legacy_detail_checkpoint.sqlite.gz ]; then
               gzip -dc cache/tcia_v2_legacy_detail_checkpoint.sqlite.gz \
                 > cache/tcia_v2_legacy_detail_checkpoint.sqlite
@@ -214,8 +248,8 @@ jobs:
           # The public artifact has absorbed these sources; free runner space
           # before producing the research and audit outputs.
           rm -f cache/nifti_metadata.sqlite cache/pathology_metadata.sqlite
-          if [ "${{ inputs.release_contract }}" = "streamlined" ] \
-             || [ "${{ inputs.release_contract }}" = "streamlined_candidate" ]; then
+          if [ "${{ steps.release_config.outputs.release_contract }}" = "streamlined" ] \
+             || [ "${{ steps.release_config.outputs.release_contract }}" = "streamlined_candidate" ]; then
             mv cache/public_non_dicom_metadata.sqlite cache/public_non_dicom_assembly.sqlite
             python scripts/tcia_v2_audit.py project-v3 \
               --artifact public_non_dicom \
@@ -324,8 +358,8 @@ jobs:
         run: |
           release_channel="stable"
           release_tag="tcia-metadata-v2-latest"
-          release_contract="${{ inputs.release_contract || 'full' }}"
-          if [ "${{ inputs.publish_channel }}" = "preview" ]; then
+          release_contract="${{ steps.release_config.outputs.release_contract }}"
+          if [ "${{ steps.release_config.outputs.publish_channel }}" = "preview" ]; then
             release_channel="preview"
             release_tag="tcia-metadata-v2-preview"
           fi
@@ -347,12 +381,12 @@ jobs:
             --manifest dist/tcia_metadata_v2_bundle_manifest.json
           if [ "$release_contract" = "streamlined" ] \
              || [ "$release_contract" = "streamlined_candidate" ]; then
-            if [ "${{ inputs.checkpoint_legacy_detail }}" != "true" ]; then
+            if [ "${{ steps.release_config.outputs.checkpoint_legacy_detail }}" != "true" ]; then
               echo "::error::The streamlined candidate requires checkpoint_legacy_detail=true."
               exit 1
             fi
             if [ "$release_contract" = "streamlined_candidate" ] \
-               && [ "${{ inputs.publish_channel }}" != "none" ]; then
+               && [ "${{ steps.release_config.outputs.publish_channel }}" != "none" ]; then
               echo "::error::The streamlined contract is evaluation-only and cannot be published."
               exit 1
             fi
@@ -369,7 +403,7 @@ jobs:
         run: |
           set -euo pipefail
           publish_requested="false"
-          channel="${{ inputs.publish_channel }}"
+          channel="${{ steps.release_config.outputs.publish_channel }}"
           tag=""
           if [ "${{ github.event_name }}" = "workflow_run" ]; then
             if gh release view tcia-metadata-v2-latest >/dev/null 2>&1; then
@@ -382,13 +416,13 @@ jobs:
           if [ "$channel" != "none" ] && [ -n "$channel" ]; then
             publish_requested="true"
           fi
-          if [ "$publish_requested" = "true" ] && [ "${{ inputs.include_pathdb_files }}" = "false" ]; then
+          if [ "$publish_requested" = "true" ] && [ "${{ steps.release_config.outputs.include_pathdb_files }}" = "false" ]; then
             echo "::error::Published V2 bundles must include the full PathDB inventory."
             exit 1
           fi
           if [ "$channel" = "stable" ] \
              && ! gh release view tcia-metadata-v2-latest >/dev/null 2>&1 \
-             && [ -z "${{ inputs.immutable_tag }}" ]; then
+             && [ -z "${{ steps.release_config.outputs.immutable_tag }}" ]; then
             echo "::error::The initial stable promotion requires immutable_tag."
             exit 1
           fi
@@ -401,8 +435,8 @@ jobs:
               tag="tcia-metadata-v2-preview"
             fi
             manifest_path="dist/tcia_metadata_v2_bundle_manifest.json"
-            if [ "${{ inputs.release_contract }}" = "streamlined" ] \
-               || [ "${{ inputs.release_contract }}" = "streamlined_candidate" ]; then
+            if [ "${{ steps.release_config.outputs.release_contract }}" = "streamlined" ] \
+               || [ "${{ steps.release_config.outputs.release_contract }}" = "streamlined_candidate" ]; then
               manifest_path="release-dist/tcia_metadata_v2_bundle_manifest.json"
             fi
             new_fingerprint="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["release_fingerprint"])' "$manifest_path")"
@@ -427,7 +461,7 @@ jobs:
           echo "- Reason: $reason" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload complete current-contract workflow artifact for evaluation
-        if: github.event_name == 'workflow_dispatch' && inputs.publish_channel == 'none' && inputs.release_contract == 'full'
+        if: github.event_name == 'workflow_dispatch' && steps.release_config.outputs.publish_channel == 'none' && steps.release_config.outputs.release_contract == 'full'
         uses: actions/upload-artifact@v6
         with:
           name: tcia-metadata-v2-candidate
@@ -436,7 +470,7 @@ jobs:
           retention-days: 30
 
       - name: Upload streamlined workflow artifact for evaluation
-        if: github.event_name == 'workflow_dispatch' && inputs.publish_channel == 'none' && inputs.release_contract == 'streamlined_candidate'
+        if: github.event_name == 'workflow_dispatch' && steps.release_config.outputs.publish_channel == 'none' && steps.release_config.outputs.release_contract == 'streamlined_candidate'
         uses: actions/upload-artifact@v6
         with:
           name: tcia-metadata-v2-streamlined-candidate
@@ -452,7 +486,7 @@ jobs:
           set -euo pipefail
           tag="${{ steps.release.outputs.tag }}"
           channel="${{ steps.release.outputs.channel }}"
-          release_contract="${{ inputs.release_contract || 'full' }}"
+          release_contract="${{ steps.release_config.outputs.release_contract }}"
           publish_dir="dist"
           if [ "$release_contract" = "streamlined" ]; then
             publish_dir="release-dist"
@@ -464,7 +498,7 @@ jobs:
             prerelease_args+=(--prerelease)
             title="TCIA metadata V2 preview"
           fi
-          immutable_tag="${{ inputs.immutable_tag }}"
+          immutable_tag="${{ steps.release_config.outputs.immutable_tag }}"
           if [ "$channel" = "stable" ] && [ -n "$immutable_tag" ]; then
             case "$immutable_tag" in
               tcia-metadata-v2-[0-9][0-9][0-9][0-9].[0-9][0-9]*) ;;
