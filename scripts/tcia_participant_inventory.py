@@ -49,7 +49,13 @@ DISPLAY_SOURCE_PRECEDENCE = {
     "crdc_ctdc": 3,
     "crdc_gc": 4,
     "crdc_idc": 5,
+    "tcia_brats_challenge": 99,
 }
+
+BRATS_SHORT_TITLE = "RSNA-ASNR-MICCAI-BraTS-2021"
+BCBM_SHORT_TITLE = "BCBM-RadioGenomics"
+BRAIN_TR_GAMMAKNIFE_SHORT_TITLE = "Brain-TR-GammaKnife"
+REMIND_SHORT_TITLE = "ReMIND"
 
 
 SCHEMA = """
@@ -195,19 +201,28 @@ SELECT
      FROM participant_identifiers i
      WHERE i.participant_key = p.participant_key) AS source_namespaces,
     COUNT(DISTINCT a.participant_asset_id) AS inventory_rows,
-    MAX(CASE WHEN a.access_level = 'open' THEN 1 ELSE 0 END) AS has_open_data,
-    MAX(CASE WHEN a.access_level = 'controlled' THEN 1 ELSE 0 END) AS has_controlled_data,
-    MAX(CASE WHEN a.access_level = 'open' AND instr(upper(COALESCE(a.file_format, '')), 'DICOM') > 0
+    MAX(CASE WHEN a.access_level = 'open' AND COALESCE(a.source_version, '') <> 'legacy'
+             THEN 1 ELSE 0 END) AS has_open_data,
+    MAX(CASE WHEN a.access_level = 'controlled' AND COALESCE(a.source_version, '') <> 'legacy'
+             THEN 1 ELSE 0 END) AS has_controlled_data,
+    MAX(CASE WHEN a.access_level = 'open'
+                  AND COALESCE(a.source_version, '') <> 'legacy'
+                  AND instr(upper(COALESCE(a.file_format, '')), 'DICOM') > 0
              THEN 1 ELSE 0 END) AS has_public_dicom,
-    MAX(CASE WHEN a.source_artifact = 'public_non_dicom_metadata'
+    MAX(CASE WHEN COALESCE(a.source_version, '') <> 'legacy'
+                  AND a.source_artifact = 'public_non_dicom_metadata'
                   AND (COALESCE(a.file_format, '') = ''
                        OR instr(upper(a.file_format), 'DICOM') = 0
                        OR instr(upper(a.file_format), 'NIFTI') > 0)
              THEN 1 ELSE 0 END) AS has_public_non_dicom,
-    MAX(CASE WHEN a.data_domain = 'clinical' THEN 1 ELSE 0 END) AS has_clinical,
-    group_concat(DISTINCT NULLIF(a.data_domain, '')) AS data_domains,
-    group_concat(DISTINCT NULLIF(a.modality, '')) AS modalities,
-    group_concat(DISTINCT NULLIF(a.file_format, '')) AS file_formats,
+    MAX(CASE WHEN a.data_domain = 'clinical' AND COALESCE(a.source_version, '') <> 'legacy'
+             THEN 1 ELSE 0 END) AS has_clinical,
+    group_concat(DISTINCT CASE WHEN COALESCE(a.source_version, '') <> 'legacy'
+                               THEN NULLIF(a.data_domain, '') END) AS data_domains,
+    group_concat(DISTINCT CASE WHEN COALESCE(a.source_version, '') <> 'legacy'
+                               THEN NULLIF(a.modality, '') END) AS modalities,
+    group_concat(DISTINCT CASE WHEN COALESCE(a.source_version, '') <> 'legacy'
+                               THEN NULLIF(a.file_format, '') END) AS file_formats,
     group_concat(DISTINCT a.managed_system) AS managed_systems
 FROM participants p
 LEFT JOIN participant_assets a USING(participant_key)
@@ -487,6 +502,48 @@ def ingest_public_non_dicom(
                 }),
             })
             imported += 1
+        if table_exists(source, "public_non_dicom_asset_participants"):
+            for row in source.execute(
+                """
+                SELECT DISTINCT subject_id, raw_subject_id, evidence_json
+                FROM public_non_dicom_asset_participants
+                WHERE lower(short_title) = lower(?)
+                  AND raw_subject_id GLOB 'BraTS2021_[0-9][0-9][0-9][0-9][0-9]'
+                """,
+                (BRATS_SHORT_TITLE,),
+            ):
+                resolved_id = str(row["subject_id"] or "").strip()
+                challenge_id = str(row["raw_subject_id"] or "").strip()
+                if challenge_id == resolved_id:
+                    # The dataset-scoped identifier already preserves this challenge ID.
+                    continue
+                evidence_json = str(row["evidence_json"] or "{}")
+                evidence = json.loads(evidence_json)
+                dataset_type, short_title = resolve_dataset_identity(
+                    dataset_types, BRATS_SHORT_TITLE, "Analysis Result"
+                )
+                key = participant_key(dataset_type, short_title, resolved_id)
+                if not conn.execute(
+                    "SELECT 1 FROM participants WHERE participant_key = ?", (key,)
+                ).fetchone():
+                    continue
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO participant_identifiers
+                    VALUES (?, ?, 'tcia_brats_challenge', 'challenge:BraTS2021',
+                            ?, ?, 'official_tcia_brats2021_workbook', ?)
+                    """,
+                    (
+                        stable_id("pid", key, "challenge:BraTS2021", challenge_id),
+                        key,
+                        challenge_id,
+                        challenge_id,
+                        json_dumps({
+                            "source_artifact": "public_non_dicom_metadata",
+                            "crosswalk": evidence,
+                        }),
+                    ),
+                )
         for row in source.execute(
             """
             SELECT dataset_type, short_title, source_system, imaging_domain, media_kind,
@@ -517,6 +574,91 @@ def ingest_public_non_dicom(
             )
     record_source(conn, "public_non_dicom_metadata", path, True, imported, "Participant-linked public non-DICOM summaries imported; unlinked dataset assets retained separately.")
     return imported
+
+
+def apply_brats_source_collection_links(conn: sqlite3.Connection) -> dict[str, int]:
+    """Record explicit Analysis Result-to-source Collection identity evidence."""
+    counts = {"linked_source_collection": 0, "source_participant_not_current": 0}
+    rows = conn.execute(
+        """
+        SELECT i.participant_key, i.raw_identifier, i.provenance_json
+        FROM participant_identifiers i
+        JOIN participants p USING(participant_key)
+        WHERE p.dataset_type = 'Analysis Result'
+          AND lower(p.short_title) = lower(?)
+          AND i.identifier_namespace = 'challenge:BraTS2021'
+        ORDER BY i.raw_identifier
+        """,
+        (BRATS_SHORT_TITLE,),
+    ).fetchall()
+    for row in rows:
+        provenance = json.loads(row["provenance_json"] or "{}")
+        crosswalk = provenance.get("crosswalk") or {}
+        source_collection = str(
+            crosswalk.get("source_collection_short_title") or ""
+        ).strip()
+        source_patient_id = str(
+            crosswalk.get("resolved_source_patient_id") or ""
+        ).strip()
+        if not source_collection or not source_patient_id:
+            continue
+        source_key = participant_key("Collection", source_collection, source_patient_id)
+        source_present = bool(
+            conn.execute(
+                "SELECT 1 FROM participants WHERE participant_key = ?", (source_key,)
+            ).fetchone()
+        )
+        status = (
+            "linked_source_collection"
+            if source_present
+            else "source_participant_not_current"
+        )
+        counts[status] += 1
+        conn.execute(
+            "UPDATE participants SET cross_dataset_identity_status = ? WHERE participant_key = ?",
+            (status, row["participant_key"]),
+        )
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO participant_identity_evidence
+            VALUES (?, ?, 'cross_dataset', 'official_tcia_brats2021_workbook',
+                    ?, 'high', ?, ?)
+            """,
+            (
+                stable_id(
+                    "identity_evidence", row["participant_key"], source_collection,
+                    source_patient_id,
+                ),
+                row["participant_key"],
+                "resolved" if source_present else "source_participant_not_current",
+                (
+                    "Official TCIA BraTS workbook links this Analysis Result participant "
+                    f"to {source_collection}/{source_patient_id}."
+                ),
+                json_dumps({
+                    **crosswalk,
+                    "source_collection_participant_key": source_key,
+                    "source_collection_participant_present": source_present,
+                }),
+            ),
+        )
+        if not source_present:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO participant_link_issues
+                VALUES (?, 'Analysis Result', ?, ?,
+                        'brats_source_collection_participant_not_current', 'open', ?, ?)
+                """,
+                (
+                    stable_id("participant_issue", BRATS_SHORT_TITLE, row["raw_identifier"]),
+                    BRATS_SHORT_TITLE,
+                    row["raw_identifier"],
+                    f"The official workbook names {source_collection}/{source_patient_id}, "
+                    "but that Collection participant is absent from the current inventory.",
+                    json_dumps(crosswalk),
+                ),
+            )
+    return counts
 
 
 def ingest_controlled(
@@ -896,6 +1038,7 @@ def resolve_within_dataset_identifiers(conn: sqlite3.Connection) -> dict[str, in
                COUNT(DISTINCT i.normalized_identifier) AS spelling_count
         FROM participant_identifiers i
         JOIN participants p USING(participant_key)
+        WHERE i.link_evidence <> 'official_tcia_brats2021_workbook'
         GROUP BY p.participant_key, p.dataset_type, p.short_title,
                  p.display_participant_id
         HAVING COUNT(DISTINCT i.identifier_namespace) > 1
@@ -1030,6 +1173,8 @@ def build_database(
                 include_clinical_values=include_clinical_values,
             ),
         }
+        brats_links = apply_brats_source_collection_links(conn)
+        counts.update({f"brats_{key}": value for key, value in brats_links.items()})
         counts["display_identifiers_selected"] = select_display_participant_ids(conn)
         resolution_counts = resolve_within_dataset_identifiers(conn)
         counts.update(resolution_counts)
@@ -1094,10 +1239,18 @@ def validate_database(
         if missing:
             errors.append("missing objects: " + ", ".join(missing))
         cross_dataset = conn.execute(
-            "SELECT COUNT(*) FROM participants WHERE cross_dataset_identity_status <> 'not_asserted'"
+            """
+            SELECT COUNT(*) FROM participants p
+            WHERE p.cross_dataset_identity_status <> 'not_asserted'
+              AND NOT EXISTS (
+                SELECT 1 FROM participant_identity_evidence e
+                WHERE e.participant_key = p.participant_key
+                  AND e.resolution_scope = 'cross_dataset'
+              )
+            """
         ).fetchone()[0]
         if cross_dataset:
-            errors.append(f"unexpected asserted cross-dataset identities: {cross_dataset}")
+            errors.append(f"cross-dataset identities without evidence: {cross_dataset}")
         duplicate_participants = conn.execute(
             """
             SELECT COUNT(*) FROM (
@@ -1137,6 +1290,7 @@ def validate_database(
             FROM participant_identifiers i
             JOIN participants p USING(participant_key)
             WHERE casefold(i.normalized_identifier) <> casefold(p.display_participant_id)
+              AND i.link_evidence <> 'official_tcia_brats2021_workbook'
             """
         ).fetchone()[0]
         if identifier_case_mismatches:
@@ -1153,6 +1307,11 @@ def validate_database(
               GROUP BY p.participant_key, p.within_dataset_identity_status
               HAVING COUNT(DISTINCT i.identifier_namespace) > 1
                  AND p.within_dataset_identity_status <> 'resolved'
+                 AND NOT EXISTS (
+                   SELECT 1 FROM participant_identity_evidence e
+                   WHERE e.participant_key = p.participant_key
+                     AND e.resolution_method = 'official_tcia_brats2021_workbook'
+                 )
             )
             """
         ).fetchone()[0]
@@ -1189,6 +1348,137 @@ def validate_database(
                 "WHERE dataset_type='Analysis Result'"
             ).fetchone()[0],
         }
+        if counts["participants"] > 100000:
+            brats_counts = {
+                "brats_participants": conn.execute(
+                    "SELECT COUNT(*) FROM participants WHERE dataset_type='Analysis Result' AND short_title=?",
+                    (BRATS_SHORT_TITLE,),
+                ).fetchone()[0],
+                "brats_source_display_ids": conn.execute(
+                    "SELECT COUNT(*) FROM participants WHERE dataset_type='Analysis Result' AND short_title=? AND display_participant_id NOT LIKE 'BraTS2021_%'",
+                    (BRATS_SHORT_TITLE,),
+                ).fetchone()[0],
+                "brats_challenge_display_ids": conn.execute(
+                    "SELECT COUNT(*) FROM participants WHERE dataset_type='Analysis Result' AND short_title=? AND display_participant_id LIKE 'BraTS2021_%'",
+                    (BRATS_SHORT_TITLE,),
+                ).fetchone()[0],
+                "brats_alternate_challenge_aliases": conn.execute(
+                    "SELECT COUNT(*) FROM participant_identifiers i JOIN participants p USING(participant_key) WHERE p.short_title=? AND i.identifier_namespace='challenge:BraTS2021'",
+                    (BRATS_SHORT_TITLE,),
+                ).fetchone()[0],
+                "brats_linked_source_collection": conn.execute(
+                    "SELECT COUNT(*) FROM participants WHERE short_title=? AND cross_dataset_identity_status='linked_source_collection'",
+                    (BRATS_SHORT_TITLE,),
+                ).fetchone()[0],
+                "brats_source_participant_not_current": conn.execute(
+                    "SELECT COUNT(*) FROM participants WHERE short_title=? AND cross_dataset_identity_status='source_participant_not_current'",
+                    (BRATS_SHORT_TITLE,),
+                ).fetchone()[0],
+            }
+            counts.update(brats_counts)
+            expected_brats = {
+                "brats_participants": 1479,
+                "brats_source_display_ids": 1066,
+                "brats_challenge_display_ids": 413,
+                "brats_alternate_challenge_aliases": 1066,
+                "brats_linked_source_collection": 1060,
+                "brats_source_participant_not_current": 6,
+            }
+            for name, expected in expected_brats.items():
+                if brats_counts[name] != expected:
+                    errors.append(
+                        f"BraTS participant coverage regression: {name}={brats_counts[name]} != {expected}"
+                    )
+            bcbm_counts = {
+                "bcbm_participants": conn.execute(
+                    "SELECT COUNT(*) FROM agent_participants WHERE short_title = ?",
+                    (BCBM_SHORT_TITLE,),
+                ).fetchone()[0],
+                "bcbm_with_public_non_dicom": conn.execute(
+                    "SELECT COUNT(*) FROM agent_participants WHERE short_title = ? AND has_public_non_dicom = 1",
+                    (BCBM_SHORT_TITLE,),
+                ).fetchone()[0],
+                "bcbm_with_clinical": conn.execute(
+                    "SELECT COUNT(*) FROM agent_participants WHERE short_title = ? AND has_clinical = 1",
+                    (BCBM_SHORT_TITLE,),
+                ).fetchone()[0],
+            }
+            counts.update(bcbm_counts)
+            for name, expected in {
+                "bcbm_participants": 165,
+                "bcbm_with_public_non_dicom": 165,
+                "bcbm_with_clinical": 165,
+            }.items():
+                if bcbm_counts[name] != expected:
+                    errors.append(
+                        f"BCBM participant coverage regression: {name}={bcbm_counts[name]} != {expected}"
+                    )
+            brain_tr_counts = {
+                "brain_tr_gammaknife_participants": conn.execute(
+                    "SELECT COUNT(*) FROM agent_participants WHERE short_title = ?",
+                    (BRAIN_TR_GAMMAKNIFE_SHORT_TITLE,),
+                ).fetchone()[0],
+                "brain_tr_gammaknife_with_controlled": conn.execute(
+                    "SELECT COUNT(*) FROM agent_participants WHERE short_title = ? AND has_controlled_data = 1",
+                    (BRAIN_TR_GAMMAKNIFE_SHORT_TITLE,),
+                ).fetchone()[0],
+                "brain_tr_gammaknife_with_clinical": conn.execute(
+                    "SELECT COUNT(*) FROM agent_participants WHERE short_title = ? AND has_clinical = 1",
+                    (BRAIN_TR_GAMMAKNIFE_SHORT_TITLE,),
+                ).fetchone()[0],
+                "brain_tr_gammaknife_with_current_public_dicom": conn.execute(
+                    "SELECT COUNT(*) FROM agent_participants WHERE short_title = ? AND has_public_dicom = 1",
+                    (BRAIN_TR_GAMMAKNIFE_SHORT_TITLE,),
+                ).fetchone()[0],
+            }
+            counts.update(brain_tr_counts)
+            for name, expected in {
+                "brain_tr_gammaknife_participants": 47,
+                "brain_tr_gammaknife_with_controlled": 47,
+                "brain_tr_gammaknife_with_clinical": 47,
+                "brain_tr_gammaknife_with_current_public_dicom": 0,
+            }.items():
+                if brain_tr_counts[name] != expected:
+                    errors.append(
+                        "Brain-TR-GammaKnife participant coverage regression: "
+                        f"{name}={brain_tr_counts[name]} != {expected}"
+                    )
+            remind_counts = {
+                "remind_participants": conn.execute(
+                    "SELECT COUNT(*) FROM agent_participants WHERE short_title = ?",
+                    (REMIND_SHORT_TITLE,),
+                ).fetchone()[0],
+                "remind_with_public_dicom": conn.execute(
+                    "SELECT COUNT(*) FROM agent_participants WHERE short_title = ? AND has_public_dicom = 1",
+                    (REMIND_SHORT_TITLE,),
+                ).fetchone()[0],
+                "remind_with_clinical": conn.execute(
+                    "SELECT COUNT(*) FROM agent_participants WHERE short_title = ? AND has_clinical = 1",
+                    (REMIND_SHORT_TITLE,),
+                ).fetchone()[0],
+                "remind_with_public_non_dicom": conn.execute(
+                    "SELECT COUNT(*) FROM agent_participants "
+                    "WHERE short_title = ? AND has_public_non_dicom = 1",
+                    (REMIND_SHORT_TITLE,),
+                ).fetchone()[0],
+                "remind_unlinked_public_nrrd_assets": conn.execute(
+                    "SELECT COUNT(*) FROM dataset_assets_without_participant_crosswalk "
+                    "WHERE short_title = ? AND upper(file_format) = 'NRRD'",
+                    (REMIND_SHORT_TITLE,),
+                ).fetchone()[0],
+            }
+            counts.update(remind_counts)
+            for name, expected in {
+                "remind_participants": 114,
+                "remind_with_public_dicom": 114,
+                "remind_with_clinical": 114,
+                "remind_with_public_non_dicom": 114,
+                "remind_unlinked_public_nrrd_assets": 0,
+            }.items():
+                if remind_counts[name] != expected:
+                    errors.append(
+                        f"ReMIND participant coverage regression: {name}={remind_counts[name]} != {expected}"
+                    )
         thresholds = {
             "collection_participants": minimum_collection_participants,
             "collections": minimum_collections,

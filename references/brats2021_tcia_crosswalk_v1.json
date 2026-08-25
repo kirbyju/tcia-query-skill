@@ -1,0 +1,22 @@
+{
+  "artifact": "brats2021_tcia_crosswalk_v1",
+  "challenge_only_rows": 413,
+  "known_exclusion": "BraTS-TCGA test-set data availability is outside this crosswalk.",
+  "normalization_rules": {
+    "UCSF-PDGM": "Prefix UCSF-PDGM- and zero-pad the numeric portal value to four digits.",
+    "UPENN-GBM": "Remove the trailing underscore study suffix from the portal value.",
+    "additional_private_or_unnamed_groups": "Retain the BraTS challenge ID without asserting a source Collection.",
+    "numeric_test_rows": "Normalize the eight workbook-only numeric forms to the existing BraTS2021_ five-digit alias; do not assert a TCGA source link.",
+    "other_named_source_collections": "Preserve the portal PatientID exactly."
+  },
+  "reviewed_at": "2026-08-25",
+  "row_count": 1479,
+  "source_collection_identifier_rows": 1066,
+  "source_columns": {
+    "challenge_id": "BraTS2021 ID",
+    "raw_tcia_patient_id": "PatientID on TCIA Radiology Portal",
+    "source_group": "Data Collection (as on TCIA+additional)"
+  },
+  "source_sha256": "223243c5821c282e90da980ba38d860ab2d2a597d1f4f1800ebe227329a2dc0b",
+  "source_url": "https://www.cancerimagingarchive.net/wp-content/uploads/BraTS2021_MappingToTCIA.xlsx"
+}

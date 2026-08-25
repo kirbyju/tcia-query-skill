@@ -401,6 +401,13 @@ def validate_db(path: Path) -> dict[str, Any]:
             WHERE short_title = 'BCBM-RadioGenomics'
             """
         ).fetchone()
+        bcbm_subjects = conn.execute(
+            """
+            SELECT COUNT(DISTINCT NULLIF(subject_id, ''))
+            FROM radiology_series
+            WHERE short_title = 'BCBM-RadioGenomics'
+            """
+        ).fetchone()[0]
         summary = conn.execute(
             """
             SELECT * FROM agent_nifti_characteristics_summary
@@ -427,6 +434,12 @@ def validate_db(path: Path) -> dict[str, Any]:
         if unlinked_segmentations:
             semantic_errors.append(
                 f"BCBM-RadioGenomics has {unlinked_segmentations} unlinked reviewed segmentations"
+            )
+        if (expected["source_images"], expected["segmentations"], expected["studies"], bcbm_subjects) != (
+            268, 2821, 268, 165
+        ):
+            semantic_errors.append(
+                "BCBM-RadioGenomics expected 165 patients, 268 scans, 268 source images, and 2821 segmentations"
             )
     vs_title = "Vestibular-Schwannoma-MC-RC2"
     vs_files = conn.execute(

@@ -399,6 +399,22 @@ def strip_session_suffix(value: str) -> str:
     return text
 
 
+BCBM_SCAN_ID = re.compile(r"^(BCBM-RadioGenomics-\d+)-(\d+)$", re.IGNORECASE)
+
+
+def bcbm_patient_and_scan_id(
+    short_title: str, package_path: str
+) -> tuple[str, str]:
+    """Return the reviewed BCBM patient and scan identifiers from a package path."""
+    if normalize_key(short_title) != normalize_key("BCBM-RadioGenomics"):
+        return "", ""
+    for part in split_package_path(package_path):
+        match = BCBM_SCAN_ID.fullmatch(part.strip())
+        if match:
+            return match.group(1), part.strip()
+    return "", ""
+
+
 def path_component_looks_like_subject_id(value: str) -> bool:
     text = value.strip("._- ")
     if not text:
@@ -479,6 +495,10 @@ def infer_patient_id_from_path(short_title: str, package_path: str) -> tuple[str
     parts = split_package_path(package_path)
     if not parts:
         return "", ""
+
+    bcbm_patient_id, _ = bcbm_patient_and_scan_id(short_title, package_path)
+    if bcbm_patient_id:
+        return bcbm_patient_id, "bcbm_reviewed_scan_suffix"
 
     for index, part in enumerate(parts[:-1]):
         if index == 0 and path_component_looks_like_package_root(part, short_title):
@@ -2876,6 +2896,9 @@ def build_nifti_file_series(conn: sqlite3.Connection) -> None:
             return
         record["normalized"]["PatientID"] = patient_id
         record["metadata_sources"].add(f"path_patient_id:{method}")
+        _, bcbm_scan_id = bcbm_patient_and_scan_id(short_title, path)
+        if bcbm_scan_id:
+            record["metadata_sources"].add(f"path_scan_id:{bcbm_scan_id}")
 
     for row in conn.execute("SELECT * FROM normalized_series_rows"):
         nifti_file = clean_package_path(row["nifti_file"] or "")
@@ -3865,6 +3888,9 @@ def build_canonical_non_dicom_layer(conn: sqlite3.Connection) -> None:
         study_id, study_id_source = infer_study_id(row)
         series_id, series_id_source = infer_series_id(row, radiology_id)
         object_type = derived_type or "NIfTI image"
+        _, bcbm_scan_id = bcbm_patient_and_scan_id(
+            row["short_title"], row["package_path"]
+        )
         radiology_records.append(
             (
                 radiology_id,
@@ -3876,7 +3902,7 @@ def build_canonical_non_dicom_layer(conn: sqlite3.Connection) -> None:
                 row["file_name"],
                 row["package_path"],
                 row["PatientID"],
-                "",
+                bcbm_scan_id,
                 study_id,
                 study_id_source,
                 series_id,

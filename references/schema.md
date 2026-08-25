@@ -27,7 +27,7 @@ Automated decisions use `decision_status='accepted_automated'` and record
 `human_reviewed=false` in provenance; they require complete, unambiguous
 download coverage. Partial candidates remain in the review-issues view.
 
-Public non-DICOM schema v6 represents participant cardinality in
+Public non-DICOM schema v7 represents participant cardinality in
 `public_non_dicom_asset_participants` and exposes
 `agent_public_non_dicom_asset_participants`. Query that junction for file-level
 Participant Explorer drill-downs, including shared assets such as HANCOCK whole
@@ -39,6 +39,17 @@ asset row would be wasteful. The initial use is the reviewed BraTS 2021 public
 DICOM trees that are available through Aspera but absent from IDC; these rows
 remain distinguishable with `file_format='DICOM'` and
 `source_system='tcia_aspera'`.
+
+For `RSNA-ASNR-MICCAI-BraTS-2021`, the canonical junction `subject_id` uses
+the original source Collection PatientID when the reviewed TCIA workbook names
+one, while `raw_subject_id` retains the `BraTS2021_NNNNN` alias. Query
+`agent_public_non_dicom_crosswalk_evidence` for the
+`official_tcia_brats2021_workbook` method and its source Collection, workbook
+row, URL, and SHA-256 provenance. The Participant Inventory retains the
+Analysis Result scope, exposes the BraTS alias in
+`agent_participant_identifiers`, and records source Collection linkage in
+`agent_participant_identity_evidence` without merging Collection and Analysis
+Result participants.
 
 The controlled-access and clinical SQLite databases are installed with the V2
 `research_detail` profile and documented in `references/controlled-access.md`
@@ -643,7 +654,7 @@ ORDER BY subject_id;
 Reviewed BCBM-RadioGenomics characteristics:
 
 ```sql
-SELECT subject_id, study_id, file_name, object_role, associated_imaging_modality,
+SELECT subject_id, procedure_id, study_id, file_name, object_role, associated_imaging_modality,
        segmentation_representation, source_nifti_volume_file_name,
        source_dicom_series_instance_uid,
        classification_confidence

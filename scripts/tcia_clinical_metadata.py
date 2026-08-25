@@ -327,10 +327,35 @@ SOURCE_COLUMN_CONCEPT_OVERRIDES = {
     # Scanner and file-grain fields use the longitudinal observation surface
     # below so repeated visits are not misclassified as patient conflicts.
     ("yalebrainmetslongitudinal", "ageatimagingyears"): "age_at_imaging_years",
+    ("bcbmradiogenomics", "er"): "estrogen_receptor_status",
+    ("bcbmradiogenomics", "pr"): "progesterone_receptor_status",
+    ("bcbmradiogenomics", "her2"): "her2_status",
+    ("braintrgammaknife", "diagnosisonlywantmets"): "metastatic_diagnosis",
+    ("braintrgammaknife", "primarydiagnosis"): "primary_diagnosis",
+    # ReMIND's dictionary defines Age relative to surgery, not imaging.
+    ("remind", "age"): "age_at_treatment_years",
+    ("remind", "whograde"): "grade",
+    ("remind", "histopathology"): "primary_diagnosis",
+    ("remind", "idhmutant"): "idh_status",
+    ("remind", "1p19qcodeleted"): "chromosomal_1p19q_status",
+    ("remind", "mgmtpromotermethylation"): "mgmt_status",
+    ("remind", "laterality"): "tumor_laterality",
+    ("remind", "previouscraniotomy"): "previous_craniotomy",
+    ("remind", "postoperativegtr"): "postoperative_extent_of_resection",
+    ("remind", "intraoperativegtr"): "intraoperative_extent_of_resection",
+    ("remind", "tumorlocation"): "tumor_location",
+    ("remind", "preoperativetumorvolume"): "preoperative_tumor_volume_ml",
+    ("remind", "awakecraniotomy"): "awake_craniotomy",
+    ("remind", "preoperativemriscanner"): "preoperative_mri_scanner",
+    ("remind", "tesla"): "magnetic_field_strength_t",
+    ("remind", "ultrasoundmissing"): "ultrasound_missing_reason",
 }
 
 SOURCE_COLUMN_UNIT_OVERRIDES = {
     ("yalebrainmetslongitudinal", "ageatimagingyears"): "years",
+    ("remind", "age"): "years",
+    ("remind", "preoperativetumorvolume"): "mL",
+    ("remind", "tesla"): "T",
 }
 
 CURATED_SCREENING_DIAGNOSIS_RESOLUTIONS = {
@@ -478,6 +503,12 @@ SUBJECT_COLUMN_OVERRIDES = {
     "ucsdvslongitudinal": {"id"},
     "ucsfpdgm": {"id"},
     "upenngbm": {"id"},
+    # Both official BCBM workbooks identify an imaging visit with the full
+    # patient-plus-scan identifier. The reviewed mapping below projects it to
+    # patient grain while retaining the source value in the raw row.
+    "bcbmradiogenomics": {"id", "filenameprefix"},
+    "braintrgammaknife": {"uniqueptid"},
+    "remind": {"casenumber"},
 }
 
 # Increment only the affected official downloads when a reviewed identifier
@@ -492,6 +523,9 @@ OFFICIAL_SOURCE_TRANSFORM_VERSIONS = {
     "ucsfpdgm": 1,
     "upenngbm": 1,
     "yalebrainmetslongitudinal": 1,
+    "bcbmradiogenomics": 1,
+    "braintrgammaknife": 1,
+    "remind": 1,
 }
 
 REVIEWED_OFFICIAL_COHORT_PATTERNS = {
@@ -500,6 +534,9 @@ REVIEWED_OFFICIAL_COHORT_PATTERNS = {
     "UCSD-VS-Longitudinal": r"VS_\d{4}",
     "UCSF-PDGM": r"UCSF-PDGM-\d{4}",
     "UPENN-GBM": r"UPENN-GBM-\d{5}",
+    "BCBM-RadioGenomics": r"BCBM-RadioGenomics-\d+",
+    "Brain-TR-GammaKnife": r"GK_\d{3}",
+    "ReMIND": r"ReMIND-\d{3}",
 }
 
 HUNGARIAN_COLORECTAL_ICD10 = {
@@ -1223,24 +1260,40 @@ def ingest_official_source_dictionary(
     frame: Any,
 ) -> int:
     """Preserve reviewed official workbook dictionaries as queryable rows."""
-    if normalize_name(short_title) != "yalebrainmetslongitudinal":
-        return 0
-    if not str(table_name).casefold().endswith("::data dictionary"):
+    dataset = normalize_name(short_title)
+    is_yale = dataset == "yalebrainmetslongitudinal" and str(
+        table_name
+    ).casefold().endswith("::data dictionary")
+    is_remind = dataset == "remind" and str(table_name).casefold().endswith(
+        "::remind data dictionary"
+    )
+    if not is_yale and not is_remind:
         return 0
     columns = list(frame.columns)
     if len(columns) < 2:
         return 0
     label_column, description_column = columns[:2]
     inserted = 0
-    for index, record in frame.iterrows():
-        field_label = clean_value(record[label_column])
-        description = clean_value(record[description_column])
-        field_name = YALE_BRAIN_METS_DICTIONARY_FIELDS.get(
-            normalize_name(field_label)
+    records: list[tuple[int, str, str]] = []
+    if is_remind:
+        # The first ReMIND dictionary entry is stored in the worksheet header.
+        records.append((1, clean_value(label_column), clean_value(description_column)))
+    records.extend(
+        (
+            int(index) + 2 if isinstance(index, int) else offset + 2,
+            clean_value(record[label_column]),
+            clean_value(record[description_column]),
+        )
+        for offset, (index, record) in enumerate(frame.iterrows())
+    )
+    for row_number, field_label, description in records:
+        field_name = (
+            field_label
+            if is_remind
+            else YALE_BRAIN_METS_DICTIONARY_FIELDS.get(normalize_name(field_label))
         )
         if not field_name:
             continue
-        row_number = int(index) + 2 if isinstance(index, int) else inserted + 2
         dictionary_id = stable_id(
             source_id, table_name, row_number, field_name, description
         )
@@ -1268,6 +1321,65 @@ def ingest_official_source_dictionary(
         )
         inserted += 1
     return inserted
+
+
+def ingest_brain_tr_gammaknife_observation(
+    conn: sqlite3.Connection,
+    *,
+    source_id: str,
+    short_title: str,
+    subject_id: str,
+    table_name: str,
+    row_number: int,
+    row: dict[str, Any],
+) -> int:
+    """Retain Gamma Knife treatment courses and lesion outcomes at source grain."""
+    if normalize_name(short_title) != "braintrgammaknife":
+        return 0
+    sheet_name = str(table_name).rsplit("::", 1)[-1].casefold()
+    normalized = {normalize_name(key): clean_value(value) for key, value in row.items()}
+    if sheet_name == "course_level":
+        observation_type = "radiotherapy_course"
+        file_name = ""
+    elif sheet_name == "lesion_level":
+        observation_type = "lesion_followup_outcome"
+        file_name = normalized.get("lesionnameinnrrdfiles", "")
+    else:
+        return 0
+    cleaned_row = {str(key): clean_value(value) for key, value in row.items()}
+    normalized_subject = clean_value(subject_id)
+    subject_key = f"{normalize_name(short_title)}:{normalize_subject(normalized_subject)}"
+    row_json = json_dumps(cleaned_row)
+    source_row_id = stable_id(source_id, table_name, row_number, subject_key, row_json)
+    observation_id = stable_id("observation", source_row_id, observation_type)
+    conn.execute(
+        """INSERT OR REPLACE INTO clinical_longitudinal_observations
+           (observation_id, source_row_id, source_id, short_title, subject_id,
+            observation_type, study_datetime, file_name, attributes_json,
+            provenance_json)
+           VALUES (?, ?, ?, ?, ?, ?, '', ?, ?, ?)""",
+        (
+            observation_id,
+            source_row_id,
+            source_id,
+            short_title,
+            normalized_subject,
+            observation_type,
+            file_name,
+            row_json,
+            json_dumps(
+                {
+                    "table_name": table_name,
+                    "row_number": row_number,
+                    "source_patient_id": normalized.get("uniqueptid", ""),
+                    "treatment_course": normalized.get("course", "")
+                    or normalized.get("treatmentcourse", ""),
+                    "lesion_number": normalized.get("lesion", ""),
+                }
+            ),
+        ),
+    )
+    return 1
 
 
 def ingest_yale_longitudinal_observation(
@@ -1316,6 +1428,71 @@ def ingest_yale_longitudinal_observation(
             clean_value(row.get("file_name")),
             row_json,
             json_dumps({"table_name": table_name, "row_number": row_number}),
+        ),
+    )
+    return 1
+
+
+def ingest_bcbm_longitudinal_observation(
+    conn: sqlite3.Connection,
+    *,
+    source_id: str,
+    short_title: str,
+    subject_id: str,
+    table_name: str,
+    row_number: int,
+    row: dict[str, Any],
+) -> int:
+    """Preserve BCBM scan and radiomics rows at their native longitudinal grain."""
+    if normalize_name(short_title) != "bcbmradiogenomics":
+        return 0
+    normalized = {normalize_name(key): clean_value(value) for key, value in row.items()}
+    scan_id = normalized.get("id") or normalized.get("filenameprefix") or ""
+    if not re.fullmatch(r"BCBM-RadioGenomics-\d+-\d+", scan_id, re.IGNORECASE):
+        return 0
+    sheet_name = str(table_name).rsplit("::", 1)[-1].casefold()
+    if sheet_name == "clinical+genetics".casefold():
+        observation_type = "scanner_clinical_scan"
+        study_datetime = normalized.get("year", "")
+        file_name = f"{scan_id}_image_ss_n4.nii.gz"
+    elif sheet_name == "merged_orig".casefold():
+        observation_type = "segmentation_radiomics"
+        study_datetime = ""
+        segmentation_name = normalized.get("segmentationname", "")
+        file_name = (
+            f"{scan_id}_{segmentation_name}.nii.gz" if segmentation_name else ""
+        )
+    else:
+        return 0
+    cleaned_row = {str(key): clean_value(value) for key, value in row.items()}
+    normalized_subject = clean_value(subject_id)
+    subject_key = f"{normalize_name(short_title)}:{normalize_subject(normalized_subject)}"
+    row_json = json_dumps(cleaned_row)
+    source_row_id = stable_id(source_id, table_name, row_number, subject_key, row_json)
+    observation_id = stable_id("observation", source_row_id, observation_type)
+    conn.execute(
+        """INSERT OR REPLACE INTO clinical_longitudinal_observations
+           (observation_id, source_row_id, source_id, short_title, subject_id,
+            observation_type, study_datetime, file_name, attributes_json,
+            provenance_json)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            observation_id,
+            source_row_id,
+            source_id,
+            short_title,
+            normalized_subject,
+            observation_type,
+            study_datetime,
+            file_name,
+            row_json,
+            json_dumps(
+                {
+                    "table_name": table_name,
+                    "row_number": row_number,
+                    "source_scan_id": scan_id,
+                }
+            ),
         ),
     )
     return 1
@@ -1408,6 +1585,18 @@ def official_subject_id_mapping(
         match = re.fullmatch(r"(VS_\d{4})_\d+", subject_id)
         if match:
             return match.group(1), "strip_visit_suffix"
+    if dataset == "bcbmradiogenomics":
+        match = re.fullmatch(r"(BCBM-RadioGenomics-\d+)-\d+", subject_id, re.IGNORECASE)
+        if match:
+            return match.group(1), "strip_scan_suffix"
+    if dataset == "braintrgammaknife":
+        match = re.fullmatch(r"(\d+)(?:\.0+)?", subject_id)
+        if match:
+            return f"GK_{int(match.group(1)):03d}", "dataset_prefix_zero_pad_3"
+    if dataset == "remind":
+        match = re.fullmatch(r"(?:ReMIND-)?(\d+)(?:\.0+)?", subject_id, re.IGNORECASE)
+        if match:
+            return f"ReMIND-{int(match.group(1)):03d}", "dataset_prefix_zero_pad_3"
     if dataset in SUBJECT_COLUMN_OVERRIDES:
         return subject_id, "dataset_specific_exact_id"
     return subject_id, "identity"
@@ -1453,6 +1642,15 @@ def is_clinical_download(row: sqlite3.Row) -> bool:
         else ""
     )
     if (
+        normalize_name(row["short_title"] if "short_title" in keys else "")
+        == "braintrgammaknife"
+        and str(row["download_id"] if "download_id" in keys else "")
+        in {"41531", "41533"}
+    ):
+        # These are explanatory DOCX documents, not patient tables. Their
+        # WordPress provenance remains in the base snapshot.
+        return False
+    if (
         "radiology images" in download_types
         and "clinical data" not in download_types
         and "dicom" in file_types
@@ -1462,6 +1660,12 @@ def is_clinical_download(row: sqlite3.Row) -> bool:
         str(row[key] or "")
         for key in ("download_title", "download_types", "data_types", "description")
     ).lower()
+    if (
+        normalize_name(row["short_title"] if "short_title" in keys else "")
+        == "bcbmradiogenomics"
+        and str(row["download_id"] if "download_id" in keys else "") in {"50323", "50399"}
+    ):
+        return True
     return any(
         token in haystack
         for token in (
@@ -3571,6 +3775,14 @@ def ingest_official_bytes(
             facts: list[tuple[str, str, str, str | None]] = []
             for column in frame.columns:
                 if (
+                    normalize_name(row["short_title"]) == "bcbmradiogenomics"
+                    and normalize_name(column) == "age"
+                ):
+                    # Age is scan-specific in this longitudinal cohort and is
+                    # retained in the observation row instead of flattened to
+                    # a potentially conflicting patient-level fact.
+                    continue
+                if (
                     normalize_name(row["short_title"]) == "ea1141"
                     and normalize_name(column) in EA1141_HANDLED_COLUMNS
                 ):
@@ -3642,6 +3854,24 @@ def ingest_official_bytes(
                 },
             ):
                 ingest_yale_longitudinal_observation(
+                    conn,
+                    source_id=source_id,
+                    short_title=row["short_title"],
+                    subject_id=subject_id,
+                    table_name=table_name,
+                    row_number=source_row_number,
+                    row=values,
+                )
+                ingest_bcbm_longitudinal_observation(
+                    conn,
+                    source_id=source_id,
+                    short_title=row["short_title"],
+                    subject_id=subject_id,
+                    table_name=table_name,
+                    row_number=source_row_number,
+                    row=values,
+                )
+                ingest_brain_tr_gammaknife_observation(
                     conn,
                     source_id=source_id,
                     short_title=row["short_title"],
@@ -6619,6 +6849,9 @@ def validate(db_path: Path) -> dict[str, Any]:
     qc_counts = {}
     semantic_errors = 0
     relationship_errors = 0
+    bcbm_counts: dict[str, int] = {}
+    brain_tr_gammaknife_counts: dict[str, int] = {}
+    remind_counts: dict[str, int] = {}
     if not missing_tables:
         qc_counts = {
             row[0]: row[1]
@@ -6647,6 +6880,61 @@ def validate(db_path: Path) -> dict[str, Any]:
                   OR (status = 'matched' AND matched_subjects = 0)
                   OR (status <> 'matched' AND inherited_facts > 0)"""
         ).fetchone()[0]
+        bcbm_counts = {
+            "subjects": conn.execute(
+                "SELECT COUNT(DISTINCT subject_id) FROM clinical_rows WHERE short_title = 'BCBM-RadioGenomics'"
+            ).fetchone()[0],
+            "clinical_scan_observations": conn.execute(
+                """SELECT COUNT(*) FROM clinical_longitudinal_observations
+                   WHERE short_title = 'BCBM-RadioGenomics'
+                     AND observation_type = 'scanner_clinical_scan'"""
+            ).fetchone()[0],
+            "radiomics_observations": conn.execute(
+                """SELECT COUNT(*) FROM clinical_longitudinal_observations
+                   WHERE short_title = 'BCBM-RadioGenomics'
+                     AND observation_type = 'segmentation_radiomics'"""
+            ).fetchone()[0],
+        }
+        if any(bcbm_counts.values()) and bcbm_counts != {
+            "subjects": 165,
+            "clinical_scan_observations": 268,
+            "radiomics_observations": 2825,
+        }:
+            semantic_errors += 1
+        brain_tr_gammaknife_counts = {
+            "subjects": conn.execute(
+                "SELECT COUNT(DISTINCT subject_id) FROM clinical_rows WHERE short_title = 'Brain-TR-GammaKnife' AND source_id LIKE 'tcia-download:%'"
+            ).fetchone()[0],
+            "course_observations": conn.execute(
+                """SELECT COUNT(*) FROM clinical_longitudinal_observations
+                   WHERE short_title = 'Brain-TR-GammaKnife'
+                     AND observation_type = 'radiotherapy_course'"""
+            ).fetchone()[0],
+            "lesion_observations": conn.execute(
+                """SELECT COUNT(*) FROM clinical_longitudinal_observations
+                   WHERE short_title = 'Brain-TR-GammaKnife'
+                     AND observation_type = 'lesion_followup_outcome'"""
+            ).fetchone()[0],
+        }
+        if any(brain_tr_gammaknife_counts.values()) and brain_tr_gammaknife_counts != {
+            "subjects": 47,
+            "course_observations": 76,
+            "lesion_observations": 244,
+        }:
+            semantic_errors += 1
+        remind_counts = {
+            "official_subjects": conn.execute(
+                "SELECT COUNT(DISTINCT subject_id) FROM clinical_rows WHERE short_title = 'ReMIND' AND source_id LIKE 'tcia-download:%'"
+            ).fetchone()[0],
+            "dictionary_fields": conn.execute(
+                "SELECT COUNT(*) FROM clinical_source_dictionary WHERE short_title = 'ReMIND'"
+            ).fetchone()[0],
+        }
+        if any(remind_counts.values()) and remind_counts != {
+            "official_subjects": 114,
+            "dictionary_fields": 32,
+        }:
+            semantic_errors += 1
     conn.close()
     result = {
         "ok": (
@@ -6664,6 +6952,9 @@ def validate(db_path: Path) -> dict[str, Any]:
         "qc_finding_counts": qc_counts,
         "semantic_errors": semantic_errors,
         "relationship_errors": relationship_errors,
+        "bcbm_counts": bcbm_counts,
+        "brain_tr_gammaknife_counts": brain_tr_gammaknife_counts,
+        "remind_counts": remind_counts,
     }
     if not result["ok"]:
         raise RuntimeError(json.dumps(result, indent=2))

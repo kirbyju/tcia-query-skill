@@ -358,6 +358,32 @@ longitudinal age changes as conflicts. The public non-DICOM detail artifact
 also joins the file-level and study-level values to NIfTI assets by exact file
 name plus patient/study datetime.
 
+For `BCBM-RadioGenomics`, the official clinical and radiomics workbooks use
+268 patient-plus-scan identifiers. A reviewed dataset-specific mapping removes
+only the final numeric scan suffix to yield 165 patient IDs; every raw scan ID
+and source row remains available in `clinical_rows` and
+`agent_clinical_longitudinal_observations`. The clinical workbook contributes
+268 `scanner_clinical_scan` observations. The radiomics workbook contributes
+2,825 `segmentation_radiomics` observations with 107 feature columns. The
+public non-DICOM artifact joins 2,774 rows by exact filename and 47 by a unique
+reviewed punctuation-normalized filename, covering all 2,821 published masks.
+Four workbook rows without a current public mask remain explicit source-side
+QC exceptions rather than being discarded.
+
+For `Brain-TR-GammaKnife`, numeric `unique_pt_id` values in the official
+workbook are projected to the controlled Collection identifiers by the reviewed
+`number -> GK_NNN` rule. All raw identifiers remain in row provenance. The
+course sheet contributes 76 `radiotherapy_course` observations for 47 patients;
+the lesion sheet contributes 244 `lesion_followup_outcome` observations and
+preserves its source NRRD lesion name without asserting that the named file is
+currently retrievable.
+
+For `ReMIND`, official `Case Number` values are projected by the reviewed
+`number -> ReMIND-NNN` rule. The workbook contributes 114 direct patient rows,
+and all 32 source dictionary fields are retained. Age is represented as age at
+treatment/surgery, not age at imaging. Molecular marker missingness remains
+source-faithful; blank IDH, MGMT, and 1p/19q cells are not filled or inferred.
+
 For ACRIN-6698 specifically, `age` is stored as
 `age_at_enrollment_years`, `SBRgrade` as `grade`, and `pcr` as `response`.
 `Ltype` remains losslessly available in `clinical_rows.row_json`.

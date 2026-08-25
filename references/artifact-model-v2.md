@@ -128,6 +128,20 @@ parallel `*Set_dcm` trees are the initial reviewed exception; their companion
 NIfTI trees are marked `standardized_representation`, while the package DICOM
 trees are marked `submitted_original`.
 
+BraTS 2021 participant identity is projected from the official TCIA workbook
+through the hash-pinned references
+`references/brats2021_tcia_crosswalk_v1.csv` and
+`references/brats2021_tcia_crosswalk_v1.json`. For named public source
+Collections, use the normalized original Collection PatientID as the Analysis
+Result display identifier and preserve the `BraTS2021_NNNNN` value as an
+alternate challenge identifier. The Analysis Result and Collection remain
+separate participant scopes; `participant_identity_evidence` records the
+explicit workbook relationship. Additional, private, and unnamed groups retain
+their BraTS identifiers. Current builds gate 1,479 total subjects, 1,066 named
+source identifiers, and 413 challenge-only identifiers. The eight numeric
+BraTS-TCGA test rows are normalized only to their existing BraTS aliases;
+test-set data availability is deliberately outside this crosswalk.
+
 ### Non-DICOM annotations
 
 The unified artifact represents annotation-like files as ordinary logical
@@ -255,6 +269,30 @@ retains the workbook URL, artifact digest, and source-row identifier in field
 provenance; unmatched workbook filenames remain an explicit dataset metadata
 note rather than being silently discarded.
 
+`BCBM-RadioGenomics` uses its official clinical and radiomics workbooks at
+native scan and segmentation grain. The reviewed patient projection maps 268
+raw scan IDs to 165 patients while retaining the scan ID as procedure and
+provenance metadata. Per-scan age, year, pixel spacing, manufacturer, and field
+strength attach to all 268 source images. The radiomics join enriches all 2,821
+published segmentation assets: 2,774 exact filename matches plus 47 unique
+punctuation-normalized matches. Four additional workbook rows that have no
+current public mask are retained as a dataset metadata QC note.
+
+WordPress download-grain non-DICOM assets retain the published `images` value
+as `represented_file_count`. This is an aggregate count, not file-level
+metadata and not a participant crosswalk. ReMIND demonstrates why this
+distinction matters: WordPress reports 113, corresponding to subjects with a
+preoperative whole-tumor segmentation, while the Aspera package contains 356
+NRRD files across all 114 subjects. Reviewed subject-folder/filename matches
+provide the file-level crosswalk. The package `.sums` file reports the
+empty-file MD5 for every nonempty NRRD; the builder preserves that raw value as
+an invalid placeholder and leaves the verified checksum field blank.
+
+Brain-TR-GammaKnife's controlled DICOM rows remain participant/file linked in
+the controlled-access artifact. Its separate controlled NRRD download is not
+promoted into the public non-DICOM artifact, and historical IDC evidence does
+not set current public-DICOM availability flags in Participant Inventory.
+
 The builder applies evidence in this order:
 
 1. file-linked values imported from the NIfTI and pathology metadata artifacts;
@@ -320,6 +358,12 @@ match for automatic resolution; use submitter crosswalks, documented shared
 namespaces, or reviewed mappings for other equivalence claims. Route
 cross-dataset, normalized-but-not-case-equivalent, one-to-many, and conflicting
 matches to `participant_link_issues`.
+
+The reviewed BraTS workbook is the explicit exception to the default
+cross-dataset non-assertion rule: it supplies both the source Collection and
+source PatientID. Current-inventory matches are marked
+`linked_source_collection`; workbook-named source participants absent from the
+current inventory remain visible as `source_participant_not_current` issues.
 
 Resolve `dataset_type` and canonical short title from the base WordPress
 snapshot rather than trusting sidecar defaults. This prevents one source from

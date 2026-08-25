@@ -15,6 +15,27 @@ HARVEST = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(HARVEST)
 
 
+class ReviewedPathIdentityTests(unittest.TestCase):
+    def test_bcbm_scan_suffix_is_projected_to_patient_grain(self) -> None:
+        for scan_id, patient_id in (
+            ("BCBM-RadioGenomics-0-0", "BCBM-RadioGenomics-0"),
+            ("BCBM-RadioGenomics-101-0", "BCBM-RadioGenomics-101"),
+        ):
+            package_path = f"BCBM/{scan_id}/{scan_id}_image_ss_n4.nii.gz"
+            self.assertEqual(
+                HARVEST.infer_patient_id_from_path(
+                    "BCBM-RadioGenomics", package_path
+                ),
+                (patient_id, "bcbm_reviewed_scan_suffix"),
+            )
+            self.assertEqual(
+                HARVEST.bcbm_patient_and_scan_id(
+                    "BCBM-RadioGenomics", package_path
+                ),
+                (patient_id, scan_id),
+            )
+
+
 class CtOrgCharacteristicsTests(unittest.TestCase):
     def setUp(self) -> None:
         self.conn = sqlite3.connect(":memory:")

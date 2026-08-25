@@ -66,6 +66,8 @@ DEFAULT_PATHOLOGY_DB = SKILL_ROOT / "cache" / "pathology_metadata.sqlite"
 DEFAULT_CLINICAL_DB = SKILL_ROOT / "cache" / "clinical_metadata.sqlite"
 DEFAULT_CROSSWALK_CSV = SKILL_ROOT / "references" / "public_non_dicom_crosswalks_v1.csv"
 DEFAULT_CROSSWALK_CURATION = SKILL_ROOT / "references" / "public-non-dicom-crosswalk-curation-v1.json"
+DEFAULT_BRATS_CROSSWALK_CSV = SKILL_ROOT / "references" / "brats2021_tcia_crosswalk_v1.csv"
+DEFAULT_BRATS_CROSSWALK_PROVENANCE = SKILL_ROOT / "references" / "brats2021_tcia_crosswalk_v1.json"
 DEFAULT_IMAGE_METADATA_CSV = SKILL_ROOT / "references" / "public_non_dicom_image_metadata_v1.csv"
 DEFAULT_DB = SKILL_ROOT / "cache" / "public_non_dicom_metadata.sqlite"
 DEFAULT_MANIFEST = SKILL_ROOT / "cache" / "public_non_dicom_metadata_manifest.json"
@@ -74,6 +76,106 @@ DEFAULT_REPOSITORY = "kirbyju/tcia-query-skill"
 DB_ASSET = "public_non_dicom_metadata.sqlite.gz"
 MANIFEST_ASSET = "public_non_dicom_metadata_manifest.json"
 SCHEMA_VERSION = 7
+
+BRATS_SHORT_TITLE = "RSNA-ASNR-MICCAI-BraTS-2021"
+BCBM_SHORT_TITLE = "BCBM-RadioGenomics"
+REMIND_SHORT_TITLE = "ReMIND"
+BCBM_SCAN_ID = re.compile(r"^(BCBM-RadioGenomics-\d+)-(\d+)$", re.IGNORECASE)
+
+
+def bcbm_patient_and_scan_id(package_path: str) -> tuple[str, str]:
+    for part in re.split(r"[/\\]+", str(package_path or "")):
+        match = BCBM_SCAN_ID.fullmatch(part.strip())
+        if match:
+            return match.group(1), part.strip()
+    return "", ""
+
+
+def load_brats2021_crosswalk(
+    csv_path: Path = DEFAULT_BRATS_CROSSWALK_CSV,
+    provenance_path: Path = DEFAULT_BRATS_CROSSWALK_PROVENANCE,
+) -> tuple[dict[str, dict[str, str]], dict[str, Any]]:
+    """Load the reviewed, hash-pinned projection of the official TCIA workbook."""
+    if not csv_path.exists() or not provenance_path.exists():
+        raise FileNotFoundError(
+            "BraTS 2021 crosswalk references are required: "
+            f"{csv_path} and {provenance_path}"
+        )
+    metadata = json.loads(provenance_path.read_text())
+    rows: dict[str, dict[str, str]] = {}
+    with csv_path.open(newline="", encoding="utf-8") as handle:
+        for row in csv.DictReader(handle):
+            challenge_id = str(row.get("challenge_id") or "").strip()
+            if not re.fullmatch(r"BraTS2021_\d{5}", challenge_id):
+                raise ValueError(f"Invalid BraTS challenge identifier: {challenge_id!r}")
+            if challenge_id in rows:
+                raise ValueError(f"Duplicate BraTS challenge identifier: {challenge_id}")
+            rows[challenge_id] = {key: str(value or "").strip() for key, value in row.items()}
+    expected = int(metadata.get("row_count") or 0)
+    if expected and len(rows) != expected:
+        raise ValueError(f"BraTS crosswalk row-count mismatch: {len(rows)} != {expected}")
+    return rows, metadata
+
+
+def brats_participant_projection(
+    challenge_id: str,
+    crosswalk: dict[str, dict[str, str]],
+    provenance: dict[str, Any],
+) -> tuple[str, str, str, dict[str, Any]]:
+    row = crosswalk.get(challenge_id)
+    if not row:
+        raise ValueError(f"BraTS asset is absent from the reviewed crosswalk: {challenge_id}")
+    source_collection = row.get("source_collection_short_title", "")
+    resolved = row.get("resolved_source_patient_id", "")
+    mapped = bool(source_collection and resolved)
+    subject_id = resolved if mapped else challenge_id
+    namespace = (
+        f"tcia_collection:{source_collection}"
+        if mapped
+        else f"tcia_dataset:{BRATS_SHORT_TITLE}"
+    )
+    link_status = "reviewed_source_crosswalk" if mapped else "dataset_scoped_source_identifier"
+    evidence = {
+        "challenge_id": challenge_id,
+        "workbook_row": int(row["workbook_row"]),
+        "source_group": row.get("source_group", ""),
+        "raw_tcia_patient_id": row.get("raw_tcia_patient_id", ""),
+        "source_collection_short_title": source_collection,
+        "resolved_source_patient_id": resolved,
+        "mapping_status": row.get("mapping_status", ""),
+        "evidence_url": provenance.get("source_url", ""),
+        "evidence_sha256": provenance.get("source_sha256", ""),
+    }
+    return subject_id, namespace, link_status, evidence
+
+
+def insert_brats_crosswalk_evidence(
+    conn: sqlite3.Connection,
+    asset_id: str,
+    challenge_id: str,
+    subject_id: str,
+    evidence: dict[str, Any],
+) -> None:
+    if evidence.get("mapping_status") != "source_collection_identifier":
+        return
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO public_non_dicom_crosswalk_evidence
+        VALUES (?, ?, ?, ?, ?, 'official_tcia_brats2021_workbook',
+                'high', ?, ?, '', ?, ?)
+        """,
+        (
+            stable_id("crosswalk", asset_id, challenge_id, subject_id),
+            asset_id,
+            BRATS_SHORT_TITLE,
+            challenge_id,
+            subject_id,
+            evidence.get("evidence_url", ""),
+            "Original TCIA Collection PatientID normalized without discarding the BraTS alias.",
+            str(evidence.get("reviewed_at") or "2026-08-25"),
+            json_dumps(evidence),
+        ),
+    )
 
 
 SCHEMA = """
@@ -786,6 +888,12 @@ def sync_scalar_asset_participants(conn: sqlite3.Connection) -> int:
             json_object('projection', 'scalar_asset_subject', 'source_system', source_system)
         FROM public_non_dicom_assets
         WHERE COALESCE(trim(subject_id), '') <> ''
+          AND NOT EXISTS (
+              SELECT 1
+              FROM public_non_dicom_asset_participants existing
+              WHERE existing.asset_id = public_non_dicom_assets.asset_id
+                AND existing.subject_id = public_non_dicom_assets.subject_id
+          )
         """
     )
     return conn.total_changes - before
@@ -980,6 +1088,42 @@ def download_size_bytes(value: Any, unit: Any) -> int | None:
     return int(number * multiplier) if multiplier else None
 
 
+def published_count(value: Any) -> int | None:
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def refresh_wordpress_aggregate_counts(
+    conn: sqlite3.Connection, snapshot_db: Path
+) -> int:
+    """Apply published image counts to existing WordPress download assets."""
+    before = conn.total_changes
+    with closing(connect(snapshot_db)) as source:
+        for row in source.execute(
+            """
+            SELECT dataset_type, short_title, download_id, images
+            FROM agent_current_downloads
+            WHERE hidden = 0 AND controlled_access = 0
+              AND NULLIF(trim(COALESCE(download_id, '')), '') IS NOT NULL
+            """
+        ):
+            count = published_count(row["images"])
+            if count is None:
+                continue
+            conn.execute(
+                """
+                UPDATE public_non_dicom_assets
+                SET represented_file_count = ?
+                WHERE dataset_type = ? AND short_title = ? AND download_id = ?
+                  AND asset_granularity = 'download'
+                """,
+                (count, row["dataset_type"], row["short_title"], str(row["download_id"])),
+            )
+    return conn.total_changes - before
+
+
 def ingest_wordpress(conn: sqlite3.Connection, snapshot_db: Path) -> int:
     count = 0
     with closing(connect(snapshot_db)) as source:
@@ -1029,6 +1173,7 @@ def ingest_wordpress(conn: sqlite3.Connection, snapshot_db: Path) -> int:
                             value for value in data_types if value.upper() in {"CT", "MR", "MG", "DX", "CR", "US", "PET", "NM"}
                         ),
                         "object_role": object_role(download_types, data_types, row["download_title"]),
+                        "represented_file_count": published_count(row["images"]),
                         "size_bytes": download_size_bytes(row["download_size"], row["download_size_unit"]),
                         "checksum": "",
                         "checksum_algorithm": "",
@@ -1040,6 +1185,8 @@ def ingest_wordpress(conn: sqlite3.Connection, snapshot_db: Path) -> int:
                             "download_types": download_types,
                             "data_types": data_types,
                             "file_types": parse_list(row["file_types"]),
+                            "published_subject_count": row["subjects"],
+                            "published_image_count": row["images"],
                         }),
                         "provenance_json": json_dumps({
                             "source_table": "agent_current_downloads",
@@ -1062,7 +1209,12 @@ def ingest_wordpress(conn: sqlite3.Connection, snapshot_db: Path) -> int:
     return count
 
 
-def ingest_nifti(conn: sqlite3.Connection, nifti_db: Path) -> int:
+def ingest_nifti(
+    conn: sqlite3.Connection,
+    nifti_db: Path,
+    brats_crosswalk: dict[str, dict[str, str]],
+    brats_provenance: dict[str, Any],
+) -> int:
     if not nifti_db.exists():
         return 0
     count = 0
@@ -1093,6 +1245,28 @@ def ingest_nifti(conn: sqlite3.Connection, nifti_db: Path) -> int:
                 and re.search(r"/BraTS2021_(?:Training|Validation)Set/", package_path)
             ):
                 representation = "standardized_representation"
+            raw_subject_id = str(row["subject_id"] or "").strip()
+            subject_id = raw_subject_id
+            namespace = f"tcia_dataset:{row['short_title']}"
+            link_status = "dataset_scoped_source_identifier" if subject_id else "unavailable"
+            brats_evidence: dict[str, Any] = {}
+            if str(row["short_title"]).casefold() == BRATS_SHORT_TITLE.casefold() and raw_subject_id:
+                subject_id, namespace, link_status, brats_evidence = brats_participant_projection(
+                    raw_subject_id, brats_crosswalk, brats_provenance
+                )
+            bcbm_evidence: dict[str, Any] = {}
+            if str(row["short_title"]).casefold() == BCBM_SHORT_TITLE.casefold():
+                bcbm_patient_id, bcbm_scan_id = bcbm_patient_and_scan_id(package_path)
+                if bcbm_patient_id:
+                    raw_subject_id = bcbm_scan_id
+                    subject_id = bcbm_patient_id
+                    namespace = f"tcia_collection:{BCBM_SHORT_TITLE}"
+                    link_status = "reviewed_patient_scan_projection"
+                    bcbm_evidence = {
+                        "source_scan_id": bcbm_scan_id,
+                        "resolved_patient_id": bcbm_patient_id,
+                        "mapping_method": "strip_final_numeric_scan_suffix",
+                    }
             insert_asset(
                 conn,
                 {
@@ -1101,9 +1275,9 @@ def ingest_nifti(conn: sqlite3.Connection, nifti_db: Path) -> int:
                     "short_title": row["short_title"],
                     "download_row_id": None,
                     "download_id": download_id,
-                    "subject_id": row["subject_id"] or "",
-                    "subject_id_namespace": f"tcia_dataset:{row['short_title']}",
-                    "participant_link_status": "dataset_scoped_source_identifier" if row["subject_id"] else "unavailable",
+                    "subject_id": subject_id,
+                    "subject_id_namespace": namespace,
+                    "participant_link_status": link_status,
                     "asset_granularity": "file",
                     "asset_name": row["file_name"],
                     "file_name": row["file_name"],
@@ -1124,8 +1298,8 @@ def ingest_nifti(conn: sqlite3.Connection, nifti_db: Path) -> int:
                     "source_system": system,
                     "source_record_id": row["radiology_id"],
                     "source_url": url,
-                    "raw_values_json": json_dumps({"object_type": row["object_type"], "image_type": row["image_type"]}),
-                    "provenance_json": json_dumps({"source_artifact": "nifti_metadata", "source_view": "agent_nifti_files"}),
+                    "raw_values_json": json_dumps({"object_type": row["object_type"], "image_type": row["image_type"], "brats_crosswalk": brats_evidence, "bcbm_scan_projection": bcbm_evidence}),
+                    "provenance_json": json_dumps({"source_artifact": "nifti_metadata", "source_view": "agent_nifti_files", "brats_crosswalk": brats_evidence, "bcbm_scan_projection": bcbm_evidence}),
                     "quality_flag_json": row["quality_flag_json"] or "{}",
                 },
             )
@@ -1159,6 +1333,7 @@ def ingest_nifti(conn: sqlite3.Connection, nifti_db: Path) -> int:
                 "slice_thickness_mm": row_value(row, "slice_thickness_mm"),
                 "spacing_between_slices_mm": row_value(row, "spacing_between_slices_mm"),
                 "orientation_or_affine": row_value(row, "orientation_or_affine"),
+                "procedure_id": bcbm_evidence.get("source_scan_id", ""),
             }
             metadata_values.update(extensions.get(str(row["radiology_id"]), {}))
             merge_image_metadata(
@@ -1175,6 +1350,33 @@ def ingest_nifti(conn: sqlite3.Connection, nifti_db: Path) -> int:
                 short_title=str(row["short_title"]),
                 assume_new=True,
             )
+            if brats_evidence:
+                insert_asset_participant(
+                    conn,
+                    asset_id=asset_id,
+                    short_title=str(row["short_title"]),
+                    subject_id=subject_id,
+                    namespace=namespace,
+                    raw_subject_id=raw_subject_id,
+                    participant_role="depicted_subject",
+                    link_status=link_status,
+                    evidence=brats_evidence,
+                )
+                insert_brats_crosswalk_evidence(
+                    conn, asset_id, raw_subject_id, subject_id, brats_evidence
+                )
+            if bcbm_evidence:
+                insert_asset_participant(
+                    conn,
+                    asset_id=asset_id,
+                    short_title=str(row["short_title"]),
+                    subject_id=subject_id,
+                    namespace=namespace,
+                    raw_subject_id=raw_subject_id,
+                    participant_role="depicted_subject",
+                    link_status=link_status,
+                    evidence=bcbm_evidence,
+                )
             count += 1
     return count
 
@@ -1381,6 +1583,192 @@ def ingest_yale_brain_mets_workbook_metadata(
     return counts
 
 
+def normalized_bcbm_filename(value: str) -> str:
+    """Comparison key for reviewed punctuation-only BCBM name differences."""
+    return re.sub(r"[^a-z0-9]", "", str(value or "").casefold())
+
+
+def bcbm_row_values(row_json: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    raw = json.loads(row_json or "{}")
+    return raw, {re.sub(r"[^a-z0-9]", "", str(key).casefold()): value for key, value in raw.items()}
+
+
+def bcbm_pixel_spacing(value: Any) -> tuple[int | float | str | None, int | float | str | None]:
+    numbers = re.findall(r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)", str(value or ""))
+    if len(numbers) < 2:
+        return None, None
+    return metadata_number(numbers[0]), metadata_number(numbers[1])
+
+
+def ingest_bcbm_workbook_metadata(
+    conn: sqlite3.Connection, clinical_db: Path | None
+) -> dict[str, int]:
+    """Join official BCBM scan metadata and radiomics to public NIfTI files."""
+    counts = {
+        "clinical_scan_rows": 0,
+        "clinical_scan_assets_matched": 0,
+        "radiomics_rows": 0,
+        "radiomics_exact_matches": 0,
+        "radiomics_normalized_matches": 0,
+        "radiomics_unmatched_source_rows": 0,
+        "radiomics_ambiguous_rows": 0,
+        "radiomics_matched_assets": 0,
+        "radiomics_feature_values": 0,
+    }
+    if not clinical_db or not clinical_db.exists():
+        return counts
+    assets_by_file: dict[str, list[str]] = defaultdict(list)
+    assets_by_normalized_file: dict[str, list[str]] = defaultdict(list)
+    for asset in conn.execute(
+        """SELECT asset_id, file_name
+           FROM public_non_dicom_assets
+           WHERE short_title = ? AND asset_granularity = 'file'""",
+        (BCBM_SHORT_TITLE,),
+    ):
+        file_name = str(asset["file_name"] or "")
+        if not file_name:
+            continue
+        assets_by_file[file_name.casefold()].append(str(asset["asset_id"]))
+        assets_by_normalized_file[normalized_bcbm_filename(file_name)].append(
+            str(asset["asset_id"])
+        )
+    if not assets_by_file:
+        return counts
+
+    unmatched_examples: list[str] = []
+    ambiguous_examples: list[str] = []
+    matched_radiomics_assets: set[str] = set()
+    with closing(connect(clinical_db)) as source:
+        if not table_exists(source, "clinical_rows") or not table_exists(
+            source, "clinical_sources"
+        ):
+            return counts
+        rows = source.execute(
+            """SELECT r.source_row_id, r.table_name, r.row_number, r.row_json,
+                      r.row_sha256, s.source_id, s.source_url, s.artifact_sha256
+               FROM clinical_rows r
+               JOIN clinical_sources s USING(source_id)
+               WHERE r.short_title = ?
+                 AND s.source_kind = 'tcia_clinical_download'
+               ORDER BY r.source_id, r.row_number""",
+            (BCBM_SHORT_TITLE,),
+        )
+        for row in rows:
+            raw, values = bcbm_row_values(str(row["row_json"] or "{}"))
+            sheet_name = str(row["table_name"] or "").rsplit("::", 1)[-1].casefold()
+            evidence = {
+                "source_id": str(row["source_id"]),
+                "source_row_id": str(row["source_row_id"]),
+                "source_row_number": int(row["row_number"]),
+                "row_sha256": str(row["row_sha256"] or ""),
+                "artifact_sha256": str(row["artifact_sha256"] or ""),
+            }
+            source_locator = f"{row['source_url']}::{sheet_name}"
+            if sheet_name == "clinical+genetics".casefold():
+                counts["clinical_scan_rows"] += 1
+                scan_id = str(values.get("id") or "").strip()
+                file_name = f"{scan_id}_image_ss_n4.nii.gz"
+                asset_ids = assets_by_file.get(file_name.casefold(), [])
+                spacing_row, spacing_col = bcbm_pixel_spacing(values.get("pixelspacing"))
+                for asset_id in asset_ids:
+                    merge_image_metadata(
+                        conn,
+                        asset_id,
+                        {
+                            "procedure_id": scan_id,
+                            "age_at_imaging_years": metadata_number(values.get("age")),
+                            "acquisition_year": metadata_number(values.get("year")),
+                            "pixel_spacing_row_mm": spacing_row,
+                            "pixel_spacing_col_mm": spacing_col,
+                            "manufacturer": values.get("manufacturer"),
+                            "magnetic_field_strength_t": metadata_number(
+                                values.get("magneticfieldstrengthid")
+                            ),
+                        },
+                        value_role="normalized",
+                        source_kind="tcia_clinical_download",
+                        source_locator=source_locator,
+                        inference_method="exact_scan_id_to_source_image_filename",
+                        confidence="high",
+                        priority=110,
+                        evidence=evidence,
+                    )
+                    counts["clinical_scan_assets_matched"] += 1
+                continue
+            if sheet_name != "merged_orig".casefold():
+                continue
+            counts["radiomics_rows"] += 1
+            prefix = str(values.get("filenameprefix") or "").strip()
+            segmentation_name = str(values.get("segmentationname") or "").strip()
+            file_name = f"{prefix}_{segmentation_name}.nii.gz"
+            asset_ids = assets_by_file.get(file_name.casefold(), [])
+            match_method = "exact_file_name"
+            if len(asset_ids) == 1:
+                counts["radiomics_exact_matches"] += 1
+            else:
+                asset_ids = assets_by_normalized_file.get(
+                    normalized_bcbm_filename(file_name), []
+                )
+                match_method = "reviewed_punctuation_normalized_unique_file_name"
+                if len(asset_ids) == 1:
+                    counts["radiomics_normalized_matches"] += 1
+                elif len(asset_ids) > 1:
+                    counts["radiomics_ambiguous_rows"] += 1
+                    if len(ambiguous_examples) < 8:
+                        ambiguous_examples.append(file_name)
+                    continue
+                else:
+                    counts["radiomics_unmatched_source_rows"] += 1
+                    if len(unmatched_examples) < 8:
+                        unmatched_examples.append(file_name)
+                    continue
+            features = {
+                str(key): value
+                for key, value in raw.items()
+                if re.sub(r"[^a-z0-9]", "", str(key).casefold())
+                not in {"filenameprefix", "segmentationname"}
+                and meaningful_metadata_value(value)
+            }
+            for asset_id in asset_ids:
+                merge_image_metadata(
+                    conn,
+                    asset_id,
+                    {
+                        "radiomics_filename_prefix": prefix,
+                        "radiomics_segmentation_name": segmentation_name,
+                        "radiomics_feature_count": len(features),
+                        "radiomics_features": features,
+                    },
+                    value_role="source_raw",
+                    source_kind="tcia_clinical_download",
+                    source_locator=source_locator,
+                    inference_method=match_method,
+                    confidence="high",
+                    priority=110,
+                    evidence={**evidence, "constructed_file_name": file_name},
+                )
+                matched_radiomics_assets.add(asset_id)
+                counts["radiomics_feature_values"] += len(features)
+    counts["radiomics_matched_assets"] = len(matched_radiomics_assets)
+    if counts["radiomics_unmatched_source_rows"] or counts["radiomics_ambiguous_rows"]:
+        add_dataset_metadata_note(
+            conn,
+            BCBM_SHORT_TITLE,
+            "radiomics_features",
+            "official_radiomics_row_not_in_public_segmentation_inventory",
+            "Official radiomics rows without a unique current public segmentation are retained as source-side QC exceptions.",
+            severity="info",
+            status="known_source_inventory_gap",
+            affected_assets=counts["radiomics_unmatched_source_rows"] + counts["radiomics_ambiguous_rows"],
+            evidence={
+                **counts,
+                "unmatched_file_examples": unmatched_examples,
+                "ambiguous_file_examples": ambiguous_examples,
+            },
+        )
+    return counts
+
+
 BRATS_DICOM_PATH = re.compile(
     r"^(?P<root>.+/BraTS2021_(?P<cohort>Training|Validation)Set_dcm/"
     r"(?P<source_group>[^/]+)/(?P<raw_subject_id>\d{5})/(?P<modality>[^/]+))/"
@@ -1388,9 +1776,21 @@ BRATS_DICOM_PATH = re.compile(
     re.IGNORECASE,
 )
 
+REMIND_NRRD_PATH = re.compile(
+    r"(?:^|/)(?P<subject>ReMIND-\d{3})/"
+    r"(?P=subject)-(?P<phase>preop|intraop)-SEG-"
+    r"(?P<label>tumor_target|tumor_residual|previous_resection_cavity|"
+    r"tumor|cerebrum|ventricles)-MR-(?P<sequence>.+)\.nrrd$",
+    re.IGNORECASE,
+)
+EMPTY_FILE_MD5 = "d41d8cd98f00b204e9800998ecf8427e"
+
 
 def ingest_aspera_public_dicom_exceptions(
-    conn: sqlite3.Connection, nifti_db: Path
+    conn: sqlite3.Connection,
+    nifti_db: Path,
+    brats_crosswalk: dict[str, dict[str, str]],
+    brats_provenance: dict[str, Any],
 ) -> int:
     """Import compact participant/modality summaries for public DICOM absent from IDC.
 
@@ -1459,7 +1859,10 @@ def ingest_aspera_public_dicom_exceptions(
                 modality,
                 package_root,
             ) = key
-            subject_id = str(item["subject_id"])
+            challenge_id = str(item["subject_id"])
+            subject_id, namespace, link_status, brats_evidence = brats_participant_projection(
+                challenge_id, brats_crosswalk, brats_provenance
+            )
             file_count = int(item["file_count"])
             url = downloads.get((short_title, download_id), "")
             asset_id = stable_id(
@@ -1480,8 +1883,8 @@ def ingest_aspera_public_dicom_exceptions(
                     "download_row_id": None,
                     "download_id": download_id,
                     "subject_id": subject_id,
-                    "subject_id_namespace": f"tcia_dataset:{short_title}",
-                    "participant_link_status": "dataset_scoped_source_identifier",
+                    "subject_id_namespace": namespace,
+                    "participant_link_status": link_status,
                     "asset_granularity": "participant_modality",
                     "asset_name": f"{subject_id} {modality} DICOM instances",
                     "file_name": "",
@@ -1512,6 +1915,7 @@ def ingest_aspera_public_dicom_exceptions(
                             "raw_subject_folder": raw_subject_id,
                             "brats_sequence_folder": modality,
                             "represented_dicom_instances": file_count,
+                            "brats_crosswalk": brats_evidence,
                         }
                     ),
                     "provenance_json": json_dumps(
@@ -1520,6 +1924,7 @@ def ingest_aspera_public_dicom_exceptions(
                             "source_table": "aspera_root_sums_inventory",
                             "inventory_scope": "public_aspera_dicom_not_in_idc",
                             "identifier_method": "BraTS DICOM folder normalized to challenge ID",
+                            "brats_crosswalk": brats_evidence,
                         }
                     ),
                     "quality_flag_json": json_dumps(
@@ -1529,6 +1934,20 @@ def ingest_aspera_public_dicom_exceptions(
                         }
                     ),
                 },
+            )
+            insert_asset_participant(
+                conn,
+                asset_id=asset_id,
+                short_title=short_title,
+                subject_id=subject_id,
+                namespace=namespace,
+                raw_subject_id=challenge_id,
+                participant_role="depicted_subject",
+                link_status=link_status,
+                evidence=brats_evidence,
+            )
+            insert_brats_crosswalk_evidence(
+                conn, asset_id, challenge_id, subject_id, brats_evidence
             )
             insert_location(
                 conn,
@@ -1565,6 +1984,200 @@ def ingest_aspera_public_dicom_exceptions(
                 assume_new=True,
             )
     return len(grouped)
+
+
+def ingest_remind_nrrd_inventory(conn: sqlite3.Connection, nifti_db: Path) -> int:
+    """Project the reviewed ReMIND Aspera ``.sums`` paths at file grain.
+
+    TCIA's download aggregate reports 113 subjects/images because 113 subjects
+    have a preoperative whole-tumor segmentation. The package itself contains
+    356 NRRD segmentations across all 114 ReMIND subjects and several segment
+    classes. The subject folder and filename repeat the exact Collection
+    PatientID, so the mapping is deterministic and source supported.
+
+    The package's March 2024 ``.sums`` file assigns the empty-file MD5 to every
+    path even though the downloaded NRRDs are nonempty. Preserve that source
+    value in provenance, but never expose it as a verified file checksum.
+    """
+    if not nifti_db.exists():
+        return 0
+    with closing(connect(nifti_db)) as source:
+        if not table_exists(source, "aspera_root_sums_inventory"):
+            return 0
+        downloads: dict[tuple[str, str], str] = {}
+        if table_exists(source, "agent_nifti_downloads"):
+            for row in source.execute(
+                "SELECT short_title, download_id, download_url FROM agent_nifti_downloads"
+            ):
+                downloads[(str(row["short_title"]), str(row["download_id"] or ""))] = str(
+                    row["download_url"] or ""
+                )
+        inventory_columns = columns(source, "aspera_root_sums_inventory")
+        if not {"short_title", "package_path", "file_ext"}.issubset(inventory_columns):
+            return 0
+        optional = {
+            "dataset_type": "'Collection'",
+            "download_id": "''",
+            "line_number": "0",
+            "checksum": "''",
+            "algorithm": "''",
+            "file_name": "''",
+        }
+        select_fields = [
+            name if name in inventory_columns else f"{fallback} AS {name}"
+            for name, fallback in optional.items()
+        ] + ["short_title", "package_path", "file_ext"]
+        imported = 0
+        for row in source.execute(
+            f"""
+            SELECT {', '.join(select_fields)}
+            FROM aspera_root_sums_inventory
+            WHERE lower(short_title) = lower(?)
+              AND lower(ltrim(file_ext, '.')) = 'nrrd'
+            ORDER BY line_number
+            """,
+            (REMIND_SHORT_TITLE,),
+        ):
+            package_path = str(row["package_path"] or "")
+            match = REMIND_NRRD_PATH.search(package_path)
+            if not match:
+                continue
+            subject_id = match.group("subject")
+            phase = match.group("phase").lower()
+            segment_label = match.group("label").lower()
+            sequence_name = match.group("sequence")
+            download_id = str(row["download_id"] or "")
+            source_url = downloads.get((str(row["short_title"]), download_id), "")
+            raw_checksum = str(row["checksum"] or "").lower()
+            checksum_is_placeholder = raw_checksum == EMPTY_FILE_MD5
+            checksum = "" if checksum_is_placeholder else raw_checksum
+            checksum_algorithm = "" if checksum_is_placeholder else str(row["algorithm"] or "")
+            asset_id = stable_id(
+                "asset", "remind_nrrd_package_path", download_id, package_path
+            )
+            mapping_method = "reviewed_remind_package_subject_folder_and_filename"
+            evidence = {
+                "download_id": download_id,
+                "package_path": package_path,
+                "source_line_number": row["line_number"],
+                "mapping_method": mapping_method,
+                "subject_folder_matches_filename": True,
+                "raw_source_checksum": raw_checksum,
+                "source_checksum_status": (
+                    "invalid_empty_file_placeholder" if checksum_is_placeholder else "reported"
+                ),
+            }
+            insert_asset(conn, {
+                "asset_id": asset_id,
+                "dataset_type": str(row["dataset_type"] or "Collection"),
+                "short_title": str(row["short_title"]),
+                "download_row_id": None,
+                "download_id": download_id,
+                "subject_id": subject_id,
+                "subject_id_namespace": f"tcia_collection:{REMIND_SHORT_TITLE}",
+                "participant_link_status": "reviewed_source_crosswalk",
+                "asset_granularity": "file",
+                "asset_name": str(row["file_name"] or Path(package_path).name),
+                "file_name": str(row["file_name"] or Path(package_path).name),
+                "package_path": package_path,
+                "file_format": "NRRD",
+                "container_format": "",
+                "media_kind": "segmentation_volume",
+                "spatial_dimensionality": "3d",
+                "temporal_dimensionality": "none",
+                "imaging_domain": "radiology",
+                "modality": "MR",
+                "object_role": "segmentation",
+                "represented_file_count": 1,
+                "size_bytes": None,
+                "checksum": checksum,
+                "checksum_algorithm": checksum_algorithm,
+                "representation_provenance_class": "submitted_original",
+                "source_system": "tcia_aspera",
+                "source_record_id": f"{download_id}:sums:{row['line_number']}",
+                "source_url": source_url,
+                "raw_values_json": json_dumps({
+                    "phase": phase,
+                    "segment_label": segment_label,
+                    "mr_sequence_token": sequence_name,
+                    "raw_source_checksum": raw_checksum,
+                }),
+                "provenance_json": json_dumps({
+                    "source_artifact": "nifti_metadata",
+                    "source_table": "aspera_root_sums_inventory",
+                    **evidence,
+                }),
+                "quality_flag_json": json_dumps({
+                    "participant_inventory": "reviewed_source_crosswalk",
+                    "checksum": (
+                        "invalid_empty_file_placeholder" if checksum_is_placeholder else "source_reported"
+                    ),
+                }),
+            })
+            insert_asset_participant(
+                conn,
+                asset_id=asset_id,
+                short_title=REMIND_SHORT_TITLE,
+                subject_id=subject_id,
+                namespace=f"tcia_collection:{REMIND_SHORT_TITLE}",
+                raw_subject_id=subject_id,
+                participant_role="depicted_subject",
+                link_status="reviewed_source_crosswalk",
+                evidence=evidence,
+            )
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO public_non_dicom_crosswalk_evidence
+                VALUES (?, ?, ?, ?, ?, ?, 'high', ?, ?, '', ?, ?)
+                """,
+                (
+                    stable_id("crosswalk", asset_id, subject_id, mapping_method),
+                    asset_id, REMIND_SHORT_TITLE, subject_id, subject_id,
+                    mapping_method, source_url,
+                    "Subject folder and filename repeat the exact ReMIND Collection PatientID.",
+                    "2026-08-25", json_dumps(evidence),
+                ),
+            )
+            if source_url:
+                insert_location(
+                    conn,
+                    location_values(
+                        asset_id,
+                        source_url,
+                        representation_class="submitted_original",
+                        provenance={
+                            "source_artifact": "nifti_metadata",
+                            "source_table": "aspera_root_sums_inventory",
+                            "package_path": package_path,
+                        },
+                    ),
+                )
+            merge_image_metadata(
+                conn,
+                asset_id,
+                {
+                    "modality": "MR",
+                    "file_format": "NRRD",
+                    "media_kind": "segmentation_volume",
+                    "spatial_dimensionality": "3d",
+                    "temporal_dimensionality": "none",
+                    "object_role": "segmentation",
+                    "acquisition_phase": phase,
+                    "segmentation_label": segment_label,
+                    "sequence_name": sequence_name,
+                },
+                value_role="source_raw",
+                source_kind="aspera_package_inventory",
+                source_locator="nifti_metadata.aspera_root_sums_inventory",
+                inference_method=mapping_method,
+                confidence="high",
+                priority=95,
+                evidence=evidence,
+                short_title=REMIND_SHORT_TITLE,
+                assume_new=True,
+            )
+            imported += 1
+    return imported
 
 
 def ingest_pathology_packages(conn: sqlite3.Connection, pathology_db: Path) -> int:
@@ -3782,6 +4395,16 @@ def add_review_issues(conn: sqlite3.Connection) -> None:
     )
 
 
+def refresh_participant_crosswalk_review_issues(conn: sqlite3.Connection) -> int:
+    before = conn.total_changes
+    conn.execute(
+        "DELETE FROM public_non_dicom_review_issues "
+        "WHERE issue_code = 'participant_file_crosswalk_unavailable'"
+    )
+    add_review_issues(conn)
+    return conn.total_changes - before
+
+
 def mark_downloads_with_linked_file_grain(conn: sqlite3.Connection) -> int:
     """Resolve parent download placeholders when linked child files exist.
 
@@ -3852,18 +4475,29 @@ def build_database(
             raise FileExistsError(f"Output exists: {out}; pass --replace")
         out.unlink()
     out.parent.mkdir(parents=True, exist_ok=True)
+    brats_crosswalk, brats_provenance = load_brats2021_crosswalk()
     with closing(connect(out)) as conn:
         conn.executescript(SCHEMA)
         insert_vocab(conn)
         counts = {
             "wordpress_download_assets": ingest_wordpress(conn, snapshot_db),
-            "nifti_file_assets": ingest_nifti(conn, nifti_db) if nifti_db else 0,
+            "nifti_file_assets": ingest_nifti(
+                conn, nifti_db, brats_crosswalk, brats_provenance
+            ) if nifti_db else 0,
             "aspera_public_dicom_exception_assets": (
-                ingest_aspera_public_dicom_exceptions(conn, nifti_db) if nifti_db else 0
+                ingest_aspera_public_dicom_exceptions(
+                    conn, nifti_db, brats_crosswalk, brats_provenance
+                ) if nifti_db else 0
+            ),
+            "remind_nrrd_file_assets": (
+                ingest_remind_nrrd_inventory(conn, nifti_db) if nifti_db else 0
             ),
             "pathology_package_assets": ingest_pathology_packages(conn, pathology_db) if pathology_db else 0,
             "pathdb_file_assets": ingest_pathdb(conn, snapshot_db, include_pathdb_files),
         }
+        counts["wordpress_aggregate_counts_refreshed"] = refresh_wordpress_aggregate_counts(
+            conn, snapshot_db
+        )
         reviewed = (
             ingest_reviewed_crosswalks(conn, crosswalk_csv, crosswalk_curation)
             if crosswalk_csv and crosswalk_curation
@@ -3885,6 +4519,8 @@ def build_database(
         counts.update({f"curated_image_metadata_{key}": value for key, value in curated_metadata.items()})
         yale_metadata = ingest_yale_brain_mets_workbook_metadata(conn, clinical_db)
         counts.update({f"yale_workbook_{key}": value for key, value in yale_metadata.items()})
+        bcbm_metadata = ingest_bcbm_workbook_metadata(conn, clinical_db)
+        counts.update({f"bcbm_workbook_{key}": value for key, value in bcbm_metadata.items()})
         counts["core_image_metadata_values"] = seed_core_asset_metadata(conn)
         inferred_metadata = enrich_from_wordpress_and_filenames(conn, snapshot_db)
         counts.update({f"inferred_image_metadata_{key}": value for key, value in inferred_metadata.items()})
@@ -3894,7 +4530,9 @@ def build_database(
         counts["download_assets_with_file_grain_crosswalk"] = (
             mark_downloads_with_linked_file_grain(conn)
         )
-        add_review_issues(conn)
+        counts["participant_crosswalk_review_issue_changes"] = (
+            refresh_participant_crosswalk_review_issues(conn)
+        )
         generated = datetime.now(timezone.utc).isoformat()
         metadata = {
             "schema_version": SCHEMA_VERSION,
@@ -3907,6 +4545,8 @@ def build_database(
             "source_crosswalk_curation": source_meta(crosswalk_curation) if crosswalk_curation else {"enabled": False},
             "source_image_metadata_csv": source_meta(image_metadata_csv) if image_metadata_csv else {"enabled": False},
             "source_staging_ledger": source_meta(staging_db) if staging_db else {"enabled": False},
+            "source_brats_crosswalk_csv": source_meta(DEFAULT_BRATS_CROSSWALK_CSV),
+            "source_brats_crosswalk_provenance": source_meta(DEFAULT_BRATS_CROSSWALK_PROVENANCE),
             "include_pathdb_files": include_pathdb_files,
             "ingest_counts": counts,
         }
@@ -4018,6 +4658,132 @@ def validate_database(path: Path) -> dict[str, Any]:
             "metadata_field_coverage_rows": conn.execute("SELECT COUNT(*) FROM public_non_dicom_metadata_field_coverage").fetchone()[0],
             "dataset_metadata_notes": conn.execute("SELECT COUNT(*) FROM public_non_dicom_dataset_metadata_notes").fetchone()[0],
         }
+        if counts["assets"] > 100000:
+            brats_counts = {
+                "brats_participants": conn.execute(
+                    "SELECT COUNT(DISTINCT subject_id) FROM public_non_dicom_asset_participants WHERE short_title = ?",
+                    (BRATS_SHORT_TITLE,),
+                ).fetchone()[0],
+                "brats_challenge_aliases": conn.execute(
+                    "SELECT COUNT(DISTINCT raw_subject_id) FROM public_non_dicom_asset_participants WHERE short_title = ?",
+                    (BRATS_SHORT_TITLE,),
+                ).fetchone()[0],
+                "brats_source_collection_identifiers": conn.execute(
+                    "SELECT COUNT(DISTINCT subject_id) FROM public_non_dicom_asset_participants WHERE short_title = ? AND subject_id NOT LIKE 'BraTS2021_%'",
+                    (BRATS_SHORT_TITLE,),
+                ).fetchone()[0],
+                "brats_challenge_only_identifiers": conn.execute(
+                    "SELECT COUNT(DISTINCT subject_id) FROM public_non_dicom_asset_participants WHERE short_title = ? AND subject_id LIKE 'BraTS2021_%'",
+                    (BRATS_SHORT_TITLE,),
+                ).fetchone()[0],
+                "brats_reviewed_source_crosswalks": conn.execute(
+                    "SELECT COUNT(DISTINCT raw_subject_id) FROM public_non_dicom_crosswalk_evidence WHERE short_title = ? AND mapping_method = 'official_tcia_brats2021_workbook'",
+                    (BRATS_SHORT_TITLE,),
+                ).fetchone()[0],
+            }
+            counts.update(brats_counts)
+            expected_brats = {
+                "brats_participants": 1479,
+                "brats_challenge_aliases": 1479,
+                "brats_source_collection_identifiers": 1066,
+                "brats_challenge_only_identifiers": 413,
+                "brats_reviewed_source_crosswalks": 1066,
+            }
+            for name, expected in expected_brats.items():
+                if brats_counts[name] != expected:
+                    errors.append(
+                        f"BraTS crosswalk coverage regression: {name}={brats_counts[name]} != {expected}"
+                    )
+            bcbm_counts = {
+                "bcbm_participants": conn.execute(
+                    "SELECT COUNT(DISTINCT subject_id) FROM public_non_dicom_asset_participants WHERE short_title = ?",
+                    (BCBM_SHORT_TITLE,),
+                ).fetchone()[0],
+                "bcbm_scan_identifiers": conn.execute(
+                    "SELECT COUNT(DISTINCT raw_subject_id) FROM public_non_dicom_asset_participants WHERE short_title = ?",
+                    (BCBM_SHORT_TITLE,),
+                ).fetchone()[0],
+                "bcbm_files": conn.execute(
+                    "SELECT COUNT(*) FROM public_non_dicom_assets WHERE short_title = ? AND asset_granularity = 'file'",
+                    (BCBM_SHORT_TITLE,),
+                ).fetchone()[0],
+                "bcbm_source_images": conn.execute(
+                    "SELECT COUNT(*) FROM public_non_dicom_assets WHERE short_title = ? AND asset_granularity = 'file' AND object_role = 'source_image'",
+                    (BCBM_SHORT_TITLE,),
+                ).fetchone()[0],
+                "bcbm_segmentations": conn.execute(
+                    "SELECT COUNT(*) FROM public_non_dicom_assets WHERE short_title = ? AND asset_granularity = 'file' AND object_role = 'segmentation'",
+                    (BCBM_SHORT_TITLE,),
+                ).fetchone()[0],
+                "bcbm_radiomics_assets": conn.execute(
+                    """SELECT COUNT(*) FROM public_non_dicom_image_metadata
+                       WHERE short_title = ?
+                         AND json_extract(metadata_json, '$.radiomics_feature_count') = 107""",
+                    (BCBM_SHORT_TITLE,),
+                ).fetchone()[0],
+            }
+            counts.update(bcbm_counts)
+            expected_bcbm = {
+                "bcbm_participants": 165,
+                "bcbm_scan_identifiers": 268,
+                "bcbm_files": 3089,
+                "bcbm_source_images": 268,
+                "bcbm_segmentations": 2821,
+                "bcbm_radiomics_assets": 2821,
+            }
+            for name, expected in expected_bcbm.items():
+                if bcbm_counts[name] != expected:
+                    errors.append(
+                        f"BCBM coverage regression: {name}={bcbm_counts[name]} != {expected}"
+                    )
+            remind_counts = {
+                "remind_nrrd_download_assets": conn.execute(
+                    "SELECT COUNT(*) FROM public_non_dicom_assets "
+                    "WHERE short_title = ? AND file_format = 'NRRD' AND asset_granularity = 'download'",
+                    (REMIND_SHORT_TITLE,),
+                ).fetchone()[0],
+                "remind_nrrd_represented_files": conn.execute(
+                    "SELECT COALESCE(SUM(represented_file_count), 0) FROM public_non_dicom_assets "
+                    "WHERE short_title = ? AND file_format = 'NRRD' AND asset_granularity = 'download'",
+                    (REMIND_SHORT_TITLE,),
+                ).fetchone()[0],
+                "remind_nrrd_file_assets": conn.execute(
+                    "SELECT COUNT(*) FROM public_non_dicom_assets "
+                    "WHERE short_title = ? AND file_format = 'NRRD' AND asset_granularity = 'file'",
+                    (REMIND_SHORT_TITLE,),
+                ).fetchone()[0],
+                "remind_nrrd_participants": conn.execute(
+                    "SELECT COUNT(DISTINCT ap.subject_id) FROM public_non_dicom_asset_participants ap "
+                    "JOIN public_non_dicom_assets a USING(asset_id) "
+                    "WHERE a.short_title = ? AND a.file_format = 'NRRD' AND a.asset_granularity = 'file'",
+                    (REMIND_SHORT_TITLE,),
+                ).fetchone()[0],
+                "remind_nrrd_whole_tumor_participants": conn.execute(
+                    "SELECT COUNT(DISTINCT subject_id) FROM public_non_dicom_assets "
+                    "WHERE short_title = ? AND file_format = 'NRRD' AND asset_granularity = 'file' "
+                    "AND json_extract(raw_values_json, '$.segment_label') = 'tumor'",
+                    (REMIND_SHORT_TITLE,),
+                ).fetchone()[0],
+                "remind_nrrd_participant_links": conn.execute(
+                    "SELECT COUNT(*) FROM public_non_dicom_asset_participants ap "
+                    "JOIN public_non_dicom_assets a USING(asset_id) "
+                    "WHERE a.short_title = ? AND a.file_format = 'NRRD'",
+                    (REMIND_SHORT_TITLE,),
+                ).fetchone()[0],
+            }
+            counts.update(remind_counts)
+            for name, expected in {
+                "remind_nrrd_download_assets": 1,
+                "remind_nrrd_represented_files": 113,
+                "remind_nrrd_file_assets": 356,
+                "remind_nrrd_participants": 114,
+                "remind_nrrd_whole_tumor_participants": 113,
+                "remind_nrrd_participant_links": 356,
+            }.items():
+                if remind_counts[name] != expected:
+                    errors.append(
+                        f"ReMIND NRRD coverage regression: {name}={remind_counts[name]} != {expected}"
+                    )
     return {"ok": not errors, "errors": errors, "integrity_check": integrity, "counts": counts}
 
 

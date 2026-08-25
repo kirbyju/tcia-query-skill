@@ -23,6 +23,223 @@ SPEC.loader.exec_module(CLINICAL)
 
 
 class ClinicalMetadataTest(unittest.TestCase):
+    def test_remind_dictionary_and_reviewed_identifiers(self) -> None:
+        self.assertEqual(
+            CLINICAL.choose_subject_column(
+                ["Case Number", "Age"], "ReMIND"
+            ),
+            "Case Number",
+        )
+        self.assertEqual(
+            CLINICAL.choose_subject_column(
+                ["unique_pt_id", "Course #"], "Brain-TR-GammaKnife"
+            ),
+            "unique_pt_id",
+        )
+        self.assertEqual(
+            CLINICAL.official_subject_id_mapping("ReMIND", "1"),
+            ("ReMIND-001", "dataset_prefix_zero_pad_3"),
+        )
+        self.assertEqual(
+            CLINICAL.official_subject_id_mapping("Brain-TR-GammaKnife", "103.0"),
+            ("GK_103", "dataset_prefix_zero_pad_3"),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            conn = CLINICAL.init_db(Path(directory) / "remind.sqlite", replace=True)
+            CLINICAL.insert_source(
+                conn,
+                source_id="official:remind",
+                source_kind="tcia_clinical_download",
+                short_title="ReMIND",
+                source_signature_value="test",
+            )
+            frame = CLINICAL.SimpleFrame(
+                ["Case Number", "Number associated with the case identifier"],
+                [
+                    {
+                        "Case Number": "Age",
+                        "Number associated with the case identifier": "Age at surgery",
+                    },
+                    {
+                        "Case Number": "Histopathology",
+                        "Number associated with the case identifier": "WHO tumor type",
+                    },
+                ],
+            )
+            inserted = CLINICAL.ingest_official_source_dictionary(
+                conn,
+                source_id="official:remind",
+                short_title="ReMIND",
+                table_name="clinical.xlsx::ReMIND Data Dictionary",
+                frame=frame,
+            )
+            self.assertEqual(inserted, 3)
+            fields = conn.execute(
+                "SELECT field_name FROM clinical_source_dictionary ORDER BY rowid"
+            ).fetchall()
+            self.assertEqual(
+                [row[0] for row in fields],
+                ["Case Number", "Age", "Histopathology"],
+            )
+            conn.close()
+
+    def test_brain_tr_gammaknife_course_and_lesion_observations(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            conn = CLINICAL.init_db(Path(directory) / "brain-tr.sqlite", replace=True)
+            CLINICAL.insert_source(
+                conn,
+                source_id="official:brain-tr",
+                source_kind="tcia_clinical_download",
+                short_title="Brain-TR-GammaKnife",
+                source_signature_value="test",
+            )
+            rows = [
+                (
+                    "clinical.xlsx::course_level",
+                    {"unique_pt_id": "103", "Course #": "1"},
+                    "radiotherapy_course",
+                    "",
+                ),
+                (
+                    "clinical.xlsx::lesion_level",
+                    {
+                        "unique_pt_id": "103",
+                        "Treatment Course": "1",
+                        "Lesion #": "2",
+                        "mri_type": "stable",
+                        "Lesion Name in NRRD files": "GK.103_1_LFrontal",
+                    },
+                    "lesion_followup_outcome",
+                    "GK.103_1_LFrontal",
+                ),
+            ]
+            for row_number, (table_name, values, _, _) in enumerate(rows, 2):
+                CLINICAL.insert_row_and_facts(
+                    conn,
+                    source_id="official:brain-tr",
+                    source_kind="tcia_clinical_download",
+                    short_title="Brain-TR-GammaKnife",
+                    subject_id="GK_103",
+                    table_name=table_name,
+                    row_number=row_number,
+                    row=values,
+                    facts=[],
+                )
+                self.assertEqual(
+                    CLINICAL.ingest_brain_tr_gammaknife_observation(
+                        conn,
+                        source_id="official:brain-tr",
+                        short_title="Brain-TR-GammaKnife",
+                        subject_id="GK_103",
+                        table_name=table_name,
+                        row_number=row_number,
+                        row=values,
+                    ),
+                    1,
+                )
+            observations = conn.execute(
+                """SELECT observation_type, file_name
+                   FROM clinical_longitudinal_observations
+                   ORDER BY observation_type"""
+            ).fetchall()
+            self.assertEqual(
+                [tuple(row) for row in observations],
+                [(row[2], row[3]) for row in sorted(rows, key=lambda item: item[2])],
+            )
+            conn.close()
+
+    def test_bcbm_scan_and_radiomics_rows_preserve_native_grain(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            conn = CLINICAL.init_db(
+                Path(directory) / "bcbm.sqlite", replace=True
+            )
+            clinical_row = {
+                "ID      ": "BCBM-RadioGenomics-76-0",
+                "Age": "52",
+                "Year": "2018",
+                "Manufacturer": "GE MEDICAL SYSTEMS",
+            }
+            radiomics_row = {
+                "FilenamePrefix": "BCBM-RadioGenomics-76-0",
+                "Segmentation_Name": "mask_tumor",
+                "original_shape_Elongation": "0.5",
+            }
+            for source_id in ("official:bcbm:clinical", "official:bcbm:radiomics"):
+                CLINICAL.insert_source(
+                    conn,
+                    source_id=source_id,
+                    source_kind="tcia_clinical_download",
+                    short_title="BCBM-RadioGenomics",
+                    source_signature_value="test",
+                )
+            CLINICAL.insert_row_and_facts(
+                conn,
+                source_id="official:bcbm:clinical",
+                source_kind="tcia_clinical_download",
+                short_title="BCBM-RadioGenomics",
+                subject_id="BCBM-RadioGenomics-76",
+                table_name="clinical.xlsx::Clinical+Genetics",
+                row_number=2,
+                row=clinical_row,
+                facts=[],
+            )
+            CLINICAL.insert_row_and_facts(
+                conn,
+                source_id="official:bcbm:radiomics",
+                source_kind="tcia_clinical_download",
+                short_title="BCBM-RadioGenomics",
+                subject_id="BCBM-RadioGenomics-76",
+                table_name="radiomics.xlsx::merged_orig",
+                row_number=2,
+                row=radiomics_row,
+                facts=[],
+            )
+            self.assertEqual(
+                CLINICAL.ingest_bcbm_longitudinal_observation(
+                    conn,
+                    source_id="official:bcbm:clinical",
+                    short_title="BCBM-RadioGenomics",
+                    subject_id="BCBM-RadioGenomics-76",
+                    table_name="clinical.xlsx::Clinical+Genetics",
+                    row_number=2,
+                    row=clinical_row,
+                ),
+                1,
+            )
+            self.assertEqual(
+                CLINICAL.ingest_bcbm_longitudinal_observation(
+                    conn,
+                    source_id="official:bcbm:radiomics",
+                    short_title="BCBM-RadioGenomics",
+                    subject_id="BCBM-RadioGenomics-76",
+                    table_name="radiomics.xlsx::merged_orig",
+                    row_number=2,
+                    row=radiomics_row,
+                ),
+                1,
+            )
+            observations = conn.execute(
+                """SELECT observation_type, study_datetime, file_name
+                   FROM clinical_longitudinal_observations
+                   ORDER BY observation_type"""
+            ).fetchall()
+            self.assertEqual(
+                [tuple(row) for row in observations],
+                [
+                    (
+                        "scanner_clinical_scan",
+                        "2018",
+                        "BCBM-RadioGenomics-76-0_image_ss_n4.nii.gz",
+                    ),
+                    (
+                        "segmentation_radiomics",
+                        "",
+                        "BCBM-RadioGenomics-76-0_mask_tumor.nii.gz",
+                    ),
+                ],
+            )
+            conn.close()
+
     def test_yale_longitudinal_ages_resolve_to_baseline_without_false_conflict(
         self,
     ) -> None:
@@ -197,6 +414,7 @@ class ClinicalMetadataTest(unittest.TestCase):
             "UCSD-VS-Longitudinal",
             "UCSF-PDGM",
             "UPENN-GBM",
+            "BCBM-RadioGenomics",
         ):
             self.assertEqual(
                 CLINICAL.choose_subject_column(["ID", "Age"], short_title),
@@ -233,6 +451,10 @@ class ClinicalMetadataTest(unittest.TestCase):
             ("HEAD-NECK-RADIOMICS-HN1", "HN1004"): (
                 "HN1004",
                 "dataset_specific_exact_id",
+            ),
+            ("BCBM-RadioGenomics", "BCBM-RadioGenomics-76-0"): (
+                "BCBM-RadioGenomics-76",
+                "strip_scan_suffix",
             ),
         }
         for (short_title, source_id), expected in mappings.items():

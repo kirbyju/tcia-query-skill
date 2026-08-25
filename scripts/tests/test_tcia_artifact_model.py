@@ -100,6 +100,141 @@ class VocabularyTests(unittest.TestCase):
 
 
 class BuilderTests(unittest.TestCase):
+    def test_remind_sums_inventory_projects_file_level_crosswalk(self):
+        import sqlite3
+
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            source_db = base / "nifti.sqlite"
+            output_db = base / "public.sqlite"
+            source = sqlite3.connect(source_db)
+            source.executescript(
+                """
+                CREATE TABLE aspera_root_sums_inventory (
+                  dataset_type TEXT, short_title TEXT, download_id TEXT,
+                  line_number INTEGER, checksum TEXT, algorithm TEXT,
+                  package_path TEXT, file_name TEXT, file_ext TEXT
+                );
+                CREATE TABLE agent_nifti_downloads (
+                  short_title TEXT, download_id TEXT, download_url TEXT
+                );
+                """
+            )
+            source.executemany(
+                "INSERT INTO aspera_root_sums_inventory VALUES (?,?,?,?,?,?,?,?,?)",
+                [
+                    (
+                        "Collection", "ReMIND", "43725", 1,
+                        public.EMPTY_FILE_MD5, "md5",
+                        "ReMIND_NRRD_Seg_Sep_2023/ReMIND-001/"
+                        "ReMIND-001-preop-SEG-tumor-MR-3D_AX_T1_postcontrast.nrrd",
+                        "ReMIND-001-preop-SEG-tumor-MR-3D_AX_T1_postcontrast.nrrd",
+                        ".nrrd",
+                    ),
+                    (
+                        "Collection", "ReMIND", "43725", 2,
+                        public.EMPTY_FILE_MD5, "md5",
+                        "ReMIND_NRRD_Seg_Sep_2023/ReMIND-032/"
+                        "ReMIND-032-intraop-SEG-tumor_residual-MR-2D_AX_T2_BLADE.nrrd",
+                        "ReMIND-032-intraop-SEG-tumor_residual-MR-2D_AX_T2_BLADE.nrrd",
+                        ".nrrd",
+                    ),
+                    (
+                        "Collection", "ReMIND", "43725", 3, "abc", "md5",
+                        "ReMIND_NRRD_Seg_Sep_2023/not-a-reviewed-path.nrrd",
+                        "not-a-reviewed-path.nrrd", ".nrrd",
+                    ),
+                ],
+            )
+            source.execute(
+                "INSERT INTO agent_nifti_downloads VALUES (?,?,?)",
+                ("ReMIND", "43725", "https://example.test/remind-aspera"),
+            )
+            source.commit()
+            source.close()
+
+            conn = sqlite3.connect(output_db)
+            conn.row_factory = sqlite3.Row
+            conn.executescript(public.SCHEMA)
+            public.insert_vocab(conn)
+            self.assertEqual(public.ingest_remind_nrrd_inventory(conn, source_db), 2)
+            rows = conn.execute(
+                """
+                SELECT subject_id, file_format, object_role, checksum,
+                       json_extract(raw_values_json, '$.segment_label'),
+                       json_extract(quality_flag_json, '$.checksum')
+                FROM public_non_dicom_assets
+                ORDER BY subject_id
+                """
+            ).fetchall()
+            self.assertEqual(
+                [tuple(row) for row in rows],
+                [
+                    ("ReMIND-001", "NRRD", "segmentation", "", "tumor",
+                     "invalid_empty_file_placeholder"),
+                    ("ReMIND-032", "NRRD", "segmentation", "", "tumor_residual",
+                     "invalid_empty_file_placeholder"),
+                ],
+            )
+            self.assertEqual(
+                conn.execute(
+                    "SELECT COUNT(*) FROM public_non_dicom_asset_participants"
+                ).fetchone()[0],
+                2,
+            )
+            self.assertEqual(public.sync_scalar_asset_participants(conn), 0)
+            self.assertEqual(
+                conn.execute(
+                    "SELECT COUNT(*) FROM public_non_dicom_crosswalk_evidence "
+                    "WHERE mapping_method='reviewed_remind_package_subject_folder_and_filename'"
+                ).fetchone()[0],
+                2,
+            )
+            conn.close()
+
+    def test_legacy_idc_evidence_does_not_claim_current_public_dicom(self):
+        import sqlite3
+
+        with tempfile.TemporaryDirectory() as directory:
+            database = Path(directory) / "participants.sqlite"
+            conn = sqlite3.connect(database)
+            conn.executescript(participants.SCHEMA)
+            conn.execute(
+                "INSERT INTO participants VALUES (?,?,?,?,?,?,?,?)",
+                (
+                    "participant-key", "Collection", "Brain-TR-GammaKnife", "GK_103",
+                    "dataset_scoped", "single_namespace", "source_identifier", "not_asserted",
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO participant_assets (
+                    participant_asset_id, participant_key, managed_system, source_artifact,
+                    access_level, data_domain, media_kind, modality, file_format, object_role,
+                    has_file_level_metadata, inventory_status, source_version, provenance_json
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    "legacy-idc", "participant-key", "crdc_idc", "clinical_metadata",
+                    "open", "radiology", "dicom_series", "", "DICOM",
+                    "source_image_or_annotation", 0,
+                    "historical_participant_presence_query_idc_or_tcia_for_detail",
+                    "legacy", "{}",
+                ),
+            )
+            row = conn.execute(
+                "SELECT has_open_data, has_public_dicom, data_domains, file_formats "
+                "FROM agent_participants WHERE participant_key='participant-key'"
+            ).fetchone()
+            self.assertEqual(row, (0, 0, None, None))
+            self.assertEqual(
+                conn.execute(
+                    "SELECT COUNT(*) FROM participant_assets WHERE participant_key='participant-key'"
+                ).fetchone()[0],
+                1,
+            )
+            conn.close()
+
     def test_reviewed_readme_and_pathdb_contract_links_partial_dataset(self):
         import sqlite3
 
@@ -942,7 +1077,7 @@ class BuilderTests(unittest.TestCase):
               download_id TEXT, download_title TEXT, title TEXT,
               download_url TEXT, download_size TEXT, download_size_unit TEXT,
               download_types TEXT, data_types TEXT, file_types TEXT,
-              hidden INTEGER, controlled_access INTEGER
+              hidden INTEGER, controlled_access INTEGER, subjects INTEGER, images INTEGER
             );
             CREATE TABLE agent_pathdb_slides (
               collection TEXT, patient_id TEXT, slide_id TEXT, camic_id TEXT,
@@ -955,19 +1090,19 @@ class BuilderTests(unittest.TestCase):
         rows = [
             (1, "Collection", "Pedi-Cranial-CT-Healthy", "55262", "Images", "Pedi CT",
              "https://faspex.cancerimagingarchive.net/?context=x", "3.2", "gb",
-             '["Radiology Images"]', '["CT"]', '["MHA"]', 0, 0),
+             '["Radiology Images"]', '["CT"]', '["MHA"]', 0, 0, 10, 100),
             (2, "Collection", "Breast-Lesions-USG", "2", "Images and masks", "US",
              "https://www.cancerimagingarchive.net/file.zip", "1", "gb",
              '["Radiology Images","Image Annotations"]', '["US","Segmentation"]',
-             '["PNG","ZIP"]', 0, 0),
+             '["PNG","ZIP"]', 0, 0, 20, 200),
             (3, "Collection", "Capsule-Endoscopy-SB-NET", "3", "Excerpts", "Capsule",
              "https://faspex.cancerimagingarchive.net/?context=y", "1", "gb",
-             '["Other"]', '["Capsule Endoscopy"]', '["JPG","MPG"]', 0, 0),
+             '["Other"]', '["Capsule Endoscopy"]', '["JPG","MPG"]', 0, 0, 30, 300),
             (4, "Collection", "Public-DICOM", "4", "Images", "DICOM",
              "https://example.org/manifest.tcia", "1", "gb",
-             '["Radiology Images"]', '["CT"]', '["DICOM"]', 0, 0),
+             '["Radiology Images"]', '["CT"]', '["DICOM"]', 0, 0, 40, 400),
         ]
-        conn.executemany("INSERT INTO agent_current_downloads VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
+        conn.executemany("INSERT INTO agent_current_downloads VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
         conn.executemany(
             "INSERT INTO agent_datasets VALUES (?, ?)",
             [(row[1], row[2]) for row in rows],
@@ -999,6 +1134,13 @@ class BuilderTests(unittest.TestCase):
                 "SELECT media_kind, imaging_domain FROM public_non_dicom_assets WHERE file_format='MPG'"
             ).fetchone()
             self.assertEqual(capsule, ("video", "endoscopy"))
+            self.assertEqual(
+                conn.execute(
+                    "SELECT represented_file_count FROM public_non_dicom_assets "
+                    "WHERE short_title='Pedi-Cranial-CT-Healthy'"
+                ).fetchone()[0],
+                100,
+            )
             issue = conn.execute(
                 "SELECT description, evidence_json FROM public_non_dicom_review_issues "
                 "WHERE short_title='Pedi-Cranial-CT-Healthy'"
@@ -1031,12 +1173,12 @@ class BuilderTests(unittest.TestCase):
 
             conn = sqlite3.connect(snapshot)
             conn.execute(
-                "INSERT INTO agent_current_downloads VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO agent_current_downloads VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     5, "Analysis Result", "RSNA-ASNR-MICCAI-BraTS-2021", "46595",
                     "Challenge data both tasks", "BraTS 2021", "https://faspex.example/package",
                     "1", "tb", '["Radiology Images"]', '["MR"]',
-                    '["DICOM","NIfTI"]', 0, 0,
+                    '["DICOM","NIfTI"]', 0, 0, 0, 0,
                 ),
             )
             conn.execute(
@@ -1068,6 +1210,8 @@ class BuilderTests(unittest.TestCase):
             )
             paths = [
                 "RSNA-ASNR-MICCAI-BraTS-2021/BraTS2021_TrainingSet_dcm/"
+                "UCSF-PDGM/00000/T1w/Image-1.dcm",
+                "RSNA-ASNR-MICCAI-BraTS-2021/BraTS2021_TrainingSet_dcm/"
                 "new-not-previously-in-TCIA/00794/T2w/Image-1.dcm",
                 "RSNA-ASNR-MICCAI-BraTS-2021/BraTS2021_TrainingSet_dcm/"
                 "new-not-previously-in-TCIA/00794/T2w/Image-2.dcm",
@@ -1097,7 +1241,7 @@ class BuilderTests(unittest.TestCase):
                 include_pathdb_files=False,
                 replace=True,
             )
-            self.assertEqual(result["counts"]["aspera_public_dicom_exception_assets"], 3)
+            self.assertEqual(result["counts"]["aspera_public_dicom_exception_assets"], 4)
 
             conn = sqlite3.connect(public_db)
             rows = conn.execute(
@@ -1115,7 +1259,18 @@ class BuilderTests(unittest.TestCase):
                     ("BraTS2021_00393", "MR", 1, "submitted_original", "tcia_aspera"),
                     ("BraTS2021_00794", "MR", 1, "submitted_original", "tcia_aspera"),
                     ("BraTS2021_00794", "MR", 2, "submitted_original", "tcia_aspera"),
+                    ("UCSF-PDGM-0057", "MR", 1, "submitted_original", "tcia_aspera"),
                 ],
+            )
+            crosswalk = conn.execute(
+                """
+                SELECT raw_subject_id, resolved_subject_id, mapping_method
+                FROM public_non_dicom_crosswalk_evidence
+                """
+            ).fetchone()
+            self.assertEqual(
+                crosswalk,
+                ("BraTS2021_00000", "UCSF-PDGM-0057", "official_tcia_brats2021_workbook"),
             )
             conn.close()
 
@@ -1142,6 +1297,7 @@ class BuilderTests(unittest.TestCase):
                 [
                     ("BraTS2021_00393", 1, 0, "DICOM"),
                     ("BraTS2021_00794", 1, 0, "DICOM"),
+                    ("UCSF-PDGM-0057", 1, 0, "DICOM"),
                 ],
             )
             file_counts = dict(
@@ -1153,7 +1309,40 @@ class BuilderTests(unittest.TestCase):
                     """
                 )
             )
-            self.assertEqual(file_counts, {"BraTS2021_00393": 1, "BraTS2021_00794": 3})
+            self.assertEqual(
+                file_counts,
+                {
+                    "BraTS2021_00393": 1,
+                    "BraTS2021_00794": 3,
+                    "UCSF-PDGM-0057": 1,
+                },
+            )
+            alias = conn.execute(
+                """
+                SELECT display_participant_id, raw_identifier, link_evidence
+                FROM agent_participant_identifiers
+                WHERE identifier_namespace='challenge:BraTS2021'
+                  AND raw_identifier='BraTS2021_00000'
+                """
+            ).fetchone()
+            self.assertEqual(
+                alias,
+                (
+                    "UCSF-PDGM-0057",
+                    "BraTS2021_00000",
+                    "official_tcia_brats2021_workbook",
+                ),
+            )
+            issue = conn.execute(
+                """
+                SELECT issue_code FROM participant_link_issues
+                WHERE raw_identifier='BraTS2021_00000'
+                """
+            ).fetchone()
+            self.assertEqual(
+                issue,
+                ("brats_source_collection_participant_not_current",),
+            )
             conn.close()
 
     def test_participant_inventory_unifies_case_equivalent_same_dataset_identifiers(self):
