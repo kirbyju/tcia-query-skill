@@ -18,7 +18,7 @@ def print_table(records: list[dict[str, Any]]) -> None:
             "No TCIA WordPress Collections or Analysis Results matched. "
             "If you expected a very recent dataset, try again after the next "
             "7:17 AM or 7:17 PM America/New_York snapshot run has finished, "
-            "then rerun `python scripts/tcia_snapshot.py ensure`."
+            "then reinstall the V2 research_core profile."
         )
         return
 

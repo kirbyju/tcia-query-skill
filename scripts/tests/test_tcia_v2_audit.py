@@ -449,6 +449,35 @@ class V2AuditSplitTests(unittest.TestCase):
                 audit_database, None, artifact="public_non_dicom"
             )
             self.assertEqual(manifest["schema_version"], 3)
+            materialized = root / "materialized.sqlite"
+            materialization = audit.materialize_assembly_from_companions(
+                research,
+                audit_database,
+                materialized,
+                replace=True,
+            )
+            self.assertEqual(materialization["integrity_check"], "ok")
+            self.assertEqual(
+                materialization["reconstructed_field_provenance"], 2
+            )
+            with sqlite3.connect(materialized) as conn:
+                self.assertEqual(
+                    {
+                        row[0]: __import__("json").loads(row[1])
+                        for row in conn.execute(
+                            "SELECT asset_id, field_provenance_json "
+                            "FROM public_non_dicom_image_metadata"
+                        )
+                    },
+                    original,
+                )
+                self.assertEqual(
+                    conn.execute(
+                        "SELECT raw_values_json, provenance_json "
+                        "FROM public_non_dicom_assets ORDER BY asset_id LIMIT 1"
+                    ).fetchone(),
+                    ('{"source_column":"raw"}', '{"source_artifact":"nifti_metadata"}'),
+                )
 
 
 if __name__ == "__main__":

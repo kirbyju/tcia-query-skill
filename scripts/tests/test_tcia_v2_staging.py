@@ -63,8 +63,8 @@ class V2StagingTests(unittest.TestCase):
             )
             self.assertTrue(validation["ok"], validation["errors"])
             self.assertEqual(
-                staging.resolve_component(ledger, "pathology"),
-                components["pathology"][0],
+                staging.resolve_component(ledger, "public_non_dicom_baseline"),
+                components["public_non_dicom_baseline"][0],
             )
             with closing(sqlite3.connect(ledger)) as conn:
                 self.assertEqual(

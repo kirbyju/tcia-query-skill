@@ -31,8 +31,6 @@ from typing import Any
 
 
 SCHEMA_VERSION = 2
-DEFAULT_REPO = "kirbyju/tcia-query-skill"
-DEFAULT_RELEASE_TAG = "tcia-snapshot-latest"
 CONTROLLED_ASSET = "controlled_access_metadata.sqlite.gz"
 CONTROLLED_MANIFEST_ASSET = "controlled_access_metadata_manifest.json"
 SKILL_ROOT = Path(__file__).resolve().parents[1]
@@ -742,7 +740,7 @@ def connect(path: str | os.PathLike[str] | None = None) -> sqlite3.Connection:
     if not resolved.exists():
         raise RuntimeError(
             f"Controlled-access metadata SQLite not found at {resolved}. "
-            "Run `python scripts/tcia_controlled_access_metadata.py ensure` first."
+            "Install the V2 research_detail profile first."
         )
     conn = sqlite3.connect(resolved)
     conn.row_factory = sqlite3.Row
@@ -2498,16 +2496,6 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    ensure = subparsers.add_parser(
-        "ensure", help="Download optional controlled-access SQLite release assets."
-    )
-    ensure.add_argument("--repo", default=DEFAULT_REPO, help="GitHub repository owner/name.")
-    ensure.add_argument("--tag", default=DEFAULT_RELEASE_TAG, help="Release tag.")
-    ensure.add_argument("--db", default=str(DEFAULT_OUT), help="Local SQLite output path.")
-    ensure.add_argument(
-        "--manifest-out", default=str(DEFAULT_MANIFEST), help="Local manifest output path."
-    )
-
     info = subparsers.add_parser("info", help="Show local controlled-access metadata DB status.")
     info.add_argument("--db", default=str(DEFAULT_OUT), help="Local SQLite path.")
     info.add_argument("--manifest", default=str(DEFAULT_MANIFEST), help="Local manifest path.")
@@ -2578,12 +2566,6 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
 
-    if args.command == "ensure":
-        result = ensure_release_controlled(
-            args.repo, args.tag, Path(args.db), Path(args.manifest_out)
-        )
-        print(json.dumps(result, indent=2, sort_keys=True))
-        return 0
     if args.command == "info":
         return command_info(args)
     if args.command == "build":

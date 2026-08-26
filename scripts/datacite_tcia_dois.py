@@ -36,7 +36,7 @@ def print_table(records: list[dict[str, Any]]) -> None:
         print(
             "No DataCite DOI records matched. If you expected very recent metadata, "
             "try again after the next 7:17 AM or 7:17 PM America/New_York snapshot "
-            "run has finished, then rerun `python scripts/tcia_snapshot.py ensure`."
+            "run has finished, then reinstall the V2 research_core profile."
         )
         return
     print("TCIA Short Name | DOI | Year | Title | URL")
@@ -70,7 +70,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     if not tcia_snapshot.snapshot_available(args.snapshot_db):
         print(
             f"No local TCIA snapshot found at {tcia_snapshot.snapshot_path(args.snapshot_db)}. "
-            "Run `python scripts/tcia_snapshot.py ensure` from the skill root, then try again.",
+            "Run `python scripts/tcia_v2_bundle.py install --profile research_core` from the skill root, then try again.",
             file=sys.stderr,
         )
         return 1

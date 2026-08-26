@@ -58,6 +58,12 @@ class V2CheckpointTests(unittest.TestCase):
                 component: self.create_component(root, component)
                 for component in staging.COMPONENT_ORDER
             }
+            components.update(
+                {
+                    component: self.create_component(root, component)
+                    for component in checkpoint.CHECKPOINT_TABLES
+                }
+            )
             ledger = root / "staging.sqlite"
             staging.build_staging_database(ledger, components=components, replace=True)
             checkpoint_db = root / "checkpoint.sqlite"
@@ -100,6 +106,14 @@ class V2CheckpointTests(unittest.TestCase):
                         "WHERE key='legacy_detail_checkpoint_fingerprint'"
                     ).fetchone()
                 )
+
+            extracted = root / "extracted.sqlite"
+            extraction = checkpoint.extract_checkpoint_from_audit(
+                extracted, audit_db=audit_db, replace=True
+            )
+            self.assertEqual(extraction["tables"], 11)
+            self.assertEqual(extraction["rows"], 11)
+            self.assertTrue(checkpoint.validate_checkpoint(extracted)["ok"])
 
 
 if __name__ == "__main__":

@@ -112,10 +112,10 @@ Use semantic WordPress context in addition to extensions. Do not classify an
 unrelated PNG in a clinical supporting package as imaging merely because its
 extension is PNG.
 
-The initial builder imports current visible public non-DICOM download
-declarations from WordPress, file-level NIfTI rows from the legacy NIfTI
-artifact, original package-file inventories from the pathology artifact, and
-PathDB file rows in full release mode.
+Routine builds start from the manifest-pinned unified V2 research/audit pair,
+losslessly materialize an internal assembly, refresh current WordPress and
+PathDB scopes directly, and apply checksum-pinned reviewed references. The
+retired standalone NIfTI and pathology artifacts are not producer inputs.
 
 Public DICOM normally remains an IDC query concern and is not duplicated here.
 When a TCIA-published public DICOM representation is distributed through an
@@ -198,8 +198,8 @@ inventory. For `DLBCL-Morphology`, the
 `Cells/{patient_id}/{patch_id}/*.npy` contract projects 1,036,974 cell-shape
 arrays into 170 participant groups instead of duplicating more than one million
 file rows in the consumer-facing artifact. This compact projection does not
-replace or alter the source paths, sizes, and checksums in
-`pathology_metadata.sqlite`.
+replace or alter the source paths, sizes, and checksums retained in the public
+audit companion checkpoint.
 
 The full builder also performs a conservative metadata-only Aspera-to-PathDB
 crosswalk pass. It accepts a download only when every imaging file matches
@@ -423,10 +423,10 @@ presence or used to create Analysis Result memberships.
 
 ## V2 Release Channels
 
-Use `tcia-metadata-v2-latest` as the moving default release contract and retain
-immutable `tcia-metadata-v2-YYYY.MM...` releases for reproducibility. Keep
-`tcia-metadata-v2-preview` for explicit schema-changing candidates. The moving
-stable channel uses the streamlined contract with these asset groups:
+Use `tcia-metadata-v2-latest` as the single supported moving release contract.
+Validated source components pass between workflows as short-lived GitHub
+Actions artifacts, not as a second public release. The stable channel uses the
+streamlined contract with these asset groups:
 
 - Research core: `tcia_snapshot.sqlite.gz`, compact
   `participant_inventory.sqlite.gz`, and the compressed
@@ -505,12 +505,13 @@ and a row-count/schema inventory. Component database names are relative to the
 ledger directory; machine-specific paths are never retained.
 
 The public non-DICOM builder accepts `--staging-db` and resolves its snapshot,
-NIfTI, pathology, and clinical inputs through that contract. The Participant
+unified public research/audit baselines, and clinical input through that
+contract. The Participant
 Inventory builder resolves its snapshot, controlled, clinical, and direct IDC
 participant inputs from the same ledger. Neither the ledger nor the IDC
 projection is a release asset. A path-independent copy of the ledger tables is embedded in
 `public_non_dicom_audit.sqlite.gz`, while a short-lived GitHub Actions artifact
-retains the ledger, IDC projection, and parity report for maintainer diagnostics.
+retains the ledger and IDC projection for maintainer diagnostics.
 Expiration of that workflow artifact does not affect a published release.
 
 Run the staging contract directly with:
@@ -521,40 +522,13 @@ python3 scripts/tcia_v2_staging.py validate \
   --verify-sources
 ```
 
-`scripts/tcia_v2_parity.py` is the removal gate for the legacy NIfTI and
-pathology detail assets. It separately verifies that every eligible source
-file is represented in the unified artifact and that specialized capabilities
-such as derived-object relationships, reviewed NIfTI characteristics,
-pathology package inventories, slide crosswalks, and QC rows have a durable
-checkpoint. A successful file projection alone is not permission to remove
-the source artifacts. The moving V2 contract must retain them until the report
-sets `retirement_ready` to true. Existing immutable releases are never revised
-by this transition.
-
-For candidate evaluation, manually dispatch the workflow with
-`checkpoint_legacy_detail=true`, `release_contract=streamlined_candidate`, and
-`publish_channel=none`. `scripts/tcia_v2_checkpoint.py` then copies
-the exact specialized source rows into path-independent `source_nifti__*` and
-`source_pathology__*` tables, validates source-versus-checkpoint row counts,
-and seeds the public non-DICOM audit companion. The workflow requires the
-parity report to set `retirement_ready=true` before accepting that candidate.
-This option defaults to false so scheduled moving-release builds do not change
-the release contract or increase runner disk use until a candidate has been
-reviewed. The checkpoint is an intermediate file, not an additional release
-asset; only its tables embedded in the audit companion persist.
-
-The workflow caches a gzip-compressed copy of that transition checkpoint by
-the NIfTI and pathology component-manifest hashes. A cache hit restores and
-validates the exact checkpoint before use; the uncompressed database is still
-runner-local and is consumed by the audit build. This cache is an optimization,
-not an authority or release surface, and a component hash change necessarily
-creates a new cache key.
-
-After the candidate passes parity, reconstruction, and bundle validation,
-promote the same path with `release_contract=streamlined`,
-`checkpoint_legacy_detail=true`, and `publish_channel=stable`. The
-`streamlined_candidate` value remains non-publishing by design. The `full`
-contract remains available as a compatibility build path.
+Legacy parity has been established and the transition is complete. Routine
+production never downloads the standalone NIfTI or pathology databases.
+Instead, `scripts/tcia_v2_audit.py materialize-assembly` losslessly restores a
+manifest-pinned unified V2 research/audit pair, and
+`scripts/tcia_v2_checkpoint.py extract-from-audit` carries the immutable
+`source_nifti__*` and `source_pathology__*` checkpoint forward. The historical
+parity script and legacy builders remain migration-forensics tools only.
 
 The streamlined release uses compact public audit schema 3. Schema 3 treats
 the original public non-DICOM database
@@ -575,13 +549,12 @@ but is normalized instead of stored as one nearly unique document per asset:
 
 Use `scripts/tcia_v2_audit.py verify-reconstruction` to compare exact document,
 source-link, and field-decision totals and to reconstruct a deterministic sample
-against the assembly database. The candidate workflow requires this check to
+against the assembly database. The production workflow requires this check to
 pass before deleting the assembly database. Its diagnostic artifact also
 retains projection/compression timings, output sizes, largest-table sizes, and
 the reconstruction report. Research and audit gzip outputs are compressed in
-parallel at level 3 for the candidate, using `pigz` when present and a portable
-Python gzip fallback otherwise. The stable schema-2 path retains its existing
-sequential level-6 compression behavior.
+parallel at level 3, using `pigz` when present and a portable Python gzip
+fallback otherwise.
 
 The materialized streamlined release contains exactly ten files: seven
 compressed SQLite databases (`tcia_snapshot`, Participant Inventory, public
@@ -592,12 +565,8 @@ checkpoint, and the clinical manual-review CSV is retained losslessly as a
 Participant Inventory audit table. Component hashes, decompressed SQLite
 hashes, schemas, fingerprints, profiles, and provenance are inline in the
 bundle manifest, so per-component manifests are unnecessary. The installer
-supports both the existing full contract and this inline streamlined contract.
-
-The evaluation-only `streamlined_candidate` path cannot update either moving
-release. Stable publication uses the separately named `streamlined` contract
-after combined audit size, runner disk headroom, installer behavior, parity,
-reconstruction, and schema-3 consumer impact have passed review.
+uses this inline streamlined contract for the moving V2 release. Standalone
+NIfTI/pathology components are absent from every current bundle contract.
 
 Verbose provenance and troubleshooting payloads are distributed separately as
 `public_non_dicom_audit.sqlite.gz` and `participant_inventory_audit.sqlite.gz`.

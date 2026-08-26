@@ -735,6 +735,196 @@ def verify_field_provenance_reconstruction(
     }
 
 
+def materialize_assembly_from_companions(
+    research_database: Path,
+    audit_database: Path,
+    out: Path,
+    *,
+    artifact: str = "public_non_dicom",
+    replace: bool = False,
+) -> dict[str, Any]:
+    """Reconstitute a lossless assembly from published V2 companions.
+
+    The resulting database is an internal build input, not another release
+    artifact.  It lets routine builds refresh unified V2 data without
+    downloading the retired standalone NIfTI or pathology databases.
+    """
+    if artifact not in CONFIGS:
+        raise ValueError(f"Unsupported V2 artifact: {artifact}")
+    if not research_database.is_file() or not audit_database.is_file():
+        raise FileNotFoundError("Both research and audit companion databases are required")
+    if out.exists():
+        if not replace:
+            raise FileExistsError(f"Assembly exists: {out}; pass --replace")
+        out.unlink()
+    out.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(research_database, out)
+    config = CONFIGS[artifact]
+    restored_fields = 0
+    restored_tables: dict[str, int] = {}
+    with sqlite3.connect(out) as conn:
+        configure_bulk_database(conn)
+        conn.execute("ATTACH DATABASE ? AS audit", (str(audit_database),))
+        audit_objects = {
+            str(row[0])
+            for row in conn.execute(
+                "SELECT name FROM audit.sqlite_master WHERE type IN ('table','view')"
+            )
+        }
+        if "agent_entity_payloads" not in audit_objects:
+            raise RuntimeError("Audit companion has no agent_entity_payloads view")
+        conn.execute(
+            "CREATE TEMP TABLE audit_payload_stage("
+            "entity_table TEXT NOT NULL, entity_id TEXT NOT NULL, "
+            "field_name TEXT NOT NULL, payload_json TEXT NOT NULL, "
+            "PRIMARY KEY(entity_table, entity_id, field_name)) WITHOUT ROWID"
+        )
+        conn.execute(
+            "INSERT INTO audit_payload_stage "
+            "SELECT entity_table, entity_id, field_name, payload_json "
+            "FROM audit.agent_entity_payloads"
+        )
+        for table in config["audit_tables"]:
+            if table not in audit_objects:
+                raise RuntimeError(f"Audit companion is missing {table}")
+            conn.execute(f"DELETE FROM main.{quote_identifier(table)}")
+            conn.execute(
+                f"INSERT INTO main.{quote_identifier(table)} "
+                f"SELECT * FROM audit.{quote_identifier(table)}"
+            )
+            restored_tables[table] = int(
+                conn.execute(
+                    f"SELECT COUNT(*) FROM main.{quote_identifier(table)}"
+                ).fetchone()[0]
+            )
+        for table, (identifier, fields) in config["json_fields"].items():
+            for field in fields:
+                if field == "field_provenance_json":
+                    continue
+                before = conn.total_changes
+                conn.execute(
+                    f"UPDATE main.{quote_identifier(table)} AS target "
+                    f"SET {quote_identifier(field)} = ("
+                    "SELECT payload_json FROM audit_payload_stage payload "
+                    "WHERE payload.entity_table=? "
+                    f"AND payload.entity_id=CAST(target.{quote_identifier(identifier)} AS TEXT) "
+                    "AND payload.field_name=? LIMIT 1) "
+                    "WHERE EXISTS (SELECT 1 FROM audit_payload_stage payload "
+                    "WHERE payload.entity_table=? "
+                    f"AND payload.entity_id=CAST(target.{quote_identifier(identifier)} AS TEXT) "
+                    "AND payload.field_name=?)",
+                    (table, field, table, field),
+                )
+                restored_fields += conn.total_changes - before
+        conn.commit()
+        conn.execute("DROP TABLE audit_payload_stage")
+        conn.execute("DETACH DATABASE audit")
+
+    # Compact audit v3 normalizes image field provenance into relational
+    # dictionaries. Stream both ordered relations once instead of performing
+    # one lookup set per asset.
+    reconstructed = 0
+    with sqlite3.connect(audit_database) as audit_conn, sqlite3.connect(out) as conn:
+        fallback_rows = list(
+            audit_conn.execute(
+                "SELECT e.entity_id, p.payload_json "
+                "FROM entity_payloads ep "
+                "JOIN entities e USING(entity_key_id) "
+                "JOIN entity_types t USING(entity_type_id) "
+                "JOIN fields f USING(field_id) "
+                "JOIN payloads p USING(payload_id) "
+                "WHERE t.entity_table='public_non_dicom_image_metadata' "
+                "AND f.field_name='field_provenance_json'"
+            )
+        )
+        conn.executemany(
+            "UPDATE public_non_dicom_image_metadata "
+            "SET field_provenance_json=? WHERE asset_id=?",
+            ((str(payload), str(entity_id)) for entity_id, payload in fallback_rows),
+        )
+        reconstructed += len(fallback_rows)
+
+        source_cursor = audit_conn.execute(
+            "SELECT s.entity_key_id, e.entity_id, s.source_label, p.source_json "
+            "FROM entity_provenance_sources s "
+            "INDEXED BY sqlite_autoindex_entity_provenance_sources_1 "
+            "CROSS JOIN entities e ON e.entity_key_id=s.entity_key_id "
+            "CROSS JOIN entity_types t ON t.entity_type_id=e.entity_type_id "
+            "JOIN provenance_source_payloads p USING(source_payload_id) "
+            "WHERE t.entity_table='public_non_dicom_image_metadata' "
+            "ORDER BY s.entity_key_id, s.source_label"
+        )
+        decision_cursor = audit_conn.execute(
+            "SELECT s.entity_key_id, e.entity_id, f.field_name, s.source_label, "
+            "       i.identifier_json, p.decision_json "
+            "FROM entity_provenance_sources s "
+            "INDEXED BY sqlite_autoindex_entity_provenance_sources_1 "
+            "CROSS JOIN entities e ON e.entity_key_id=s.entity_key_id "
+            "CROSS JOIN entity_types t ON t.entity_type_id=e.entity_type_id "
+            "JOIN field_provenance fp USING(entity_source_id) "
+            "JOIN provenance_fields f USING(provenance_field_id) "
+            "JOIN provenance_source_identifiers i USING(source_identifier_id) "
+            "JOIN provenance_decision_payloads p USING(decision_payload_id) "
+            "WHERE t.entity_table='public_non_dicom_image_metadata' "
+            "ORDER BY s.entity_key_id, s.source_label, fp.provenance_field_id"
+        )
+        source_row = source_cursor.fetchone()
+        decision_row = decision_cursor.fetchone()
+        batch: list[tuple[str, str]] = []
+        while source_row is not None or decision_row is not None:
+            candidates = [
+                int(row[0]) for row in (source_row, decision_row) if row is not None
+            ]
+            entity_key_id = min(candidates)
+            entity_id = str(
+                source_row[1]
+                if source_row is not None and int(source_row[0]) == entity_key_id
+                else decision_row[1]
+            )
+            value: dict[str, Any] = {"_sources": {}}
+            while source_row is not None and int(source_row[0]) == entity_key_id:
+                value["_sources"][str(source_row[2])] = json.loads(str(source_row[3]))
+                source_row = source_cursor.fetchone()
+            while decision_row is not None and int(decision_row[0]) == entity_key_id:
+                decision = json.loads(str(decision_row[5]))
+                decision["source_id"] = json.loads(str(decision_row[4]))
+                value[str(decision_row[2])] = decision
+                decision_row = decision_cursor.fetchone()
+            batch.append((canonical_json(value), entity_id))
+            reconstructed += 1
+            if len(batch) >= 10000:
+                conn.executemany(
+                    "UPDATE public_non_dicom_image_metadata "
+                    "SET field_provenance_json=? WHERE asset_id=?",
+                    batch,
+                )
+                conn.commit()
+                batch.clear()
+        if batch:
+            conn.executemany(
+                "UPDATE public_non_dicom_image_metadata "
+                "SET field_provenance_json=? WHERE asset_id=?",
+                batch,
+            )
+        conn.execute(
+            "DELETE FROM artifact_meta WHERE key IN "
+            "('provenance_storage','audit_companion_asset','audit_schema_version')"
+        )
+        conn.commit()
+        integrity = str(conn.execute("PRAGMA integrity_check").fetchone()[0])
+    return {
+        "path": str(out),
+        "artifact": artifact,
+        "integrity_check": integrity,
+        "restored_json_fields": restored_fields + reconstructed,
+        "reconstructed_field_provenance": reconstructed,
+        "restored_audit_tables": restored_tables,
+        "research_sha256": file_sha256(research_database),
+        "audit_sha256": file_sha256(audit_database),
+        "sqlite_sha256": file_sha256(out),
+    }
+
+
 def build_compact_audit_database(
     source_database: Path,
     audit_database: Path,
@@ -1262,6 +1452,50 @@ def validate_audit_database(path: Path, *, artifact: str | None = None) -> dict[
                 counts[table] = conn.execute(
                     f"SELECT COUNT(*) FROM {quote_identifier(table)}"
                 ).fetchone()[0]
+        if (
+            artifact == "public_non_dicom"
+            and counts.get("public_non_dicom_crosswalk_evidence", 0) > 1000
+        ):
+            brats_reviewed = int(
+                conn.execute(
+                    "SELECT COUNT(DISTINCT raw_subject_id) "
+                    "FROM public_non_dicom_crosswalk_evidence "
+                    "WHERE short_title='RSNA-ASNR-MICCAI-BraTS-2021' "
+                    "AND mapping_method='official_tcia_brats2021_workbook'"
+                ).fetchone()[0]
+            )
+            remind_participants = int(
+                conn.execute(
+                    "SELECT COUNT(DISTINCT resolved_subject_id) "
+                    "FROM public_non_dicom_crosswalk_evidence "
+                    "WHERE short_title='ReMIND' "
+                    "AND mapping_method='reviewed_remind_package_subject_folder_and_filename'"
+                ).fetchone()[0]
+            )
+            remind_files = int(
+                conn.execute(
+                    "SELECT COUNT(*) FROM public_non_dicom_crosswalk_evidence "
+                    "WHERE short_title='ReMIND' "
+                    "AND mapping_method='reviewed_remind_package_subject_folder_and_filename'"
+                ).fetchone()[0]
+            )
+            counts.update(
+                {
+                    "brats_reviewed_source_crosswalks": brats_reviewed,
+                    "remind_reviewed_participants": remind_participants,
+                    "remind_reviewed_files": remind_files,
+                }
+            )
+            for name, actual, expected in (
+                ("brats_reviewed_source_crosswalks", brats_reviewed, 1066),
+                ("remind_reviewed_participants", remind_participants, 114),
+                ("remind_reviewed_files", remind_files, 356),
+            ):
+                if actual != expected:
+                    errors.append(
+                        f"public non-DICOM audit coverage regression: "
+                        f"{name}={actual} != {expected}"
+                    )
         staging_objects = {
             "staging_meta", "staging_sources", "staging_object_inventory"
         }
@@ -1410,6 +1644,15 @@ def parser() -> argparse.ArgumentParser:
     reconstruction.add_argument("--audit-db", required=True)
     reconstruction.add_argument("--sample-size", type=int, default=1000)
     reconstruction.add_argument("--out")
+    materialize = sub.add_parser(
+        "materialize-assembly",
+        help="Reconstitute a build assembly from manifest-pinned V2 companions.",
+    )
+    materialize.add_argument("--artifact", choices=("public_non_dicom",), required=True)
+    materialize.add_argument("--research-db", required=True)
+    materialize.add_argument("--audit-db", required=True)
+    materialize.add_argument("--out", required=True)
+    materialize.add_argument("--replace", action="store_true")
     return root
 
 
@@ -1434,6 +1677,16 @@ def main() -> int:
             )
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0 if result["ok"] else 1
+    if args.command == "materialize-assembly":
+        result = materialize_assembly_from_companions(
+            Path(args.research_db),
+            Path(args.audit_db),
+            Path(args.out),
+            artifact=args.artifact,
+            replace=args.replace,
+        )
+        print(json.dumps(result, indent=2, sort_keys=True))
+        return 0 if result["integrity_check"] == "ok" else 1
     source_database = Path(args.db)
     audit_database = Path(args.audit_out)
     if args.command == "project-v3":

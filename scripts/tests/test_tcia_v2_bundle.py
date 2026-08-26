@@ -47,7 +47,7 @@ class V2BundleTests(unittest.TestCase):
             first = BUNDLE.build_bundle_manifest(root)
             second = BUNDLE.build_bundle_manifest(root)
             self.assertEqual(first["release_fingerprint"], second["release_fingerprint"])
-            self.assertEqual(first["asset_count"], 27)
+            self.assertEqual(first["asset_count"], 23)
             manifest = root / BUNDLE.BUNDLE_MANIFEST_ASSET
             manifest.write_text(json.dumps(first))
             result = BUNDLE.validate_bundle(root, manifest)
@@ -168,7 +168,44 @@ class V2BundleTests(unittest.TestCase):
             release_path.write_text(json.dumps(release))
             result = BUNDLE.validate_source_release(root, release_path)
             self.assertEqual(result["release_id"], 42)
-            self.assertEqual(len(result["assets"]), 11)
+            self.assertEqual(len(result["assets"]), 7)
+
+    def test_selected_v2_baseline_assets_are_manifest_and_release_pinned(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.create_bundle_files(root)
+            payload = BUNDLE.build_bundle_manifest(
+                root,
+                release_contract=BUNDLE.STREAMLINED_RELEASE_CONTRACT,
+            )
+            manifest_path = root / BUNDLE.BUNDLE_MANIFEST_ASSET
+            manifest_path.write_text(json.dumps(payload))
+            names = [
+                "public_non_dicom_metadata.sqlite.gz",
+                "public_non_dicom_audit.sqlite.gz",
+            ]
+            release_path = root / "release.json"
+            release_path.write_text(
+                json.dumps(
+                    {
+                        "tag_name": BUNDLE.DEFAULT_RELEASE_TAG,
+                        "assets": [
+                            {
+                                "name": name,
+                                "digest": "sha256:" + BUNDLE.file_sha256(root / name),
+                            }
+                            for name in names
+                        ],
+                    }
+                )
+            )
+            result = BUNDLE.validate_selected_bundle_assets(
+                root,
+                manifest_path,
+                names,
+                release_json_path=release_path,
+            )
+            self.assertTrue(result["ok"], result["errors"])
 
     def test_published_release_digests_match_bundle(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -194,7 +231,7 @@ class V2BundleTests(unittest.TestCase):
             release_path.write_text(json.dumps({"tag_name": BUNDLE.DEFAULT_RELEASE_TAG, "assets": assets}))
             result = BUNDLE.validate_published_release(manifest_path, release_path)
             self.assertTrue(result["ok"], result["errors"])
-            self.assertEqual(result["asset_count"], 28)
+            self.assertEqual(result["asset_count"], 24)
 
     def test_changed_assets_excludes_unchanged_large_sidecars(self):
         with tempfile.TemporaryDirectory() as temporary:

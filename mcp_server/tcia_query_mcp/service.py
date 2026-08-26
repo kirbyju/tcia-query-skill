@@ -705,7 +705,7 @@ class TciaQueryService:
         if not self.controlled_db.exists():
             raise SnapshotNotFoundError(
                 f"Controlled-access metadata snapshot not found at {self.controlled_db}. "
-                "Run `python scripts/tcia_controlled_access_metadata.py ensure` from the skill root."
+                "Run `python scripts/tcia_v2_bundle.py install --profile research_detail` from the skill root."
             )
         conn = sqlite3.connect(self.controlled_db, factory=ClosingConnection)
         conn.row_factory = sqlite3.Row
@@ -715,7 +715,7 @@ class TciaQueryService:
         if not self.nifti_db.exists():
             raise SnapshotNotFoundError(
                 f"NIfTI metadata snapshot not found at {self.nifti_db}. "
-                "Run `python scripts/tcia_nifti_metadata.py ensure` from the skill root."
+                "The standalone NIfTI artifact is retired; use the unified public non-DICOM V2 tools."
             )
         conn = sqlite3.connect(self.nifti_db, factory=ClosingConnection)
         conn.row_factory = sqlite3.Row
@@ -725,7 +725,7 @@ class TciaQueryService:
         if not self.pathology_db.exists():
             raise SnapshotNotFoundError(
                 f"Pathology metadata snapshot not found at {self.pathology_db}. "
-                "Run `python scripts/tcia_pathology_metadata.py ensure` from the skill root."
+                "The standalone pathology artifact is retired; use the unified public non-DICOM V2 tools."
             )
         conn = sqlite3.connect(self.pathology_db, factory=ClosingConnection)
         conn.row_factory = sqlite3.Row
@@ -735,7 +735,7 @@ class TciaQueryService:
         if not self.clinical_db.exists():
             raise SnapshotNotFoundError(
                 f"Clinical metadata snapshot not found at {self.clinical_db}. "
-                "Run `python scripts/tcia_clinical_metadata.py ensure` from the skill root."
+                "Run `python scripts/tcia_v2_bundle.py install --profile research_detail` from the skill root."
             )
         conn = sqlite3.connect(self.clinical_db, factory=ClosingConnection)
         conn.row_factory = sqlite3.Row
@@ -1673,7 +1673,7 @@ class TciaQueryService:
             if not self._object_exists(conn, "agent_nifti_derived_objects"):
                 raise TciaServiceError(
                     "The NIfTI sidecar does not provide agent_nifti_derived_objects. "
-                    "Refresh it with `python scripts/tcia_nifti_metadata.py ensure`."
+                    "The standalone NIfTI artifact is retired; use the unified public non-DICOM V2 tools."
                 )
             sql = "SELECT * FROM agent_nifti_derived_objects WHERE lower(short_title) = ?"
             params: list[Any] = [title]
@@ -1722,7 +1722,7 @@ class TciaQueryService:
             if not self._object_exists(conn, "agent_nifti_characteristics"):
                 raise TciaServiceError(
                     "The NIfTI sidecar does not provide agent_nifti_characteristics. "
-                    "Refresh it with `python scripts/tcia_nifti_metadata.py ensure`."
+                    "The standalone NIfTI artifact is retired; use the unified public non-DICOM V2 tools."
                 )
             sql = "SELECT * FROM agent_nifti_characteristics WHERE lower(short_title) = ?"
             params: list[Any] = [title]
@@ -1775,7 +1775,7 @@ class TciaQueryService:
             if not self._object_exists(conn, "agent_nifti_review_issues"):
                 raise TciaServiceError(
                     "The NIfTI sidecar does not provide agent_nifti_review_issues. "
-                    "Refresh it with `python scripts/tcia_nifti_metadata.py ensure`."
+                    "The standalone NIfTI artifact is retired; use the unified public non-DICOM V2 audit tools."
                 )
             sql = "SELECT * FROM agent_nifti_review_issues WHERE 1 = 1"
             params: list[Any] = []

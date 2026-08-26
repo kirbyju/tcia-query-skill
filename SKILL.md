@@ -157,16 +157,16 @@ Run scripts from the skill root.
 | --- | --- |
 | `scripts/tcia_wordpress_search.py` | Search local SQLite TCIA WordPress Collection and Analysis Result snapshot metadata, with text or JSON output. |
 | `scripts/tcia_snapshot.py` | Build, inspect, validate, or download the local SQLite metadata snapshot, and export web-friendly release files. |
-| `scripts/tcia_freshness.py` | Verify installed skill files against GitHub, then refresh the base snapshot and requested optional sidecars. |
+| `scripts/tcia_freshness.py` | Verify installed skill files against GitHub, then refresh the base snapshot and current clinical/controlled-access sidecars. |
 | `scripts/tcia_skill_version.py` | Generate or validate the committed version/hash manifest for operational skill files. |
-| `scripts/tcia_nifti_metadata.py` | Download, validate, summarize, and query the optional release SQLite for visible non-controlled TCIA NIfTI file-grain metadata. |
+| `scripts/tcia_nifti_metadata.py` | Migration-only builder/validator for the retired standalone NIfTI source; end-user queries use unified V2 detail. |
 | `scripts/tcia_public_non_dicom_metadata.py` | Build, validate, summarize, and query the V2 public non-DICOM logical-asset and managed-location artifact. |
 | `scripts/tcia_participant_inventory.py` | Compose dataset-scoped participant availability from public non-DICOM, controlled, clinical, and IDC participant projections. |
 | `scripts/tcia_idc_participant_projection.py` | Build the compact, WordPress-scoped Collection and Analysis Result participant projection directly from IDC for the V2 staging ledger. |
 | `scripts/tcia_v2_bundle.py` | Install a manifest-pinned V2 profile, regenerate compatibility exports, and build or validate the complete V2 release contract. |
 | `scripts/tcia_v2_staging.py` | Build and validate the runner-local, hash-pinned source ledger used by V2 producers. |
 | `scripts/tcia_v2_checkpoint.py` | Preserve exact specialized NIfTI/pathology source rows inside the V2 audit checkpoint after retiring separate detail artifacts. |
-| `scripts/tcia_v2_parity.py` | Gate legacy-detail retirement on complete unified file projection and exact specialized checkpoint row counts. |
+| `scripts/tcia_v2_parity.py` | Historical migration gate that established retirement parity; it is not part of routine production. |
 | `scripts/tcia_v2_audit.py` | Preserve the schema-2 compatibility path and build/validate compact schema-3 research/audit projections with normalized, reconstructable provenance for streamlined releases. |
 | `scripts/tcia_controlled_access_metadata.py` | Build/download, validate, summarize, and query the optional release SQLite for public controlled-access WordPress manifests, metadata spreadsheets, `drs_uri` rows, and IDC-shaped radiology indexes. |
 | `scripts/tcia_clinical_metadata.py` | Build/download and validate the optional patient-level clinical SQLite from official TCIA artifacts, IDC collection clinical tables, strict TCIA-matched CDA rows, and DICOM fallback. |
@@ -277,7 +277,7 @@ Load `references/artifact-model-v2.md` for public non-DICOM inventory, managed-s
 
 ## PathDB Metadata
 
-For non-DICOM histopathology, load `references/pathdb.md`. Use WordPress first to confirm the dataset is TCIA-published, then use PathDB metadata to answer slide-level questions, including patient counts, slide counts, image URLs, caMicroscope viewer URLs, cancer type/location, data formats, and companion radiology/genomics/proteomics flags. For public pathology Aspera package scope, Aspera-derived package file inventory, or PathDB/package reconciliation, use the optional pathology SQLite and prefer `agent_pathology_dataset_summary`, `agent_pathology_downloads`, `agent_pathology_file_objects`, and `agent_pathology_package_files`. For caMicroscope URLs, use CSV `camic_id`, not `slide_id`. If the same pathology data are also distributed as an Aspera package, distinguish the routes: PathDB is optimized for metadata and browser viewing and may use converted or reformatted files; Aspera is the original submitter-provided copy and is preferred for analyses requiring exact source files.
+For non-DICOM histopathology, load `references/pathdb.md`. Use WordPress first to confirm the dataset is TCIA-published, then use PathDB metadata to answer slide-level questions, including patient counts, slide counts, image URLs, caMicroscope viewer URLs, cancer type/location, data formats, and companion radiology/genomics/proteomics flags. For public pathology Aspera package scope, file inventory, or PathDB/package reconciliation, use unified V2 public non-DICOM detail and its audit companion. The retired standalone pathology SQLite is not an install or query target. For caMicroscope URLs, use CSV `camic_id`, not `slide_id`. If the same pathology data are also distributed as an Aspera package, distinguish the routes: PathDB is optimized for metadata and browser viewing and may use converted or reformatted files; Aspera is the original submitter-provided copy and is preferred for analyses requiring exact source files.
 
 ## Answer Format
 

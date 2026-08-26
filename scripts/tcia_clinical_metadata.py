@@ -40,8 +40,6 @@ from typing import Any, Iterable
 
 
 SCHEMA_VERSION = 17
-DEFAULT_REPO = "kirbyju/tcia-query-skill"
-DEFAULT_RELEASE_TAG = "tcia-snapshot-latest"
 CLINICAL_ASSET = "clinical_metadata.sqlite.gz"
 CLINICAL_MANIFEST_ASSET = "clinical_metadata_manifest.json"
 SKILL_ROOT = Path(__file__).resolve().parents[1]
@@ -7097,14 +7095,6 @@ def parse_args() -> argparse.Namespace:
     info_parser = subparsers.add_parser("info")
     info_parser.add_argument("--db", default=str(DEFAULT_DB_PATH))
 
-    ensure_parser = subparsers.add_parser("ensure")
-    ensure_parser.add_argument("--db", default=str(DEFAULT_DB_PATH))
-    ensure_parser.add_argument("--manifest", default=str(DEFAULT_MANIFEST_PATH))
-    ensure_parser.add_argument("--repo", default=DEFAULT_REPO)
-    ensure_parser.add_argument("--tag", default=DEFAULT_RELEASE_TAG)
-    ensure_parser.add_argument(
-        "--max-download-bytes", type=int, default=512 * 1024 * 1024
-    )
     qc_parser = subparsers.add_parser(
         "export-qc", help="Export clinical QC findings to CSV."
     )
@@ -7142,8 +7132,6 @@ def main() -> int:
             }
             conn.close()
             print(json.dumps(result, indent=2))
-        elif args.command == "ensure":
-            ensure(args)
         elif args.command == "export-qc":
             print(
                 json.dumps(

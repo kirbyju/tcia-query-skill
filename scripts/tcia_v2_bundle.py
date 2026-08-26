@@ -27,9 +27,8 @@ BUNDLE_SCHEMA_VERSION = 2
 BUNDLE_ARTIFACT = "tcia_metadata_v2_bundle"
 BUNDLE_MANIFEST_ASSET = "tcia_metadata_v2_bundle_manifest.json"
 DEFAULT_REPOSITORY = "kirbyju/tcia-query-skill"
-DEFAULT_SOURCE_TAG = "tcia-snapshot-latest"
+DEFAULT_SOURCE_TAG = "workflow-artifact:update-tcia-metadata-v2-source-inputs"
 DEFAULT_RELEASE_TAG = "tcia-metadata-v2-latest"
-PREVIEW_RELEASE_TAG = "tcia-metadata-v2-preview"
 DEFAULT_INSTALL_DIR = Path(__file__).resolve().parents[1] / "cache" / DEFAULT_RELEASE_TAG
 INSTALL_STATE_ASSET = "tcia_metadata_v2_install.json"
 FULL_RELEASE_CONTRACT = "full"
@@ -47,18 +46,6 @@ COMPONENTS = {
         "manifest": "tcia_snapshot_manifest.json",
         "category": "core",
         "default_download": True,
-    },
-    "nifti": {
-        "database": "nifti_metadata.sqlite.gz",
-        "manifest": "nifti_metadata_manifest.json",
-        "category": "research_detail",
-        "default_download": False,
-    },
-    "pathology": {
-        "database": "pathology_metadata.sqlite.gz",
-        "manifest": "pathology_metadata_manifest.json",
-        "category": "research_detail",
-        "default_download": False,
     },
     "controlled_access": {
         "database": "controlled_access_metadata.sqlite.gz",
@@ -102,11 +89,11 @@ EXTRA_ASSETS = {
     "clinical_qc_manual_review.csv": {
         "category": "audit_support",
         "default_download": False,
-        "source": "source_release_copy",
+        "source": "source_workflow_input",
     },
 }
 
-SOURCE_COMPONENTS = ("snapshot", "nifti", "pathology", "controlled_access", "clinical")
+SOURCE_COMPONENTS = ("snapshot", "controlled_access", "clinical")
 STREAMLINED_COMPONENTS = (
     "snapshot",
     "controlled_access",
@@ -253,7 +240,7 @@ def asset_source(name: str) -> str:
         ("participant_inventory.", "participant_inventory_")
     ):
         return "v2_build"
-    return "source_release_copy"
+    return "source_workflow_input"
 
 
 def asset_category(name: str) -> tuple[str, bool]:
@@ -399,6 +386,60 @@ def validate_source_release(asset_dir: Path, release_json_path: Path) -> dict[st
         "target_commitish": release.get("target_commitish"),
         "published_at": release.get("published_at"),
         "updated_at": release.get("updated_at"),
+        "assets": verified,
+    }
+
+
+def validate_selected_bundle_assets(
+    asset_dir: Path,
+    manifest_path: Path,
+    asset_names: list[str],
+    *,
+    release_json_path: Path | None = None,
+) -> dict[str, Any]:
+    """Validate a pinned subset used as an internal V2 build baseline."""
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    errors = validate_manifest_contract(manifest)
+    manifest_assets = manifest.get("assets") or {}
+    release_assets: dict[str, dict[str, Any]] = {}
+    release_tag = ""
+    if release_json_path:
+        release = json.loads(release_json_path.read_text(encoding="utf-8"))
+        release_tag = str(release.get("tag_name") or "")
+        release_assets = {
+            str(asset.get("name")): asset for asset in release.get("assets") or []
+        }
+    verified: dict[str, dict[str, Any]] = {}
+    for name in asset_names:
+        details = manifest_assets.get(name)
+        path = asset_dir / name
+        if not details:
+            errors.append(f"bundle manifest does not contain selected asset: {name}")
+            continue
+        if not path.is_file():
+            errors.append(f"missing selected bundle asset: {name}")
+            continue
+        digest = file_sha256(path)
+        if digest != details.get("sha256"):
+            errors.append(f"selected bundle asset hash mismatch: {name}")
+        if path.stat().st_size != details.get("bytes"):
+            errors.append(f"selected bundle asset byte-size mismatch: {name}")
+        if release_assets:
+            release_asset = release_assets.get(name)
+            if not release_asset:
+                errors.append(f"captured release does not contain selected asset: {name}")
+            else:
+                release_digest = str(release_asset.get("digest") or "").removeprefix(
+                    "sha256:"
+                )
+                if not release_digest or release_digest != digest:
+                    errors.append(f"captured release digest mismatch: {name}")
+        verified[name] = {"bytes": path.stat().st_size, "sha256": digest}
+    return {
+        "ok": not errors,
+        "errors": errors,
+        "release_tag": release_tag or manifest.get("release_tag"),
+        "release_fingerprint": manifest.get("release_fingerprint"),
         "assets": verified,
     }
 
@@ -846,6 +887,14 @@ def install_bundle(
 def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(description=__doc__)
     sub = root.add_subparsers(dest="command", required=True)
+    selection = sub.add_parser(
+        "validate-selection",
+        help="Validate selected assets against a captured V2 release and bundle manifest.",
+    )
+    selection.add_argument("--asset-dir", required=True)
+    selection.add_argument("--manifest", required=True)
+    selection.add_argument("--source-release-json")
+    selection.add_argument("--asset", action="append", required=True)
     exports = sub.add_parser("exports", help="Regenerate all web exports from the bundled snapshot.")
     exports.add_argument("--snapshot-db", required=True)
     exports.add_argument("--out-dir", required=True)
@@ -900,6 +949,17 @@ def parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = parser().parse_args()
+    if args.command == "validate-selection":
+        result = validate_selected_bundle_assets(
+            Path(args.asset_dir),
+            Path(args.manifest),
+            args.asset,
+            release_json_path=(
+                Path(args.source_release_json) if args.source_release_json else None
+            ),
+        )
+        print(json.dumps(result, indent=2, sort_keys=True))
+        return 0 if result["ok"] else 1
     if args.command == "exports":
         snapshot_db = Path(args.snapshot_db)
         out_dir = Path(args.out_dir)

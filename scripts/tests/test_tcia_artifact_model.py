@@ -157,7 +157,12 @@ class BuilderTests(unittest.TestCase):
             conn.row_factory = sqlite3.Row
             conn.executescript(public.SCHEMA)
             public.insert_vocab(conn)
-            self.assertEqual(public.ingest_remind_nrrd_inventory(conn, source_db), 2)
+            self.assertEqual(
+                public.ingest_remind_nrrd_inventory(
+                    conn, source_db, inventory_path=None
+                ),
+                2,
+            )
             rows = conn.execute(
                 """
                 SELECT subject_id, file_format, object_role, checksum,
@@ -191,6 +196,23 @@ class BuilderTests(unittest.TestCase):
                 2,
             )
             conn.close()
+
+    def test_reviewed_remind_reference_is_hash_pinned_and_complete(self):
+        rows, provenance = public.load_remind_nrrd_reference(
+            public.DEFAULT_REMIND_NRRD_INVENTORY
+        )
+        self.assertEqual(len(rows), 356)
+        self.assertEqual(provenance["participant_count"], 114)
+        self.assertEqual(
+            len(
+                {
+                    public.REMIND_NRRD_PATH.search(row["package_path"]).group("subject")
+                    for row in rows
+                    if public.REMIND_NRRD_PATH.search(row["package_path"])
+                }
+            ),
+            114,
+        )
 
     def test_legacy_idc_evidence_does_not_claim_current_public_dicom(self):
         import sqlite3

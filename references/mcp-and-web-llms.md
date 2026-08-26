@@ -37,7 +37,7 @@ The stable streamlined release has nine payload assets plus the authoritative bu
 - `public_non_dicom_audit.sqlite.gz`: verbose non-DICOM provenance, specialized source checkpoints, crosswalk evidence, and QC.
 - `participant_inventory_audit.sqlite.gz`: verbose participant provenance, linkage evidence, and retained clinical-review material.
 
-Per-component manifests, plain JSONL files, release-timeline JSONL files, and standalone NIfTI/pathology SQLite files are not assets in the streamlined stable release. Their validation metadata is inline in the bundle manifest. Query release timelines from the base snapshot or through MCP/REST. If a web-only host cannot decompress gzip, use MCP rather than falling back to live WordPress.
+Per-component manifests, plain JSONL files, release-timeline JSONL files, and standalone NIfTI/pathology SQLite files are not assets in the moving V2 release. Their validation metadata is inline in the bundle manifest. Query release timelines from the base snapshot or through MCP/REST. If a web-only host cannot decompress gzip, use MCP rather than falling back to live WordPress.
 
 Direct release URLs:
 

@@ -28,7 +28,6 @@ from typing import Any, Callable, Optional
 
 SCHEMA_VERSION = 7
 DEFAULT_REPO = "kirbyju/tcia-query-skill"
-DEFAULT_RELEASE_TAG = "tcia-snapshot-latest"
 SNAPSHOT_ASSET = "tcia_snapshot.sqlite.gz"
 MANIFEST_ASSET = "tcia_snapshot_manifest.json"
 AGENT_DATASETS_JSONL = "agent_datasets.jsonl"
@@ -2401,16 +2400,6 @@ def main(argv: Optional[list[str]] = None) -> int:
     validate.add_argument("--db", default=str(DEFAULT_DB_PATH), help="SQLite snapshot path.")
     validate.add_argument("--exports-dir", help="Optional directory containing web-friendly exports.")
 
-    ensure = subparsers.add_parser("ensure", help="Download the latest release snapshot if missing or changed.")
-    ensure.add_argument(
-        "--repo",
-        default=None,
-        help=f"GitHub repository in owner/name form. Defaults to {DEFAULT_REPO}.",
-    )
-    ensure.add_argument("--tag", default=DEFAULT_RELEASE_TAG, help="Snapshot release tag.")
-    ensure.add_argument("--db", default=str(DEFAULT_DB_PATH), help="SQLite snapshot path.")
-    ensure.add_argument("--manifest-out", default=str(DEFAULT_MANIFEST_PATH), help="Manifest output path.")
-
     args = parser.parse_args(argv)
     if args.command == "build":
         manifest = build_snapshot(
@@ -2435,11 +2424,6 @@ def main(argv: Optional[list[str]] = None) -> int:
             Path(args.db),
             exports_dir=Path(args.exports_dir) if args.exports_dir else None,
         )
-        print(json.dumps(result, indent=2, sort_keys=True))
-        return 0
-    if args.command == "ensure":
-        repo = args.repo or github_repo_from_env_or_default()
-        result = download_release_snapshot(repo, args.tag, Path(args.db), Path(args.manifest_out))
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0
     raise AssertionError(args.command)

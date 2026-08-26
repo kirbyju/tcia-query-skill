@@ -6,10 +6,11 @@ source components into a build-time staging contract, builds the compact V2
 research databases and audit companions, and publishes the streamlined
 profile-based bundle only when its fingerprint changes. The stable bundle has
 nine payload assets plus one authoritative manifest; only the current dataset
-and download JSONL exports remain, both gzip-compressed. The moving stable tag is
-`tcia-metadata-v2-latest`; immutable tags preserve reproducible releases and
-`tcia-metadata-v2-preview` remains available for explicit candidates. The
-release workflow does not itself deploy or restart MCP/REST.
+and download JSONL exports remain, both gzip-compressed. The single supported
+release tag is `tcia-metadata-v2-latest`. Build stages exchange validated inputs
+through short-lived GitHub Actions artifacts rather than publishing separate
+source, preview, or dated releases. The release workflow does not itself deploy
+or restart MCP/REST.
 
 The skill uses a local SQLite snapshot for routine TCIA discovery instead of querying public APIs during end-user tasks. The snapshot contains:
 

@@ -61,14 +61,14 @@ from tcia_artifact_model import (
 
 SKILL_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SNAPSHOT_DB = SKILL_ROOT / "cache" / "tcia_snapshot.sqlite"
-DEFAULT_NIFTI_DB = SKILL_ROOT / "cache" / "nifti_metadata.sqlite"
-DEFAULT_PATHOLOGY_DB = SKILL_ROOT / "cache" / "pathology_metadata.sqlite"
 DEFAULT_CLINICAL_DB = SKILL_ROOT / "cache" / "clinical_metadata.sqlite"
 DEFAULT_CROSSWALK_CSV = SKILL_ROOT / "references" / "public_non_dicom_crosswalks_v1.csv"
 DEFAULT_CROSSWALK_CURATION = SKILL_ROOT / "references" / "public-non-dicom-crosswalk-curation-v1.json"
 DEFAULT_BRATS_CROSSWALK_CSV = SKILL_ROOT / "references" / "brats2021_tcia_crosswalk_v1.csv"
 DEFAULT_BRATS_CROSSWALK_PROVENANCE = SKILL_ROOT / "references" / "brats2021_tcia_crosswalk_v1.json"
 DEFAULT_IMAGE_METADATA_CSV = SKILL_ROOT / "references" / "public_non_dicom_image_metadata_v1.csv"
+DEFAULT_REMIND_NRRD_INVENTORY = SKILL_ROOT / "references" / "remind_nrrd_inventory_v1.sums"
+DEFAULT_REMIND_NRRD_PROVENANCE = SKILL_ROOT / "references" / "remind_nrrd_inventory_v1.json"
 DEFAULT_DB = SKILL_ROOT / "cache" / "public_non_dicom_metadata.sqlite"
 DEFAULT_MANIFEST = SKILL_ROOT / "cache" / "public_non_dicom_metadata_manifest.json"
 DEFAULT_RELEASE_TAG = "tcia-metadata-v2-latest"
@@ -1986,7 +1986,57 @@ def ingest_aspera_public_dicom_exceptions(
     return len(grouped)
 
 
-def ingest_remind_nrrd_inventory(conn: sqlite3.Connection, nifti_db: Path) -> int:
+def load_remind_nrrd_reference(
+    inventory_path: Path,
+    provenance_path: Path = DEFAULT_REMIND_NRRD_PROVENANCE,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    if not inventory_path.is_file() or not provenance_path.is_file():
+        return [], {}
+    provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+    expected_digest = str(provenance.get("source_sha256") or "")
+    actual_digest = file_sha256(inventory_path)
+    if not expected_digest or actual_digest != expected_digest:
+        raise RuntimeError(
+            f"ReMIND inventory digest mismatch: {actual_digest} != {expected_digest}"
+        )
+    rows: list[dict[str, Any]] = []
+    for line_number, line in enumerate(
+        inventory_path.read_text(encoding="utf-8").splitlines(), start=1
+    ):
+        if not line.strip():
+            continue
+        parts = line.split(maxsplit=1)
+        if len(parts) != 2:
+            raise RuntimeError(f"Malformed ReMIND inventory line {line_number}")
+        checksum, package_path = parts
+        rows.append(
+            {
+                "dataset_type": str(provenance.get("dataset_type") or "Collection"),
+                "short_title": str(provenance.get("short_title") or REMIND_SHORT_TITLE),
+                "download_id": str(provenance.get("aspera_inventory_id") or ""),
+                "line_number": line_number,
+                "checksum": checksum,
+                "algorithm": "md5",
+                "file_name": Path(package_path).name,
+                "package_path": package_path,
+                "file_ext": Path(package_path).suffix,
+            }
+        )
+    expected_rows = int(provenance.get("row_count") or 0)
+    if expected_rows and len(rows) != expected_rows:
+        raise RuntimeError(
+            f"ReMIND inventory row mismatch: {len(rows)} != {expected_rows}"
+        )
+    return rows, provenance
+
+
+def ingest_remind_nrrd_inventory(
+    conn: sqlite3.Connection,
+    nifti_db: Path | None = None,
+    *,
+    inventory_path: Path | None = DEFAULT_REMIND_NRRD_INVENTORY,
+    provenance_path: Path = DEFAULT_REMIND_NRRD_PROVENANCE,
+) -> int:
     """Project the reviewed ReMIND Aspera ``.sums`` paths at file grain.
 
     TCIA's download aggregate reports 113 subjects/images because 113 subjects
@@ -1999,45 +2049,69 @@ def ingest_remind_nrrd_inventory(conn: sqlite3.Connection, nifti_db: Path) -> in
     path even though the downloaded NRRDs are nonempty. Preserve that source
     value in provenance, but never expose it as a verified file checksum.
     """
-    if not nifti_db.exists():
-        return 0
-    with closing(connect(nifti_db)) as source:
-        if not table_exists(source, "aspera_root_sums_inventory"):
-            return 0
-        downloads: dict[tuple[str, str], str] = {}
-        if table_exists(source, "agent_nifti_downloads"):
-            for row in source.execute(
-                "SELECT short_title, download_id, download_url FROM agent_nifti_downloads"
-            ):
-                downloads[(str(row["short_title"]), str(row["download_id"] or ""))] = str(
-                    row["download_url"] or ""
-                )
-        inventory_columns = columns(source, "aspera_root_sums_inventory")
-        if not {"short_title", "package_path", "file_ext"}.issubset(inventory_columns):
-            return 0
-        optional = {
-            "dataset_type": "'Collection'",
-            "download_id": "''",
-            "line_number": "0",
-            "checksum": "''",
-            "algorithm": "''",
-            "file_name": "''",
-        }
-        select_fields = [
-            name if name in inventory_columns else f"{fallback} AS {name}"
-            for name, fallback in optional.items()
-        ] + ["short_title", "package_path", "file_ext"]
-        imported = 0
-        for row in source.execute(
-            f"""
-            SELECT {', '.join(select_fields)}
-            FROM aspera_root_sums_inventory
-            WHERE lower(short_title) = lower(?)
-              AND lower(ltrim(file_ext, '.')) = 'nrrd'
-            ORDER BY line_number
-            """,
+    inventory_rows: Iterable[sqlite3.Row | dict[str, Any]] = []
+    downloads: dict[tuple[str, str], str] = {}
+    source_artifact = "public_non_dicom_reference"
+    source_locator = "references/remind_nrrd_inventory_v1.sums"
+    reference_provenance: dict[str, Any] = {}
+    if inventory_path and inventory_path.is_file():
+        inventory_rows, reference_provenance = load_remind_nrrd_reference(
+            inventory_path, provenance_path
+        )
+        aggregate = conn.execute(
+            "SELECT source_url FROM public_non_dicom_assets "
+            "WHERE short_title=? AND file_format='NRRD' "
+            "AND asset_granularity='download' ORDER BY asset_id LIMIT 1",
             (REMIND_SHORT_TITLE,),
-        ):
+        ).fetchone()
+        if aggregate:
+            downloads[(REMIND_SHORT_TITLE, str(reference_provenance.get("aspera_inventory_id") or ""))] = str(
+                aggregate[0] or ""
+            )
+    elif nifti_db and nifti_db.exists():
+        source_artifact = "nifti_metadata"
+        source_locator = "nifti_metadata.aspera_root_sums_inventory"
+        with closing(connect(nifti_db)) as source:
+            if not table_exists(source, "aspera_root_sums_inventory"):
+                return 0
+            if table_exists(source, "agent_nifti_downloads"):
+                for row in source.execute(
+                    "SELECT short_title, download_id, download_url FROM agent_nifti_downloads"
+                ):
+                    downloads[(str(row["short_title"]), str(row["download_id"] or ""))] = str(
+                        row["download_url"] or ""
+                    )
+            inventory_columns = columns(source, "aspera_root_sums_inventory")
+            if not {"short_title", "package_path", "file_ext"}.issubset(inventory_columns):
+                return 0
+            optional = {
+                "dataset_type": "'Collection'",
+                "download_id": "''",
+                "line_number": "0",
+                "checksum": "''",
+                "algorithm": "''",
+                "file_name": "''",
+            }
+            select_fields = [
+                name if name in inventory_columns else f"{fallback} AS {name}"
+                for name, fallback in optional.items()
+            ] + ["short_title", "package_path", "file_ext"]
+            inventory_rows = list(
+                source.execute(
+                    f"""
+                    SELECT {', '.join(select_fields)}
+                    FROM aspera_root_sums_inventory
+                    WHERE lower(short_title) = lower(?)
+                      AND lower(ltrim(file_ext, '.')) = 'nrrd'
+                    ORDER BY line_number
+                    """,
+                    (REMIND_SHORT_TITLE,),
+                )
+            )
+    else:
+        return 0
+    imported = 0
+    for row in inventory_rows:
             package_path = str(row["package_path"] or "")
             match = REMIND_NRRD_PATH.search(package_path)
             if not match:
@@ -2103,8 +2177,9 @@ def ingest_remind_nrrd_inventory(conn: sqlite3.Connection, nifti_db: Path) -> in
                     "raw_source_checksum": raw_checksum,
                 }),
                 "provenance_json": json_dumps({
-                    "source_artifact": "nifti_metadata",
-                    "source_table": "aspera_root_sums_inventory",
+                    "source_artifact": source_artifact,
+                    "source_locator": source_locator,
+                    "reference_provenance": reference_provenance,
                     **evidence,
                 }),
                 "quality_flag_json": json_dumps({
@@ -2146,8 +2221,8 @@ def ingest_remind_nrrd_inventory(conn: sqlite3.Connection, nifti_db: Path) -> in
                         source_url,
                         representation_class="submitted_original",
                         provenance={
-                            "source_artifact": "nifti_metadata",
-                            "source_table": "aspera_root_sums_inventory",
+                            "source_artifact": source_artifact,
+                            "source_locator": source_locator,
                             "package_path": package_path,
                         },
                     ),
@@ -2168,7 +2243,7 @@ def ingest_remind_nrrd_inventory(conn: sqlite3.Connection, nifti_db: Path) -> in
                 },
                 value_role="source_raw",
                 source_kind="aspera_package_inventory",
-                source_locator="nifti_metadata.aspera_root_sums_inventory",
+                source_locator=source_locator,
                 inference_method=mapping_method,
                 confidence="high",
                 priority=95,
@@ -4454,6 +4529,196 @@ def mark_downloads_with_linked_file_grain(conn: sqlite3.Connection) -> int:
     return conn.total_changes - before
 
 
+def delete_refreshable_assets(conn: sqlite3.Connection) -> int:
+    """Remove source scopes that are rebuilt from current native V2 inputs."""
+    conn.execute("DROP TABLE IF EXISTS temp.refresh_asset_ids")
+    conn.execute("CREATE TEMP TABLE refresh_asset_ids(asset_id TEXT PRIMARY KEY)")
+    conn.execute(
+        "INSERT INTO refresh_asset_ids "
+        "SELECT asset_id FROM public_non_dicom_assets "
+        "WHERE (source_system='tcia_wordpress' AND asset_granularity='download') "
+        "   OR source_system='tcia_pathdb'"
+    )
+    count = int(conn.execute("SELECT COUNT(*) FROM refresh_asset_ids").fetchone()[0])
+    conn.execute(
+        "DELETE FROM public_non_dicom_asset_relationships "
+        "WHERE source_asset_id IN (SELECT asset_id FROM refresh_asset_ids) "
+        "   OR target_asset_id IN (SELECT asset_id FROM refresh_asset_ids)"
+    )
+    for table in (
+        "public_non_dicom_locations",
+        "public_non_dicom_asset_participants",
+        "public_non_dicom_crosswalk_evidence",
+        "public_non_dicom_image_metadata",
+    ):
+        conn.execute(
+            f"DELETE FROM {table} WHERE asset_id IN (SELECT asset_id FROM refresh_asset_ids)"
+        )
+    conn.execute(
+        "DELETE FROM public_non_dicom_assets "
+        "WHERE asset_id IN (SELECT asset_id FROM refresh_asset_ids)"
+    )
+    conn.execute("DROP TABLE refresh_asset_ids")
+    return count
+
+
+def apply_brats_crosswalk_to_existing_assets(
+    conn: sqlite3.Connection,
+    crosswalk: dict[str, dict[str, str]],
+    provenance: dict[str, Any],
+) -> int:
+    """Replay the reviewed BraTS identity projection onto migrated V2 rows."""
+    rows = conn.execute(
+        """
+        SELECT a.asset_id, a.subject_id, a.raw_values_json, a.provenance_json,
+               COALESCE(
+                 (SELECT ap.raw_subject_id
+                  FROM public_non_dicom_asset_participants ap
+                  WHERE ap.asset_id=a.asset_id AND ap.raw_subject_id LIKE 'BraTS2021_%'
+                  LIMIT 1),
+                 a.subject_id
+               ) AS challenge_id
+        FROM public_non_dicom_assets a
+        WHERE lower(a.short_title)=lower(?)
+          AND COALESCE(
+                (SELECT ap.raw_subject_id
+                 FROM public_non_dicom_asset_participants ap
+                 WHERE ap.asset_id=a.asset_id AND ap.raw_subject_id LIKE 'BraTS2021_%'
+                 LIMIT 1),
+                a.subject_id
+              ) LIKE 'BraTS2021_%'
+        ORDER BY a.asset_id
+        """,
+        (BRATS_SHORT_TITLE,),
+    ).fetchall()
+    for row in rows:
+        challenge_id = str(row["challenge_id"])
+        subject_id, namespace, link_status, evidence = brats_participant_projection(
+            challenge_id, crosswalk, provenance
+        )
+        try:
+            raw_values = json.loads(row["raw_values_json"] or "{}")
+        except json.JSONDecodeError:
+            raw_values = {}
+        try:
+            provenance_values = json.loads(row["provenance_json"] or "{}")
+        except json.JSONDecodeError:
+            provenance_values = {}
+        raw_values["brats_crosswalk"] = evidence
+        provenance_values["brats_crosswalk"] = evidence
+        conn.execute(
+            """
+            UPDATE public_non_dicom_assets
+            SET subject_id=?, subject_id_namespace=?, participant_link_status=?,
+                raw_values_json=?, provenance_json=?
+            WHERE asset_id=?
+            """,
+            (
+                subject_id,
+                namespace,
+                link_status,
+                json_dumps(raw_values),
+                json_dumps(provenance_values),
+                row["asset_id"],
+            ),
+        )
+        conn.execute(
+            "DELETE FROM public_non_dicom_asset_participants WHERE asset_id=?",
+            (row["asset_id"],),
+        )
+        insert_asset_participant(
+            conn,
+            asset_id=str(row["asset_id"]),
+            short_title=BRATS_SHORT_TITLE,
+            subject_id=subject_id,
+            namespace=namespace,
+            raw_subject_id=challenge_id,
+            participant_role="depicted_subject",
+            link_status=link_status,
+            evidence=evidence,
+        )
+        insert_brats_crosswalk_evidence(
+            conn, str(row["asset_id"]), challenge_id, subject_id, evidence
+        )
+    return len(rows)
+
+
+def apply_bcbm_projection_to_existing_assets(conn: sqlite3.Connection) -> int:
+    """Replay the reviewed BCBM scan-to-patient projection onto migrated rows."""
+    rows = conn.execute(
+        """SELECT asset_id, package_path, raw_values_json, provenance_json
+           FROM public_non_dicom_assets
+           WHERE lower(short_title)=lower(?) AND asset_granularity='file'
+           ORDER BY asset_id""",
+        (BCBM_SHORT_TITLE,),
+    ).fetchall()
+    projected = 0
+    for row in rows:
+        patient_id, scan_id = bcbm_patient_and_scan_id(str(row["package_path"] or ""))
+        if not patient_id:
+            continue
+        evidence = {
+            "source_scan_id": scan_id,
+            "resolved_patient_id": patient_id,
+            "mapping_method": "strip_final_numeric_scan_suffix",
+        }
+        try:
+            raw_values = json.loads(row["raw_values_json"] or "{}")
+        except json.JSONDecodeError:
+            raw_values = {}
+        try:
+            provenance_values = json.loads(row["provenance_json"] or "{}")
+        except json.JSONDecodeError:
+            provenance_values = {}
+        raw_values["bcbm_scan_projection"] = evidence
+        provenance_values["bcbm_scan_projection"] = evidence
+        namespace = f"tcia_collection:{BCBM_SHORT_TITLE}"
+        conn.execute(
+            """UPDATE public_non_dicom_assets
+               SET subject_id=?, subject_id_namespace=?,
+                   participant_link_status='reviewed_patient_scan_projection',
+                   raw_values_json=?, provenance_json=?
+               WHERE asset_id=?""",
+            (
+                patient_id,
+                namespace,
+                json_dumps(raw_values),
+                json_dumps(provenance_values),
+                row["asset_id"],
+            ),
+        )
+        conn.execute(
+            "DELETE FROM public_non_dicom_asset_participants WHERE asset_id=?",
+            (row["asset_id"],),
+        )
+        insert_asset_participant(
+            conn,
+            asset_id=str(row["asset_id"]),
+            short_title=BCBM_SHORT_TITLE,
+            subject_id=patient_id,
+            namespace=namespace,
+            raw_subject_id=scan_id,
+            participant_role="depicted_subject",
+            link_status="reviewed_patient_scan_projection",
+            evidence=evidence,
+        )
+        merge_image_metadata(
+            conn,
+            str(row["asset_id"]),
+            {"procedure_id": scan_id},
+            value_role="normalized",
+            source_kind="reviewed_package_path_contract",
+            source_locator="BCBM-RadioGenomics package path",
+            inference_method="strip_final_numeric_scan_suffix",
+            confidence="high",
+            priority=110,
+            evidence=evidence,
+            short_title=BCBM_SHORT_TITLE,
+        )
+        projected += 1
+    return projected
+
+
 def build_database(
     snapshot_db: Path,
     out: Path,
@@ -4466,20 +4731,48 @@ def build_database(
     crosswalk_csv: Path | None = None,
     crosswalk_curation: Path | None = None,
     image_metadata_csv: Path | None = None,
+    remind_nrrd_inventory: Path | None = None,
+    remind_nrrd_provenance: Path = DEFAULT_REMIND_NRRD_PROVENANCE,
     staging_db: Path | None = None,
+    baseline_db: Path | None = None,
 ) -> dict[str, Any]:
     if not snapshot_db.exists():
         raise FileNotFoundError(f"Base snapshot not found: {snapshot_db}")
+    if baseline_db and not baseline_db.is_file():
+        raise FileNotFoundError(f"V2 baseline not found: {baseline_db}")
+    baseline_source_meta = source_meta(baseline_db) if baseline_db else {"enabled": False}
+    in_place_baseline = bool(
+        baseline_db and baseline_db.resolve() == out.resolve()
+    )
     if out.exists():
         if not replace:
             raise FileExistsError(f"Output exists: {out}; pass --replace")
-        out.unlink()
+        if not in_place_baseline:
+            out.unlink()
     out.parent.mkdir(parents=True, exist_ok=True)
+    if baseline_db and not in_place_baseline:
+        shutil.copy2(baseline_db, out)
     brats_crosswalk, brats_provenance = load_brats2021_crosswalk()
     with closing(connect(out)) as conn:
-        conn.executescript(SCHEMA)
-        insert_vocab(conn)
+        if baseline_db:
+            schema_row = conn.execute(
+                "SELECT value FROM artifact_meta WHERE key='schema_version'"
+            ).fetchone()
+            if not schema_row or int(schema_row[0]) != SCHEMA_VERSION:
+                raise RuntimeError("V2 baseline schema does not match the current builder")
+            conn.execute("DELETE FROM artifact_meta")
+            refreshed_assets = delete_refreshable_assets(conn)
+            conn.execute("DELETE FROM public_non_dicom_crosswalk_decisions")
+            conn.execute("DELETE FROM public_non_dicom_crosswalk_evidence")
+            conn.execute("DELETE FROM public_non_dicom_review_issues")
+            conn.execute("DELETE FROM public_non_dicom_dataset_metadata_notes")
+            conn.execute("DELETE FROM public_non_dicom_metadata_field_coverage")
+        else:
+            conn.executescript(SCHEMA)
+            insert_vocab(conn)
+            refreshed_assets = 0
         counts = {
+            "baseline_refreshable_assets_removed": refreshed_assets,
             "wordpress_download_assets": ingest_wordpress(conn, snapshot_db),
             "nifti_file_assets": ingest_nifti(
                 conn, nifti_db, brats_crosswalk, brats_provenance
@@ -4489,12 +4782,20 @@ def build_database(
                     conn, nifti_db, brats_crosswalk, brats_provenance
                 ) if nifti_db else 0
             ),
-            "remind_nrrd_file_assets": (
-                ingest_remind_nrrd_inventory(conn, nifti_db) if nifti_db else 0
+            "remind_nrrd_file_assets": ingest_remind_nrrd_inventory(
+                conn,
+                nifti_db,
+                inventory_path=remind_nrrd_inventory,
+                provenance_path=remind_nrrd_provenance,
             ),
             "pathology_package_assets": ingest_pathology_packages(conn, pathology_db) if pathology_db else 0,
             "pathdb_file_assets": ingest_pathdb(conn, snapshot_db, include_pathdb_files),
         }
+        if baseline_db:
+            counts["brats_existing_assets_reprojected"] = apply_brats_crosswalk_to_existing_assets(
+                conn, brats_crosswalk, brats_provenance
+            )
+            counts["bcbm_existing_assets_reprojected"] = apply_bcbm_projection_to_existing_assets(conn)
         counts["wordpress_aggregate_counts_refreshed"] = refresh_wordpress_aggregate_counts(
             conn, snapshot_db
         )
@@ -4544,7 +4845,10 @@ def build_database(
             "source_crosswalk_csv": source_meta(crosswalk_csv) if crosswalk_csv else {"enabled": False},
             "source_crosswalk_curation": source_meta(crosswalk_curation) if crosswalk_curation else {"enabled": False},
             "source_image_metadata_csv": source_meta(image_metadata_csv) if image_metadata_csv else {"enabled": False},
+            "source_remind_nrrd_inventory": source_meta(remind_nrrd_inventory) if remind_nrrd_inventory else {"enabled": False},
+            "source_remind_nrrd_provenance": source_meta(remind_nrrd_provenance),
             "source_staging_ledger": source_meta(staging_db) if staging_db else {"enabled": False},
+            "source_public_non_dicom_baseline": baseline_source_meta,
             "source_brats_crosswalk_csv": source_meta(DEFAULT_BRATS_CROSSWALK_CSV),
             "source_brats_crosswalk_provenance": source_meta(DEFAULT_BRATS_CROSSWALK_PROVENANCE),
             "include_pathdb_files": include_pathdb_files,
@@ -4606,6 +4910,14 @@ def validate_database(path: Path) -> dict[str, Any]:
         if integrity != "ok":
             errors.append(f"integrity_check={integrity}")
         objects = {row[0] for row in conn.execute("SELECT name FROM sqlite_master")}
+        artifact_meta = (
+            dict(conn.execute("SELECT key, value FROM artifact_meta"))
+            if "artifact_meta" in objects
+            else {}
+        )
+        provenance_in_companion = (
+            artifact_meta.get("provenance_storage") == "companion_audit_artifact"
+        )
         missing = sorted(required - objects)
         if missing:
             errors.append(f"missing objects: {', '.join(missing)}")
@@ -4690,6 +5002,8 @@ def validate_database(path: Path) -> dict[str, Any]:
                 "brats_reviewed_source_crosswalks": 1066,
             }
             for name, expected in expected_brats.items():
+                if name == "brats_reviewed_source_crosswalks" and provenance_in_companion:
+                    continue
                 if brats_counts[name] != expected:
                     errors.append(
                         f"BraTS crosswalk coverage regression: {name}={brats_counts[name]} != {expected}"
@@ -4759,9 +5073,11 @@ def validate_database(path: Path) -> dict[str, Any]:
                     (REMIND_SHORT_TITLE,),
                 ).fetchone()[0],
                 "remind_nrrd_whole_tumor_participants": conn.execute(
-                    "SELECT COUNT(DISTINCT subject_id) FROM public_non_dicom_assets "
-                    "WHERE short_title = ? AND file_format = 'NRRD' AND asset_granularity = 'file' "
-                    "AND json_extract(raw_values_json, '$.segment_label') = 'tumor'",
+                    "SELECT COUNT(DISTINCT a.subject_id) FROM public_non_dicom_assets a "
+                    "JOIN public_non_dicom_image_metadata m USING(asset_id) "
+                    "WHERE a.short_title = ? AND a.file_format = 'NRRD' "
+                    "AND a.asset_granularity = 'file' "
+                    "AND json_extract(m.metadata_json, '$.segmentation_label') = 'tumor'",
                     (REMIND_SHORT_TITLE,),
                 ).fetchone()[0],
                 "remind_nrrd_participant_links": conn.execute(
@@ -4896,19 +5212,33 @@ def parser() -> argparse.ArgumentParser:
     sub = root.add_subparsers(dest="command", required=True)
     build = sub.add_parser("build")
     build.add_argument("--snapshot-db", default=str(DEFAULT_SNAPSHOT_DB))
-    build.add_argument("--nifti-db", default=str(DEFAULT_NIFTI_DB))
-    build.add_argument("--pathology-db", default=str(DEFAULT_PATHOLOGY_DB))
+    build.add_argument(
+        "--nifti-db",
+        default="",
+        help="Migration-only legacy source; routine V2 builds use --baseline-db.",
+    )
+    build.add_argument(
+        "--pathology-db",
+        default="",
+        help="Migration-only legacy source; routine V2 builds use --baseline-db.",
+    )
     build.add_argument("--clinical-db", default=str(DEFAULT_CLINICAL_DB))
     build.add_argument(
         "--staging-db",
         help=(
-            "Resolve snapshot, NIfTI, pathology, and clinical inputs from a validated "
-            "runner-local V2 staging ledger. Explicit component paths are ignored."
+            "Resolve the current snapshot/clinical inputs and the manifest-pinned "
+            "unified V2 baseline from a runner-local staging ledger."
         ),
+    )
+    build.add_argument(
+        "--baseline-db",
+        help="Losslessly materialized V2 public non-DICOM assembly used after legacy retirement.",
     )
     build.add_argument("--crosswalk-csv", default=str(DEFAULT_CROSSWALK_CSV))
     build.add_argument("--crosswalk-curation", default=str(DEFAULT_CROSSWALK_CURATION))
     build.add_argument("--image-metadata-csv", default=str(DEFAULT_IMAGE_METADATA_CSV))
+    build.add_argument("--remind-nrrd-inventory", default=str(DEFAULT_REMIND_NRRD_INVENTORY))
+    build.add_argument("--remind-nrrd-provenance", default=str(DEFAULT_REMIND_NRRD_PROVENANCE))
     build.add_argument("--out", default=str(DEFAULT_DB))
     build.add_argument("--gzip-out")
     build.add_argument("--manifest-out")
@@ -4954,14 +5284,18 @@ def main() -> int:
         staging_db = Path(args.staging_db) if args.staging_db else None
         if staging_db:
             snapshot_db = resolve_staging_component(staging_db, "snapshot", verify_hash=False)
-            nifti_db = resolve_staging_component(staging_db, "nifti", verify_hash=False)
-            pathology_db = resolve_staging_component(staging_db, "pathology", verify_hash=False)
             clinical_db = resolve_staging_component(staging_db, "clinical", verify_hash=False)
+            baseline_db = Path(args.baseline_db) if args.baseline_db else resolve_staging_component(
+                staging_db, "public_non_dicom_baseline", verify_hash=False
+            )
+            nifti_db = None
+            pathology_db = None
         else:
             snapshot_db = Path(args.snapshot_db)
             nifti_db = Path(args.nifti_db) if args.nifti_db else None
             pathology_db = Path(args.pathology_db) if args.pathology_db else None
             clinical_db = Path(args.clinical_db) if args.clinical_db else None
+            baseline_db = Path(args.baseline_db) if args.baseline_db else None
         result = build_database(
             snapshot_db, out,
             nifti_db=nifti_db,
@@ -4970,9 +5304,12 @@ def main() -> int:
             crosswalk_csv=Path(args.crosswalk_csv) if args.crosswalk_csv else None,
             crosswalk_curation=Path(args.crosswalk_curation) if args.crosswalk_curation else None,
             image_metadata_csv=Path(args.image_metadata_csv) if args.image_metadata_csv else None,
+            remind_nrrd_inventory=Path(args.remind_nrrd_inventory) if args.remind_nrrd_inventory else None,
+            remind_nrrd_provenance=Path(args.remind_nrrd_provenance),
             include_pathdb_files=not args.no_pathdb_files,
             replace=args.replace,
             staging_db=staging_db,
+            baseline_db=baseline_db,
         )
         if args.gzip_out:
             gzip_database(out, Path(args.gzip_out))

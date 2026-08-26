@@ -2,50 +2,11 @@ name: Build TCIA metadata V2
 
 on:
   workflow_run:
-    workflows: ["Update TCIA metadata snapshot"]
+    workflows: ["Build TCIA metadata V2 source inputs"]
     types: [completed]
-  workflow_dispatch:
-    inputs:
-      publish_channel:
-        description: "Choose a release channel after validation"
-        required: true
-        default: "none"
-        type: choice
-        options:
-          - "none"
-          - "preview"
-          - "stable"
-      immutable_tag:
-        description: "Optional immutable tag for a stable promotion, for example tcia-metadata-v2-2026.08"
-        required: false
-        type: string
-      include_pathdb_files:
-        description: "Include the full PathDB file inventory"
-        required: true
-        default: "true"
-        type: choice
-        options:
-          - "true"
-          - "false"
-      checkpoint_legacy_detail:
-        description: "Embed exact specialized NIfTI/pathology rows in the public audit candidate"
-        required: true
-        default: "false"
-        type: choice
-        options:
-          - "false"
-          - "true"
-      release_contract:
-        description: "Build the full, publishable streamlined, or evaluation-only streamlined contract"
-        required: true
-        default: "full"
-        type: choice
-        options:
-          - "full"
-          - "streamlined"
-          - "streamlined_candidate"
 
 permissions:
+  actions: read
   contents: write
 
 concurrency:
@@ -54,11 +15,13 @@ concurrency:
 
 jobs:
   build:
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    if: github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -70,25 +33,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [ "${{ github.event_name }}" = "workflow_run" ]; then
-            publish_channel="stable"
-            include_pathdb_files="true"
-            checkpoint_legacy_detail="true"
-            release_contract="streamlined"
-            immutable_tag=""
-          else
-            publish_channel="${{ inputs.publish_channel }}"
-            include_pathdb_files="${{ inputs.include_pathdb_files }}"
-            checkpoint_legacy_detail="${{ inputs.checkpoint_legacy_detail }}"
-            release_contract="${{ inputs.release_contract }}"
-            immutable_tag="${{ inputs.immutable_tag }}"
-          fi
+          publish_channel="stable"
+          include_pathdb_files="true"
+          release_contract="streamlined"
           {
             echo "publish_channel=$publish_channel"
             echo "include_pathdb_files=$include_pathdb_files"
-            echo "checkpoint_legacy_detail=$checkpoint_legacy_detail"
             echo "release_contract=$release_contract"
-            echo "immutable_tag=$immutable_tag"
           } >> "$GITHUB_OUTPUT"
           {
             echo "### Effective V2 release configuration"
@@ -96,58 +47,76 @@ jobs:
             echo "- Publish channel: $publish_channel"
             echo "- Release contract: $release_contract"
             echo "- Include PathDB files: $include_pathdb_files"
-            echo "- Checkpoint legacy detail: $checkpoint_legacy_detail"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Install IDC projection dependency
         run: python -m pip install --upgrade "idc-index>=0.12.3"
 
-      - name: Validate transition candidate inputs
-        if: steps.release_config.outputs.release_contract == 'streamlined' || steps.release_config.outputs.release_contract == 'streamlined_candidate'
-        run: |
-          if [ "${{ steps.release_config.outputs.checkpoint_legacy_detail }}" != "true" ]; then
-            echo "::error::The streamlined candidate requires checkpoint_legacy_detail=true."
-            exit 1
-          fi
-          if [ "${{ steps.release_config.outputs.release_contract }}" = "streamlined_candidate" ] \
-             && [ "${{ steps.release_config.outputs.publish_channel }}" != "none" ]; then
-            echo "::error::The streamlined contract is evaluation-only and cannot be published."
-            exit 1
-          fi
+      - name: Download validated V2 source inputs from the triggering run
+        uses: actions/download-artifact@v8
+        with:
+          name: tcia-metadata-v2-source
+          path: dist
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ github.event.workflow_run.id }}
 
-      - name: Capture and download the source release without changing it
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Prepare validated V2 source inputs
         run: |
           set -euo pipefail
           mkdir -p cache dist
-          legacy_tag="tcia-snapshot-latest"
-          gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${legacy_tag}" > cache/source_release.json
           for asset in \
             tcia_snapshot.sqlite.gz \
-            tcia_snapshot_manifest.json \
-            nifti_metadata.sqlite.gz \
-            nifti_metadata_manifest.json \
-            pathology_metadata.sqlite.gz \
-            pathology_metadata_manifest.json \
-            controlled_access_metadata.sqlite.gz \
-            controlled_access_metadata_manifest.json \
-            clinical_metadata.sqlite.gz \
-            clinical_metadata_manifest.json \
-            clinical_qc_manual_review.csv; do
-            gh release download "$legacy_tag" --pattern "$asset" --dir dist --clobber
-          done
-          python scripts/tcia_v2_bundle.py validate-source \
-            --asset-dir dist \
-            --source-release-json cache/source_release.json
-          for asset in \
-            tcia_snapshot.sqlite.gz \
-            nifti_metadata.sqlite.gz \
-            pathology_metadata.sqlite.gz \
             controlled_access_metadata.sqlite.gz \
             clinical_metadata.sqlite.gz; do
             gzip -dc "dist/$asset" > "cache/${asset%.gz}"
           done
+
+      - name: Capture and validate the unified V2 build baseline
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          baseline_tag="tcia-metadata-v2-latest"
+          gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${baseline_tag}" \
+            > cache/baseline_release.json
+          for asset in \
+            tcia_metadata_v2_bundle_manifest.json \
+            public_non_dicom_metadata.sqlite.gz \
+            public_non_dicom_audit.sqlite.gz; do
+            gh release download "$baseline_tag" --pattern "$asset" --dir dist --clobber
+          done
+          python scripts/tcia_v2_bundle.py validate-selection \
+            --asset-dir dist \
+            --manifest dist/tcia_metadata_v2_bundle_manifest.json \
+            --source-release-json cache/baseline_release.json \
+            --asset public_non_dicom_metadata.sqlite.gz \
+            --asset public_non_dicom_audit.sqlite.gz
+          gzip -dc dist/public_non_dicom_metadata.sqlite.gz \
+            > cache/public_non_dicom_baseline.sqlite
+          gzip -dc dist/public_non_dicom_audit.sqlite.gz \
+            > cache/public_non_dicom_audit_baseline.sqlite
+          jq '.components.public_non_dicom' \
+            dist/tcia_metadata_v2_bundle_manifest.json \
+            > cache/public_non_dicom_baseline_manifest.json
+          jq '.components.public_non_dicom_audit' \
+            dist/tcia_metadata_v2_bundle_manifest.json \
+            > cache/public_non_dicom_audit_baseline_manifest.json
+
+      - name: Materialize the lossless unified V2 assembly and checkpoint
+        run: |
+          python scripts/tcia_v2_audit.py materialize-assembly \
+            --artifact public_non_dicom \
+            --research-db cache/public_non_dicom_baseline.sqlite \
+            --audit-db cache/public_non_dicom_audit_baseline.sqlite \
+            --out cache/public_non_dicom_metadata.sqlite \
+            --replace
+          python scripts/tcia_v2_checkpoint.py extract-from-audit \
+            --audit-db cache/public_non_dicom_audit_baseline.sqlite \
+            --out cache/tcia_v2_legacy_detail_checkpoint.sqlite \
+            --replace
+          python scripts/tcia_v2_checkpoint.py validate \
+            --db cache/tcia_v2_legacy_detail_checkpoint.sqlite
 
       - name: Build the direct IDC participant projection
         run: |
@@ -168,29 +137,23 @@ jobs:
           python scripts/tcia_v2_staging.py build \
             --snapshot-db cache/tcia_snapshot.sqlite \
             --snapshot-manifest dist/tcia_snapshot_manifest.json \
-            --nifti-db cache/nifti_metadata.sqlite \
-            --nifti-manifest dist/nifti_metadata_manifest.json \
-            --pathology-db cache/pathology_metadata.sqlite \
-            --pathology-manifest dist/pathology_metadata_manifest.json \
+            --public-non-dicom-baseline-db cache/public_non_dicom_baseline.sqlite \
+            --public-non-dicom-baseline-manifest cache/public_non_dicom_baseline_manifest.json \
+            --public-non-dicom-audit-baseline-db cache/public_non_dicom_audit_baseline.sqlite \
+            --public-non-dicom-audit-baseline-manifest cache/public_non_dicom_audit_baseline_manifest.json \
             --controlled-access-db cache/controlled_access_metadata.sqlite \
             --controlled-access-manifest dist/controlled_access_metadata_manifest.json \
             --clinical-db cache/clinical_metadata.sqlite \
             --clinical-manifest dist/clinical_metadata_manifest.json \
             --idc-participants-db cache/idc_participant_projection.sqlite \
             --idc-participants-manifest cache/idc_participant_projection_manifest.json \
-            --source-release-json cache/source_release.json \
             --out cache/tcia_metadata_v2_staging.sqlite \
             --replace
           python scripts/tcia_v2_staging.py validate \
             --db cache/tcia_metadata_v2_staging.sqlite \
             --verify-sources
-
-      - name: Restore unchanged legacy-detail transition checkpoint
-        if: steps.release_config.outputs.checkpoint_legacy_detail == 'true'
-        uses: actions/cache@v4
-        with:
-          path: cache/tcia_v2_legacy_detail_checkpoint.sqlite.gz
-          key: tcia-v2-legacy-detail-${{ hashFiles('dist/nifti_metadata_manifest.json', 'dist/pathology_metadata_manifest.json') }}
+          rm -f cache/public_non_dicom_baseline.sqlite \
+            cache/public_non_dicom_audit_baseline.sqlite
 
       - name: Regenerate the complete web export set from the bundled snapshot
         run: |
@@ -207,6 +170,7 @@ jobs:
           fi
           python scripts/tcia_public_non_dicom_metadata.py build \
             --staging-db cache/tcia_metadata_v2_staging.sqlite \
+            --baseline-db cache/public_non_dicom_metadata.sqlite \
             --crosswalk-csv references/public_non_dicom_crosswalks_v1.csv \
             --crosswalk-curation references/public-non-dicom-crosswalk-curation-v1.json \
             --image-metadata-csv references/public_non_dicom_image_metadata_v1.csv \
@@ -216,78 +180,32 @@ jobs:
           python scripts/tcia_public_non_dicom_metadata.py validate \
             --db cache/public_non_dicom_metadata.sqlite
           mkdir -p cache/reports
-          checkpoint_args=()
-          parity_args=()
-          if [ "${{ steps.release_config.outputs.checkpoint_legacy_detail }}" = "true" ]; then
-            if [ -s cache/tcia_v2_legacy_detail_checkpoint.sqlite.gz ]; then
-              gzip -dc cache/tcia_v2_legacy_detail_checkpoint.sqlite.gz \
-                > cache/tcia_v2_legacy_detail_checkpoint.sqlite
-            else
-              python scripts/tcia_v2_checkpoint.py build \
-                --staging-db cache/tcia_metadata_v2_staging.sqlite \
-                --out cache/tcia_v2_legacy_detail_checkpoint.sqlite \
-                --replace
-              gzip -1 -c cache/tcia_v2_legacy_detail_checkpoint.sqlite \
-                > cache/tcia_v2_legacy_detail_checkpoint.sqlite.gz
-            fi
-            python scripts/tcia_v2_checkpoint.py validate \
-              --db cache/tcia_v2_legacy_detail_checkpoint.sqlite
-            checkpoint_args+=(--checkpoint-db cache/tcia_v2_legacy_detail_checkpoint.sqlite)
-            checkpoint_args+=(--consume-checkpoint)
-            parity_args+=(
-              --audit-db cache/tcia_v2_legacy_detail_checkpoint.sqlite
-              --require-retirement-ready
-            )
-          fi
-          python scripts/tcia_v2_parity.py \
-            --public-db cache/public_non_dicom_metadata.sqlite \
-            --nifti-db cache/nifti_metadata.sqlite \
-            --pathology-db cache/pathology_metadata.sqlite \
-            --out cache/reports/tcia_v2_legacy_detail_parity.json \
-            "${parity_args[@]}"
-          # The public artifact has absorbed these sources; free runner space
-          # before producing the research and audit outputs.
-          rm -f cache/nifti_metadata.sqlite cache/pathology_metadata.sqlite
-          if [ "${{ steps.release_config.outputs.release_contract }}" = "streamlined" ] \
-             || [ "${{ steps.release_config.outputs.release_contract }}" = "streamlined_candidate" ]; then
-            mv cache/public_non_dicom_metadata.sqlite cache/public_non_dicom_assembly.sqlite
-            python scripts/tcia_v2_audit.py project-v3 \
-              --artifact public_non_dicom \
-              --db cache/public_non_dicom_assembly.sqlite \
-              --research-out cache/public_non_dicom_metadata.sqlite \
-              --audit-out cache/public_non_dicom_audit.sqlite \
-              --research-gzip-out dist/public_non_dicom_metadata.sqlite.gz \
-              --research-manifest-out dist/public_non_dicom_metadata_manifest.json \
-              --audit-gzip-out dist/public_non_dicom_audit.sqlite.gz \
-              --audit-manifest-out dist/public_non_dicom_audit_manifest.json \
-              --staging-db cache/tcia_metadata_v2_staging.sqlite \
-              --gzip-level 3 \
-              --metrics-out cache/reports/tcia_v2_compact_audit_metrics.json \
-              "${checkpoint_args[@]}" \
-              --replace
-            python scripts/tcia_v2_audit.py verify-reconstruction \
-              --source-db cache/public_non_dicom_assembly.sqlite \
-              --audit-db cache/public_non_dicom_audit.sqlite \
-              --sample-size 1000 \
-              --out cache/reports/tcia_v2_compact_audit_reconstruction.json
-            rm -f cache/public_non_dicom_assembly.sqlite
-            {
-              echo "### Compact V2 audit candidate"
-              python -c 'import json; d=json.load(open("cache/reports/tcia_v2_compact_audit_metrics.json")); s=d["output_sizes"]; print("- Projection: {:.1f} seconds\n- Compression: {:.1f} seconds\n- Research SQLite/gzip: {:,} / {:,} bytes\n- Audit SQLite/gzip: {:,} / {:,} bytes".format(d["total_projection_seconds"],d["compression"]["compression_seconds"],s["research_sqlite_bytes"],s["research_gzip_bytes"],s["audit_sqlite_bytes"],s["audit_gzip_bytes"]))'
-            } >> "$GITHUB_STEP_SUMMARY"
-          else
-            python scripts/tcia_v2_audit.py split \
-              --artifact public_non_dicom \
-              --db cache/public_non_dicom_metadata.sqlite \
-              --audit-out cache/public_non_dicom_audit.sqlite \
-              --research-gzip-out dist/public_non_dicom_metadata.sqlite.gz \
-              --research-manifest-out dist/public_non_dicom_metadata_manifest.json \
-              --audit-gzip-out dist/public_non_dicom_audit.sqlite.gz \
-              --audit-manifest-out dist/public_non_dicom_audit_manifest.json \
-              --staging-db cache/tcia_metadata_v2_staging.sqlite \
-              "${checkpoint_args[@]}" \
-              --replace
-          fi
+          mv cache/public_non_dicom_metadata.sqlite cache/public_non_dicom_assembly.sqlite
+          python scripts/tcia_v2_audit.py project-v3 \
+            --artifact public_non_dicom \
+            --db cache/public_non_dicom_assembly.sqlite \
+            --research-out cache/public_non_dicom_metadata.sqlite \
+            --audit-out cache/public_non_dicom_audit.sqlite \
+            --research-gzip-out dist/public_non_dicom_metadata.sqlite.gz \
+            --research-manifest-out dist/public_non_dicom_metadata_manifest.json \
+            --audit-gzip-out dist/public_non_dicom_audit.sqlite.gz \
+            --audit-manifest-out dist/public_non_dicom_audit_manifest.json \
+            --staging-db cache/tcia_metadata_v2_staging.sqlite \
+            --checkpoint-db cache/tcia_v2_legacy_detail_checkpoint.sqlite \
+            --consume-checkpoint \
+            --gzip-level 3 \
+            --metrics-out cache/reports/tcia_v2_compact_audit_metrics.json \
+            --replace
+          python scripts/tcia_v2_audit.py verify-reconstruction \
+            --source-db cache/public_non_dicom_assembly.sqlite \
+            --audit-db cache/public_non_dicom_audit.sqlite \
+            --sample-size 1000 \
+            --out cache/reports/tcia_v2_compact_audit_reconstruction.json
+          rm -f cache/public_non_dicom_assembly.sqlite
+          {
+            echo "### Compact V2 audit build"
+            python -c 'import json; d=json.load(open("cache/reports/tcia_v2_compact_audit_metrics.json")); s=d["output_sizes"]; print("- Projection: {:.1f} seconds\n- Compression: {:.1f} seconds\n- Research SQLite/gzip: {:,} / {:,} bytes\n- Audit SQLite/gzip: {:,} / {:,} bytes".format(d["total_projection_seconds"],d["compression"]["compression_seconds"],s["research_sqlite_bytes"],s["research_gzip_bytes"],s["audit_sqlite_bytes"],s["audit_gzip_bytes"]))'
+          } >> "$GITHUB_STEP_SUMMARY"
           python scripts/tcia_public_non_dicom_metadata.py validate \
             --db cache/public_non_dicom_metadata.sqlite
           python scripts/tcia_v2_audit.py validate \
@@ -341,14 +259,13 @@ jobs:
 
       - name: Retain staging diagnostics for maintainers
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: tcia-metadata-v2-staging-diagnostics
           path: |
             cache/tcia_metadata_v2_staging.sqlite
             cache/idc_participant_projection.sqlite
             cache/idc_participant_projection_manifest.json
-            cache/reports/tcia_v2_legacy_detail_parity.json
             cache/reports/tcia_v2_compact_audit_metrics.json
             cache/reports/tcia_v2_compact_audit_reconstruction.json
           if-no-files-found: ignore
@@ -359,17 +276,9 @@ jobs:
           release_channel="stable"
           release_tag="tcia-metadata-v2-latest"
           release_contract="${{ steps.release_config.outputs.release_contract }}"
-          if [ "${{ steps.release_config.outputs.publish_channel }}" = "preview" ]; then
-            release_channel="preview"
-            release_tag="tcia-metadata-v2-preview"
-          fi
-          if [ "$release_contract" = "streamlined_candidate" ]; then
-            release_channel="candidate"
-            release_tag="tcia-metadata-v2-streamlined-candidate"
-          fi
           python scripts/tcia_v2_bundle.py build \
             --asset-dir dist \
-            --source-release-json cache/source_release.json \
+            --source-tag "workflow-artifact:update-tcia-metadata-v2-source-inputs" \
             --release-channel "$release_channel" \
             --release-tag "$release_tag" \
             --producer-commit "$GITHUB_SHA" \
@@ -379,22 +288,10 @@ jobs:
           python scripts/tcia_v2_bundle.py validate \
             --asset-dir dist \
             --manifest dist/tcia_metadata_v2_bundle_manifest.json
-          if [ "$release_contract" = "streamlined" ] \
-             || [ "$release_contract" = "streamlined_candidate" ]; then
-            if [ "${{ steps.release_config.outputs.checkpoint_legacy_detail }}" != "true" ]; then
-              echo "::error::The streamlined candidate requires checkpoint_legacy_detail=true."
-              exit 1
-            fi
-            if [ "$release_contract" = "streamlined_candidate" ] \
-               && [ "${{ steps.release_config.outputs.publish_channel }}" != "none" ]; then
-              echo "::error::The streamlined contract is evaluation-only and cannot be published."
-              exit 1
-            fi
-            python scripts/tcia_v2_bundle.py materialize \
-              --asset-dir dist \
-              --manifest dist/tcia_metadata_v2_bundle_manifest.json \
-              --out-dir release-dist
-          fi
+          python scripts/tcia_v2_bundle.py materialize \
+            --asset-dir dist \
+            --manifest dist/tcia_metadata_v2_bundle_manifest.json \
+            --out-dir release-dist
 
       - name: Decide whether to publish V2 release assets
         id: release
@@ -402,55 +299,21 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          publish_requested="false"
-          channel="${{ steps.release_config.outputs.publish_channel }}"
-          tag=""
-          if [ "${{ github.event_name }}" = "workflow_run" ]; then
-            if gh release view tcia-metadata-v2-latest >/dev/null 2>&1; then
-              channel="stable"
-            else
-              channel="none"
-              echo "::notice::Stable V2 publication requires an initial manual promotion with an immutable tag."
-            fi
-          fi
-          if [ "$channel" != "none" ] && [ -n "$channel" ]; then
-            publish_requested="true"
-          fi
-          if [ "$publish_requested" = "true" ] && [ "${{ steps.release_config.outputs.include_pathdb_files }}" = "false" ]; then
-            echo "::error::Published V2 bundles must include the full PathDB inventory."
-            exit 1
-          fi
-          if [ "$channel" = "stable" ] \
-             && ! gh release view tcia-metadata-v2-latest >/dev/null 2>&1 \
-             && [ -z "${{ steps.release_config.outputs.immutable_tag }}" ]; then
-            echo "::error::The initial stable promotion requires immutable_tag."
-            exit 1
-          fi
-
+          channel="stable"
+          tag="tcia-metadata-v2-latest"
           publish="false"
-          reason="publication not requested"
-          if [ "$publish_requested" = "true" ]; then
-            tag="tcia-metadata-v2-latest"
-            if [ "$channel" = "preview" ]; then
-              tag="tcia-metadata-v2-preview"
-            fi
-            manifest_path="dist/tcia_metadata_v2_bundle_manifest.json"
-            if [ "${{ steps.release_config.outputs.release_contract }}" = "streamlined" ] \
-               || [ "${{ steps.release_config.outputs.release_contract }}" = "streamlined_candidate" ]; then
-              manifest_path="release-dist/tcia_metadata_v2_bundle_manifest.json"
-            fi
-            new_fingerprint="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["release_fingerprint"])' "$manifest_path")"
-            old_fingerprint=""
-            mkdir -p previous-v2
-            if gh release download "$tag" --pattern tcia_metadata_v2_bundle_manifest.json --dir previous-v2 --clobber >/dev/null 2>&1; then
-              old_fingerprint="$(python -c 'import json; print(json.load(open("previous-v2/tcia_metadata_v2_bundle_manifest.json")).get("release_fingerprint", ""))')"
-            fi
-            if [ "$new_fingerprint" != "$old_fingerprint" ]; then
-              publish="true"
-              reason="complete V2 bundle fingerprint changed"
-            else
-              reason="complete V2 bundle fingerprint unchanged"
-            fi
+          manifest_path="release-dist/tcia_metadata_v2_bundle_manifest.json"
+          new_fingerprint="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["release_fingerprint"])' "$manifest_path")"
+          old_fingerprint=""
+          mkdir -p previous-v2
+          if gh release download "$tag" --pattern tcia_metadata_v2_bundle_manifest.json --dir previous-v2 --clobber >/dev/null 2>&1; then
+            old_fingerprint="$(python -c 'import json; print(json.load(open("previous-v2/tcia_metadata_v2_bundle_manifest.json")).get("release_fingerprint", ""))')"
+          fi
+          if [ "$new_fingerprint" != "$old_fingerprint" ]; then
+            publish="true"
+            reason="complete V2 bundle fingerprint changed"
+          else
+            reason="complete V2 bundle fingerprint unchanged"
           fi
           echo "publish=$publish" >> "$GITHUB_OUTPUT"
           echo "channel=$channel" >> "$GITHUB_OUTPUT"
@@ -459,24 +322,6 @@ jobs:
           echo "### V2 release decision" >> "$GITHUB_STEP_SUMMARY"
           echo "- Publish: $publish" >> "$GITHUB_STEP_SUMMARY"
           echo "- Reason: $reason" >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Upload complete current-contract workflow artifact for evaluation
-        if: github.event_name == 'workflow_dispatch' && steps.release_config.outputs.publish_channel == 'none' && steps.release_config.outputs.release_contract == 'full'
-        uses: actions/upload-artifact@v6
-        with:
-          name: tcia-metadata-v2-candidate
-          path: dist/*
-          compression-level: 0
-          retention-days: 30
-
-      - name: Upload streamlined workflow artifact for evaluation
-        if: github.event_name == 'workflow_dispatch' && steps.release_config.outputs.publish_channel == 'none' && steps.release_config.outputs.release_contract == 'streamlined_candidate'
-        uses: actions/upload-artifact@v6
-        with:
-          name: tcia-metadata-v2-streamlined-candidate
-          path: release-dist/*
-          compression-level: 0
-          retention-days: 30
 
       - name: Publish validated V2 release
         if: steps.release.outputs.publish == 'true'
@@ -487,46 +332,15 @@ jobs:
           tag="${{ steps.release.outputs.tag }}"
           channel="${{ steps.release.outputs.channel }}"
           release_contract="${{ steps.release_config.outputs.release_contract }}"
-          publish_dir="dist"
-          if [ "$release_contract" = "streamlined" ]; then
-            publish_dir="release-dist"
-          fi
-          notes="TCIA Metadata Artifact Model V2 bundle. The manifest defines research-core, research-detail, audit-support, and compatibility-export profiles. Participant Inventory is compact by default; file-grain metadata and verbose audit evidence are optional hash-pinned companions. Public DICOM detail remains authoritative in IDC. The legacy tcia-snapshot-latest release is retained as a compatibility line."
-          prerelease_args=()
+          publish_dir="release-dist"
+          notes="TCIA Metadata Artifact Model V2 bundle. The manifest defines research-core, research-detail, audit-support, and compatibility-export profiles. Participant Inventory is compact by default; unified public non-DICOM file-grain metadata and verbose audit evidence are optional hash-pinned companions. Public DICOM detail remains authoritative in IDC. Historical specialized NIfTI and pathology evidence is retained in the public audit companion; standalone detail artifacts are retired from production."
           title="TCIA metadata V2 latest"
-          if [ "$channel" = "preview" ]; then
-            prerelease_args+=(--prerelease)
-            title="TCIA metadata V2 preview"
-          fi
-          immutable_tag="${{ steps.release_config.outputs.immutable_tag }}"
-          if [ "$channel" = "stable" ] && [ -n "$immutable_tag" ]; then
-            case "$immutable_tag" in
-              tcia-metadata-v2-[0-9][0-9][0-9][0-9].[0-9][0-9]*) ;;
-              *)
-                echo "::error::immutable_tag must start with tcia-metadata-v2-YYYY.MM"
-                exit 1
-                ;;
-            esac
-            if gh release view "$immutable_tag" >/dev/null 2>&1; then
-              echo "::error::Immutable release already exists: $immutable_tag"
-              exit 1
-            fi
-            gh release create "$immutable_tag" "$publish_dir"/* \
-              --title "TCIA metadata V2 ${immutable_tag#tcia-metadata-v2-}" \
-              --notes "$notes"
-            gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${immutable_tag}" > immutable-release.json
-            python scripts/tcia_v2_bundle.py validate-published \
-              --manifest "$publish_dir/tcia_metadata_v2_bundle_manifest.json" \
-              --release-json immutable-release.json
-          fi
           if ! gh release view "$tag" >/dev/null 2>&1; then
             gh release create "$tag" \
-              "${prerelease_args[@]}" \
               --title "$title" \
               --notes "$notes"
           else
             gh release edit "$tag" \
-              "${prerelease_args[@]}" \
               --title "$title" \
               --notes "$notes"
           fi
@@ -581,7 +395,8 @@ jobs:
           published_tag_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}" --jq '.object.sha')"
           test "$published_tag_sha" = "$GITHUB_SHA"
 
-      - name: Confirm legacy release isolation
+      - name: Confirm single-release publication
         run: |
-          echo "This workflow never uploads to or modifies tcia-snapshot-latest."
+          echo "This workflow publishes only to tcia-metadata-v2-latest."
+          echo "Validated source components arrive through a short-lived workflow artifact."
           echo "It does not deploy or reconfigure the MCP/REST service."

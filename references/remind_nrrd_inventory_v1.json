@@ -1,0 +1,19 @@
+{
+  "artifact": "remind_nrrd_inventory_v1",
+  "short_title": "ReMIND",
+  "dataset_type": "Collection",
+  "wordpress_download_row_id": 405,
+  "aspera_inventory_id": "43725",
+  "source_file_name": "ReMIND_NRRD_Segs_September_2023.sums",
+  "source_file_observed_at": "2024-03-23T21:41:04Z",
+  "reviewed_at": "2026-08-25",
+  "row_count": 356,
+  "participant_count": 114,
+  "whole_tumor_participant_count": 113,
+  "source_sha256": "6daa7391546fca3d4a9bc985241c8f499726f9b3116617efcc89d53f2ece5116",
+  "source_bytes": 45831,
+  "source_url_authority": "TCIA WordPress ReMIND NRRD download record",
+  "source_page": "https://www.cancerimagingarchive.net/collection/remind/",
+  "checksum_note": "The source .sums file assigns the empty-file MD5 to every nonempty NRRD. Preserve it only as raw provenance; do not expose it as a verified checksum.",
+  "mapping_note": "Every subject directory and filename repeats the exact ReMIND Collection PatientID."
+}

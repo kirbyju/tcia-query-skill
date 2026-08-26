@@ -13,11 +13,11 @@ from pathlib import Path
 from typing import Any
 
 
-STAGING_SCHEMA_VERSION = 2
+STAGING_SCHEMA_VERSION = 3
 COMPONENT_ORDER = (
     "snapshot",
-    "nifti",
-    "pathology",
+    "public_non_dicom_baseline",
+    "public_non_dicom_audit_baseline",
     "controlled_access",
     "clinical",
     "idc_participants",
@@ -141,7 +141,10 @@ def build_staging_database(
     release_tag, release_assets = source_release_details(source_release_json)
     source_rows: list[tuple[Any, ...]] = []
     object_rows: list[tuple[Any, ...]] = []
-    for component in COMPONENT_ORDER:
+    ordered_components = COMPONENT_ORDER + tuple(
+        sorted(set(components) - set(COMPONENT_ORDER))
+    )
+    for component in ordered_components:
         database, manifest_path = components[component]
         if not database.is_file():
             raise FileNotFoundError(f"Missing {component} database: {database}")
@@ -286,8 +289,6 @@ def validate_staging_database(path: Path, *, verify_sources: bool = False) -> di
 
 
 def resolve_component(path: Path, component: str, *, verify_hash: bool = True) -> Path:
-    if component not in COMPONENT_ORDER:
-        raise ValueError(f"Unknown staging component: {component}")
     if not path.is_file():
         raise FileNotFoundError(f"Staging ledger is missing: {path}")
     with closing(sqlite3.connect(f"file:{path}?mode=ro", uri=True)) as conn:

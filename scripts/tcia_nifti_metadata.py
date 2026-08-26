@@ -22,7 +22,6 @@ from typing import Any, Optional
 
 SCHEMA_VERSION = 4
 DEFAULT_REPO = "kirbyju/tcia-query-skill"
-DEFAULT_RELEASE_TAG = "tcia-snapshot-latest"
 NIFTI_ASSET = "nifti_metadata.sqlite.gz"
 NIFTI_MANIFEST_ASSET = "nifti_metadata_manifest.json"
 SKILL_ROOT = Path(__file__).resolve().parents[1]
@@ -111,7 +110,7 @@ def connect(path: str | os.PathLike[str] | None = None) -> sqlite3.Connection:
     if not resolved.exists():
         raise RuntimeError(
             f"NIfTI metadata SQLite not found at {resolved}. "
-            "Run `python scripts/tcia_nifti_metadata.py ensure` first."
+            "Standalone downloads are retired; use the unified public non-DICOM V2 artifact."
         )
     conn = sqlite3.connect(resolved)
     conn.row_factory = sqlite3.Row
@@ -1017,14 +1016,6 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    ensure = subparsers.add_parser("ensure", help="Download optional NIfTI SQLite release assets.")
-    ensure.add_argument("--repo", default=DEFAULT_REPO, help="GitHub repository owner/name.")
-    ensure.add_argument("--tag", default=DEFAULT_RELEASE_TAG, help="Release tag.")
-    ensure.add_argument("--db", default=str(DEFAULT_DB_PATH), help="Local SQLite output path.")
-    ensure.add_argument(
-        "--manifest-out", default=str(DEFAULT_MANIFEST_PATH), help="Local manifest output path."
-    )
-
     info = subparsers.add_parser("info", help="Show local NIfTI metadata DB status.")
     info.add_argument("--db", default=str(DEFAULT_DB_PATH), help="Local SQLite path.")
     info.add_argument("--manifest", default=str(DEFAULT_MANIFEST_PATH), help="Local manifest path.")
@@ -1083,12 +1074,6 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     args = parser.parse_args(argv)
 
-    if args.command == "ensure":
-        result = ensure_release_nifti(
-            args.repo, args.tag, Path(args.db), Path(args.manifest_out)
-        )
-        print(json.dumps(result, indent=2, sort_keys=True))
-        return 0
     if args.command == "info":
         return command_info(args)
     if args.command == "manifest":
