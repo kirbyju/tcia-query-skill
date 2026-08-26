@@ -217,6 +217,7 @@ jobs:
           python scripts/tcia_participant_inventory.py build \
             --staging-db cache/tcia_metadata_v2_staging.sqlite \
             --public-db cache/public_non_dicom_metadata.sqlite \
+            --public-audit-db cache/public_non_dicom_audit.sqlite \
             --out cache/participant_inventory.sqlite \
             --replace
           # C-NMC 2019 final-test identities were not published. The reviewed

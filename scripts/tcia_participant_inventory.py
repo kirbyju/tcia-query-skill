@@ -424,6 +424,8 @@ def ingest_public_non_dicom(
     conn: sqlite3.Connection,
     path: Path,
     dataset_types: dict[str, tuple[str, str]],
+    *,
+    audit_path: Path | None = None,
 ) -> int:
     if not path.exists():
         record_source(conn, "public_non_dicom_metadata", path, False, 0, "Optional source not installed.")
@@ -502,48 +504,6 @@ def ingest_public_non_dicom(
                 }),
             })
             imported += 1
-        if table_exists(source, "public_non_dicom_asset_participants"):
-            for row in source.execute(
-                """
-                SELECT DISTINCT subject_id, raw_subject_id, evidence_json
-                FROM public_non_dicom_asset_participants
-                WHERE lower(short_title) = lower(?)
-                  AND raw_subject_id GLOB 'BraTS2021_[0-9][0-9][0-9][0-9][0-9]'
-                """,
-                (BRATS_SHORT_TITLE,),
-            ):
-                resolved_id = str(row["subject_id"] or "").strip()
-                challenge_id = str(row["raw_subject_id"] or "").strip()
-                if challenge_id == resolved_id:
-                    # The dataset-scoped identifier already preserves this challenge ID.
-                    continue
-                evidence_json = str(row["evidence_json"] or "{}")
-                evidence = json.loads(evidence_json)
-                dataset_type, short_title = resolve_dataset_identity(
-                    dataset_types, BRATS_SHORT_TITLE, "Analysis Result"
-                )
-                key = participant_key(dataset_type, short_title, resolved_id)
-                if not conn.execute(
-                    "SELECT 1 FROM participants WHERE participant_key = ?", (key,)
-                ).fetchone():
-                    continue
-                conn.execute(
-                    """
-                    INSERT OR IGNORE INTO participant_identifiers
-                    VALUES (?, ?, 'tcia_brats_challenge', 'challenge:BraTS2021',
-                            ?, ?, 'official_tcia_brats2021_workbook', ?)
-                    """,
-                    (
-                        stable_id("pid", key, "challenge:BraTS2021", challenge_id),
-                        key,
-                        challenge_id,
-                        challenge_id,
-                        json_dumps({
-                            "source_artifact": "public_non_dicom_metadata",
-                            "crosswalk": evidence,
-                        }),
-                    ),
-                )
         for row in source.execute(
             """
             SELECT dataset_type, short_title, source_system, imaging_domain, media_kind,
@@ -573,6 +533,78 @@ def ingest_public_non_dicom(
                 ),
             )
     record_source(conn, "public_non_dicom_metadata", path, True, imported, "Participant-linked public non-DICOM summaries imported; unlinked dataset assets retained separately.")
+    crosswalk_path = audit_path if audit_path and audit_path.is_file() else path
+    crosswalk_source = (
+        "public_non_dicom_audit" if crosswalk_path != path else "public_non_dicom_metadata"
+    )
+    aliases = 0
+    with closing(connect(crosswalk_path)) as source:
+        if table_exists(source, "public_non_dicom_crosswalk_evidence"):
+            rows = source.execute(
+                """
+                SELECT DISTINCT resolved_subject_id AS subject_id, raw_subject_id,
+                       provenance_json AS evidence_json
+                FROM public_non_dicom_crosswalk_evidence
+                WHERE lower(short_title) = lower(?)
+                  AND mapping_method = 'official_tcia_brats2021_workbook'
+                  AND raw_subject_id GLOB 'BraTS2021_[0-9][0-9][0-9][0-9][0-9]'
+                """,
+                (BRATS_SHORT_TITLE,),
+            )
+        elif table_exists(source, "public_non_dicom_asset_participants"):
+            # Compatibility for unsplit source databases used by local builders.
+            rows = source.execute(
+                """
+                SELECT DISTINCT subject_id, raw_subject_id, evidence_json
+                FROM public_non_dicom_asset_participants
+                WHERE lower(short_title) = lower(?)
+                  AND raw_subject_id GLOB 'BraTS2021_[0-9][0-9][0-9][0-9][0-9]'
+                """,
+                (BRATS_SHORT_TITLE,),
+            )
+        else:
+            rows = ()
+        for row in rows:
+            resolved_id = str(row["subject_id"] or "").strip()
+            challenge_id = str(row["raw_subject_id"] or "").strip()
+            if challenge_id == resolved_id:
+                continue
+            evidence = json.loads(str(row["evidence_json"] or "{}"))
+            dataset_type, short_title = resolve_dataset_identity(
+                dataset_types, BRATS_SHORT_TITLE, "Analysis Result"
+            )
+            key = participant_key(dataset_type, short_title, resolved_id)
+            if not conn.execute(
+                "SELECT 1 FROM participants WHERE participant_key = ?", (key,)
+            ).fetchone():
+                continue
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO participant_identifiers
+                VALUES (?, ?, 'tcia_brats_challenge', 'challenge:BraTS2021',
+                        ?, ?, 'official_tcia_brats2021_workbook', ?)
+                """,
+                (
+                    stable_id("pid", key, "challenge:BraTS2021", challenge_id),
+                    key,
+                    challenge_id,
+                    challenge_id,
+                    json_dumps({
+                        "source_artifact": crosswalk_source,
+                        "crosswalk": evidence,
+                    }),
+                ),
+            )
+            aliases += 1
+    if audit_path is not None:
+        record_source(
+            conn,
+            "public_non_dicom_audit",
+            audit_path,
+            audit_path.is_file(),
+            aliases,
+            "Reviewed BraTS challenge-to-source identity evidence imported.",
+        )
     return imported
 
 
@@ -1143,6 +1175,7 @@ def build_database(
     controlled_db: Path,
     clinical_db: Path,
     replace: bool,
+    public_audit_db: Path | None = None,
     idc_db: Path = DEFAULT_IDC_DB,
     include_clinical_values: bool = False,
 ) -> dict[str, Any]:
@@ -1163,7 +1196,9 @@ def build_database(
             "Authoritative WordPress dataset type and short-title identities imported.",
         )
         counts = {
-            "public_non_dicom": ingest_public_non_dicom(conn, public_db, dataset_types),
+            "public_non_dicom": ingest_public_non_dicom(
+                conn, public_db, dataset_types, audit_path=public_audit_db
+            ),
             "controlled": ingest_controlled(conn, controlled_db, dataset_types),
             "idc_participants": ingest_idc_participants(conn, idc_db, dataset_types),
             "clinical": ingest_clinical(
@@ -1588,6 +1623,7 @@ def parser() -> argparse.ArgumentParser:
     build = sub.add_parser("build")
     build.add_argument("--snapshot-db", default=str(DEFAULT_SNAPSHOT_DB))
     build.add_argument("--public-db", default=str(DEFAULT_PUBLIC_DB))
+    build.add_argument("--public-audit-db")
     build.add_argument("--controlled-db", default=str(DEFAULT_CONTROLLED_DB))
     build.add_argument("--clinical-db", default=str(DEFAULT_CLINICAL_DB))
     build.add_argument("--idc-db", default=str(DEFAULT_IDC_DB))
@@ -1650,6 +1686,7 @@ def main() -> int:
             out,
             snapshot_db=snapshot_db,
             public_db=Path(args.public_db),
+            public_audit_db=(Path(args.public_audit_db) if args.public_audit_db else None),
             controlled_db=controlled_db,
             clinical_db=clinical_db,
             idc_db=idc_db,

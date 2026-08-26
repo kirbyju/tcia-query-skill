@@ -22,6 +22,7 @@ def load(name: str):
 model = load("tcia_artifact_model")
 public = load("tcia_public_non_dicom_metadata")
 participants = load("tcia_participant_inventory")
+audit = load("tcia_v2_audit")
 crosswalks = load("tcia_public_non_dicom_crosswalks")
 discovery = load("tcia_public_non_dicom_crosswalk_discovery")
 
@@ -1190,6 +1191,7 @@ class BuilderTests(unittest.TestCase):
             snapshot = base / "snapshot.sqlite"
             nifti = base / "nifti.sqlite"
             public_db = base / "public.sqlite"
+            public_audit_db = base / "public-audit.sqlite"
             participant_db = base / "participants.sqlite"
             self.build_snapshot(snapshot)
 
@@ -1296,10 +1298,18 @@ class BuilderTests(unittest.TestCase):
             )
             conn.close()
 
+            audit.split_database(
+                public_db,
+                public_audit_db,
+                artifact="public_non_dicom",
+                replace=True,
+            )
+
             participants.build_database(
                 participant_db,
                 snapshot_db=snapshot,
                 public_db=public_db,
+                public_audit_db=public_audit_db,
                 controlled_db=base / "missing-controlled.sqlite",
                 clinical_db=base / "missing-clinical.sqlite",
                 replace=True,
