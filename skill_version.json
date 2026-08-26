@@ -63,7 +63,7 @@
     "scripts/tcia_pathology_metadata.py": "91cb19a373d74bc4d8345afcbeccb37b4cede2b2b5c7d1c4c9dfac51d5328c98",
     "scripts/tcia_public_non_dicom_crosswalk_discovery.py": "52a706a791088d375cb74d7494c432f5921313a4ef3c8acb95cc459831e264b6",
     "scripts/tcia_public_non_dicom_crosswalks.py": "2a0ffa603720725e357221454ca5c0d765a7b5c891ff5faf9b2d9906b7ebf514",
-    "scripts/tcia_public_non_dicom_metadata.py": "0c311cab2bb6ce4d956b1fcbc3764822983e8991260375dce7b8a2a989d04390",
+    "scripts/tcia_public_non_dicom_metadata.py": "bbf56c58280c037cdea161f834a3a806590bd6b006011c142d24d0faf04a30ce",
     "scripts/tcia_publications.py": "fcd1aa1e5abd48d0f556165bbee85af7d30030ba4ece1af573c8a441b720659a",
     "scripts/tcia_skill_version.py": "022626ade6a21b225cc0974c7e0593afb4bc158bc6850c41966205a5a41f796b",
     "scripts/tcia_snapshot.py": "addba5e3a3c4d05b54ef14a7c1b252da25752cc76cfaef6534dee784bb2329f8",
@@ -89,5 +89,5 @@
   },
   "schema_version": 1,
   "skill_version": "2026.08.26.1",
-  "updated_at_utc": "2026-08-26T17:33:11.143681+00:00"
+  "updated_at_utc": "2026-08-26T18:17:35.991597+00:00"
 }

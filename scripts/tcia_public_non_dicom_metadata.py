@@ -5090,7 +5090,7 @@ def validate_database(path: Path) -> dict[str, Any]:
             counts.update(remind_counts)
             for name, expected in {
                 "remind_nrrd_download_assets": 1,
-                "remind_nrrd_represented_files": 113,
+                "remind_nrrd_represented_files": 356,
                 "remind_nrrd_file_assets": 356,
                 "remind_nrrd_participants": 114,
                 "remind_nrrd_whole_tumor_participants": 113,
