@@ -223,9 +223,11 @@ jobs:
           # C-NMC 2019 final-test identities were not published. The reviewed
           # crosswalk therefore removes the synthetic NA_final participant
           # while retaining all 2,586 files as source_confirmed_unavailable.
+          # The reviewed BCBM crosswalk also replaces 223 filename-derived
+          # identities with the 165 source-confirmed clinical participants.
           python scripts/tcia_participant_inventory.py validate \
             --db cache/participant_inventory.sqlite \
-            --min-collection-participants 125727 \
+            --min-collection-participants 125669 \
             --min-collections 222 \
             --min-analysis-result-participants 11730 \
             --min-analysis-results 29
