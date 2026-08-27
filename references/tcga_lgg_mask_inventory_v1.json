@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "reviewed_at": "2026-08-27",
+  "dataset_type": "Analysis Result",
+  "short_title": "TCGA-LGG-Mask",
+  "review_status": "curator_reviewed",
+  "review_decisions": {
+    "segmentation_subject_count": 108,
+    "vasari_alias": {
+      "raw_subject_id": "TCGA-EZ-7264A",
+      "canonical_subject_id": "TCGA-EZ-7264",
+      "reason": "curator-confirmed_likely_typo"
+    }
+  },
+  "counts": {
+    "mask_files": 406,
+    "mask_subjects": 108,
+    "series_instance_uids": 406,
+    "clinical_rows": 188,
+    "clinical_subjects": 188,
+    "vasari_rows": 188,
+    "vasari_subjects": 188,
+    "vasari_complete_numeric_rows": 178
+  },
+  "source_files": {
+    "mask_zip": {
+      "name": "ROIdata-TCGA-LGG-20170131.zip",
+      "url": "https://www.cancerimagingarchive.net/wp-content/uploads/ROIdata-TCGA-LGG-20170131.zip",
+      "bytes": 2185825,
+      "sha256": "6481c7e8217546d2420a7f64739b4da238fa8ec04b2e674cfce144bc9fa37b25"
+    },
+    "clinical_csv": {
+      "name": "TCGA_clinical_INFO.csv",
+      "url": "https://www.cancerimagingarchive.net/wp-content/uploads/TCGA_clinical_INFO.csv",
+      "bytes": 36249,
+      "sha256": "9724e0174fb10baa5dc5102ca0eac688b057b3fbbd53682ad0ded5900edceb21"
+    },
+    "vasari_csv": {
+      "name": "TCGA_vasari_INFO.csv",
+      "url": "https://www.cancerimagingarchive.net/wp-content/uploads/TCGA_vasari_INFO.csv",
+      "bytes": 12592,
+      "sha256": "023789faac3a470453de179b8ca13a58961519f8fae80d4e861297021a3d69a7"
+    },
+    "feature_key_pdf": {
+      "name": "VASARI_MR_featurekey.pdf",
+      "url": "https://www.cancerimagingarchive.net/wp-content/uploads/VASARI_MR_featurekey.pdf",
+      "bytes": 114021,
+      "sha256": "60b54746c519e2431c9d4f2983e4adb3c150261aa44557db743ccd10f81eff96"
+    },
+    "series_manifest_csv": {
+      "name": "GC_manifest_TCGA-LGG-MASK-TCGA-LGG-doiJNLP-LxVyYE8d.csv",
+      "url": "https://www.cancerimagingarchive.net/wp-content/uploads/GC_manifest_TCGA-LGG-MASK-TCGA-LGG-doiJNLP-LxVyYE8d.csv",
+      "bytes": 44693,
+      "sha256": "4ac1f4e08a0515d7717dd12aec8623d6c120076ccf981ba2f08a70c183b3e33b"
+    },
+    "dicom_digest_xlsx": {
+      "name": "doiJNLP-LxVyYE8d-nbia-digest.xlsx",
+      "url": "https://www.cancerimagingarchive.net/wp-content/uploads/doiJNLP-LxVyYE8d-nbia-digest.xlsx",
+      "bytes": 81701,
+      "sha256": "ecf2129b3e6fcdfbe59b6f3b581546de9df7a37558e066237704fd6f06ba72be"
+    }
+  },
+  "reference_files": {
+    "mask_inventory": {
+      "name": "tcga_lgg_mask_inventory_v1.csv",
+      "url": "references/tcga_lgg_mask_inventory_v1.csv",
+      "bytes": 175445,
+      "sha256": "8900a732f860dedd75dca19dc3785f0b7d6262e64186e8fd7893f442ce899202"
+    },
+    "vasari_participants": {
+      "name": "tcga_lgg_mask_vasari_participants_v1.csv",
+      "url": "references/tcga_lgg_mask_vasari_participants_v1.csv",
+      "bytes": 8113,
+      "sha256": "093b3ded00674231898ad16f530b0a6afd1fdf85db7553c254f54e3a8857f40e"
+    }
+  }
+}

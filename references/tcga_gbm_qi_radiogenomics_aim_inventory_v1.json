@@ -1,0 +1,25 @@
+{
+  "counts": {
+    "annotation_uids": 321,
+    "patients": 55,
+    "series": 111,
+    "sop_instances": 193,
+    "studies": 60,
+    "xml_files": 321
+  },
+  "dataset_type": "Analysis Result",
+  "download_id": "45557",
+  "generated_at_utc": "2026-08-27T20:11:08.895750+00:00",
+  "ignored_package_entries": [
+    "__MACOSX/._ne-temporal-01_340255958.564473.xml"
+  ],
+  "inventory_sha256": "d19d81d8aad5a0d96f8f23ca41add1235accaf2d2d3f78a704118f7aae0b7892",
+  "mapping_note": "Each AIM XML directly supplies one TCGA PatientID and one DICOM Study, Series, and SOP Instance UID.",
+  "review_status": "reviewed_source_projection",
+  "reviewed_at": "2026-08-27",
+  "schema_version": 1,
+  "short_title": "TCGA-GBM-QI-Radiogenomics",
+  "source_collection_short_title": "TCGA-GBM",
+  "source_url": "https://www.cancerimagingarchive.net/wp-content/uploads/SupplementaryDataZIP_AIMfiles.zip",
+  "source_zip_sha256": "8e0560497cebcdfd6ab182590cf46cd97c5ab55bb89c2d5818900a9a5c658d9b"
+}

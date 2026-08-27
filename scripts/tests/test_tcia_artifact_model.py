@@ -28,6 +28,39 @@ discovery = load("tcia_public_non_dicom_crosswalk_discovery")
 
 
 class VocabularyTests(unittest.TestCase):
+    def test_refresh_replaces_wordpress_downloads_routed_through_aspera(self):
+        import sqlite3
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "public.sqlite"
+            conn = public.connect(path)
+            conn.executescript(public.SCHEMA)
+            public.insert_vocab(conn)
+            required = (
+                "asset_id,dataset_type,short_title,asset_granularity,file_format,"
+                "media_kind,spatial_dimensionality,temporal_dimensionality,"
+                "imaging_domain,object_role,representation_provenance_class,"
+                "source_system,source_record_id"
+            )
+            conn.executemany(
+                f"INSERT INTO public_non_dicom_assets ({required}) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                [
+                    ("aspera_download", "Collection", "A", "download", "NRRD", "image_volume", "3d", "none", "radiology", "segmentation", "submitted_original", "tcia_aspera", "1"),
+                    ("wordpress_download", "Collection", "B", "download", "ZIP", "archive", "unknown", "unknown", "other", "package", "unknown", "tcia_wordpress", "2"),
+                    ("aspera_file", "Collection", "A", "file", "NRRD", "image_volume", "3d", "none", "radiology", "segmentation", "submitted_original", "tcia_aspera", "3"),
+                    ("pathdb_file", "Collection", "C", "file", "SVS", "whole_slide_image", "2d", "none", "pathology", "source_image", "submitted_original", "tcia_pathdb", "4"),
+                ],
+            )
+            self.assertEqual(public.delete_refreshable_assets(conn), 3)
+            self.assertEqual(
+                conn.execute(
+                    "SELECT group_concat(asset_id) FROM public_non_dicom_assets"
+                ).fetchone()[0],
+                "aspera_file",
+            )
+            conn.close()
+
     def test_explicit_reviewed_mapping_generates_reproducible_crosswalk_row(self):
         rows = crosswalks.explicit_mapping_rows({
             "decisions": [{
@@ -90,10 +123,90 @@ class VocabularyTests(unittest.TestCase):
 
     def test_media_and_domain_are_independent_from_format(self):
         self.assertEqual(model.media_kind("MHA", ["CT"]), "image_volume")
+        self.assertEqual(model.normalize_format("mat"), "MATLAB")
+        self.assertEqual(model.normalize_format(".qptiff"), "TIFF")
+        self.assertEqual(model.format_from_path("slide.qptiff"), "TIFF")
+        self.assertEqual(model.media_kind("MATLAB", ["Segmentation"]), "image_volume")
         self.assertEqual(model.media_kind("PNG", ["US", "Segmentation"]), "still_image")
         self.assertEqual(model.media_kind("MPG", ["Capsule Endoscopy"]), "video")
         self.assertEqual(model.imaging_domain(["Other"], ["Capsule Endoscopy"]), "endoscopy")
         self.assertEqual(model.imaging_domain(["Radiology Images"], ["CT"]), "radiology")
+
+    def test_cptac_codex_workbook_projection_helpers(self):
+        self.assertEqual(
+            public.codex_workbook_file_key("WSI_CODEX__A__B.ome.tiff"),
+            "wsi_codex__a__b",
+        )
+        self.assertEqual(
+            public.codex_workbook_file_key("WSI_HE__A__B.qptiff"),
+            "wsi_he__a__b",
+        )
+        self.assertEqual(
+            public.codex_workbook_participants(
+                {
+                    "CPTAC-GBM_PatientID": "C3L-01046, C3N-01197, C3L-02041",
+                    "UPENN-GBM_PatientID": "",
+                }
+            ),
+            ["C3L-01046", "C3N-01197", "C3L-02041"],
+        )
+        self.assertEqual(
+            public.codex_workbook_participants(
+                {
+                    "CPTAC-GBM_PatientID": "",
+                    "UPENN-GBM_PatientID": "C1230738",
+                }
+            ),
+            ["C1230738"],
+        )
+
+    def test_participant_inventory_projects_codex_specimens_to_patients(self):
+        import sqlite3
+
+        connection = sqlite3.connect(":memory:")
+        connection.row_factory = sqlite3.Row
+        connection.execute(
+            "CREATE TABLE clinical_rows(short_title TEXT, source_id TEXT, "
+            "subject_id TEXT, row_json TEXT)"
+        )
+        connection.executemany(
+            "INSERT INTO clinical_rows VALUES (?, 'tcia-download:test', ?, ?)",
+            [
+                (
+                    "CPTAC-Glioblastoma-CODEX",
+                    "C1230738-TP",
+                    json.dumps(
+                        {
+                            "UPENN-GBM_PatientID": "C1230738",
+                            "CPTAC-GBM_PatientID": "",
+                        }
+                    ),
+                ),
+                (
+                    "CPTAC-Glioblastoma-CODEX",
+                    "C3L-01046, C3N-01197, C3L-02041",
+                    json.dumps(
+                        {
+                            "UPENN-GBM_PatientID": "",
+                            "CPTAC-GBM_PatientID": (
+                                "C3L-01046, C3N-01197, C3L-02041"
+                            ),
+                        }
+                    ),
+                ),
+            ],
+        )
+        self.assertEqual(
+            participants.cptac_gbm_codex_clinical_projection(connection),
+            {
+                "C1230738-TP": ["C1230738"],
+                "C3L-01046, C3N-01197, C3L-02041": [
+                    "C3L-01046",
+                    "C3L-02041",
+                    "C3N-01197",
+                ],
+            },
+        )
 
     def test_original_is_not_assigned_to_unknown_wordpress_attachment(self):
         self.assertEqual(model.default_representation_class("tcia_aspera"), "submitted_original")
@@ -1174,6 +1287,84 @@ class BuilderTests(unittest.TestCase):
             self.assertEqual(evidence["linked_file_assets_same_dataset"], 0)
             self.assertEqual(
                 evidence["coverage_context"], "no_linked_file_coverage_observed"
+            )
+            conn.close()
+
+    def test_tcga_lgg_mask_reviewed_file_and_participant_coverage(self):
+        import sqlite3
+
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            snapshot = base / "snapshot.sqlite"
+            output = base / "public.sqlite"
+            self.build_snapshot(snapshot)
+            conn = sqlite3.connect(snapshot)
+            rows = [
+                (
+                    101, "Analysis Result", "TCGA-LGG-Mask", "45749",
+                    "VASARI information", "TCGA-LGG-Mask",
+                    "https://www.cancerimagingarchive.net/wp-content/uploads/TCGA_vasari_INFO.csv",
+                    "12.3", "kb", "[]", '["Other"]', '["CSV"]',
+                    0, 0, 188, 1,
+                ),
+                (
+                    102, "Analysis Result", "TCGA-LGG-Mask", "45751",
+                    "VASARI MR feature key", "TCGA-LGG-Mask",
+                    "https://www.cancerimagingarchive.net/wp-content/uploads/VASARI_MR_featurekey.pdf",
+                    "111.35", "kb", "[]", '["Other"]', '["PDF"]',
+                    0, 0, 0, 1,
+                ),
+                (
+                    103, "Analysis Result", "TCGA-LGG-Mask", "45753",
+                    "Matlab Segmentations", "TCGA-LGG-Mask",
+                    "https://www.cancerimagingarchive.net/wp-content/uploads/TCGA_LGG_masks.zip",
+                    "2.08", "mb", "[]", '["Segmentation"]',
+                    '["MATLAB","ZIP"]', 0, 0, 108, 406,
+                ),
+            ]
+            conn.executemany(
+                "INSERT INTO agent_current_downloads VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                rows,
+            )
+            conn.execute(
+                "INSERT INTO agent_datasets VALUES ('Analysis Result', 'TCGA-LGG-Mask')"
+            )
+            conn.commit()
+            conn.close()
+            result = public.build_database(
+                snapshot,
+                output,
+                nifti_db=None,
+                pathology_db=None,
+                include_pathdb_files=False,
+                replace=True,
+            )
+            self.assertEqual(result["counts"]["tcga_lgg_mask_mask_files"], 406)
+            self.assertEqual(result["counts"]["tcga_lgg_mask_mask_participants"], 108)
+            self.assertEqual(result["counts"]["tcga_lgg_mask_vasari_participants"], 188)
+            conn = sqlite3.connect(output)
+            self.assertEqual(
+                conn.execute(
+                    "SELECT subject_id FROM public_non_dicom_asset_participants "
+                    "WHERE raw_subject_id='TCGA-EZ-7264A'"
+                ).fetchone()[0],
+                "TCGA-EZ-7264",
+            )
+            self.assertEqual(
+                conn.execute(
+                    "SELECT COUNT(DISTINCT json_extract(metadata_json, "
+                    "'$.source_series_instance_uid')) "
+                    "FROM public_non_dicom_image_metadata "
+                    "WHERE short_title='TCGA-LGG-Mask'"
+                ).fetchone()[0],
+                406,
+            )
+            self.assertEqual(
+                conn.execute(
+                    "SELECT COUNT(*) FROM public_non_dicom_asset_relationships "
+                    "WHERE relationship_type='interpreted_by'"
+                ).fetchone()[0],
+                1,
             )
             conn.close()
 

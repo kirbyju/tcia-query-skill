@@ -47,6 +47,7 @@ NON_DICOM_IMAGING_FORMATS = {
     "HDF5",
     "JPG",
     "JPEG",
+    "MATLAB",
     "MHA",
     "MHD",
     "MP4",
@@ -64,7 +65,7 @@ NON_DICOM_IMAGING_FORMATS = {
 CONTAINER_FORMATS = {"ZIP", "TAR", "GZ", "TGZ"}
 
 VIDEO_FORMATS = {"AVI", "MP4", "MPG", "MPEG", "MOV", "WEBM"}
-VOLUME_FORMATS = {"MHA", "MHD", "NIFTI", "NRRD"}
+VOLUME_FORMATS = {"MATLAB", "MHA", "MHD", "NIFTI", "NRRD"}
 WHOLE_SLIDE_FORMATS = {"MRXS", "NDPI", "SVS"}
 STILL_IMAGE_FORMATS = {"BMP", "JPG", "JPEG", "PNG", "TIFF"}
 
@@ -84,8 +85,13 @@ def normalize_format(value: object) -> str:
     aliases = {
         "NII": "NIFTI",
         "NII.GZ": "NIFTI",
+        "MAT": "MATLAB",
         "JPE": "JPEG",
         "TIF": "TIFF",
+        # QPTIFF is a TIFF-based whole-slide container used by QuPath. TCIA's
+        # Collection Manager describes these files as TIFF, while package
+        # inventories preserve the more specific .qptiff extension.
+        "QPTIFF": "TIFF",
     }
     return aliases.get(text, text)
 

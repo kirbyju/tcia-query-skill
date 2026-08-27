@@ -51,6 +51,26 @@ Analysis Result scope, exposes the BraTS alias in
 `agent_participant_identity_evidence` without merging Collection and Analysis
 Result participants.
 
+For `TCGA-LGG-Mask`, query MATLAB segmentation files with
+`file_format='MATLAB'` and `object_role='segmentation'`. The selected image
+metadata retains `source_study_instance_uid`, `source_series_instance_uid`, and
+source DICOM image counts for the exact manifest/digest linkage. The shared
+VASARI CSV uses `object_role='qualitative_image_annotation_table'`; its 188
+participant links are in `agent_public_non_dicom_asset_participants`, and the
+PDF feature dictionary is connected through
+`public_non_dicom_asset_relationships.relationship_type='interpreted_by'`.
+
+For `TCGA-GBM-QI-Radiogenomics`, query `file_format='XML'` and
+`object_role='aim_segmentation_annotation'`. The participant junction contains
+the 55 TCGA patient links; `agent_public_non_dicom_crosswalk_evidence` exposes
+the AIM-embedded Series UID used to link each file back to source DICOM.
+
+For `CPTAC-Glioblastoma-CODEX`, the participant junction resolves both Aspera
+and PathDB file records to 12 parent patients. Raw specimen/timepoint or
+composite IDs remain in `raw_subject_id`. Use
+`managed_representation_correspondence` relationships only as published
+filename correspondence; they do not establish checksum or byte equality.
+
 The controlled-access and clinical SQLite databases are installed with the V2
 `research_detail` profile and documented in `references/controlled-access.md`
 and `references/clinical.md`.

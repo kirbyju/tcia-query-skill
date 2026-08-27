@@ -23,6 +23,49 @@ SPEC.loader.exec_module(CLINICAL)
 
 
 class ClinicalMetadataTest(unittest.TestCase):
+    def test_tcga_lgg_mask_identifiers_and_duplicate_headers(self) -> None:
+        self.assertEqual(
+            CLINICAL.choose_subject_column(
+                ["Tumor", "neoplasm_histologic_grade"], "TCGA-LGG-Mask"
+            ),
+            "Tumor",
+        )
+        self.assertEqual(
+            CLINICAL.official_subject_id_mapping(
+                "TCGA-LGG-Mask", "tcga-cs-4938"
+            ),
+            ("TCGA-CS-4938", "case_normalized_tcga_patient_id"),
+        )
+        self.assertEqual(
+            CLINICAL.official_subject_id_mapping(
+                "TCGA-LGG-Mask", "TCGA-EZ-7264A"
+            ),
+            ("TCGA-EZ-7264", "curator_reviewed_typo_alias"),
+        )
+        data = (
+            "Tumor,neoplasm_histologic_grade,neoplasm_histologic_grade,"
+            "IDH/1p19q Subtype,IDH/1p19q Subtype\n"
+            "TCGA-CS-4938,G2,Grade II,IDHmut-non-codel,1\n"
+        ).encode()
+        tables = CLINICAL.read_tables(
+            data, "clinical.csv", deduplicate_headers=True
+        )
+        frame = tables[0][1]
+        self.assertEqual(
+            list(frame.columns),
+            [
+                "Tumor",
+                "neoplasm_histologic_grade",
+                "neoplasm_histologic_grade__2",
+                "IDH/1p19q Subtype",
+                "IDH/1p19q Subtype__2",
+            ],
+        )
+        self.assertEqual(
+            next(frame.iterrows())[1]["neoplasm_histologic_grade__2"],
+            "Grade II",
+        )
+
     def test_remind_dictionary_and_reviewed_identifiers(self) -> None:
         self.assertEqual(
             CLINICAL.choose_subject_column(

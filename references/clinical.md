@@ -384,6 +384,23 @@ and all 32 source dictionary fields are retained. Age is represented as age at
 treatment/surgery, not age at imaging. Molecular marker missingness remains
 source-faithful; blank IDH, MGMT, and 1p/19q cells are not filled or inferred.
 
+For `TCGA-LGG-Mask`, the official clinical CSV contributes 188 direct patient
+rows keyed by `Tumor`. TCGA barcodes are normalized to uppercase. Duplicate
+source headers are preserved losslessly with `__2` suffixes instead of allowing
+the second value to overwrite the first; this applies to both
+`neoplasm_histologic_grade` and `IDH/1p19q Subtype`. The reviewed cohort pattern
+promotes all 188 rows to image-linked Analysis Result participants. The
+curator-reviewed `TCGA-EZ-7264A` typo decision is used by the VASARI non-DICOM
+crosswalk; the clinical CSV itself contains canonical TCGA barcodes.
+
+For `CPTAC-Glioblastoma-CODEX`, the official workbook distinguishes parent
+patients from specimen/timepoint labels such as `-TP`, `-TR1`, and `-NAT`.
+`UPENN-GBM_PatientID` and `CPTAC-GBM_PatientID` provide the source-supported
+parent IDs, including the two three-patient composite slides. Participant
+Inventory therefore exposes 12 patients, retains all raw specimen/composite
+identifiers in file links and provenance, and associates the workbook with all 12
+rather than only the nine patients also returned by CDA.
+
 For ACRIN-6698 specifically, `age` is stored as
 `age_at_enrollment_years`, `SBRgrade` as `grade`, and `pcr` as `response`.
 `Ltype` remains losslessly available in `clinical_rows.row_json`.

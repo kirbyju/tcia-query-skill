@@ -56,6 +56,33 @@ BRATS_SHORT_TITLE = "RSNA-ASNR-MICCAI-BraTS-2021"
 BCBM_SHORT_TITLE = "BCBM-RadioGenomics"
 BRAIN_TR_GAMMAKNIFE_SHORT_TITLE = "Brain-TR-GammaKnife"
 REMIND_SHORT_TITLE = "ReMIND"
+TCGA_LGG_MASK_SHORT_TITLE = "TCGA-LGG-Mask"
+CPTAC_GBM_CODEX_SHORT_TITLE = "CPTAC-Glioblastoma-CODEX"
+TCGA_GBM_QI_SHORT_TITLE = "TCGA-GBM-QI-Radiogenomics"
+
+
+def cptac_gbm_codex_clinical_projection(
+    source: sqlite3.Connection,
+) -> dict[str, list[str]]:
+    """Map official workbook specimen/composite IDs to parent patients."""
+    if not table_exists(source, "clinical_rows"):
+        return {}
+    projected: dict[str, set[str]] = defaultdict(set)
+    for row in source.execute(
+        """SELECT subject_id, row_json
+           FROM clinical_rows
+           WHERE short_title = ? AND source_id LIKE 'tcia-download:%'""",
+        (CPTAC_GBM_CODEX_SHORT_TITLE,),
+    ):
+        values = json.loads(str(row["row_json"] or "{}"))
+        upenn_id = str(values.get("UPENN-GBM_PatientID") or "").strip()
+        cptac_id = str(values.get("CPTAC-GBM_PatientID") or "").strip()
+        parent_value = upenn_id or cptac_id
+        parents = [item.strip() for item in parent_value.split(",") if item.strip()]
+        raw_id = str(row["subject_id"] or "").strip()
+        if raw_id and parents:
+            projected[raw_id].update(parents)
+    return {key: sorted(values) for key, values in projected.items()}
 
 
 SCHEMA = """
@@ -780,6 +807,7 @@ def ingest_clinical(
         return 0
     imported = 0
     with closing(connect(path)) as source:
+        codex_projection = cptac_gbm_codex_clinical_projection(source)
         if table_exists(source, "agent_clinical_all_subjects"):
             for row in source.execute("SELECT short_title, subject_id, source_kinds FROM agent_clinical_all_subjects"):
                 raw_id = str(row["subject_id"] or "").strip()
@@ -788,36 +816,110 @@ def ingest_clinical(
                 dataset_type, short_title = resolve_dataset_identity(
                     dataset_types, str(row["short_title"]), "Collection"
                 )
-                key = ensure_participant(
-                    conn, dataset_type, short_title, raw_id,
-                    managed_system="tcia_wordpress",
-                    namespace=f"tcia_dataset:{row['short_title']}",
-                    evidence="clinical_sidecar_dataset_scoped_identifier",
-                    provenance={"source_artifact": "clinical_metadata", "source_kinds": row["source_kinds"]},
+                resolved_ids = (
+                    codex_projection.get(raw_id, [raw_id])
+                    if short_title == CPTAC_GBM_CODEX_SHORT_TITLE
+                    else [raw_id]
                 )
-                add_asset(conn, {
-                    "participant_asset_id": stable_id("pa", key, "clinical"),
-                    "participant_key": key,
-                    "managed_system": "tcia_wordpress",
-                    "source_artifact": "clinical_metadata",
-                    "access_level": "open",
-                    "data_domain": "clinical",
-                    "media_kind": "",
-                    "modality": "",
-                    "file_format": "",
-                    "object_role": "metadata_only",
-                    "study_count": None,
-                    "series_count": None,
-                    "file_count": None,
-                    "known_size_bytes": None,
-                    "has_file_level_metadata": 0,
-                    "detail_pointer": f"agent_clinical_facts:{row['short_title']}:{raw_id}",
-                    "access_route": "",
-                    "inventory_status": "known",
-                    "source_version": "",
-                    "provenance_json": json_dumps({"source_view": "agent_clinical_all_subjects"}),
-                })
-                imported += 1
+                for resolved_id in resolved_ids:
+                    evidence = (
+                        "official_cptac_gbm_codex_workbook_parent_patient"
+                        if resolved_id != raw_id or len(resolved_ids) > 1
+                        else "clinical_sidecar_dataset_scoped_identifier"
+                    )
+                    key = ensure_participant(
+                        conn, dataset_type, short_title, resolved_id,
+                        managed_system="tcia_wordpress",
+                        namespace=f"tcia_dataset:{row['short_title']}",
+                        evidence=evidence,
+                        provenance={
+                            "source_artifact": "clinical_metadata",
+                            "source_kinds": row["source_kinds"],
+                            "raw_subject_id": raw_id,
+                        },
+                    )
+                    add_asset(conn, {
+                        "participant_asset_id": stable_id("pa", key, "clinical"),
+                        "participant_key": key,
+                        "managed_system": "tcia_wordpress",
+                        "source_artifact": "clinical_metadata",
+                        "access_level": "open",
+                        "data_domain": "clinical",
+                        "media_kind": "",
+                        "modality": "",
+                        "file_format": "",
+                        "object_role": "metadata_only",
+                        "study_count": None,
+                        "series_count": None,
+                        "file_count": None,
+                        "known_size_bytes": None,
+                        "has_file_level_metadata": 0,
+                        "detail_pointer": f"agent_clinical_facts:{row['short_title']}:{raw_id}",
+                        "access_route": "",
+                        "inventory_status": "known",
+                        "source_version": "",
+                        "provenance_json": json_dumps({
+                            "source_view": "agent_clinical_all_subjects",
+                            "raw_subject_id": raw_id,
+                            "identity_projection": evidence,
+                        }),
+                    })
+                    imported += 1
+        # The CODEX workbook rows describe published image files but were not
+        # promoted into agent_clinical_all_subjects by the legacy has_imaging
+        # gate. Its explicit parent-patient fields are nevertheless valid
+        # participant-level clinical/file metadata for all 12 patients.
+        for raw_id, resolved_ids in codex_projection.items():
+            dataset_type, short_title = resolve_dataset_identity(
+                dataset_types, CPTAC_GBM_CODEX_SHORT_TITLE, "Analysis Result"
+            )
+            for resolved_id in resolved_ids:
+                key = ensure_participant(
+                    conn, dataset_type, short_title, resolved_id,
+                    managed_system="tcia_wordpress",
+                    namespace=f"tcia_dataset:{CPTAC_GBM_CODEX_SHORT_TITLE}",
+                    evidence="official_cptac_gbm_codex_workbook_parent_patient",
+                    provenance={
+                        "source_artifact": "clinical_metadata",
+                        "raw_subject_id": raw_id,
+                        "projection": "official_workbook_parent_patient",
+                    },
+                )
+                add_asset(
+                    conn,
+                    {
+                        "participant_asset_id": stable_id("pa", key, "clinical"),
+                        "participant_key": key,
+                        "managed_system": "tcia_wordpress",
+                        "source_artifact": "clinical_metadata",
+                        "access_level": "open",
+                        "data_domain": "clinical",
+                        "media_kind": "",
+                        "modality": "",
+                        "file_format": "XLSX",
+                        "object_role": "metadata_only",
+                        "study_count": None,
+                        "series_count": None,
+                        "file_count": None,
+                        "known_size_bytes": None,
+                        "has_file_level_metadata": 1,
+                        "detail_pointer": (
+                            f"clinical_rows:{CPTAC_GBM_CODEX_SHORT_TITLE}:{raw_id}"
+                        ),
+                        "access_route": "",
+                        "inventory_status": "known",
+                        "source_version": "",
+                        "provenance_json": json_dumps(
+                            {
+                                "source_view": "clinical_rows",
+                                "raw_subject_id": raw_id,
+                                "identity_projection": (
+                                    "official_cptac_gbm_codex_workbook_parent_patient"
+                                ),
+                            }
+                        ),
+                    },
+                )
         if include_clinical_values and table_exists(source, "agent_clinical_facts"):
             for row in source.execute(
                 """
@@ -834,15 +936,6 @@ def ingest_clinical(
                 dataset_type, short_title = resolve_dataset_identity(
                     dataset_types, str(row["short_title"]), "Collection"
                 )
-                key = participant_key(dataset_type, short_title, raw_id)
-                if conn.execute("SELECT 1 FROM participants WHERE participant_key = ?", (key,)).fetchone() is None:
-                    key = ensure_participant(
-                        conn, dataset_type, short_title, raw_id,
-                        managed_system="tcia_wordpress",
-                        namespace=f"tcia_dataset:{row['short_title']}",
-                        evidence="clinical_fact_dataset_scoped_identifier",
-                        provenance={"source_artifact": "clinical_metadata"},
-                    )
                 raw_value = str(row["value_text"] or "")
                 standardized = str(row["value_resolved"] or "")
                 if row["is_inferred"]:
@@ -857,26 +950,63 @@ def ingest_clinical(
                 else:
                     role = "source_raw"
                     method = "preserved without standardized value"
-                value_id = stable_id(
-                    "clinical_value", key, row["concept"], row["source_kind"],
-                    row["source_url"], row["original_column"], raw_value, standardized,
+                resolved_ids = (
+                    codex_projection.get(raw_id, [raw_id])
+                    if short_title == CPTAC_GBM_CODEX_SHORT_TITLE
+                    else [raw_id]
                 )
-                conn.execute(
-                    """
-                    INSERT OR IGNORE INTO participant_clinical_values
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'tcia_wordpress',
-                            'clinical_metadata', ?, ?, ?, ?)
-                    """,
-                    (
-                        value_id, key, row["concept"], row["original_column"], raw_value,
-                        standardized, role, method, row["source_url"] or "",
-                        "inferred" if row["is_inferred"] else "source_supported",
-                        row["qc_status"] or "",
-                        row["provenance_json"] or json_dumps({
-                            "source_kind": row["source_kind"], "evidence_scope": row["evidence_scope"]
-                        }),
-                    ),
-                )
+                for resolved_id in resolved_ids:
+                    key = participant_key(dataset_type, short_title, resolved_id)
+                    if conn.execute(
+                        "SELECT 1 FROM participants WHERE participant_key = ?", (key,)
+                    ).fetchone() is None:
+                        key = ensure_participant(
+                            conn, dataset_type, short_title, resolved_id,
+                            managed_system="tcia_wordpress",
+                            namespace=f"tcia_dataset:{row['short_title']}",
+                            evidence=(
+                                "official_cptac_gbm_codex_workbook_parent_patient"
+                                if resolved_id != raw_id or len(resolved_ids) > 1
+                                else "clinical_fact_dataset_scoped_identifier"
+                            ),
+                            provenance={
+                                "source_artifact": "clinical_metadata",
+                                "raw_subject_id": raw_id,
+                            },
+                        )
+                    value_id = stable_id(
+                        "clinical_value", key, raw_id, row["concept"],
+                        row["source_kind"], row["source_url"],
+                        row["original_column"], raw_value, standardized,
+                    )
+                    try:
+                        value_provenance = json.loads(
+                            str(row["provenance_json"] or "{}")
+                        )
+                    except json.JSONDecodeError:
+                        value_provenance = {}
+                    value_provenance.update(
+                        {
+                            "source_kind": row["source_kind"],
+                            "evidence_scope": row["evidence_scope"],
+                            "raw_subject_id": raw_id,
+                            "resolved_participant_id": resolved_id,
+                        }
+                    )
+                    conn.execute(
+                        """
+                        INSERT OR IGNORE INTO participant_clinical_values
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'tcia_wordpress',
+                                'clinical_metadata', ?, ?, ?, ?)
+                        """,
+                        (
+                            value_id, key, row["concept"], row["original_column"],
+                            raw_value, standardized, role, method,
+                            row["source_url"] or "",
+                            "inferred" if row["is_inferred"] else "source_supported",
+                            row["qc_status"] or "", json_dumps(value_provenance),
+                        ),
+                    )
         # Preserve previously observed IDC Collection membership only when the
         # clinical artifact explicitly marks it as legacy. Current IDC presence
         # is supplied exclusively by the direct build-time projection above.
@@ -1448,6 +1578,60 @@ def validate_database(
                     errors.append(
                         f"BCBM participant coverage regression: {name}={bcbm_counts[name]} != {expected}"
                     )
+            tcga_gbm_qi_counts = {
+                "tcga_gbm_qi_participants": conn.execute(
+                    "SELECT COUNT(*) FROM agent_participants WHERE short_title=?",
+                    ("TCGA-GBM-QI-Radiogenomics",),
+                ).fetchone()[0],
+                "tcga_gbm_qi_with_public_non_dicom": conn.execute(
+                    "SELECT COUNT(*) FROM agent_participants WHERE short_title=? "
+                    "AND has_public_non_dicom=1",
+                    ("TCGA-GBM-QI-Radiogenomics",),
+                ).fetchone()[0],
+                "tcga_gbm_qi_unlinked_xml_assets": conn.execute(
+                    "SELECT COUNT(*) FROM dataset_assets_without_participant_crosswalk "
+                    "WHERE short_title=? AND upper(file_format)='XML'",
+                    ("TCGA-GBM-QI-Radiogenomics",),
+                ).fetchone()[0],
+            }
+            counts.update(tcga_gbm_qi_counts)
+            for name, expected in {
+                "tcga_gbm_qi_participants": 55,
+                "tcga_gbm_qi_with_public_non_dicom": 55,
+                "tcga_gbm_qi_unlinked_xml_assets": 0,
+            }.items():
+                if tcga_gbm_qi_counts[name] != expected:
+                    errors.append(
+                        "TCGA-GBM-QI-Radiogenomics participant coverage regression: "
+                        f"{name}={tcga_gbm_qi_counts[name]} != {expected}"
+                    )
+            cptac_codex_counts = {
+                "cptac_gbm_codex_participants": conn.execute(
+                    "SELECT COUNT(*) FROM agent_participants WHERE short_title=?",
+                    (CPTAC_GBM_CODEX_SHORT_TITLE,),
+                ).fetchone()[0],
+                "cptac_gbm_codex_with_public_non_dicom": conn.execute(
+                    "SELECT COUNT(*) FROM agent_participants WHERE short_title=? "
+                    "AND has_public_non_dicom=1",
+                    (CPTAC_GBM_CODEX_SHORT_TITLE,),
+                ).fetchone()[0],
+                "cptac_gbm_codex_with_clinical": conn.execute(
+                    "SELECT COUNT(*) FROM agent_participants WHERE short_title=? "
+                    "AND has_clinical=1",
+                    (CPTAC_GBM_CODEX_SHORT_TITLE,),
+                ).fetchone()[0],
+            }
+            counts.update(cptac_codex_counts)
+            for name, expected in {
+                "cptac_gbm_codex_participants": 12,
+                "cptac_gbm_codex_with_public_non_dicom": 12,
+                "cptac_gbm_codex_with_clinical": 12,
+            }.items():
+                if cptac_codex_counts[name] != expected:
+                    errors.append(
+                        "CPTAC-Glioblastoma-CODEX participant coverage regression: "
+                        f"{name}={cptac_codex_counts[name]} != {expected}"
+                    )
             brain_tr_counts = {
                 "brain_tr_gammaknife_participants": conn.execute(
                     "SELECT COUNT(*) FROM agent_participants WHERE short_title = ?",
@@ -1513,6 +1697,52 @@ def validate_database(
                 if remind_counts[name] != expected:
                     errors.append(
                         f"ReMIND participant coverage regression: {name}={remind_counts[name]} != {expected}"
+                    )
+            tcga_lgg_mask_counts = {
+                "tcga_lgg_mask_participants": conn.execute(
+                    "SELECT COUNT(*) FROM agent_participants WHERE short_title = ?",
+                    (TCGA_LGG_MASK_SHORT_TITLE,),
+                ).fetchone()[0],
+                "tcga_lgg_mask_with_public_non_dicom": conn.execute(
+                    "SELECT COUNT(*) FROM agent_participants "
+                    "WHERE short_title = ? AND has_public_non_dicom = 1",
+                    (TCGA_LGG_MASK_SHORT_TITLE,),
+                ).fetchone()[0],
+                "tcga_lgg_mask_with_clinical": conn.execute(
+                    "SELECT COUNT(*) FROM agent_participants "
+                    "WHERE short_title = ? AND has_clinical = 1",
+                    (TCGA_LGG_MASK_SHORT_TITLE,),
+                ).fetchone()[0],
+                "tcga_lgg_mask_matlab_files": conn.execute(
+                    # The participant summary counts the one shared VASARI CSV
+                    # once for each of 188 participants. Subtract that one
+                    # shared-file link per participant to recover mask files.
+                    "SELECT COALESCE(SUM(file_count), 0) - COUNT(*) "
+                    "FROM agent_participant_assets "
+                    "WHERE short_title = ? "
+                    "AND source_artifact = 'public_non_dicom_metadata'",
+                    (TCGA_LGG_MASK_SHORT_TITLE,),
+                ).fetchone()[0],
+                "tcga_lgg_mask_matlab_participants": conn.execute(
+                    "SELECT COUNT(DISTINCT participant_key) FROM agent_participant_assets "
+                    "WHERE short_title = ? "
+                    "AND instr(',' || upper(file_format) || ',', ',MATLAB,') > 0 "
+                    "AND instr(',' || object_role || ',', ',segmentation,') > 0",
+                    (TCGA_LGG_MASK_SHORT_TITLE,),
+                ).fetchone()[0],
+            }
+            counts.update(tcga_lgg_mask_counts)
+            for name, expected in {
+                "tcga_lgg_mask_participants": 188,
+                "tcga_lgg_mask_with_public_non_dicom": 188,
+                "tcga_lgg_mask_with_clinical": 188,
+                "tcga_lgg_mask_matlab_files": 406,
+                "tcga_lgg_mask_matlab_participants": 108,
+            }.items():
+                if tcga_lgg_mask_counts[name] != expected:
+                    errors.append(
+                        "TCGA-LGG-Mask participant coverage regression: "
+                        f"{name}={tcga_lgg_mask_counts[name]} != {expected}"
                     )
         thresholds = {
             "collection_participants": minimum_collection_participants,

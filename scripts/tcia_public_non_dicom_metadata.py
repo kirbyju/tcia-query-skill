@@ -69,6 +69,13 @@ DEFAULT_BRATS_CROSSWALK_PROVENANCE = SKILL_ROOT / "references" / "brats2021_tcia
 DEFAULT_IMAGE_METADATA_CSV = SKILL_ROOT / "references" / "public_non_dicom_image_metadata_v1.csv"
 DEFAULT_REMIND_NRRD_INVENTORY = SKILL_ROOT / "references" / "remind_nrrd_inventory_v1.sums"
 DEFAULT_REMIND_NRRD_PROVENANCE = SKILL_ROOT / "references" / "remind_nrrd_inventory_v1.json"
+DEFAULT_TCGA_LGG_MASK_INVENTORY = SKILL_ROOT / "references" / "tcga_lgg_mask_inventory_v1.csv"
+DEFAULT_TCGA_LGG_MASK_VASARI = SKILL_ROOT / "references" / "tcga_lgg_mask_vasari_participants_v1.csv"
+DEFAULT_TCGA_LGG_MASK_PROVENANCE = SKILL_ROOT / "references" / "tcga_lgg_mask_inventory_v1.json"
+DEFAULT_CPTAC_GBM_CODEX_INVENTORY = SKILL_ROOT / "references" / "cptac_gbm_codex_inventory_v1.csv"
+DEFAULT_CPTAC_GBM_CODEX_PROVENANCE = SKILL_ROOT / "references" / "cptac_gbm_codex_inventory_v1.json"
+DEFAULT_TCGA_GBM_QI_AIM_INVENTORY = SKILL_ROOT / "references" / "tcga_gbm_qi_radiogenomics_aim_inventory_v1.csv"
+DEFAULT_TCGA_GBM_QI_AIM_PROVENANCE = SKILL_ROOT / "references" / "tcga_gbm_qi_radiogenomics_aim_inventory_v1.json"
 DEFAULT_DB = SKILL_ROOT / "cache" / "public_non_dicom_metadata.sqlite"
 DEFAULT_MANIFEST = SKILL_ROOT / "cache" / "public_non_dicom_metadata_manifest.json"
 DEFAULT_RELEASE_TAG = "tcia-metadata-v2-latest"
@@ -80,7 +87,94 @@ SCHEMA_VERSION = 7
 BRATS_SHORT_TITLE = "RSNA-ASNR-MICCAI-BraTS-2021"
 BCBM_SHORT_TITLE = "BCBM-RadioGenomics"
 REMIND_SHORT_TITLE = "ReMIND"
+TCGA_LGG_MASK_SHORT_TITLE = "TCGA-LGG-Mask"
+CPTAC_GBM_CODEX_SHORT_TITLE = "CPTAC-Glioblastoma-CODEX"
+TCGA_GBM_QI_SHORT_TITLE = "TCGA-GBM-QI-Radiogenomics"
 BCBM_SCAN_ID = re.compile(r"^(BCBM-RadioGenomics-\d+)-(\d+)$", re.IGNORECASE)
+
+
+def codex_workbook_file_key(value: str) -> str:
+    """Return the extension-free key shared by the workbook and PathDB."""
+    name = Path(str(value or "").strip()).name.casefold()
+    for suffix in (".ome.tiff", ".ome.tif", ".qptiff", ".tiff", ".tif"):
+        if name.endswith(suffix):
+            return name[: -len(suffix)]
+    return name
+
+
+def codex_workbook_participants(values: dict[str, Any]) -> list[str]:
+    """Project a CODEX workbook row to its parent patient identifier(s)."""
+    upenn_id = str(values.get("UPENN-GBM_PatientID") or "").strip()
+    cptac_id = str(values.get("CPTAC-GBM_PatientID") or "").strip()
+    source = upenn_id or cptac_id
+    return [item.strip() for item in source.split(",") if item.strip()]
+
+
+def load_cptac_gbm_codex_inventory(
+    inventory_path: Path = DEFAULT_CPTAC_GBM_CODEX_INVENTORY,
+    provenance_path: Path = DEFAULT_CPTAC_GBM_CODEX_PROVENANCE,
+) -> tuple[list[dict[str, str]], dict[str, Any]]:
+    if not inventory_path.is_file() or not provenance_path.is_file():
+        raise FileNotFoundError(
+            "CPTAC-Glioblastoma-CODEX reviewed inventory references are required: "
+            f"{inventory_path} and {provenance_path}"
+        )
+    provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+    actual_sha256 = file_sha256(inventory_path)
+    expected_sha256 = str(provenance.get("inventory_sha256") or "")
+    if actual_sha256 != expected_sha256:
+        raise RuntimeError(
+            "CPTAC-Glioblastoma-CODEX inventory digest mismatch: "
+            f"{actual_sha256} != {expected_sha256}"
+        )
+    with inventory_path.open(newline="", encoding="utf-8") as handle:
+        rows = [dict(row) for row in csv.DictReader(handle)]
+    if len(rows) != int(provenance.get("row_count") or 0):
+        raise RuntimeError("CPTAC-Glioblastoma-CODEX inventory row-count mismatch")
+    return rows, provenance
+
+
+def load_tcga_gbm_qi_aim_inventory(
+    inventory_path: Path = DEFAULT_TCGA_GBM_QI_AIM_INVENTORY,
+    provenance_path: Path = DEFAULT_TCGA_GBM_QI_AIM_PROVENANCE,
+) -> tuple[list[dict[str, str]], dict[str, Any]]:
+    if not inventory_path.is_file() or not provenance_path.is_file():
+        raise FileNotFoundError(
+            "TCGA-GBM-QI-Radiogenomics reviewed AIM references are required: "
+            f"{inventory_path} and {provenance_path}"
+        )
+    provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+    expected_sha256 = str(provenance.get("inventory_sha256") or "")
+    actual_sha256 = file_sha256(inventory_path)
+    if actual_sha256 != expected_sha256:
+        raise RuntimeError(
+            "TCGA-GBM-QI-Radiogenomics AIM inventory digest mismatch: "
+            f"{actual_sha256} != {expected_sha256}"
+        )
+    with inventory_path.open(newline="", encoding="utf-8") as handle:
+        rows = [dict(row) for row in csv.DictReader(handle)]
+    counts = provenance.get("counts") or {}
+    expected = (
+        int(counts.get("xml_files") or 0),
+        int(counts.get("patients") or 0),
+        int(counts.get("studies") or 0),
+        int(counts.get("series") or 0),
+        int(counts.get("sop_instances") or 0),
+        int(counts.get("annotation_uids") or 0),
+    )
+    actual = (
+        len(rows),
+        len({row["patient_id"] for row in rows}),
+        len({row["study_instance_uid"] for row in rows}),
+        len({row["series_instance_uid"] for row in rows}),
+        len({row["sop_instance_uid"] for row in rows}),
+        len({row["annotation_uid"] for row in rows}),
+    )
+    if actual != expected or actual != (321, 55, 60, 111, 193, 321):
+        raise RuntimeError(
+            f"TCGA-GBM-QI-Radiogenomics AIM inventory mismatch: {actual} != {expected}"
+        )
+    return rows, provenance
 
 
 def bcbm_patient_and_scan_id(package_path: str) -> tuple[str, str]:
@@ -2255,6 +2349,924 @@ def ingest_remind_nrrd_inventory(
     return imported
 
 
+def ingest_tcga_gbm_qi_aim_inventory(
+    conn: sqlite3.Connection,
+    snapshot_db: Path,
+    *,
+    inventory_path: Path = DEFAULT_TCGA_GBM_QI_AIM_INVENTORY,
+    provenance_path: Path = DEFAULT_TCGA_GBM_QI_AIM_PROVENANCE,
+) -> dict[str, int]:
+    """Project all AIM XML annotations to TCGA patients and source DICOM."""
+    rows, provenance = load_tcga_gbm_qi_aim_inventory(
+        inventory_path, provenance_path
+    )
+    with closing(connect(snapshot_db)) as source:
+        dataset_present = source.execute(
+            """SELECT 1 FROM agent_current_downloads
+               WHERE lower(short_title) = lower(?) AND hidden = 0 LIMIT 1""",
+            (TCGA_GBM_QI_SHORT_TITLE,),
+        ).fetchone()
+        download = source.execute(
+            """SELECT * FROM agent_current_downloads
+               WHERE lower(short_title) = lower(?) AND download_id = '45557'
+                 AND hidden = 0 AND controlled_access = 0""",
+            (TCGA_GBM_QI_SHORT_TITLE,),
+        ).fetchone()
+    if download is None:
+        if dataset_present is None:
+            return {
+                "xml_files": 0,
+                "participants": 0,
+                "studies": 0,
+                "series": 0,
+                "sop_instances": 0,
+            }
+        raise RuntimeError(
+            "TCGA-GBM-QI-Radiogenomics AIM download 45557 is absent from the current snapshot"
+        )
+    source_url = str(download["download_url"] or provenance.get("source_url") or "")
+    reviewed_at = str(provenance.get("reviewed_at") or "2026-08-27")
+    namespace = "tcia_collection:TCGA-GBM"
+    parent_id = stable_id("asset", "tcga_gbm_qi_aim_download", "45557")
+    insert_asset(
+        conn,
+        {
+            "asset_id": parent_id,
+            "dataset_type": "Analysis Result",
+            "short_title": TCGA_GBM_QI_SHORT_TITLE,
+            "download_row_id": download["download_row_id"],
+            "download_id": "45557",
+            "subject_id": "",
+            "subject_id_namespace": "",
+            "participant_link_status": "crosswalk_available_at_file_grain",
+            "asset_granularity": "download",
+            "asset_name": download["download_title"],
+            "file_name": Path(urllib.parse.urlparse(source_url).path).name,
+            "package_path": "",
+            "file_format": "XML",
+            "container_format": "ZIP",
+            "media_kind": "geometric_annotation",
+            "spatial_dimensionality": "2D",
+            "temporal_dimensionality": "static",
+            "imaging_domain": "imaging_annotation",
+            "modality": "MR",
+            "object_role": "aim_segmentation_annotation",
+            "represented_file_count": len(rows),
+            "size_bytes": download_size_bytes(
+                download["download_size"], download["download_size_unit"]
+            ),
+            "checksum": str(provenance.get("source_zip_sha256") or ""),
+            "checksum_algorithm": "sha256",
+            "representation_provenance_class": "derived_asset",
+            "source_system": "tcia_wordpress",
+            "source_record_id": "tcga-gbm-qi-aim-download:45557",
+            "source_url": source_url,
+            "raw_values_json": json_dumps(
+                {
+                    "source_collection": "TCGA-GBM",
+                    "aim_version": "TCGA",
+                    "ignored_package_entries": provenance.get(
+                        "ignored_package_entries"
+                    ) or [],
+                }
+            ),
+            "provenance_json": json_dumps(
+                {
+                    "source_artifact": "tcga_gbm_qi_radiogenomics_aim_inventory_v1",
+                    "reference_provenance": provenance,
+                }
+            ),
+            "quality_flag_json": json_dumps(
+                {
+                    "participant_inventory": "crosswalk_available_at_file_grain",
+                    "represented_file_count_source": "reviewed_zip_inventory",
+                }
+            ),
+        },
+    )
+    insert_location(
+        conn,
+        location_values(
+            parent_id,
+            source_url,
+            checksum=str(provenance.get("source_zip_sha256") or ""),
+            checksum_algorithm="sha256",
+            representation_class="derived_asset",
+            provenance={"download_id": "45557", "container_format": "ZIP"},
+        ),
+    )
+    decision_id = stable_id(
+        "crosswalk_decision", "Analysis Result", TCGA_GBM_QI_SHORT_TITLE,
+        "aim_patient_and_dicom_uid_projection", "45557",
+    )
+    conn.execute(
+        """INSERT OR REPLACE INTO public_non_dicom_crosswalk_decisions
+           VALUES (?, 'Analysis Result', ?, '["45557"]', 'resolved',
+                   'aim_patient_and_dicom_uid_projection', ?, ?, ?, ?)""",
+        (
+            decision_id,
+            TCGA_GBM_QI_SHORT_TITLE,
+            "Every AIM XML directly supplies one TCGA PatientID and one referenced DICOM Study, Series, and SOP Instance UID.",
+            source_url,
+            reviewed_at,
+            json_dumps(
+                {
+                    "source_file": str(provenance_path),
+                    "source_zip_sha256": provenance.get("source_zip_sha256"),
+                    "source_collection": "TCGA-GBM",
+                }
+            ),
+        ),
+    )
+    patients: set[str] = set()
+    studies: set[str] = set()
+    series: set[str] = set()
+    sops: set[str] = set()
+    for row_number, row in enumerate(rows, start=2):
+        patient_id = str(row["patient_id"])
+        study_uid = str(row["study_instance_uid"])
+        series_uid = str(row["series_instance_uid"])
+        sop_uid = str(row["sop_instance_uid"])
+        asset_id = stable_id(
+            "asset", "tcga_gbm_qi_aim_xml", "45557", row["file_name"]
+        )
+        evidence = {
+            "source_file": str(inventory_path),
+            "source_row": row_number,
+            "patient_id": patient_id,
+            "study_instance_uid": study_uid,
+            "series_instance_uid": series_uid,
+            "sop_instance_uid": sop_uid,
+            "annotation_uid": row["annotation_uid"],
+            "reviewed_at": reviewed_at,
+        }
+        insert_asset(
+            conn,
+            {
+                "asset_id": asset_id,
+                "dataset_type": "Analysis Result",
+                "short_title": TCGA_GBM_QI_SHORT_TITLE,
+                "download_row_id": download["download_row_id"],
+                "download_id": "45557",
+                "subject_id": patient_id,
+                "subject_id_namespace": namespace,
+                "participant_link_status": "reviewed_source_crosswalk",
+                "asset_granularity": "file",
+                "asset_name": row["annotation_name"] or row["file_name"],
+                "file_name": row["file_name"],
+                "package_path": row["file_name"],
+                "file_format": "XML",
+                "container_format": "ZIP",
+                "media_kind": "geometric_annotation",
+                "spatial_dimensionality": "2D",
+                "temporal_dimensionality": "static",
+                "imaging_domain": "imaging_annotation",
+                "modality": "MR",
+                "object_role": "aim_segmentation_annotation",
+                "represented_file_count": 1,
+                "size_bytes": int(row["size_bytes"]),
+                "checksum": row["sha256"],
+                "checksum_algorithm": "sha256",
+                "representation_provenance_class": "derived_asset",
+                "source_system": "tcia_wordpress",
+                "source_record_id": f"tcga-gbm-qi-aim-inventory:{row_number}",
+                "source_url": source_url,
+                "raw_values_json": json_dumps(
+                    {
+                        "source_collection": "TCGA-GBM",
+                        "annotation_uid": row["annotation_uid"],
+                        "aim_version": row["aim_version"],
+                        "code_meaning": row["code_meaning"],
+                        "code_value": row["code_value"],
+                        "coding_scheme_designator": row[
+                            "coding_scheme_designator"
+                        ],
+                        "study_instance_uid": study_uid,
+                        "series_instance_uid": series_uid,
+                        "sop_instance_uid": sop_uid,
+                        "study_date": row["study_date"],
+                    }
+                ),
+                "provenance_json": json_dumps(
+                    {
+                        "source_artifact": "tcga_gbm_qi_radiogenomics_aim_inventory_v1",
+                        "reference_provenance": provenance,
+                        **evidence,
+                    }
+                ),
+                "quality_flag_json": json_dumps(
+                    {
+                        "participant_inventory": "reviewed_source_crosswalk",
+                        "source_dicom_link": "aim_embedded_uids",
+                    }
+                ),
+            },
+        )
+        insert_asset_participant(
+            conn,
+            asset_id=asset_id,
+            short_title=TCGA_GBM_QI_SHORT_TITLE,
+            subject_id=patient_id,
+            namespace=namespace,
+            raw_subject_id=patient_id,
+            participant_role="annotated_subject",
+            link_status="reviewed_source_crosswalk",
+            evidence=evidence,
+        )
+        insert_location(
+            conn,
+            location_values(
+                asset_id,
+                source_url,
+                representation_class="derived_asset",
+                provenance={"package_path": row["file_name"], **evidence},
+            ),
+        )
+        conn.execute(
+            """INSERT OR REPLACE INTO public_non_dicom_crosswalk_evidence
+               VALUES (?, ?, ?, ?, ?, ?, 'high', ?, ?, ?, ?, ?)""",
+            (
+                stable_id(
+                    "crosswalk", asset_id, patient_id, series_uid,
+                    "aim_embedded_patient_and_dicom_uids",
+                ),
+                asset_id,
+                TCGA_GBM_QI_SHORT_TITLE,
+                patient_id,
+                patient_id,
+                "aim_embedded_patient_and_dicom_uids",
+                source_url,
+                "The AIM XML directly records the TCGA PatientID and referenced DICOM Study, Series, and SOP Instance UIDs.",
+                series_uid,
+                reviewed_at,
+                json_dumps(evidence),
+            ),
+        )
+        merge_image_metadata(
+            conn,
+            asset_id,
+            {
+                "file_format": "XML",
+                "media_kind": "geometric_annotation",
+                "object_role": "aim_segmentation_annotation",
+                "modality": "MR",
+                "aim_version": row["aim_version"],
+                "annotation_uid": row["annotation_uid"],
+                "study_instance_uid": study_uid,
+                "series_instance_uid": series_uid,
+                "sop_instance_uid": sop_uid,
+            },
+            value_role="source_raw",
+            source_kind="reviewed_aim_inventory",
+            source_locator=str(inventory_path),
+            inference_method="direct_aim_xml_attributes",
+            confidence="high",
+            priority=110,
+            evidence=evidence,
+            short_title=TCGA_GBM_QI_SHORT_TITLE,
+            assume_new=True,
+        )
+        patients.add(patient_id)
+        studies.add(study_uid)
+        series.add(series_uid)
+        sops.add(sop_uid)
+
+    counts = {
+        "xml_files": len(rows),
+        "participants": len(patients),
+        "studies": len(studies),
+        "series": len(series),
+        "sop_instances": len(sops),
+    }
+    if counts != {
+        "xml_files": 321,
+        "participants": 55,
+        "studies": 60,
+        "series": 111,
+        "sop_instances": 193,
+    }:
+        raise RuntimeError(f"TCGA-GBM-QI-Radiogenomics ingest mismatch: {counts}")
+    add_dataset_metadata_note(
+        conn,
+        TCGA_GBM_QI_SHORT_TITLE,
+        "aim_annotations",
+        "aim_patient_and_dicom_uid_inventory_reviewed",
+        "The AIM ZIP contains 321 XML annotations for 55 TCGA-GBM patients, linked directly to 60 studies, 111 series, and 193 SOP instances.",
+        severity="info",
+        status="resolved",
+        affected_assets=len(rows),
+        evidence={"source_url": source_url, **counts},
+    )
+    return counts
+
+
+def ingest_tcga_lgg_mask_inventory(
+    conn: sqlite3.Connection,
+    snapshot_db: Path,
+    *,
+    mask_inventory_path: Path = DEFAULT_TCGA_LGG_MASK_INVENTORY,
+    vasari_inventory_path: Path = DEFAULT_TCGA_LGG_MASK_VASARI,
+    provenance_path: Path = DEFAULT_TCGA_LGG_MASK_PROVENANCE,
+) -> dict[str, int]:
+    """Project reviewed MATLAB masks and VASARI annotations at file grain."""
+    counts = {
+        "mask_files": 0,
+        "mask_participants": 0,
+        "mask_series_links": 0,
+        "vasari_assets": 0,
+        "vasari_participants": 0,
+        "vasari_complete_rows": 0,
+        "feature_key_assets": 0,
+    }
+    required = (mask_inventory_path, vasari_inventory_path, provenance_path)
+    if not all(path.is_file() for path in required):
+        return counts
+    provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+    expected = provenance.get("counts") or {}
+    reference_files = provenance.get("reference_files") or {}
+    for key, path in (
+        ("mask_inventory", mask_inventory_path),
+        ("vasari_participants", vasari_inventory_path),
+    ):
+        expected_sha256 = str((reference_files.get(key) or {}).get("sha256") or "")
+        if expected_sha256 and file_sha256(path) != expected_sha256:
+            raise RuntimeError(f"TCGA-LGG-Mask reference hash mismatch: {path}")
+
+    with closing(connect(snapshot_db)) as source:
+        download_rows = {
+            str(row["download_id"]): row
+            for row in source.execute(
+                """SELECT * FROM agent_current_downloads
+                   WHERE lower(short_title) = lower(?) AND hidden = 0
+                     AND controlled_access = 0 AND download_id IN ('45749', '45751', '45753')""",
+                (TCGA_LGG_MASK_SHORT_TITLE,),
+            )
+        }
+    if not download_rows:
+        return counts
+    missing_downloads = sorted({"45749", "45751", "45753"} - set(download_rows))
+    if missing_downloads:
+        raise RuntimeError(
+            "TCGA-LGG-Mask current public downloads missing from snapshot: "
+            + ", ".join(missing_downloads)
+        )
+
+    mask_download = download_rows["45753"]
+    mask_parent = conn.execute(
+        """SELECT * FROM public_non_dicom_assets
+           WHERE lower(short_title) = lower(?) AND download_id = '45753'
+             AND asset_granularity = 'download' AND file_format = 'MATLAB'""",
+        (TCGA_LGG_MASK_SHORT_TITLE,),
+    ).fetchone()
+    if mask_parent is None:
+        raise RuntimeError("TCGA-LGG-Mask MATLAB download declaration was not imported")
+
+    reviewed_at = str(provenance.get("reviewed_at") or "2026-08-27")
+    page_url = "https://www.cancerimagingarchive.net/analysis-result/tcga-lgg-mask/"
+    mask_decision_id = stable_id(
+        "crosswalk_decision", "Analysis Result", TCGA_LGG_MASK_SHORT_TITLE,
+        "participant_and_source_series_crosswalk", "45753",
+    )
+    conn.execute(
+        """INSERT OR REPLACE INTO public_non_dicom_crosswalk_decisions
+           VALUES (?, 'Analysis Result', ?, '["45753"]', 'resolved',
+                   'participant_and_source_series_crosswalk', ?, ?, ?, ?)""",
+        (
+            mask_decision_id,
+            TCGA_LGG_MASK_SHORT_TITLE,
+            "Patient folders provide TCGA-LGG PatientIDs and every MATLAB filename exactly matches one Series Instance UID in both the published manifest and DICOM digest.",
+            page_url,
+            reviewed_at,
+            json_dumps({"source_file": str(provenance_path), "review_status": provenance.get("review_status")}),
+        ),
+    )
+
+    mask_subjects: set[str] = set()
+    mask_series: set[str] = set()
+    with mask_inventory_path.open(newline="", encoding="utf-8") as handle:
+        mask_rows = list(csv.DictReader(handle))
+    for row_number, row in enumerate(mask_rows, start=2):
+        subject_id = str(row["subject_id"]).strip()
+        raw_subject_id = str(row["raw_subject_id"]).strip()
+        series_uid = str(row["series_instance_uid"]).strip()
+        package_path = str(row["package_path"]).strip()
+        asset_id = stable_id(
+            "asset", "tcga_lgg_mask", "45753", package_path, subject_id
+        )
+        evidence = {
+            "source_file": str(mask_inventory_path),
+            "source_row": row_number,
+            "series_instance_uid": series_uid,
+            "study_instance_uid": row["study_instance_uid"],
+            "dicom_image_count": int(row["dicom_image_count"]),
+            "reviewed_at": reviewed_at,
+        }
+        insert_asset(
+            conn,
+            {
+                "asset_id": asset_id,
+                "dataset_type": "Analysis Result",
+                "short_title": TCGA_LGG_MASK_SHORT_TITLE,
+                "download_row_id": mask_parent["download_row_id"],
+                "download_id": "45753",
+                "subject_id": subject_id,
+                "subject_id_namespace": f"tcia_dataset:{TCGA_LGG_MASK_SHORT_TITLE}",
+                "participant_link_status": "reviewed_source_crosswalk",
+                "asset_granularity": "file",
+                "asset_name": row["file_name"],
+                "file_name": row["file_name"],
+                "package_path": package_path,
+                "file_format": "MATLAB",
+                "container_format": "ZIP",
+                "media_kind": "image_volume",
+                "spatial_dimensionality": "3D",
+                "temporal_dimensionality": "static",
+                "imaging_domain": "imaging_annotation",
+                "modality": "MR",
+                "object_role": "segmentation",
+                "represented_file_count": 1,
+                "size_bytes": int(row["size_bytes"]),
+                "checksum": row["sha256"],
+                "checksum_algorithm": "sha256",
+                "representation_provenance_class": "derived_asset",
+                "source_system": "tcia_wordpress",
+                "source_record_id": f"tcga-lgg-mask-inventory:{row_number}",
+                "source_url": mask_download["download_url"],
+                "raw_values_json": json_dumps(
+                    {
+                        "source_collection": "TCGA-LGG",
+                        "study_instance_uid": row["study_instance_uid"],
+                        "series_instance_uid": series_uid,
+                        "dicom_image_count": int(row["dicom_image_count"]),
+                        "series_description": row["series_description"],
+                        "protocol_name": row["protocol_name"],
+                    }
+                ),
+                "provenance_json": json_dumps(
+                    {
+                        "source_artifact": "tcga_lgg_mask_inventory_v1",
+                        "reference_provenance": provenance,
+                        **evidence,
+                    }
+                ),
+                "quality_flag_json": json_dumps(
+                    {
+                        "participant_inventory": "reviewed_source_crosswalk",
+                        "source_series_link": "exact_manifest_and_digest_match",
+                    }
+                ),
+            },
+        )
+        insert_asset_participant(
+            conn,
+            asset_id=asset_id,
+            short_title=TCGA_LGG_MASK_SHORT_TITLE,
+            subject_id=subject_id,
+            namespace=f"tcia_dataset:{TCGA_LGG_MASK_SHORT_TITLE}",
+            raw_subject_id=raw_subject_id,
+            participant_role="depicted_subject",
+            link_status="reviewed_source_crosswalk",
+            evidence=evidence,
+        )
+        insert_location(
+            conn,
+            location_values(
+                asset_id,
+                str(mask_download["download_url"] or ""),
+                representation_class="derived_asset",
+                provenance={"package_path": package_path, **evidence},
+            ),
+        )
+        crosswalk_id = stable_id(
+            "crosswalk", asset_id, subject_id, series_uid,
+            "package_patient_and_exact_series_uid",
+        )
+        conn.execute(
+            """INSERT OR REPLACE INTO public_non_dicom_crosswalk_evidence
+               VALUES (?, ?, ?, ?, ?, ?, 'high', ?, ?, ?, ?, ?)""",
+            (
+                crosswalk_id,
+                asset_id,
+                TCGA_LGG_MASK_SHORT_TITLE,
+                raw_subject_id,
+                subject_id,
+                "package_patient_and_exact_series_uid",
+                str((provenance.get("source_files") or {}).get("series_manifest_csv", {}).get("url") or page_url),
+                "Folder PatientID and filename Series Instance UID exactly match the official corresponding-image digest.",
+                series_uid,
+                reviewed_at,
+                json_dumps(evidence),
+            ),
+        )
+        merge_image_metadata(
+            conn,
+            asset_id,
+            {
+                "modality": "MR",
+                "file_format": "MATLAB",
+                "media_kind": "image_volume",
+                "spatial_dimensionality": "3D",
+                "temporal_dimensionality": "static",
+                "object_role": "segmentation",
+                "source_collection": "TCGA-LGG",
+                "source_study_instance_uid": row["study_instance_uid"],
+                "source_series_instance_uid": series_uid,
+                "source_dicom_image_count": int(row["dicom_image_count"]),
+                "source_series_description": row["series_description"],
+                "source_protocol_name": row["protocol_name"],
+            },
+            value_role="source_raw",
+            source_kind="reviewed_manifest_and_dicom_digest",
+            source_locator=str(mask_inventory_path),
+            inference_method="package_patient_and_exact_series_uid",
+            confidence="high",
+            priority=110,
+            evidence=evidence,
+            short_title=TCGA_LGG_MASK_SHORT_TITLE,
+            assume_new=True,
+        )
+        mask_subjects.add(subject_id)
+        mask_series.add(series_uid)
+
+    vasari_download = download_rows["45749"]
+    vasari_asset_id = stable_id(
+        "asset", "tcga_lgg_mask_vasari", "45749", vasari_download["download_url"]
+    )
+    vasari_sha256 = str(
+        ((provenance.get("source_files") or {}).get("vasari_csv") or {}).get("sha256") or ""
+    )
+    insert_asset(
+        conn,
+        {
+            "asset_id": vasari_asset_id,
+            "dataset_type": "Analysis Result",
+            "short_title": TCGA_LGG_MASK_SHORT_TITLE,
+            "download_row_id": vasari_download["download_row_id"],
+            "download_id": "45749",
+            "subject_id": "",
+            "subject_id_namespace": "",
+            "participant_link_status": "reviewed_source_crosswalk",
+            "asset_granularity": "file",
+            "asset_name": vasari_download["download_title"],
+            "file_name": Path(urllib.parse.urlparse(vasari_download["download_url"]).path).name,
+            "package_path": "",
+            "file_format": "CSV",
+            "container_format": "",
+            "media_kind": "tabular",
+            "spatial_dimensionality": "not_applicable",
+            "temporal_dimensionality": "static",
+            "imaging_domain": "imaging_annotation",
+            "modality": "MR",
+            "object_role": "qualitative_image_annotation_table",
+            "represented_file_count": 1,
+            "size_bytes": download_size_bytes(
+                vasari_download["download_size"], vasari_download["download_size_unit"]
+            ),
+            "checksum": vasari_sha256,
+            "checksum_algorithm": "sha256" if vasari_sha256 else "",
+            "representation_provenance_class": "derived_asset",
+            "source_system": "tcia_wordpress",
+            "source_record_id": "tcga-lgg-mask-vasari:45749",
+            "source_url": vasari_download["download_url"],
+            "raw_values_json": json_dumps(
+                {"feature_columns": [f"f{index}" for index in range(1, 26)] + ["f29"]}
+            ),
+            "provenance_json": json_dumps(
+                {"source_artifact": "tcga_lgg_mask_vasari_participants_v1", "reference_provenance": provenance}
+            ),
+            "quality_flag_json": json_dumps(
+                {"complete_numeric_rows": 178, "participant_rows": 188}
+            ),
+        },
+    )
+    insert_location(
+        conn,
+        location_values(
+            vasari_asset_id,
+            str(vasari_download["download_url"] or ""),
+            representation_class="derived_asset",
+            provenance={"source_record_id": "tcga-lgg-mask-vasari:45749"},
+        ),
+    )
+    vasari_subjects: set[str] = set()
+    complete_rows = 0
+    with vasari_inventory_path.open(newline="", encoding="utf-8") as handle:
+        vasari_rows = list(csv.DictReader(handle))
+    for row in vasari_rows:
+        raw_subject_id = str(row["raw_subject_id"]).strip()
+        subject_id = str(row["subject_id"]).strip()
+        complete_numeric = int(row["complete_numeric"])
+        evidence = {
+            "source_file": str(vasari_inventory_path),
+            "source_row": int(row["source_row"]),
+            "complete_numeric": bool(complete_numeric),
+            "non_numeric_or_missing_fields": json.loads(
+                row["non_numeric_or_missing_fields_json"] or "[]"
+            ),
+            "normalization_method": (
+                "curator_reviewed_typo_alias"
+                if raw_subject_id.upper() == "TCGA-EZ-7264A"
+                else "case_normalization"
+                if raw_subject_id != subject_id
+                else "identity"
+            ),
+        }
+        insert_asset_participant(
+            conn,
+            asset_id=vasari_asset_id,
+            short_title=TCGA_LGG_MASK_SHORT_TITLE,
+            subject_id=subject_id,
+            namespace=f"tcia_dataset:{TCGA_LGG_MASK_SHORT_TITLE}",
+            raw_subject_id=raw_subject_id,
+            participant_role="annotated_subject",
+            link_status="reviewed_source_crosswalk",
+            evidence=evidence,
+        )
+        conn.execute(
+            """INSERT OR REPLACE INTO public_non_dicom_crosswalk_evidence
+               VALUES (?, ?, ?, ?, ?, ?, 'high', ?, ?, '', ?, ?)""",
+            (
+                stable_id("crosswalk", vasari_asset_id, raw_subject_id, subject_id),
+                vasari_asset_id,
+                TCGA_LGG_MASK_SHORT_TITLE,
+                raw_subject_id,
+                subject_id,
+                evidence["normalization_method"],
+                str(vasari_download["download_url"] or ""),
+                "VASARI row PatientID retained raw and linked to the reviewed Analysis Result participant identity.",
+                reviewed_at,
+                json_dumps(evidence),
+            ),
+        )
+        vasari_subjects.add(subject_id)
+        complete_rows += complete_numeric
+    merge_image_metadata(
+        conn,
+        vasari_asset_id,
+        {
+            "file_format": "CSV",
+            "media_kind": "tabular",
+            "object_role": "qualitative_image_annotation_table",
+            "participant_count": len(vasari_subjects),
+            "complete_numeric_rows": complete_rows,
+            "vasari_feature_count": 26,
+        },
+        value_role="source_raw",
+        source_kind="reviewed_vasari_inventory",
+        source_locator=str(vasari_inventory_path),
+        inference_method="participant_row_inventory",
+        confidence="high",
+        priority=110,
+        evidence={"reference_provenance": provenance},
+        short_title=TCGA_LGG_MASK_SHORT_TITLE,
+        assume_new=True,
+    )
+
+    feature_download = download_rows["45751"]
+    feature_asset_id = stable_id(
+        "asset", "tcga_lgg_mask_feature_key", "45751", feature_download["download_url"]
+    )
+    feature_sha256 = str(
+        ((provenance.get("source_files") or {}).get("feature_key_pdf") or {}).get("sha256") or ""
+    )
+    insert_asset(
+        conn,
+        {
+            "asset_id": feature_asset_id,
+            "dataset_type": "Analysis Result",
+            "short_title": TCGA_LGG_MASK_SHORT_TITLE,
+            "download_row_id": feature_download["download_row_id"],
+            "download_id": "45751",
+            "subject_id": "",
+            "subject_id_namespace": "",
+            "participant_link_status": "dataset_only",
+            "asset_granularity": "file",
+            "asset_name": feature_download["download_title"],
+            "file_name": Path(urllib.parse.urlparse(feature_download["download_url"]).path).name,
+            "package_path": "",
+            "file_format": "PDF",
+            "container_format": "",
+            "media_kind": "document",
+            "spatial_dimensionality": "not_applicable",
+            "temporal_dimensionality": "static",
+            "imaging_domain": "imaging_annotation",
+            "modality": "MR",
+            "object_role": "annotation_feature_dictionary",
+            "represented_file_count": 1,
+            "size_bytes": download_size_bytes(
+                feature_download["download_size"], feature_download["download_size_unit"]
+            ),
+            "checksum": feature_sha256,
+            "checksum_algorithm": "sha256" if feature_sha256 else "",
+            "representation_provenance_class": "metadata_only",
+            "source_system": "tcia_wordpress",
+            "source_record_id": "tcga-lgg-mask-feature-key:45751",
+            "source_url": feature_download["download_url"],
+            "raw_values_json": json_dumps({"defined_features": "F1-F30"}),
+            "provenance_json": json_dumps(
+                {"source_artifact": "VASARI_MR_featurekey.pdf", "reference_provenance": provenance}
+            ),
+            "quality_flag_json": "{}",
+        },
+    )
+    insert_location(
+        conn,
+        location_values(
+            feature_asset_id,
+            str(feature_download["download_url"] or ""),
+            representation_class="metadata_only",
+            provenance={"source_record_id": "tcga-lgg-mask-feature-key:45751"},
+        ),
+    )
+    conn.execute(
+        """INSERT OR REPLACE INTO public_non_dicom_asset_relationships
+           VALUES (?, ?, ?, 'interpreted_by', 'source_supported', ?, 'curator_reviewed')""",
+        (
+            stable_id("relationship", vasari_asset_id, feature_asset_id, "interpreted_by"),
+            vasari_asset_id,
+            feature_asset_id,
+            json_dumps(
+                {"description": "The PDF defines the VASARI feature names and categorical score codes.", "reviewed_at": reviewed_at}
+            ),
+        ),
+    )
+    annotation_decision_id = stable_id(
+        "crosswalk_decision", "Analysis Result", TCGA_LGG_MASK_SHORT_TITLE,
+        "shared_annotation_participants", "45749", "45751",
+    )
+    conn.execute(
+        """INSERT OR REPLACE INTO public_non_dicom_crosswalk_decisions
+           VALUES (?, 'Analysis Result', ?, '["45749","45751"]', 'resolved',
+                   'shared_annotation_participants', ?, ?, ?, ?)""",
+        (
+            annotation_decision_id,
+            TCGA_LGG_MASK_SHORT_TITLE,
+            "The VASARI CSV contains 188 participant rows; mixed-case source spellings are normalized and TCGA-EZ-7264A is retained as a curator-reviewed alias of TCGA-EZ-7264. The PDF is companion feature documentation.",
+            page_url,
+            reviewed_at,
+            json_dumps({"source_file": str(provenance_path), "review_status": provenance.get("review_status")}),
+        ),
+    )
+    add_dataset_metadata_note(
+        conn,
+        TCGA_LGG_MASK_SHORT_TITLE,
+        "vasari_scores",
+        "vasari_feature_key_and_completeness_reviewed",
+        "The shared CSV has 188 participant rows and 178 complete numeric rows across f1-f25 and f29; the linked PDF defines VASARI F1-F30.",
+        severity="info",
+        status="resolved",
+        affected_assets=1,
+        evidence={"vasari_asset_id": vasari_asset_id, "feature_key_asset_id": feature_asset_id},
+    )
+
+    counts.update(
+        {
+            "mask_files": len(mask_rows),
+            "mask_participants": len(mask_subjects),
+            "mask_series_links": len(mask_series),
+            "vasari_assets": 1,
+            "vasari_participants": len(vasari_subjects),
+            "vasari_complete_rows": complete_rows,
+            "feature_key_assets": 1,
+        }
+    )
+    expected_counts = {
+        "mask_files": int(expected.get("mask_files") or 0),
+        "mask_participants": int(expected.get("mask_subjects") or 0),
+        "mask_series_links": int(expected.get("series_instance_uids") or 0),
+        "vasari_assets": 1,
+        "vasari_participants": int(expected.get("vasari_subjects") or 0),
+        "vasari_complete_rows": int(expected.get("vasari_complete_numeric_rows") or 0),
+        "feature_key_assets": 1,
+    }
+    if counts != expected_counts:
+        raise RuntimeError(
+            f"TCGA-LGG-Mask reviewed inventory mismatch: {counts} != {expected_counts}"
+        )
+    return counts
+
+
+def apply_reviewed_remind_nrrd_aggregate(conn: sqlite3.Connection) -> int:
+    """Restore package-grain ReMIND counts after WordPress count refresh.
+
+    WordPress's 113-image value describes whole-tumor segmentations, while the
+    reviewed package inventory contains 356 NRRD files across 114 subjects.
+    The original WordPress values remain in the download asset raw provenance.
+    """
+    file_count = int(
+        conn.execute(
+            "SELECT COUNT(*) FROM public_non_dicom_assets "
+            "WHERE short_title = ? AND file_format = 'NRRD' "
+            "AND asset_granularity = 'file'",
+            (REMIND_SHORT_TITLE,),
+        ).fetchone()[0]
+    )
+    if not file_count:
+        return 0
+    before = conn.total_changes
+    conn.execute(
+        "UPDATE public_non_dicom_assets "
+        "SET represented_file_count = ?, "
+        "quality_flag_json = json_set("
+        "COALESCE(NULLIF(quality_flag_json, ''), '{}'), "
+        "'$.represented_file_count_source', 'reviewed_package_inventory') "
+        "WHERE short_title = ? AND file_format = 'NRRD' "
+        "AND asset_granularity = 'download'",
+        (file_count, REMIND_SHORT_TITLE),
+    )
+    return conn.total_changes - before
+
+
+def ingest_cptac_gbm_codex_inventory(
+    conn: sqlite3.Connection,
+    inventory_path: Path = DEFAULT_CPTAC_GBM_CODEX_INVENTORY,
+    provenance_path: Path = DEFAULT_CPTAC_GBM_CODEX_PROVENANCE,
+) -> int:
+    """Ingest the reviewed 52-file package inventory without a legacy sidecar."""
+    rows, provenance = load_cptac_gbm_codex_inventory(
+        inventory_path, provenance_path
+    )
+    aggregate = conn.execute(
+        """SELECT source_url, download_row_id FROM public_non_dicom_assets
+           WHERE short_title = ? AND download_id = '48969'
+             AND asset_granularity = 'download'
+           ORDER BY asset_id LIMIT 1""",
+        (CPTAC_GBM_CODEX_SHORT_TITLE,),
+    ).fetchone()
+    if aggregate is None:
+        return 0
+    source_url = str(aggregate[0] or "")
+    system = managed_system_for_url(source_url)
+    for row in rows:
+        file_format = normalize_format(row.get("image_format") or row.get("file_ext"))
+        asset_id = stable_id("asset", "pathology_package", row["non_dicom_file_id"])
+        insert_asset(
+            conn,
+            {
+                "asset_id": asset_id,
+                "dataset_type": "Analysis Result",
+                "short_title": CPTAC_GBM_CODEX_SHORT_TITLE,
+                "download_row_id": aggregate["download_row_id"],
+                "download_id": "48969",
+                "subject_id": "",
+                "subject_id_namespace": "",
+                "participant_link_status": "unavailable",
+                "asset_granularity": "file",
+                "asset_name": row["file_name"],
+                "file_name": row["file_name"],
+                "package_path": row["package_path"],
+                "file_format": file_format,
+                "container_format": "",
+                "media_kind": "whole_slide_image" if int(row.get("is_wsi") or 0) else "still_image",
+                "spatial_dimensionality": "2D",
+                "temporal_dimensionality": "static",
+                "imaging_domain": "pathology",
+                "modality": row.get("object_modality") or "",
+                "object_role": row.get("file_role") or "source_image",
+                "represented_file_count": 1,
+                "size_bytes": int(row["bytes"]) if row.get("bytes") else None,
+                "checksum": row.get("checksum") or "",
+                "checksum_algorithm": row.get("checksum_algorithm") or "",
+                "representation_provenance_class": default_representation_class(system),
+                "source_system": system,
+                "source_record_id": row["non_dicom_file_id"],
+                "source_url": source_url,
+                "raw_values_json": json_dumps(
+                    {
+                        "source_table": row.get("source_table") or "pathology_package_files",
+                        "source_row_id": row.get("source_row_id") or "",
+                        "source_file_ext": row.get("file_ext") or "",
+                    }
+                ),
+                "provenance_json": json_dumps(
+                    {
+                        "source_artifact": "reviewed_cptac_gbm_codex_inventory",
+                        "source_locator": str(inventory_path),
+                        "reference_provenance": provenance,
+                    }
+                ),
+                "quality_flag_json": "{}",
+            },
+        )
+        if source_url:
+            insert_location(
+                conn,
+                location_values(
+                    asset_id,
+                    source_url,
+                    checksum=row.get("checksum") or "",
+                    checksum_algorithm=row.get("checksum_algorithm") or "",
+                    provenance={
+                        "source_artifact": "reviewed_cptac_gbm_codex_inventory",
+                        "package_path": row["package_path"],
+                    },
+                ),
+            )
+    if len(rows) != 52:
+        raise RuntimeError(f"Expected 52 reviewed CODEX files, found {len(rows)}")
+    return len(rows)
+
+
 def ingest_pathology_packages(conn: sqlite3.Connection, pathology_db: Path) -> int:
     if not pathology_db.exists():
         return 0
@@ -2496,6 +3508,286 @@ def ingest_pathdb(conn: sqlite3.Connection, snapshot_db: Path, include_files: bo
             if count % 10000 == 0:
                 conn.commit()
     return count
+
+
+def apply_cptac_gbm_codex_workbook_crosswalk(
+    conn: sqlite3.Connection,
+    clinical_db: Path | None,
+    *,
+    require_pathdb: bool = True,
+) -> dict[str, int]:
+    """Resolve CODEX specimen labels and files to the 12 published patients.
+
+    The official TCIA workbook supplies exact WSI/cropped filenames, the
+    dataset-specific specimen or composite identifier, and either the parent
+    UPENN patient ID or CPTAC patient ID. This projection is applied to both
+    submitted package files and PathDB records. Raw specimen/timepoint labels
+    remain in asset and crosswalk provenance.
+    """
+    empty = {
+        "workbook_rows": 0,
+        "workbook_files": 0,
+        "participants": 0,
+        "matched_assets": 0,
+        "aspera_assets": 0,
+        "pathdb_assets": 0,
+        "evidence_rows": 0,
+        "representation_links": 0,
+    }
+    if not clinical_db or not clinical_db.is_file():
+        return empty
+    if conn.execute(
+        "SELECT 1 FROM public_non_dicom_assets WHERE short_title=? LIMIT 1",
+        (CPTAC_GBM_CODEX_SHORT_TITLE,),
+    ).fetchone() is None:
+        return empty
+
+    source_url = ""
+    artifact_sha256 = ""
+    reviewed_at = "2026-08-27"
+    by_file: dict[str, dict[str, Any]] = {}
+    participant_ids: set[str] = set()
+    with closing(connect(clinical_db)) as clinical:
+        if not table_exists(clinical, "clinical_rows"):
+            return empty
+        source = clinical.execute(
+            """SELECT source_id, source_url, artifact_sha256
+               FROM clinical_sources
+               WHERE short_title = ? AND source_kind = 'tcia_clinical_download'
+               ORDER BY source_priority DESC LIMIT 1""",
+            (CPTAC_GBM_CODEX_SHORT_TITLE,),
+        ).fetchone()
+        if source is None:
+            return empty
+        source_url = str(source["source_url"] or "")
+        artifact_sha256 = str(source["artifact_sha256"] or "")
+        rows = clinical.execute(
+            """SELECT source_row_id, subject_id, table_name, row_number, row_json,
+                      row_sha256
+               FROM clinical_rows
+               WHERE source_id = ? ORDER BY table_name, row_number""",
+            (source["source_id"],),
+        ).fetchall()
+        for row in rows:
+            values = json.loads(str(row["row_json"] or "{}"))
+            file_name = str(
+                values.get("CPTAC-Glioblastoma-CODEX_WSI_filename")
+                or values.get("CPTAC-Glioblastoma-CODEX_Cropped_filename")
+                or ""
+            ).strip()
+            participants = codex_workbook_participants(values)
+            if not file_name or not participants:
+                raise RuntimeError(
+                    "CPTAC-Glioblastoma-CODEX workbook row lacks a file or parent patient: "
+                    f"{row['source_row_id']}"
+                )
+            key = codex_workbook_file_key(file_name)
+            if key in by_file:
+                raise RuntimeError(f"Duplicate CODEX workbook filename key: {key}")
+            raw_subject_id = str(
+                values.get("CPTAC-Glioblastoma-CODEX_PatientID")
+                or row["subject_id"]
+                or ""
+            ).strip()
+            by_file[key] = {
+                "source_row_id": str(row["source_row_id"]),
+                "source_row_number": int(row["row_number"]),
+                "source_row_sha256": str(row["row_sha256"] or ""),
+                "table_name": str(row["table_name"] or ""),
+                "file_name": file_name,
+                "raw_subject_id": raw_subject_id,
+                "participants": participants,
+                "image_type": values.get("Image_type"),
+                "sample_type": values.get("Sample_type"),
+                "slide_setup": values.get("Slide_setup"),
+                "number_of_samples_on_slide": metadata_number(
+                    values.get("Number_of_samples_on_slide")
+                ),
+            }
+            participant_ids.update(participants)
+
+    if len(by_file) != 52 or len(participant_ids) != 12:
+        raise RuntimeError(
+            "CPTAC-Glioblastoma-CODEX workbook contract changed: "
+            f"files={len(by_file)} participants={len(participant_ids)}"
+        )
+
+    assets = conn.execute(
+        """SELECT * FROM public_non_dicom_assets
+           WHERE short_title = ? AND asset_granularity = 'file'
+             AND source_system IN ('tcia_aspera', 'tcia_pathdb')
+           ORDER BY source_system, asset_name""",
+        (CPTAC_GBM_CODEX_SHORT_TITLE,),
+    ).fetchall()
+    matched_by_key: dict[str, dict[str, str]] = defaultdict(dict)
+    counts = dict(empty)
+    counts.update(
+        {
+            "workbook_rows": len(by_file),
+            "workbook_files": len(by_file),
+            "participants": len(participant_ids),
+        }
+    )
+    mapping_method = "official_cptac_gbm_codex_workbook_filename_patient_projection"
+    for asset in assets:
+        key = codex_workbook_file_key(
+            str(asset["file_name"] or asset["asset_name"] or "")
+        )
+        evidence_row = by_file.get(key)
+        if evidence_row is None:
+            raise RuntimeError(
+                "CODEX public file is absent from the official workbook: "
+                f"{asset['source_system']}:{asset['file_name'] or asset['asset_name']}"
+            )
+        participants = list(evidence_row["participants"])
+        scalar = participants[0] if len(participants) == 1 else ""
+        namespace = f"tcia_dataset:{CPTAC_GBM_CODEX_SHORT_TITLE}"
+        provenance = json.loads(str(asset["provenance_json"] or "{}"))
+        provenance["official_workbook_projection"] = {
+            "source_url": source_url,
+            "artifact_sha256": artifact_sha256,
+            "source_row_id": evidence_row["source_row_id"],
+            "source_file_name": evidence_row["file_name"],
+            "raw_subject_id": evidence_row["raw_subject_id"],
+            "resolved_patient_ids": participants,
+            "mapping_method": mapping_method,
+        }
+        conn.execute(
+            """UPDATE public_non_dicom_assets
+               SET dataset_type = 'Analysis Result',
+                   subject_id = ?, subject_id_namespace = ?,
+                   participant_link_status = 'reviewed_source_crosswalk',
+                   provenance_json = ?,
+                   quality_flag_json = json_set(
+                       COALESCE(NULLIF(quality_flag_json, ''), '{}'),
+                       '$.participant_inventory', 'reviewed_source_crosswalk',
+                       '$.raw_specimen_or_composite_id_preserved', 1
+                   )
+               WHERE asset_id = ?""",
+            (scalar, namespace, json_dumps(provenance), asset["asset_id"]),
+        )
+        conn.execute(
+            "DELETE FROM public_non_dicom_asset_participants WHERE asset_id = ?",
+            (asset["asset_id"],),
+        )
+        for participant_id in participants:
+            evidence = {
+                "source_url": source_url,
+                "artifact_sha256": artifact_sha256,
+                "source_row_id": evidence_row["source_row_id"],
+                "source_row_number": evidence_row["source_row_number"],
+                "source_row_sha256": evidence_row["source_row_sha256"],
+                "source_file_name": evidence_row["file_name"],
+                "raw_subject_id": evidence_row["raw_subject_id"],
+                "mapping_method": mapping_method,
+            }
+            insert_asset_participant(
+                conn,
+                asset_id=str(asset["asset_id"]),
+                short_title=CPTAC_GBM_CODEX_SHORT_TITLE,
+                subject_id=participant_id,
+                namespace=namespace,
+                raw_subject_id=str(evidence_row["raw_subject_id"]),
+                participant_role="depicted_subject",
+                link_status="reviewed_source_crosswalk",
+                evidence=evidence,
+            )
+            conn.execute(
+                """INSERT OR REPLACE INTO public_non_dicom_crosswalk_evidence
+                   VALUES (?, ?, ?, ?, ?, ?, 'high', ?, ?, '', ?, ?)""",
+                (
+                    stable_id(
+                        "crosswalk", asset["asset_id"],
+                        evidence_row["raw_subject_id"], participant_id, mapping_method,
+                    ),
+                    asset["asset_id"], CPTAC_GBM_CODEX_SHORT_TITLE,
+                    evidence_row["raw_subject_id"], participant_id, mapping_method,
+                    source_url,
+                    "Exact official-workbook filename and parent patient fields resolve the specimen, timepoint, or composite slide label.",
+                    reviewed_at, json_dumps(evidence),
+                ),
+            )
+            counts["evidence_rows"] += 1
+        merge_image_metadata(
+            conn,
+            str(asset["asset_id"]),
+            {
+                "image_type": evidence_row["image_type"],
+                "sample_type": evidence_row["sample_type"],
+                "slide_setup": evidence_row["slide_setup"],
+                "number_of_samples_on_slide": evidence_row[
+                    "number_of_samples_on_slide"
+                ],
+            },
+            value_role="source_raw",
+            source_kind="tcia_clinical_download",
+            source_locator=f"{source_url}::{evidence_row['table_name'].rsplit('::', 1)[-1]}",
+            inference_method="exact_official_workbook_filename",
+            confidence="high",
+            priority=110,
+            evidence={
+                "source_row_id": evidence_row["source_row_id"],
+                "artifact_sha256": artifact_sha256,
+            },
+        )
+        system = str(asset["source_system"])
+        matched_by_key[key][system] = str(asset["asset_id"])
+        counts["matched_assets"] += 1
+        counts["aspera_assets" if system == "tcia_aspera" else "pathdb_assets"] += 1
+
+    for key, systems in matched_by_key.items():
+        expected_systems = (
+            {"tcia_aspera", "tcia_pathdb"} if require_pathdb else {"tcia_aspera"}
+        )
+        if set(systems) != expected_systems:
+            raise RuntimeError(f"CODEX file lacks an Aspera/PathDB pair: {key}")
+        if not require_pathdb:
+            continue
+        conn.execute(
+            """INSERT OR REPLACE INTO public_non_dicom_asset_relationships
+               VALUES (?, ?, ?, 'managed_representation_correspondence',
+                       'source_supported', ?, 'curator_reviewed')""",
+            (
+                stable_id(
+                    "relationship", systems["tcia_aspera"], systems["tcia_pathdb"],
+                    "managed_representation_correspondence",
+                ),
+                systems["tcia_aspera"], systems["tcia_pathdb"],
+                json_dumps(
+                    {
+                        "workbook_file_key": key,
+                        "source_url": source_url,
+                        "note": "The exact published filename links the managed records; byte identity is not asserted.",
+                    }
+                ),
+            ),
+        )
+        counts["representation_links"] += 1
+
+    expected_assets = len(by_file) * (2 if require_pathdb else 1)
+    if counts["matched_assets"] != expected_assets:
+        raise RuntimeError(
+            "CPTAC-Glioblastoma-CODEX file coverage mismatch: "
+            f"{counts['matched_assets']} != {expected_assets}"
+        )
+    add_dataset_metadata_note(
+        conn,
+        CPTAC_GBM_CODEX_SHORT_TITLE,
+        "participant_identity",
+        "official_workbook_specimen_to_patient_projection",
+        "The official workbook resolves specimen/timepoint labels and composite slides to 12 parent patients across all 52 submitted package files and 52 PathDB records.",
+        severity="info",
+        status="resolved",
+        affected_assets=counts["matched_assets"],
+        evidence={
+            "source_url": source_url,
+            "artifact_sha256": artifact_sha256,
+            "workbook_rows": len(by_file),
+            "participant_count": len(participant_ids),
+            "byte_identity_asserted": False,
+        },
+    )
+    return counts
 
 
 def ingest_reviewed_crosswalks(
@@ -4536,7 +5828,10 @@ def delete_refreshable_assets(conn: sqlite3.Connection) -> int:
     conn.execute(
         "INSERT INTO refresh_asset_ids "
         "SELECT asset_id FROM public_non_dicom_assets "
-        "WHERE (source_system='tcia_wordpress' AND asset_granularity='download') "
+        "WHERE (source_system IN ('tcia_wordpress', 'tcia_aspera') "
+        "       AND asset_granularity='download') "
+        "   OR source_record_id LIKE 'tcga-lgg-mask-%' "
+        "   OR source_record_id LIKE 'tcga-lgg-mask-inventory:%' "
         "   OR source_system='tcia_pathdb'"
     )
     count = int(conn.execute("SELECT COUNT(*) FROM refresh_asset_ids").fetchone()[0])
@@ -4733,6 +6028,9 @@ def build_database(
     image_metadata_csv: Path | None = None,
     remind_nrrd_inventory: Path | None = None,
     remind_nrrd_provenance: Path = DEFAULT_REMIND_NRRD_PROVENANCE,
+    tcga_lgg_mask_inventory: Path = DEFAULT_TCGA_LGG_MASK_INVENTORY,
+    tcga_lgg_mask_vasari: Path = DEFAULT_TCGA_LGG_MASK_VASARI,
+    tcga_lgg_mask_provenance: Path = DEFAULT_TCGA_LGG_MASK_PROVENANCE,
     staging_db: Path | None = None,
     baseline_db: Path | None = None,
 ) -> dict[str, Any]:
@@ -4788,9 +6086,16 @@ def build_database(
                 inventory_path=remind_nrrd_inventory,
                 provenance_path=remind_nrrd_provenance,
             ),
+            "cptac_gbm_codex_reviewed_file_assets": ingest_cptac_gbm_codex_inventory(conn),
             "pathology_package_assets": ingest_pathology_packages(conn, pathology_db) if pathology_db else 0,
             "pathdb_file_assets": ingest_pathdb(conn, snapshot_db, include_pathdb_files),
         }
+        codex_crosswalk = apply_cptac_gbm_codex_workbook_crosswalk(
+            conn, clinical_db, require_pathdb=include_pathdb_files
+        )
+        counts.update(
+            {f"cptac_gbm_codex_{key}": value for key, value in codex_crosswalk.items()}
+        )
         if baseline_db:
             counts["brats_existing_assets_reprojected"] = apply_brats_crosswalk_to_existing_assets(
                 conn, brats_crosswalk, brats_provenance
@@ -4799,12 +6104,29 @@ def build_database(
         counts["wordpress_aggregate_counts_refreshed"] = refresh_wordpress_aggregate_counts(
             conn, snapshot_db
         )
+        counts["remind_nrrd_aggregate_counts_reviewed"] = (
+            apply_reviewed_remind_nrrd_aggregate(conn)
+        )
         reviewed = (
             ingest_reviewed_crosswalks(conn, crosswalk_csv, crosswalk_curation)
             if crosswalk_csv and crosswalk_curation
             else {"decisions": 0, "file_assets": 0, "evidence_rows": 0}
         )
         counts.update({f"reviewed_crosswalk_{key}": value for key, value in reviewed.items()})
+        tcga_gbm_qi_aim = ingest_tcga_gbm_qi_aim_inventory(conn, snapshot_db)
+        counts.update(
+            {f"tcga_gbm_qi_aim_{key}": value for key, value in tcga_gbm_qi_aim.items()}
+        )
+        tcga_lgg_mask = ingest_tcga_lgg_mask_inventory(
+            conn,
+            snapshot_db,
+            mask_inventory_path=tcga_lgg_mask_inventory,
+            vasari_inventory_path=tcga_lgg_mask_vasari,
+            provenance_path=tcga_lgg_mask_provenance,
+        )
+        counts.update(
+            {f"tcga_lgg_mask_{key}": value for key, value in tcga_lgg_mask.items()}
+        )
         path_contracts = apply_reviewed_path_contracts(
             conn, clinical_db, crosswalk_curation, pathology_db=pathology_db
         )
@@ -4847,6 +6169,13 @@ def build_database(
             "source_image_metadata_csv": source_meta(image_metadata_csv) if image_metadata_csv else {"enabled": False},
             "source_remind_nrrd_inventory": source_meta(remind_nrrd_inventory) if remind_nrrd_inventory else {"enabled": False},
             "source_remind_nrrd_provenance": source_meta(remind_nrrd_provenance),
+            "source_tcga_lgg_mask_inventory": source_meta(tcga_lgg_mask_inventory),
+            "source_tcga_lgg_mask_vasari": source_meta(tcga_lgg_mask_vasari),
+            "source_tcga_lgg_mask_provenance": source_meta(tcga_lgg_mask_provenance),
+            "source_tcga_gbm_qi_aim_inventory": source_meta(DEFAULT_TCGA_GBM_QI_AIM_INVENTORY),
+            "source_tcga_gbm_qi_aim_provenance": source_meta(DEFAULT_TCGA_GBM_QI_AIM_PROVENANCE),
+            "source_cptac_gbm_codex_inventory": source_meta(DEFAULT_CPTAC_GBM_CODEX_INVENTORY),
+            "source_cptac_gbm_codex_provenance": source_meta(DEFAULT_CPTAC_GBM_CODEX_PROVENANCE),
             "source_staging_ledger": source_meta(staging_db) if staging_db else {"enabled": False},
             "source_public_non_dicom_baseline": baseline_source_meta,
             "source_brats_crosswalk_csv": source_meta(DEFAULT_BRATS_CROSSWALK_CSV),
@@ -5050,6 +6379,83 @@ def validate_database(path: Path) -> dict[str, Any]:
                     errors.append(
                         f"BCBM coverage regression: {name}={bcbm_counts[name]} != {expected}"
                     )
+            tcga_gbm_qi_counts = {
+                "tcga_gbm_qi_aim_files": conn.execute(
+                    "SELECT COUNT(*) FROM public_non_dicom_assets WHERE short_title=? "
+                    "AND asset_granularity='file' AND file_format='XML' "
+                    "AND object_role='aim_segmentation_annotation'",
+                    (TCGA_GBM_QI_SHORT_TITLE,),
+                ).fetchone()[0],
+                "tcga_gbm_qi_participants": conn.execute(
+                    "SELECT COUNT(DISTINCT subject_id) FROM public_non_dicom_asset_participants "
+                    "WHERE short_title=?",
+                    (TCGA_GBM_QI_SHORT_TITLE,),
+                ).fetchone()[0],
+                "tcga_gbm_qi_series": conn.execute(
+                    "SELECT COUNT(DISTINCT json_extract(raw_values_json, '$.series_instance_uid')) "
+                    "FROM public_non_dicom_assets WHERE short_title=? "
+                    "AND asset_granularity='file'",
+                    (TCGA_GBM_QI_SHORT_TITLE,),
+                ).fetchone()[0],
+                "tcga_gbm_qi_sop_instances": conn.execute(
+                    "SELECT COUNT(DISTINCT json_extract(raw_values_json, '$.sop_instance_uid')) "
+                    "FROM public_non_dicom_assets WHERE short_title=? "
+                    "AND asset_granularity='file'",
+                    (TCGA_GBM_QI_SHORT_TITLE,),
+                ).fetchone()[0],
+            }
+            counts.update(tcga_gbm_qi_counts)
+            for name, expected in {
+                "tcga_gbm_qi_aim_files": 321,
+                "tcga_gbm_qi_participants": 55,
+                "tcga_gbm_qi_series": 111,
+                "tcga_gbm_qi_sop_instances": 193,
+            }.items():
+                if tcga_gbm_qi_counts[name] != expected:
+                    errors.append(
+                        "TCGA-GBM-QI-Radiogenomics coverage regression: "
+                        f"{name}={tcga_gbm_qi_counts[name]} != {expected}"
+                    )
+            include_pathdb = json.loads(
+                artifact_meta.get("include_pathdb_files", "true")
+            )
+            cptac_codex_counts = {
+                "cptac_gbm_codex_aspera_files": conn.execute(
+                    "SELECT COUNT(*) FROM public_non_dicom_assets WHERE short_title=? "
+                    "AND asset_granularity='file' AND source_system='tcia_aspera'",
+                    (CPTAC_GBM_CODEX_SHORT_TITLE,),
+                ).fetchone()[0],
+                "cptac_gbm_codex_pathdb_files": conn.execute(
+                    "SELECT COUNT(*) FROM public_non_dicom_assets WHERE short_title=? "
+                    "AND asset_granularity='file' AND source_system='tcia_pathdb'",
+                    (CPTAC_GBM_CODEX_SHORT_TITLE,),
+                ).fetchone()[0],
+                "cptac_gbm_codex_participants": conn.execute(
+                    "SELECT COUNT(DISTINCT subject_id) FROM public_non_dicom_asset_participants "
+                    "WHERE short_title=?",
+                    (CPTAC_GBM_CODEX_SHORT_TITLE,),
+                ).fetchone()[0],
+                "cptac_gbm_codex_representation_links": conn.execute(
+                    "SELECT COUNT(*) FROM public_non_dicom_asset_relationships r "
+                    "JOIN public_non_dicom_assets a ON a.asset_id=r.source_asset_id "
+                    "WHERE a.short_title=? "
+                    "AND r.relationship_type='managed_representation_correspondence'",
+                    (CPTAC_GBM_CODEX_SHORT_TITLE,),
+                ).fetchone()[0],
+            }
+            counts.update(cptac_codex_counts)
+            expected_cptac = {
+                "cptac_gbm_codex_aspera_files": 52,
+                "cptac_gbm_codex_pathdb_files": 52 if include_pathdb else 0,
+                "cptac_gbm_codex_participants": 12,
+                "cptac_gbm_codex_representation_links": 52 if include_pathdb else 0,
+            }
+            for name, expected in expected_cptac.items():
+                if cptac_codex_counts[name] != expected:
+                    errors.append(
+                        "CPTAC-Glioblastoma-CODEX coverage regression: "
+                        f"{name}={cptac_codex_counts[name]} != {expected}"
+                    )
             remind_counts = {
                 "remind_nrrd_download_assets": conn.execute(
                     "SELECT COUNT(*) FROM public_non_dicom_assets "
@@ -5099,6 +6505,76 @@ def validate_database(path: Path) -> dict[str, Any]:
                 if remind_counts[name] != expected:
                     errors.append(
                         f"ReMIND NRRD coverage regression: {name}={remind_counts[name]} != {expected}"
+                    )
+            tcga_lgg_mask_counts = {
+                "tcga_lgg_mask_files": conn.execute(
+                    "SELECT COUNT(*) FROM public_non_dicom_assets "
+                    "WHERE short_title = ? AND asset_granularity = 'file' "
+                    "AND file_format = 'MATLAB' AND object_role = 'segmentation'",
+                    (TCGA_LGG_MASK_SHORT_TITLE,),
+                ).fetchone()[0],
+                "tcga_lgg_mask_participants": conn.execute(
+                    "SELECT COUNT(DISTINCT ap.subject_id) "
+                    "FROM public_non_dicom_asset_participants ap "
+                    "JOIN public_non_dicom_assets a USING(asset_id) "
+                    "WHERE a.short_title = ? AND a.file_format = 'MATLAB' "
+                    "AND a.asset_granularity = 'file'",
+                    (TCGA_LGG_MASK_SHORT_TITLE,),
+                ).fetchone()[0],
+                "tcga_lgg_mask_source_series": conn.execute(
+                    "SELECT COUNT(DISTINCT json_extract(m.metadata_json, '$.source_series_instance_uid')) "
+                    "FROM public_non_dicom_image_metadata m "
+                    "JOIN public_non_dicom_assets a USING(asset_id) "
+                    "WHERE a.short_title = ? AND a.file_format = 'MATLAB'",
+                    (TCGA_LGG_MASK_SHORT_TITLE,),
+                ).fetchone()[0],
+                "tcga_lgg_mask_vasari_assets": conn.execute(
+                    "SELECT COUNT(*) FROM public_non_dicom_assets "
+                    "WHERE short_title = ? AND object_role = 'qualitative_image_annotation_table'",
+                    (TCGA_LGG_MASK_SHORT_TITLE,),
+                ).fetchone()[0],
+                "tcga_lgg_mask_vasari_participants": conn.execute(
+                    "SELECT COUNT(DISTINCT ap.subject_id) "
+                    "FROM public_non_dicom_asset_participants ap "
+                    "JOIN public_non_dicom_assets a USING(asset_id) "
+                    "WHERE a.short_title = ? "
+                    "AND a.object_role = 'qualitative_image_annotation_table'",
+                    (TCGA_LGG_MASK_SHORT_TITLE,),
+                ).fetchone()[0],
+                "tcga_lgg_mask_vasari_complete_rows": conn.execute(
+                    "SELECT COALESCE(MAX(json_extract(m.metadata_json, '$.complete_numeric_rows')), 0) "
+                    "FROM public_non_dicom_image_metadata m "
+                    "JOIN public_non_dicom_assets a USING(asset_id) "
+                    "WHERE a.short_title = ? "
+                    "AND a.object_role = 'qualitative_image_annotation_table'",
+                    (TCGA_LGG_MASK_SHORT_TITLE,),
+                ).fetchone()[0],
+                "tcga_lgg_mask_feature_keys": conn.execute(
+                    "SELECT COUNT(*) FROM public_non_dicom_assets "
+                    "WHERE short_title = ? AND object_role = 'annotation_feature_dictionary'",
+                    (TCGA_LGG_MASK_SHORT_TITLE,),
+                ).fetchone()[0],
+                "tcga_lgg_mask_union_participants": conn.execute(
+                    "SELECT COUNT(DISTINCT subject_id) FROM public_non_dicom_asset_participants "
+                    "WHERE short_title = ?",
+                    (TCGA_LGG_MASK_SHORT_TITLE,),
+                ).fetchone()[0],
+            }
+            counts.update(tcga_lgg_mask_counts)
+            for name, expected in {
+                "tcga_lgg_mask_files": 406,
+                "tcga_lgg_mask_participants": 108,
+                "tcga_lgg_mask_source_series": 406,
+                "tcga_lgg_mask_vasari_assets": 1,
+                "tcga_lgg_mask_vasari_participants": 188,
+                "tcga_lgg_mask_vasari_complete_rows": 178,
+                "tcga_lgg_mask_feature_keys": 1,
+                "tcga_lgg_mask_union_participants": 188,
+            }.items():
+                if tcga_lgg_mask_counts[name] != expected:
+                    errors.append(
+                        "TCGA-LGG-Mask coverage regression: "
+                        f"{name}={tcga_lgg_mask_counts[name]} != {expected}"
                     )
     return {"ok": not errors, "errors": errors, "integrity_check": integrity, "counts": counts}
 
@@ -5239,6 +6715,9 @@ def parser() -> argparse.ArgumentParser:
     build.add_argument("--image-metadata-csv", default=str(DEFAULT_IMAGE_METADATA_CSV))
     build.add_argument("--remind-nrrd-inventory", default=str(DEFAULT_REMIND_NRRD_INVENTORY))
     build.add_argument("--remind-nrrd-provenance", default=str(DEFAULT_REMIND_NRRD_PROVENANCE))
+    build.add_argument("--tcga-lgg-mask-inventory", default=str(DEFAULT_TCGA_LGG_MASK_INVENTORY))
+    build.add_argument("--tcga-lgg-mask-vasari", default=str(DEFAULT_TCGA_LGG_MASK_VASARI))
+    build.add_argument("--tcga-lgg-mask-provenance", default=str(DEFAULT_TCGA_LGG_MASK_PROVENANCE))
     build.add_argument("--out", default=str(DEFAULT_DB))
     build.add_argument("--gzip-out")
     build.add_argument("--manifest-out")
@@ -5306,6 +6785,9 @@ def main() -> int:
             image_metadata_csv=Path(args.image_metadata_csv) if args.image_metadata_csv else None,
             remind_nrrd_inventory=Path(args.remind_nrrd_inventory) if args.remind_nrrd_inventory else None,
             remind_nrrd_provenance=Path(args.remind_nrrd_provenance),
+            tcga_lgg_mask_inventory=Path(args.tcga_lgg_mask_inventory),
+            tcga_lgg_mask_vasari=Path(args.tcga_lgg_mask_vasari),
+            tcga_lgg_mask_provenance=Path(args.tcga_lgg_mask_provenance),
             include_pathdb_files=not args.no_pathdb_files,
             replace=args.replace,
             staging_db=staging_db,

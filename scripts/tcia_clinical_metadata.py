@@ -507,6 +507,7 @@ SUBJECT_COLUMN_OVERRIDES = {
     "bcbmradiogenomics": {"id", "filenameprefix"},
     "braintrgammaknife": {"uniqueptid"},
     "remind": {"casenumber"},
+    "tcgalggmask": {"tumor"},
 }
 
 # Increment only the affected official downloads when a reviewed identifier
@@ -524,6 +525,7 @@ OFFICIAL_SOURCE_TRANSFORM_VERSIONS = {
     "bcbmradiogenomics": 1,
     "braintrgammaknife": 1,
     "remind": 1,
+    "tcgalggmask": 1,
 }
 
 REVIEWED_OFFICIAL_COHORT_PATTERNS = {
@@ -535,6 +537,7 @@ REVIEWED_OFFICIAL_COHORT_PATTERNS = {
     "BCBM-RadioGenomics": r"BCBM-RadioGenomics-\d+",
     "Brain-TR-GammaKnife": r"GK_\d{3}",
     "ReMIND": r"ReMIND-\d{3}",
+    "TCGA-LGG-Mask": r"TCGA-[A-Z0-9]{2}-[A-Z0-9]{4}",
 }
 
 HUNGARIAN_COLORECTAL_ICD10 = {
@@ -1595,6 +1598,13 @@ def official_subject_id_mapping(
         match = re.fullmatch(r"(?:ReMIND-)?(\d+)(?:\.0+)?", subject_id, re.IGNORECASE)
         if match:
             return f"ReMIND-{int(match.group(1)):03d}", "dataset_prefix_zero_pad_3"
+    if dataset == "tcgalggmask":
+        normalized = subject_id.upper()
+        if normalized == "TCGA-EZ-7264A":
+            return "TCGA-EZ-7264", "curator_reviewed_typo_alias"
+        if normalized != subject_id:
+            return normalized, "case_normalized_tcga_patient_id"
+        return normalized, "dataset_specific_exact_id"
     if dataset in SUBJECT_COLUMN_OVERRIDES:
         return subject_id, "dataset_specific_exact_id"
     return subject_id, "identity"
@@ -3462,7 +3472,9 @@ def fetch_url(url: str, *, timeout: int, max_bytes: int) -> bytes:
     return data
 
 
-def read_delimited(data: bytes, suffix: str) -> Any:
+def read_delimited(
+    data: bytes, suffix: str, *, deduplicate_headers: bool = False
+) -> Any:
     delimiter = "\t" if suffix in {".tsv", ".tab"} else None
     last_error: Exception | None = None
     for encoding in ("utf-8-sig", "utf-8", "latin-1"):
@@ -3476,19 +3488,42 @@ def read_delimited(data: bytes, suffix: str) -> Any:
                     dialect = csv.Sniffer().sniff(sample, delimiters=",;\t|")
                 except csv.Error:
                     dialect = csv.excel
-            reader = csv.DictReader(io.StringIO(text), dialect=dialect)
-            columns = [str(column) for column in (reader.fieldnames or []) if column]
-            rows = [
-                {str(key): value for key, value in row.items() if key is not None}
-                for row in reader
-            ]
+            if deduplicate_headers:
+                parsed = list(csv.reader(io.StringIO(text), dialect=dialect))
+                if not parsed:
+                    return SimpleFrame([], [])
+                columns = []
+                header_counts: dict[str, int] = {}
+                for index, raw_header in enumerate(parsed[0]):
+                    header = str(raw_header or f"column_{index + 1}")
+                    header_counts[header] = header_counts.get(header, 0) + 1
+                    suffix_number = header_counts[header]
+                    columns.append(
+                        header if suffix_number == 1 else f"{header}__{suffix_number}"
+                    )
+                rows = [
+                    {
+                        column: values[index] if index < len(values) else ""
+                        for index, column in enumerate(columns)
+                    }
+                    for values in parsed[1:]
+                ]
+            else:
+                reader = csv.DictReader(io.StringIO(text), dialect=dialect)
+                columns = [str(column) for column in (reader.fieldnames or []) if column]
+                rows = [
+                    {str(key): value for key, value in row.items() if key is not None}
+                    for row in reader
+                ]
             return SimpleFrame(columns, rows)
         except Exception as exc:
             last_error = exc
     raise RuntimeError(f"could not parse delimited table: {last_error}")
 
 
-def read_tables(data: bytes, name: str) -> list[tuple[str, Any]]:
+def read_tables(
+    data: bytes, name: str, *, deduplicate_headers: bool = False
+) -> list[tuple[str, Any]]:
     suffix = Path(name.split("?", 1)[0]).suffix.lower()
     # XLSX files are ZIP containers too, so magic-byte detection alone would
     # incorrectly treat their internal XML parts as a clinical package.
@@ -3507,10 +3542,23 @@ def read_tables(data: bytes, name: str) -> list[tuple[str, Any]]:
                 if member_suffix not in {".csv", ".tsv", ".tab", ".xls", ".xlsx"}:
                     continue
                 member_data = archive.read(member)
-                tables.extend(read_tables(member_data, member))
+                tables.extend(
+                    read_tables(
+                        member_data,
+                        member,
+                        deduplicate_headers=deduplicate_headers,
+                    )
+                )
         return tables
     if suffix in {".csv", ".tsv", ".tab", ".txt"}:
-        return [(name, read_delimited(data, suffix))]
+        return [
+            (
+                name,
+                read_delimited(
+                    data, suffix, deduplicate_headers=deduplicate_headers
+                ),
+            )
+        ]
     if suffix in {".xls", ".xlsx"}:
         import pandas as pd
 
@@ -3731,7 +3779,11 @@ def ingest_official_bytes(
     )
     loaded_rows = 0
     subjects: set[str] = set()
-    tables = read_tables(data, row["download_url"] or row["download_title"] or "")
+    tables = read_tables(
+        data,
+        row["download_url"] or row["download_title"] or "",
+        deduplicate_headers=normalize_name(row["short_title"]) == "tcgalggmask",
+    )
     if not tables:
         raise RuntimeError("no supported CSV/TSV/XLS/XLSX table found")
     for table_name, frame in tables:
@@ -6850,6 +6902,7 @@ def validate(db_path: Path) -> dict[str, Any]:
     bcbm_counts: dict[str, int] = {}
     brain_tr_gammaknife_counts: dict[str, int] = {}
     remind_counts: dict[str, int] = {}
+    tcga_lgg_mask_counts: dict[str, int] = {}
     if not missing_tables:
         qc_counts = {
             row[0]: row[1]
@@ -6933,6 +6986,35 @@ def validate(db_path: Path) -> dict[str, Any]:
             "dictionary_fields": 32,
         }:
             semantic_errors += 1
+        tcga_lgg_mask_counts = {
+            "official_rows": conn.execute(
+                "SELECT COUNT(*) FROM clinical_rows "
+                "WHERE short_title = 'TCGA-LGG-Mask' "
+                "AND source_id LIKE 'tcia-download:%'"
+            ).fetchone()[0],
+            "official_subjects": conn.execute(
+                "SELECT COUNT(DISTINCT subject_id) FROM clinical_rows "
+                "WHERE short_title = 'TCGA-LGG-Mask' "
+                "AND source_id LIKE 'tcia-download:%'"
+            ).fetchone()[0],
+            "duplicate_grade_columns_preserved": conn.execute(
+                "SELECT COUNT(*) FROM clinical_rows "
+                "WHERE short_title = 'TCGA-LGG-Mask' "
+                "AND json_extract(row_json, '$.neoplasm_histologic_grade__2') IS NOT NULL"
+            ).fetchone()[0],
+            "duplicate_subtype_columns_preserved": conn.execute(
+                "SELECT COUNT(*) FROM clinical_rows "
+                "WHERE short_title = 'TCGA-LGG-Mask' "
+                "AND json_extract(row_json, '$.IDH/1p19q Subtype__2') IS NOT NULL"
+            ).fetchone()[0],
+        }
+        if any(tcga_lgg_mask_counts.values()) and tcga_lgg_mask_counts != {
+            "official_rows": 188,
+            "official_subjects": 188,
+            "duplicate_grade_columns_preserved": 188,
+            "duplicate_subtype_columns_preserved": 188,
+        }:
+            semantic_errors += 1
     conn.close()
     result = {
         "ok": (
@@ -6953,6 +7035,7 @@ def validate(db_path: Path) -> dict[str, Any]:
         "bcbm_counts": bcbm_counts,
         "brain_tr_gammaknife_counts": brain_tr_gammaknife_counts,
         "remind_counts": remind_counts,
+        "tcga_lgg_mask_counts": tcga_lgg_mask_counts,
     }
     if not result["ok"]:
         raise RuntimeError(json.dumps(result, indent=2))

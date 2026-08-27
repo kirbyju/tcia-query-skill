@@ -1,0 +1,21 @@
+{
+  "dataset_type": "Analysis Result",
+  "download_id": "48969",
+  "extension_counts": {
+    ".qptiff": 8,
+    ".tif": 18,
+    ".tiff": 26
+  },
+  "generated_at_utc": "2026-08-27T20:02:08.405527+00:00",
+  "inventory_sha256": "650f0c09da49a17ba58f10d861a0b80519e5aeeeaf745186f542e80ea19ada4d",
+  "migration_note": "This pinned 52-row reference removes the runtime dependency on the retired pathology artifact.",
+  "review_status": "reviewed_source_projection",
+  "reviewed_at": "2026-08-27",
+  "row_count": 52,
+  "schema_version": 1,
+  "short_title": "CPTAC-Glioblastoma-CODEX",
+  "source_artifact": "legacy pathology_metadata package inventory",
+  "source_scope": "short_title=CPTAC-Glioblastoma-CODEX and is_metadata=0",
+  "source_view": "agent_pathology_file_objects",
+  "unique_package_paths": 52
+}

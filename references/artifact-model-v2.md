@@ -278,6 +278,30 @@ published segmentation assets: 2,774 exact filename matches plus 47 unique
 punctuation-normalized matches. Four additional workbook rows that have no
 current public mask are retained as a dataset metadata QC note.
 
+`TCGA-LGG-Mask` is expanded from its official supporting package rather than
+left at WordPress download grain. The reviewed inventory exposes 406 MATLAB
+segmentation files for 108 TCGA-LGG patients. Each filename is the exact
+Series Instance UID of its source MR series and is checked against both the
+published manifest and corresponding-image DICOM digest. The shared VASARI CSV
+is one file asset linked through the participant junction to 188 patients; its
+feature-key PDF is linked with `interpreted_by`. Raw mixed-case spellings are
+retained. The source value `TCGA-EZ-7264A` is retained as a curator-reviewed
+alias while the canonical participant ID is `TCGA-EZ-7264`.
+
+`TCGA-GBM-QI-Radiogenomics` exposes all 321 AIM XML files from download 45557.
+Every XML directly records one TCGA PatientID and one referenced DICOM Study,
+Series, and SOP Instance UID. The reviewed inventory therefore links 321 files
+to 55 `TCGA-GBM` patients, 60 studies, 111 series, and 193 SOP instances without
+inferring identity from filenames. XML remains a dataset-scoped annotation
+format here; it is not added to the global non-DICOM image-format vocabulary.
+
+`CPTAC-Glioblastoma-CODEX` uses a hash-pinned 52-row package inventory so the
+V2 build does not depend on the retired pathology artifact. The official XLSX
+maps exact WSI/cropped filenames and specimen, timepoint, or composite labels
+to 12 parent patients. The projection covers all 52 submitted files and all 52
+PathDB records. Corresponding Aspera and PathDB records remain separate managed
+representations; filename correspondence does not assert byte identity.
+
 WordPress download-grain non-DICOM assets retain the published `images` value
 as `represented_file_count`. This is an aggregate count, not file-level
 metadata and not a participant crosswalk. ReMIND demonstrates why this
