@@ -84,7 +84,26 @@ DEFAULT_RELEASE_TAG = "tcia-metadata-v2-latest"
 DEFAULT_REPOSITORY = "kirbyju/tcia-query-skill"
 DB_ASSET = "public_non_dicom_metadata.sqlite.gz"
 MANIFEST_ASSET = "public_non_dicom_metadata_manifest.json"
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
+
+GEOMETRY_CAPABLE_FORMATS = {"DICOM", "NIFTI", "MHA", "MHD", "NRRD"}
+GEOMETRY_STATUSES = {
+    "not_checked",
+    "not_applicable",
+    "checked_regular",
+    "checked_not_regular",
+    "checked_grid_geometry",
+    "checked_invalid_geometry",
+    "insufficient_slices",
+    "missing_geometry",
+    "unsupported_multiframe",
+    "not_applicable_localizer_or_mip",
+    "not_applicable_nonvolume_sop_class",
+    "read_error",
+    "dependency_error",
+    "analysis_error",
+    "mixed",
+}
 
 BRATS_SHORT_TITLE = "RSNA-ASNR-MICCAI-BraTS-2021"
 BCBM_SHORT_TITLE = "BCBM-RadioGenomics"
@@ -314,6 +333,11 @@ CREATE TABLE public_non_dicom_assets (
     imaging_domain TEXT NOT NULL,
     modality TEXT,
     object_role TEXT NOT NULL,
+    geometry_status TEXT,
+    geometry_assessment_method TEXT,
+    geometry_assessment_source TEXT,
+    geometry_assessed_at_utc TEXT,
+    geometry_details_json TEXT,
     represented_file_count INTEGER,
     size_bytes INTEGER,
     checksum TEXT,
@@ -326,6 +350,30 @@ CREATE TABLE public_non_dicom_assets (
     provenance_json TEXT NOT NULL DEFAULT '{}',
     quality_flag_json TEXT NOT NULL DEFAULT '{}',
     FOREIGN KEY (source_system) REFERENCES managed_systems(managed_system)
+);
+
+CREATE TABLE public_non_dicom_geometry_assessments (
+    geometry_assessment_id TEXT PRIMARY KEY,
+    asset_id TEXT NOT NULL,
+    analyzer TEXT NOT NULL,
+    analyzer_version TEXT NOT NULL,
+    assessed_at_utc TEXT NOT NULL,
+    local_relative_path TEXT NOT NULL,
+    file_format TEXT NOT NULL,
+    assessment_scope TEXT NOT NULL,
+    series_instance_uid TEXT,
+    study_instance_uid TEXT,
+    geometry_status TEXT NOT NULL,
+    dimension INTEGER,
+    shape_json TEXT NOT NULL DEFAULT '[]',
+    spacing_json TEXT NOT NULL DEFAULT '[]',
+    origin_json TEXT NOT NULL DEFAULT '[]',
+    direction_json TEXT NOT NULL DEFAULT '[]',
+    checks_json TEXT NOT NULL DEFAULT '{}',
+    details_json TEXT NOT NULL DEFAULT '{}',
+    error TEXT,
+    source_result_artifact TEXT NOT NULL,
+    FOREIGN KEY (asset_id) REFERENCES public_non_dicom_assets(asset_id)
 );
 
 CREATE TABLE public_non_dicom_locations (
@@ -486,6 +534,40 @@ SELECT
        FROM public_non_dicom_locations l WHERE l.asset_id = a.asset_id)
       AS managed_systems
 FROM public_non_dicom_assets a;
+
+CREATE VIEW agent_public_non_dicom_geometry_status AS
+SELECT
+    g.geometry_assessment_id,
+    a.asset_id,
+    a.dataset_type,
+    a.short_title,
+    a.download_id,
+    a.subject_id,
+    a.asset_granularity,
+    a.file_name,
+    a.package_path,
+    a.file_format,
+    a.modality,
+    a.object_role,
+    g.geometry_status,
+    g.analyzer,
+    g.analyzer_version,
+    g.assessed_at_utc,
+    g.local_relative_path,
+    g.assessment_scope,
+    g.series_instance_uid,
+    g.study_instance_uid,
+    g.dimension,
+    g.shape_json,
+    g.spacing_json,
+    g.origin_json,
+    g.direction_json,
+    g.checks_json,
+    g.details_json,
+    g.error,
+    g.source_result_artifact
+FROM public_non_dicom_geometry_assessments g
+JOIN public_non_dicom_assets a USING(asset_id);
 
 CREATE VIEW agent_public_non_dicom_asset_participants AS
 SELECT
@@ -741,13 +823,248 @@ def insert_vocab(conn: sqlite3.Connection) -> None:
     )
 
 
+def normalize_object_role(value: object) -> str:
+    role = str(value or "").strip()
+    return {
+        "whole_slide_image": "source_image",
+        "video_clip": "source_image",
+    }.get(role, role)
+
+
 def insert_asset(conn: sqlite3.Connection, values: dict[str, Any]) -> None:
+    values = dict(values)
+    values["object_role"] = normalize_object_role(values.get("object_role"))
     names = [row[1] for row in conn.execute("PRAGMA table_info(public_non_dicom_assets)")]
     conn.execute(
         f"INSERT OR IGNORE INTO public_non_dicom_assets ({', '.join(names)}) "
         f"VALUES ({', '.join('?' for _ in names)})",
         [values.get(name) for name in names],
     )
+
+
+def ensure_geometry_schema(conn: sqlite3.Connection) -> None:
+    """Add the schema-8 geometry fields to a copied schema-7 baseline."""
+    columns = {
+        row[1] for row in conn.execute("PRAGMA table_info(public_non_dicom_assets)")
+    }
+    additions = {
+        "geometry_status": "TEXT",
+        "geometry_assessment_method": "TEXT",
+        "geometry_assessment_source": "TEXT",
+        "geometry_assessed_at_utc": "TEXT",
+        "geometry_details_json": "TEXT",
+    }
+    for name, sql_type in additions.items():
+        if name not in columns:
+            conn.execute(
+                f"ALTER TABLE public_non_dicom_assets ADD COLUMN {name} {sql_type}"
+            )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS public_non_dicom_geometry_assessments (
+            geometry_assessment_id TEXT PRIMARY KEY,
+            asset_id TEXT NOT NULL,
+            analyzer TEXT NOT NULL,
+            analyzer_version TEXT NOT NULL,
+            assessed_at_utc TEXT NOT NULL,
+            local_relative_path TEXT NOT NULL,
+            file_format TEXT NOT NULL,
+            assessment_scope TEXT NOT NULL,
+            series_instance_uid TEXT,
+            study_instance_uid TEXT,
+            geometry_status TEXT NOT NULL,
+            dimension INTEGER,
+            shape_json TEXT NOT NULL DEFAULT '[]',
+            spacing_json TEXT NOT NULL DEFAULT '[]',
+            origin_json TEXT NOT NULL DEFAULT '[]',
+            direction_json TEXT NOT NULL DEFAULT '[]',
+            checks_json TEXT NOT NULL DEFAULT '{}',
+            details_json TEXT NOT NULL DEFAULT '{}',
+            error TEXT,
+            source_result_artifact TEXT NOT NULL,
+            FOREIGN KEY (asset_id) REFERENCES public_non_dicom_assets(asset_id)
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_public_geometry_asset "
+        "ON public_non_dicom_geometry_assessments(asset_id)"
+    )
+    conn.execute("DROP VIEW IF EXISTS agent_public_non_dicom_geometry_status")
+    conn.execute(
+        """
+        CREATE VIEW agent_public_non_dicom_geometry_status AS
+        SELECT
+            g.geometry_assessment_id,
+            a.asset_id,
+            a.dataset_type,
+            a.short_title,
+            a.download_id,
+            a.subject_id,
+            a.asset_granularity,
+            a.file_name,
+            a.package_path,
+            a.file_format,
+            a.modality,
+            a.object_role,
+            g.geometry_status,
+            g.analyzer,
+            g.analyzer_version,
+            g.assessed_at_utc,
+            g.local_relative_path,
+            g.assessment_scope,
+            g.series_instance_uid,
+            g.study_instance_uid,
+            g.dimension,
+            g.shape_json,
+            g.spacing_json,
+            g.origin_json,
+            g.direction_json,
+            g.checks_json,
+            g.details_json,
+            g.error,
+            g.source_result_artifact
+        FROM public_non_dicom_geometry_assessments g
+        JOIN public_non_dicom_assets a USING(asset_id)
+        """
+    )
+
+
+def geometry_capable_format(value: object) -> bool:
+    tokens = {
+        token.strip().upper()
+        for token in re.split(r"[,;]", str(value or ""))
+        if token.strip()
+    }
+    return bool(tokens & GEOMETRY_CAPABLE_FORMATS)
+
+
+def initialize_geometry_statuses(conn: sqlite3.Connection) -> int:
+    updates: list[tuple[str, str, str, str]] = []
+    for row in conn.execute(
+        "SELECT asset_id, file_format, geometry_status FROM public_non_dicom_assets"
+    ):
+        if str(row["geometry_status"] or ""):
+            continue
+        status = "not_checked" if geometry_capable_format(row["file_format"]) else "not_applicable"
+        updates.append((status, "not_assessed", "", str(row["asset_id"])))
+    conn.executemany(
+        """
+        UPDATE public_non_dicom_assets
+        SET geometry_status=?, geometry_assessment_method=?,
+            geometry_assessment_source=?, geometry_details_json='{}'
+        WHERE asset_id=?
+        """,
+        updates,
+    )
+    return len(updates)
+
+
+def ingest_geometry_results(conn: sqlite3.Connection, path: Path | None) -> dict[str, int]:
+    counts = {"assessment_rows": 0, "matched_rows": 0, "matched_assets": 0, "unmatched_rows": 0}
+    if path is None:
+        return counts
+    if not path.is_file():
+        raise FileNotFoundError(f"Geometry result database not found: {path}")
+    source_digest = file_sha256(path)
+    source_artifact = f"geometry_results.sqlite:sha256:{source_digest}"
+    matched_asset_ids: set[str] = set()
+    with closing(connect(path)) as source:
+        if not table_exists(source, "geometry_assessments"):
+            raise RuntimeError("Geometry result database is missing geometry_assessments")
+        for row in source.execute(
+            """
+            SELECT assessment_id, asset_id, geometry_status, analyzer, analyzer_version,
+                   assessed_at_utc, checks_json, details_json, error,
+                   local_relative_path, file_format, assessment_scope,
+                   series_instance_uid, study_instance_uid, dimension,
+                   shape_json, spacing_json, origin_json, direction_json
+            FROM geometry_assessments
+            """
+        ):
+            counts["assessment_rows"] += 1
+            asset_id = str(row["asset_id"] or "")
+            status = str(row["geometry_status"] or "not_checked")
+            if status not in GEOMETRY_STATUSES:
+                raise RuntimeError(f"Unsupported geometry status in {path}: {status}")
+            if not asset_id or conn.execute(
+                "SELECT 1 FROM public_non_dicom_assets WHERE asset_id=?", (asset_id,)
+            ).fetchone() is None:
+                counts["unmatched_rows"] += 1
+                continue
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO public_non_dicom_geometry_assessments (
+                    geometry_assessment_id, asset_id, analyzer, analyzer_version,
+                    assessed_at_utc, local_relative_path, file_format,
+                    assessment_scope, series_instance_uid, study_instance_uid,
+                    geometry_status, dimension, shape_json, spacing_json,
+                    origin_json, direction_json, checks_json, details_json,
+                    error, source_result_artifact
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    stable_id("geometry", source_digest, row["assessment_id"]),
+                    asset_id,
+                    str(row["analyzer"] or ""),
+                    str(row["analyzer_version"] or ""),
+                    str(row["assessed_at_utc"] or ""),
+                    str(row["local_relative_path"] or ""),
+                    str(row["file_format"] or ""),
+                    str(row["assessment_scope"] or ""),
+                    str(row["series_instance_uid"] or "") or None,
+                    str(row["study_instance_uid"] or "") or None,
+                    status,
+                    row["dimension"],
+                    str(row["shape_json"] or "[]"),
+                    str(row["spacing_json"] or "[]"),
+                    str(row["origin_json"] or "[]"),
+                    str(row["direction_json"] or "[]"),
+                    str(row["checks_json"] or "{}"),
+                    str(row["details_json"] or "{}"),
+                    str(row["error"] or "") or None,
+                    source_artifact,
+                ),
+            )
+            counts["matched_rows"] += 1
+            matched_asset_ids.add(asset_id)
+    asset_rows = conn.execute(
+        """
+        SELECT asset_id, group_concat(DISTINCT geometry_status),
+               group_concat(DISTINCT analyzer || '@' || analyzer_version),
+               MAX(assessed_at_utc), COUNT(*),
+               group_concat(DISTINCT source_result_artifact)
+        FROM public_non_dicom_geometry_assessments
+        GROUP BY asset_id
+        """
+    ).fetchall()
+    for asset_id, statuses, methods, assessed_at, assessment_count, sources in asset_rows:
+        status_values = sorted(filter(None, str(statuses or "").split(",")))
+        summary_status = status_values[0] if len(status_values) == 1 else "mixed"
+        conn.execute(
+            """
+            UPDATE public_non_dicom_assets
+            SET geometry_status=?, geometry_assessment_method=?,
+                geometry_assessment_source=?, geometry_assessed_at_utc=?,
+                geometry_details_json=?
+            WHERE asset_id=?
+            """,
+            (
+                summary_status,
+                str(methods or ""),
+                str(sources or ""),
+                str(assessed_at or ""),
+                json_dumps(
+                    {
+                        "assessment_count": int(assessment_count),
+                        "geometry_statuses": status_values,
+                    }
+                ),
+                asset_id,
+            ),
+        )
+    counts["matched_assets"] = len(matched_asset_ids)
+    return counts
 
 
 def insert_location(conn: sqlite3.Connection, values: dict[str, Any]) -> None:
@@ -6088,6 +6405,7 @@ def delete_refreshable_assets(conn: sqlite3.Connection) -> int:
         "public_non_dicom_asset_participants",
         "public_non_dicom_crosswalk_evidence",
         "public_non_dicom_image_metadata",
+        "public_non_dicom_geometry_assessments",
     ):
         conn.execute(
             f"DELETE FROM {table} WHERE asset_id IN (SELECT asset_id FROM refresh_asset_ids)"
@@ -6276,6 +6594,7 @@ def build_database(
     tcga_lgg_mask_provenance: Path = DEFAULT_TCGA_LGG_MASK_PROVENANCE,
     reviewed_participant_inventory: Path = DEFAULT_REVIEWED_PARTICIPANT_INVENTORY,
     reviewed_participant_provenance: Path = DEFAULT_REVIEWED_PARTICIPANT_PROVENANCE,
+    geometry_results: Path | None = None,
     staging_db: Path | None = None,
     baseline_db: Path | None = None,
 ) -> dict[str, Any]:
@@ -6301,8 +6620,9 @@ def build_database(
             schema_row = conn.execute(
                 "SELECT value FROM artifact_meta WHERE key='schema_version'"
             ).fetchone()
-            if not schema_row or int(schema_row[0]) != SCHEMA_VERSION:
+            if not schema_row or int(schema_row[0]) not in {7, SCHEMA_VERSION}:
                 raise RuntimeError("V2 baseline schema does not match the current builder")
+            ensure_geometry_schema(conn)
             conn.execute("DELETE FROM artifact_meta")
             refreshed_assets = delete_refreshable_assets(conn)
             conn.execute("DELETE FROM public_non_dicom_crosswalk_decisions")
@@ -6313,6 +6633,7 @@ def build_database(
         else:
             conn.executescript(SCHEMA)
             insert_vocab(conn)
+            ensure_geometry_schema(conn)
             refreshed_assets = 0
         counts = {
             "baseline_refreshable_assets_removed": refreshed_assets,
@@ -6411,6 +6732,11 @@ def build_database(
         counts["participant_crosswalk_review_issue_changes"] = (
             refresh_participant_crosswalk_review_issues(conn)
         )
+        counts["geometry_statuses_initialized"] = initialize_geometry_statuses(conn)
+        geometry_counts = ingest_geometry_results(conn, geometry_results)
+        counts.update(
+            {f"geometry_results_{key}": value for key, value in geometry_counts.items()}
+        )
         generated = datetime.now(timezone.utc).isoformat()
         metadata = {
             "schema_version": SCHEMA_VERSION,
@@ -6429,6 +6755,9 @@ def build_database(
             "source_tcga_lgg_mask_provenance": source_meta(tcga_lgg_mask_provenance),
             "source_reviewed_participant_inventory": source_meta(reviewed_participant_inventory),
             "source_reviewed_participant_provenance": source_meta(reviewed_participant_provenance),
+            "source_geometry_results": (
+                source_meta(geometry_results) if geometry_results else {"enabled": False}
+            ),
             "source_tcga_gbm_qi_aim_inventory": source_meta(DEFAULT_TCGA_GBM_QI_AIM_INVENTORY),
             "source_tcga_gbm_qi_aim_provenance": source_meta(DEFAULT_TCGA_GBM_QI_AIM_PROVENANCE),
             "source_cptac_gbm_codex_inventory": source_meta(DEFAULT_CPTAC_GBM_CODEX_INVENTORY),
@@ -6504,6 +6833,14 @@ def validate_database(path: Path) -> dict[str, Any]:
         provenance_in_companion = (
             artifact_meta.get("provenance_storage") == "companion_audit_artifact"
         )
+        artifact_schema_version = int(artifact_meta.get("schema_version", 0) or 0)
+        if artifact_schema_version >= 8:
+            required.update(
+                {
+                    "public_non_dicom_geometry_assessments",
+                    "agent_public_non_dicom_geometry_status",
+                }
+            )
         missing = sorted(required - objects)
         if missing:
             errors.append(f"missing objects: {', '.join(missing)}")
@@ -6513,12 +6850,55 @@ def validate_database(path: Path) -> dict[str, Any]:
         for row in conn.execute("SELECT DISTINCT representation_provenance_class FROM public_non_dicom_assets"):
             if row[0] not in REPRESENTATION_PROVENANCE_CLASSES:
                 errors.append(f"invalid representation class: {row[0]}")
+        if artifact_schema_version >= 8:
+            invalid_geometry = [
+                str(row[0])
+                for row in conn.execute(
+                    "SELECT DISTINCT geometry_status FROM public_non_dicom_assets"
+                )
+                if str(row[0] or "") not in GEOMETRY_STATUSES
+            ]
+            if invalid_geometry:
+                errors.append(
+                    "invalid geometry statuses: " + ", ".join(sorted(invalid_geometry))
+                )
+            invalid_assessment_geometry = [
+                str(row[0])
+                for row in conn.execute(
+                    "SELECT DISTINCT geometry_status "
+                    "FROM public_non_dicom_geometry_assessments"
+                )
+                if str(row[0] or "") not in GEOMETRY_STATUSES - {"mixed"}
+            ]
+            if invalid_assessment_geometry:
+                errors.append(
+                    "invalid assessment geometry statuses: "
+                    + ", ".join(sorted(invalid_assessment_geometry))
+                )
+            unchecked_non_geometry = conn.execute(
+                """
+                SELECT COUNT(*) FROM public_non_dicom_assets
+                WHERE geometry_status='not_checked'
+                  AND upper(file_format) NOT IN ('DICOM','NIFTI','MHA','MHD','NRRD')
+                """
+            ).fetchone()[0]
+            if unchecked_non_geometry:
+                errors.append(
+                    f"non-geometry assets incorrectly marked not_checked: {unchecked_non_geometry}"
+                )
         orphan_locations = conn.execute(
             """SELECT COUNT(*) FROM public_non_dicom_locations l
                LEFT JOIN public_non_dicom_assets a USING(asset_id) WHERE a.asset_id IS NULL"""
         ).fetchone()[0]
         if orphan_locations:
             errors.append(f"orphan locations: {orphan_locations}")
+        if artifact_schema_version >= 8:
+            orphan_geometry = conn.execute(
+                """SELECT COUNT(*) FROM public_non_dicom_geometry_assessments g
+                   LEFT JOIN public_non_dicom_assets a USING(asset_id) WHERE a.asset_id IS NULL"""
+            ).fetchone()[0]
+            if orphan_geometry:
+                errors.append(f"orphan geometry assessments: {orphan_geometry}")
         orphan_participant_links = conn.execute(
             """SELECT COUNT(*) FROM public_non_dicom_asset_participants ap
                LEFT JOIN public_non_dicom_assets a USING(asset_id) WHERE a.asset_id IS NULL"""
@@ -6555,6 +6935,13 @@ def validate_database(path: Path) -> dict[str, Any]:
             "image_metadata_assets": conn.execute("SELECT COUNT(*) FROM public_non_dicom_image_metadata").fetchone()[0],
             "metadata_field_coverage_rows": conn.execute("SELECT COUNT(*) FROM public_non_dicom_metadata_field_coverage").fetchone()[0],
             "dataset_metadata_notes": conn.execute("SELECT COUNT(*) FROM public_non_dicom_dataset_metadata_notes").fetchone()[0],
+            "geometry_not_checked": conn.execute(
+                "SELECT COUNT(*) FROM public_non_dicom_assets WHERE geometry_status='not_checked'"
+            ).fetchone()[0],
+            "geometry_checked": conn.execute(
+                "SELECT COUNT(*) FROM public_non_dicom_assets "
+                "WHERE geometry_status LIKE 'checked_%'"
+            ).fetchone()[0],
         }
         if counts["assets"] > 100000:
             brats_counts = {
@@ -7012,6 +7399,13 @@ def parser() -> argparse.ArgumentParser:
         "--reviewed-participant-provenance",
         default=str(DEFAULT_REVIEWED_PARTICIPANT_PROVENANCE),
     )
+    build.add_argument(
+        "--geometry-results",
+        help=(
+            "Optional geometry_results.sqlite produced by "
+            "scripts/tcia_geometry_batch.py; omitted assets remain not_checked."
+        ),
+    )
     build.add_argument("--out", default=str(DEFAULT_DB))
     build.add_argument("--gzip-out")
     build.add_argument("--manifest-out")
@@ -7084,6 +7478,7 @@ def main() -> int:
             tcga_lgg_mask_provenance=Path(args.tcga_lgg_mask_provenance),
             reviewed_participant_inventory=Path(args.reviewed_participant_inventory),
             reviewed_participant_provenance=Path(args.reviewed_participant_provenance),
+            geometry_results=Path(args.geometry_results) if args.geometry_results else None,
             include_pathdb_files=not args.no_pathdb_files,
             replace=args.replace,
             staging_db=staging_db,

@@ -27,7 +27,7 @@ Automated decisions use `decision_status='accepted_automated'` and record
 `human_reviewed=false` in provenance; they require complete, unambiguous
 download coverage. Partial candidates remain in the review-issues view.
 
-Public non-DICOM schema v7 represents participant cardinality in
+Public non-DICOM schema v8 represents participant cardinality in
 `public_non_dicom_asset_participants` and exposes
 `agent_public_non_dicom_asset_participants`. Query that junction for file-level
 Participant Explorer drill-downs, including shared assets such as HANCOCK whole
@@ -39,6 +39,19 @@ asset row would be wasteful. The initial use is the reviewed BraTS 2021 public
 DICOM trees that are available through Aspera but absent from IDC; these rows
 remain distinguishable with `file_format='DICOM'` and
 `source_system='tcia_aspera'`.
+
+Schema v8 also initializes DICOM, NIFTI, MHA, MHD, and NRRD assets to
+`geometry_status='not_checked'` unless a batch result has been imported. The
+`public_non_dicom_geometry_assessments` table retains one row per analyzed file
+or DICOM series, and `agent_public_non_dicom_geometry_status` exposes those
+rows. Asset-level geometry columns are summaries and can be `mixed`.
+
+Participant Inventory schema v7 adds `data_category`, `data_type`, and
+`file_format` facets plus geometry summary counts. Data category is broad
+content, data type is modality/specific content, and file format is the
+encoding. Access level remains independent. `media_kind`, `data_domain`, and
+`object_role` remain available for internal derivation and provenance-aware
+drill-down.
 
 For `RSNA-ASNR-MICCAI-BraTS-2021`, the canonical junction `subject_id` uses
 the original source Collection PatientID when the reviewed TCIA workbook names

@@ -60,6 +60,15 @@ pathology, and other public non-DICOM discovery uses
 non-DICOM `segmentation`, `annotation`, and `annotation_snapshot` roles. This
 discovers annotation-like assets but does not infer source-image relationships.
 
+Participant discovery and asset drill-down expose WordPress-aligned
+`data_categories`, `data_types`, and `file_formats`, with access kept as an
+independent facet. They also expose `geometry_statuses` and geometry assessment
+counts. The older `modalities` and `data_domains` parameters remain additive
+compatibility filters; `media_kinds` and `object_roles` remain technical detail
+filters for public non-DICOM assets rather than the primary user-facing model.
+Use `modalities` and `geometry_statuses` on `find_public_non_dicom_assets` for
+file-grain geometry review.
+
 The default REST documentation is under `/v2/docs`. V2 routes cover dataset and
 release history, participants, public non-DICOM detail, controlled-access public
 metadata, clinical detail, and TCIA DICOM annotation-download signals. Public

@@ -142,6 +142,25 @@ source identifiers, and 413 challenge-only identifiers. The eight numeric
 BraTS-TCGA test rows are normalized only to their existing BraTS aliases;
 test-set data availability is deliberately outside this crosswalk.
 
+### Geometry assessment
+
+Keep geometry assessment separate from format, modality, media kind, and object
+role. DICOM, NIfTI, MHA/MHD, and NRRD identify encodings; none proves that a
+particular object is a coherent volume.
+
+For IDC DICOM, build the compact participant projection from the separately
+versioned idc-index `volume_geometry_index`. A series present there is recorded
+as `checked_regular`, `checked_not_regular`, or `checked_indeterminate`; a
+series outside that index's documented scope is
+`not_in_geometry_index_scope`, not an inferred volume.
+
+For non-IDC DICOM and single-file volume formats, initialize eligible assets as
+`not_checked`. Import cluster results only from the header-only workflow in
+`references/geometry-batch-slurm.md`. Preserve every file- or DICOM-series-level
+row in `public_non_dicom_geometry_assessments`; the geometry fields on
+`public_non_dicom_assets` are summaries and may be `mixed`. Header assessment
+does not establish pixel quality, clinical usability, or semantic correctness.
+
 ### Non-DICOM annotations
 
 The unified artifact represents annotation-like files as ordinary logical
@@ -423,9 +442,24 @@ value.
 ## Participant Explorer presentation
 
 Query `agent_participant_search` in the Participant Inventory first; it is the
-one-row-per-canonical-participant search contract. Present user-centered summaries such as
-CT series, MHA volumes, pathology images, capsule-endoscopy videos, clinical
-data, and access level. Do not make users understand internal system names.
+one-row-per-canonical-participant search contract. Use these three public
+facets, aligned with the WordPress label hierarchy:
+
+- `data_category`: broad content category, such as Radiology, Pathology,
+  Annotations/Segmentations, Clinical Data, or Other Imaging;
+- `data_type`: modality or specific content type, such as CT, MR, SEG,
+  Segmentation, Whole Slide Image, Video, or Clinical Data;
+- `file_format`: physical format, such as DICOM, NIFTI, MHA, SVS, CSV, or MPG.
+
+Access level remains its own facet. Do not combine `open` with DICOM to create
+a label such as "Public DICOM."
+
+Retain `media_kind` as an internal, user-friendly representation grouping and
+`data_domain` as the normalized scientific domain. They support derivation and
+drill-down but are not replacements for the three public facets. Retain
+`object_role` for source-versus-derived semantics and annotation relationships;
+do not put representation values such as `whole_slide_image` or `video_clip`
+there because those belong in `media_kind`/`data_type`.
 
 Provide an expandable provenance/troubleshooting surface containing managed
 system, location, source version, checksums, original-versus-standardized

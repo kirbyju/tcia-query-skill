@@ -83,7 +83,7 @@ def explicit_mapping_rows(curation: dict[str, Any]) -> list[dict[str, Any]]:
                 media_kind="whole_slide_image",
                 imaging_domain="pathology",
                 modality="SM",
-                object_role="whole_slide_image",
+                object_role="source_image",
                 source_system="tcia_aspera",
                 crosswalk_source_url=mapping["crosswalk_source_url"],
                 crosswalk_method="exact_pathdb_source_url_suffix",
@@ -198,7 +198,7 @@ def aspera_rows(source_dir: Path, decision: dict[str, Any], *, kind: str) -> lis
                 subject_id = match.group(1).upper()
                 raw_subject_id = subject_id
                 media = "video" if file_format == "MPG" else "still_image"
-                role = "video_clip" if file_format == "MPG" else "source_image"
+                role = "source_image"
                 method = "aspera_patient_folder_and_filename"
                 crosswalk_url = decision["evidence_url"]
             else:
@@ -370,7 +370,7 @@ def aurora_rows(source_dir: Path, decision: dict[str, Any]) -> list[dict[str, An
                 media_kind="whole_slide_image",
                 imaging_domain="pathology",
                 modality="SM",
-                object_role="whole_slide_image",
+                object_role="source_image",
                 size_bytes=size_bytes,
                 source_system="tcia_aspera",
                 source_url="",

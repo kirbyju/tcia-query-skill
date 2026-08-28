@@ -56,7 +56,11 @@ service. Public DICOM detail stays in IDC.
 - Exclude hidden/staged/retired WordPress rows by default.
 - Use WordPress Collection and Analysis Result rows as the TCIA publication
   authority.
-- Use download-level labels for modality, file type, and access routing.
+- Use WordPress-aligned Data Category, Data Type, and File Format facets for
+  participant discovery, while keeping access independent and retaining
+  modality/data-domain filters for compatibility.
+- Expose geometry status and assessment counts without inferring coherence from
+  file format alone.
 - Split mixed-access datasets and never imply that all files are open.
 - Keep this MCP server read-only; it does not transfer controlled payloads. Client
   agents may use official TCIA Data Retriever manifests after an authorized user

@@ -28,6 +28,28 @@ discovery = load("tcia_public_non_dicom_crosswalk_discovery")
 
 
 class VocabularyTests(unittest.TestCase):
+    def test_participant_facets_separate_category_type_and_format(self):
+        self.assertEqual(
+            participants.derived_data_categories(
+                "radiology", "source_image;segmentation"
+            ),
+            "Annotations/Segmentations;Radiology",
+        )
+        self.assertEqual(
+            participants.derived_data_types(
+                "pathology", "whole_slide_image", "SM", "source_image"
+            ),
+            "SM;Whole Slide Image",
+        )
+        self.assertEqual(
+            participants.derived_data_categories(
+                "endoscopy", "source_image"
+            ),
+            "Other Imaging",
+        )
+        self.assertEqual(public.normalize_object_role("whole_slide_image"), "source_image")
+        self.assertEqual(public.normalize_object_role("video_clip"), "source_image")
+
     def test_refresh_replaces_wordpress_downloads_routed_through_aspera(self):
         import sqlite3
 

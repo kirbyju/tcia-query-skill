@@ -40,7 +40,15 @@ DEFAULT_RELEASE_TAG = "tcia-metadata-v2-latest"
 DEFAULT_REPOSITORY = "kirbyju/tcia-query-skill"
 DB_ASSET = "participant_inventory.sqlite.gz"
 MANIFEST_ASSET = "participant_inventory_manifest.json"
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
+
+GEOMETRY_CAPABLE_FORMATS = {"DICOM", "NIFTI", "MHA", "MHD", "NRRD"}
+GEOMETRY_CHECKED_STATUSES = {
+    "checked_regular",
+    "checked_not_regular",
+    "checked_grid_geometry",
+    "checked_invalid_geometry",
+}
 
 
 DISPLAY_SOURCE_PRECEDENCE = {
@@ -124,10 +132,18 @@ CREATE TABLE participant_assets (
     source_artifact TEXT NOT NULL,
     access_level TEXT NOT NULL,
     data_domain TEXT NOT NULL,
+    data_category TEXT,
+    data_type TEXT,
     media_kind TEXT,
     modality TEXT,
     file_format TEXT,
     object_role TEXT,
+    geometry_status TEXT,
+    geometry_checked_count INTEGER,
+    geometry_regular_count INTEGER,
+    geometry_not_regular_count INTEGER,
+    geometry_not_checked_count INTEGER,
+    geometry_source TEXT,
     study_count INTEGER,
     series_count INTEGER,
     file_count INTEGER,
@@ -248,9 +264,27 @@ SELECT
     group_concat(DISTINCT CASE WHEN COALESCE(a.source_version, '') <> 'legacy'
                                THEN NULLIF(a.data_domain, '') END) AS data_domains,
     group_concat(DISTINCT CASE WHEN COALESCE(a.source_version, '') <> 'legacy'
+                               THEN NULLIF(a.data_category, '') END) AS data_categories,
+    group_concat(DISTINCT CASE WHEN COALESCE(a.source_version, '') <> 'legacy'
+                               THEN NULLIF(a.data_type, '') END) AS data_types,
+    group_concat(DISTINCT CASE WHEN COALESCE(a.source_version, '') <> 'legacy'
                                THEN NULLIF(a.modality, '') END) AS modalities,
     group_concat(DISTINCT CASE WHEN COALESCE(a.source_version, '') <> 'legacy'
                                THEN NULLIF(a.file_format, '') END) AS file_formats,
+    group_concat(DISTINCT CASE WHEN COALESCE(a.source_version, '') <> 'legacy'
+                               THEN NULLIF(a.geometry_status, '') END) AS geometry_statuses,
+    SUM(CASE WHEN COALESCE(a.source_version, '') <> 'legacy'
+             THEN COALESCE(a.geometry_checked_count, 0) ELSE 0 END)
+      AS geometry_checked_count,
+    SUM(CASE WHEN COALESCE(a.source_version, '') <> 'legacy'
+             THEN COALESCE(a.geometry_regular_count, 0) ELSE 0 END)
+      AS geometry_regular_count,
+    SUM(CASE WHEN COALESCE(a.source_version, '') <> 'legacy'
+             THEN COALESCE(a.geometry_not_regular_count, 0) ELSE 0 END)
+      AS geometry_not_regular_count,
+    SUM(CASE WHEN COALESCE(a.source_version, '') <> 'legacy'
+             THEN COALESCE(a.geometry_not_checked_count, 0) ELSE 0 END)
+      AS geometry_not_checked_count,
     group_concat(DISTINCT a.managed_system) AS managed_systems
 FROM participants p
 LEFT JOIN participant_assets a USING(participant_key)
@@ -431,7 +465,102 @@ def ensure_participant(
     return key
 
 
+def split_tokens(value: object) -> list[str]:
+    return [
+        token.strip()
+        for token in re.split(r"[,;]", str(value or ""))
+        if token.strip()
+    ]
+
+
+def derived_data_categories(data_domain: object, object_role: object) -> str:
+    domains = {token.casefold() for token in split_tokens(data_domain)}
+    roles = {token.casefold() for token in split_tokens(object_role)}
+    categories: list[str] = []
+    if "imaging_annotation" in domains or roles & {
+        "segmentation",
+        "annotation",
+        "annotation_snapshot",
+        "aim_segmentation_annotation",
+    }:
+        categories.append("Annotations/Segmentations")
+    mapping = (
+        ("radiology", "Radiology"),
+        ("pathology", "Pathology"),
+        ("clinical", "Clinical Data"),
+        ("other_imaging", "Other Imaging"),
+        ("endoscopy", "Other Imaging"),
+    )
+    categories.extend(label for token, label in mapping if token in domains)
+    return ";".join(dict.fromkeys(categories))
+
+
+def derived_data_types(
+    data_domain: object,
+    media_kind: object,
+    modality: object,
+    object_role: object,
+) -> str:
+    values: list[str] = split_tokens(modality)
+    roles = {token.casefold() for token in split_tokens(object_role)}
+    if "segmentation" in roles:
+        values.append("Segmentation")
+    if roles & {"annotation", "annotation_snapshot", "aim_segmentation_annotation"}:
+        values.append("Annotation")
+    media_labels = {
+        "whole_slide_image": "Whole Slide Image",
+        "still_image": "Still Image",
+        "video": "Video",
+        "spectral_or_array": "Spectral/Array Data",
+        "tabular": "Tabular Data",
+    }
+    for token in split_tokens(media_kind):
+        label = media_labels.get(token.casefold())
+        if label:
+            values.append(label)
+    if "clinical" in {token.casefold() for token in split_tokens(data_domain)}:
+        values.append("Clinical Data")
+    return ";".join(dict.fromkeys(value for value in values if value))
+
+
+def default_geometry_status(file_format: object, data_domain: object) -> str:
+    if "clinical" in {token.casefold() for token in split_tokens(data_domain)}:
+        return "not_applicable"
+    formats = {token.upper() for token in split_tokens(file_format)}
+    return "not_checked" if formats & GEOMETRY_CAPABLE_FORMATS else "not_applicable"
+
+
 def add_asset(conn: sqlite3.Connection, values: dict[str, Any]) -> None:
+    values = dict(values)
+    values.setdefault(
+        "data_category",
+        derived_data_categories(values.get("data_domain"), values.get("object_role")),
+    )
+    values.setdefault(
+        "data_type",
+        derived_data_types(
+            values.get("data_domain"),
+            values.get("media_kind"),
+            values.get("modality"),
+            values.get("object_role"),
+        ),
+    )
+    values.setdefault(
+        "geometry_status",
+        default_geometry_status(values.get("file_format"), values.get("data_domain")),
+    )
+    values.setdefault("geometry_checked_count", 0)
+    values.setdefault("geometry_regular_count", 0)
+    values.setdefault("geometry_not_regular_count", 0)
+    values.setdefault(
+        "geometry_not_checked_count",
+        (
+            int(values.get("file_count") or values.get("series_count") or 1)
+            if values["geometry_status"] == "not_checked"
+            else 0
+        ),
+    )
+    values.setdefault("geometry_source", "not_assessed")
     names = [row[1] for row in conn.execute("PRAGMA table_info(participant_assets)")]
     conn.execute(
         f"INSERT OR IGNORE INTO participant_assets ({', '.join(names)}) VALUES ({', '.join('?' for _ in names)})",
@@ -470,7 +599,68 @@ def ingest_public_non_dicom(
             ).fetchone()
             if row:
                 public_schema_version = str(row[0])
-        for row in source.execute("SELECT * FROM agent_public_non_dicom_participant_summary"):
+        public_asset_columns = {
+            item[1] for item in source.execute("PRAGMA table_info(public_non_dicom_assets)")
+        }
+        has_geometry_assessments = table_exists(
+            source, "public_non_dicom_geometry_assessments"
+        )
+        participant_summary_sql = (
+            """
+            WITH geometry AS (
+              SELECT
+                a.dataset_type,
+                a.short_title,
+                a.source_system,
+                ap.subject_id,
+                ap.subject_id_namespace,
+                ap.link_status AS participant_link_status,
+                group_concat(DISTINCT a.geometry_status) AS geometry_statuses,
+                COUNT(g.geometry_assessment_id) FILTER (
+                    WHERE g.geometry_status LIKE 'checked_%'
+                )
+                    AS geometry_checked_count,
+                COUNT(g.geometry_assessment_id) FILTER (
+                    WHERE g.geometry_status IN ('checked_regular','checked_grid_geometry')
+                )
+                    AS geometry_regular_count,
+                COUNT(g.geometry_assessment_id) FILTER (
+                    WHERE g.geometry_status IN ('checked_not_regular','checked_invalid_geometry')
+                )
+                    AS geometry_not_regular_count,
+                COUNT(DISTINCT CASE WHEN a.geometry_status='not_checked'
+                                    THEN a.asset_id END)
+                    AS geometry_not_checked_count
+              FROM public_non_dicom_asset_participants ap
+              JOIN public_non_dicom_assets a USING(asset_id)
+              LEFT JOIN public_non_dicom_geometry_assessments g USING(asset_id)
+              GROUP BY a.dataset_type, a.short_title, a.source_system,
+                       ap.subject_id, ap.subject_id_namespace, ap.link_status
+            )
+            SELECT s.*, g.geometry_statuses, g.geometry_checked_count,
+                   g.geometry_regular_count, g.geometry_not_regular_count,
+                   g.geometry_not_checked_count
+            FROM agent_public_non_dicom_participant_summary s
+            LEFT JOIN geometry g
+              ON g.dataset_type=s.dataset_type
+             AND g.short_title=s.short_title
+             AND g.source_system=s.source_system
+             AND g.subject_id=s.subject_id
+             AND g.subject_id_namespace=s.subject_id_namespace
+             AND g.participant_link_status=s.participant_link_status
+            """
+            if "geometry_status" in public_asset_columns and has_geometry_assessments
+            else """
+            SELECT s.*, 'not_checked' AS geometry_statuses,
+                   0 AS geometry_checked_count,
+                   0 AS geometry_regular_count,
+                   0 AS geometry_not_regular_count,
+                   COALESCE(s.represented_files, s.file_assets, s.asset_rows, 0)
+                     AS geometry_not_checked_count
+            FROM agent_public_non_dicom_participant_summary s
+            """
+        )
+        for row in source.execute(participant_summary_sql):
             raw_id = str(row["subject_id"] or "").strip()
             if not raw_id:
                 continue
@@ -507,6 +697,12 @@ def ingest_public_non_dicom(
                 "modality": row["modalities"] or "",
                 "file_format": row["file_formats"] or "",
                 "object_role": row["object_roles"] or "",
+                "geometry_status": row["geometry_statuses"] or "not_checked",
+                "geometry_checked_count": row["geometry_checked_count"] or 0,
+                "geometry_regular_count": row["geometry_regular_count"] or 0,
+                "geometry_not_regular_count": row["geometry_not_regular_count"] or 0,
+                "geometry_not_checked_count": row["geometry_not_checked_count"] or 0,
+                "geometry_source": "public_non_dicom_metadata",
                 "study_count": None,
                 "series_count": None,
                 "file_count": (
@@ -1102,12 +1298,35 @@ def ingest_idc_participants(
             raise RuntimeError(
                 "IDC participant projection is missing agent_idc_dataset_participants"
             )
+        idc_columns = {
+            item[1] for item in source.execute("PRAGMA table_info(agent_idc_dataset_participants)")
+        }
+        object_roles_sql = (
+            "object_roles"
+            if "object_roles" in idc_columns
+            else "'source_image_or_annotation' AS object_roles"
+        )
+        geometry_sql = (
+            """geometry_statuses, geometry_eligible_series_count,
+                   geometry_checked_series_count,
+                   regularly_spaced_volume_series_count,
+                   non_regular_volume_series_count,
+                   geometry_not_checked_series_count"""
+            if "geometry_statuses" in idc_columns
+            else """'not_checked' AS geometry_statuses,
+                   0 AS geometry_eligible_series_count,
+                   0 AS geometry_checked_series_count,
+                   0 AS regularly_spaced_volume_series_count,
+                   0 AS non_regular_volume_series_count,
+                   series_count AS geometry_not_checked_series_count"""
+        )
         for row in source.execute(
-            """
+            f"""
             SELECT dataset_type, short_title, participant_id,
                    source_collection_ids_json,
                    source_analysis_result_ids_json,
-                   study_count, series_count, modalities, source_dois,
+                   study_count, series_count, modalities, {object_roles_sql}, source_dois,
+                   {geometry_sql},
                    idc_version
             FROM agent_idc_dataset_participants
             """
@@ -1150,10 +1369,20 @@ def ingest_idc_participants(
                     "source_artifact": "idc_participant_projection",
                     "access_level": "open",
                     "data_domain": "radiology",
-                    "media_kind": "dicom_series",
+                    "media_kind": "",
                     "modality": row["modalities"] or "",
                     "file_format": "DICOM",
-                    "object_role": "source_image_or_annotation",
+                    "object_role": row["object_roles"] or "",
+                    "geometry_status": row["geometry_statuses"] or "not_checked",
+                    "geometry_checked_count": row["geometry_checked_series_count"] or 0,
+                    "geometry_regular_count": row["regularly_spaced_volume_series_count"] or 0,
+                    "geometry_not_regular_count": row["non_regular_volume_series_count"] or 0,
+                    "geometry_not_checked_count": row["geometry_not_checked_series_count"] or 0,
+                    "geometry_source": (
+                        "idc-index-data:volume_geometry_index"
+                        if "geometry_statuses" in idc_columns
+                        else "not_assessed"
+                    ),
                     "study_count": row["study_count"],
                     "series_count": row["series_count"],
                     "file_count": None,

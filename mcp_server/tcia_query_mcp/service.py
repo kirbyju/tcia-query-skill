@@ -133,6 +133,17 @@ def parse_comma_values(value: Any) -> list[str]:
     return [item.strip() for item in str(value).split(",") if item.strip()]
 
 
+def parse_multi_values(value: Any) -> list[str]:
+    """Normalize comma-aggregated rows whose source fields may use semicolons."""
+    if value in (None, ""):
+        return []
+    return list(
+        dict.fromkeys(
+            item.strip() for item in re.split(r"[,;]", str(value)) if item.strip()
+        )
+    )
+
+
 def normalize_row(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
     output: dict[str, Any] = dict(row)
     for key in (
@@ -611,14 +622,17 @@ def normalize_v2_row(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
         elif key in {
             "source_namespaces",
             "data_domains",
+            "data_categories",
+            "data_types",
             "modalities",
             "file_formats",
+            "geometry_statuses",
             "managed_systems",
             "media_kinds",
             "imaging_domains",
             "object_roles",
         }:
-            output[key] = parse_comma_values(value)
+            output[key] = parse_multi_values(value)
     return output
 
 
@@ -2132,6 +2146,12 @@ class TciaQueryService:
         short_titles = [item.lower() for item in as_list(filters.get("short_titles"))]
         dataset_type = str(filters.get("dataset_type") or "both").strip().lower()
         modalities = [item.lower() for item in as_list(filters.get("modalities"))]
+        data_categories = [item.lower() for item in as_list(filters.get("data_categories"))]
+        data_types = [item.lower() for item in as_list(filters.get("data_types"))]
+        file_formats = [item.lower() for item in as_list(filters.get("file_formats"))]
+        geometry_statuses = [
+            item.lower() for item in as_list(filters.get("geometry_statuses"))
+        ]
         access_levels = [item.lower() for item in as_list(filters.get("access_levels"))]
         with self._connect_participants() as conn:
             if all(
@@ -2144,6 +2164,10 @@ class TciaQueryService:
                     short_titles=short_titles,
                     dataset_type=dataset_type,
                     modalities=modalities,
+                    data_categories=data_categories,
+                    data_types=data_types,
+                    file_formats=file_formats,
+                    geometry_statuses=geometry_statuses,
                     access_levels=access_levels,
                     limit=limit,
                 )
@@ -2186,6 +2210,22 @@ class TciaQueryService:
                     "',' || replace(replace(?, ';', ','), ' ', '') || ',') > 0"
                 )
                 params.append(modality)
+            search_columns = self._columns(conn, "agent_participant_search")
+            for column, values in (
+                ("data_categories", data_categories),
+                ("data_types", data_types),
+                ("file_formats", file_formats),
+                ("geometry_statuses", geometry_statuses),
+            ):
+                if values and column not in search_columns:
+                    sql += " AND 0 = 1"
+                for value in values if column in search_columns else []:
+                    sql += (
+                        f" AND instr(',' || lower(replace(replace(COALESCE({column}, ''), "
+                        "';', ','), ' ', '')) || ',', "
+                        "',' || replace(replace(?, ';', ','), ' ', '') || ',') > 0"
+                    )
+                    params.append(value)
             sql += " ORDER BY lower(short_title), lower(display_participant_id) LIMIT ?"
             params.append(limit)
             rows = [normalize_v2_row(row) for row in conn.execute(sql, params).fetchall()]
@@ -2205,6 +2245,10 @@ class TciaQueryService:
         short_titles: list[str],
         dataset_type: str,
         modalities: list[str],
+        data_categories: list[str],
+        data_types: list[str],
+        file_formats: list[str],
+        geometry_statuses: list[str],
         access_levels: list[str],
         limit: int,
     ) -> list[str]:
@@ -2221,25 +2265,41 @@ class TciaQueryService:
             if dataset_type in {"collection", "analysis result"}:
                 sql += " AND p.dataset_type = ? COLLATE NOCASE"
                 params.append(dataset_type)
-            if "open" in access_levels and "controlled" not in access_levels:
-                sql += (
-                    " AND EXISTS (SELECT 1 FROM participant_assets a "
-                    "WHERE a.participant_key = p.participant_key AND a.access_level = 'open')"
-                )
-            elif "controlled" in access_levels and "open" not in access_levels:
-                sql += (
-                    " AND EXISTS (SELECT 1 FROM participant_assets a "
-                    "WHERE a.participant_key = p.participant_key AND a.access_level = 'controlled')"
-                )
-            for modality in modalities:
-                sql += (
-                    " AND EXISTS (SELECT 1 FROM participant_assets a "
-                    "WHERE a.participant_key = p.participant_key "
-                    "AND instr(',' || lower(replace(replace(COALESCE(a.modality, ''), "
-                    "';', ','), ' ', '')) || ',', "
-                    "',' || replace(replace(?, ';', ','), ' ', '') || ',') > 0)"
-                )
-                params.append(modality)
+            asset_columns = self._columns(conn, "participant_assets")
+            facet_filters = (
+                ("modality", modalities),
+                ("data_category", data_categories),
+                ("data_type", data_types),
+                ("file_format", file_formats),
+                ("geometry_status", geometry_statuses),
+            )
+            restrict_access = (
+                "open"
+                if "open" in access_levels and "controlled" not in access_levels
+                else "controlled"
+                if "controlled" in access_levels and "open" not in access_levels
+                else ""
+            )
+            if restrict_access or any(values for _column, values in facet_filters):
+                asset_sql = [
+                    "EXISTS (SELECT 1 FROM participant_assets a ",
+                    "WHERE a.participant_key = p.participant_key",
+                ]
+                if restrict_access:
+                    asset_sql.append(" AND lower(a.access_level) = ?")
+                    params.append(restrict_access)
+                for column, values in facet_filters:
+                    if values and column not in asset_columns:
+                        asset_sql.append(" AND 0 = 1")
+                    for value in values if column in asset_columns else []:
+                        asset_sql.append(
+                            f" AND instr(',' || lower(replace(replace(COALESCE(a.{column}, ''), "
+                            "';', ','), ' ', '')) || ',', "
+                            "',' || replace(replace(?, ';', ','), ' ', '') || ',') > 0"
+                        )
+                        params.append(value)
+                asset_sql.append(")")
+                sql += " AND " + "".join(asset_sql)
             sql += (
                 " ORDER BY p.short_title COLLATE NOCASE, "
                 "p.display_participant_id COLLATE NOCASE LIMIT ?"
@@ -2293,6 +2353,35 @@ class TciaQueryService:
             f"(?, {ordinal})" for ordinal, _key in enumerate(participant_keys)
         )
         params: list[Any] = list(participant_keys)
+        asset_columns = self._columns(conn, "participant_assets")
+        data_categories_sql = (
+            "group_concat(DISTINCT NULLIF(a.data_category, '')) AS data_categories"
+            if "data_category" in asset_columns
+            else "NULL AS data_categories"
+        )
+        data_types_sql = (
+            "group_concat(DISTINCT NULLIF(a.data_type, '')) AS data_types"
+            if "data_type" in asset_columns
+            else "NULL AS data_types"
+        )
+        geometry_statuses_sql = (
+            "group_concat(DISTINCT NULLIF(a.geometry_status, '')) AS geometry_statuses"
+            if "geometry_status" in asset_columns
+            else "NULL AS geometry_statuses"
+        )
+        geometry_count_sql = {
+            name: (
+                f"SUM(COALESCE(a.{name}, 0)) AS {name}"
+                if name in asset_columns
+                else f"0 AS {name}"
+            )
+            for name in (
+                "geometry_checked_count",
+                "geometry_regular_count",
+                "geometry_not_regular_count",
+                "geometry_not_checked_count",
+            )
+        }
         sql = f"""
             WITH requested(participant_key, ordinal) AS (VALUES {values}),
             identifier_summary AS (
@@ -2318,8 +2407,15 @@ class TciaQueryService:
                                 THEN 1 ELSE 0 END) AS has_public_non_dicom,
                        MAX(CASE WHEN a.data_domain = 'clinical' THEN 1 ELSE 0 END) AS has_clinical,
                        group_concat(DISTINCT NULLIF(a.data_domain, '')) AS data_domains,
+                       {data_categories_sql},
+                       {data_types_sql},
                        group_concat(DISTINCT NULLIF(a.modality, '')) AS modalities,
                        group_concat(DISTINCT NULLIF(a.file_format, '')) AS file_formats,
+                       {geometry_statuses_sql},
+                       {geometry_count_sql['geometry_checked_count']},
+                       {geometry_count_sql['geometry_regular_count']},
+                       {geometry_count_sql['geometry_not_regular_count']},
+                       {geometry_count_sql['geometry_not_checked_count']},
                        group_concat(DISTINCT a.managed_system) AS managed_systems
                 FROM participant_assets a
                 JOIN requested r USING(participant_key)
@@ -2334,7 +2430,13 @@ class TciaQueryService:
                    COALESCE(a.has_public_dicom, 0) AS has_public_dicom,
                    COALESCE(a.has_public_non_dicom, 0) AS has_public_non_dicom,
                    COALESCE(a.has_clinical, 0) AS has_clinical,
-                   a.data_domains, a.modalities, a.file_formats, a.managed_systems
+                   a.data_domains, a.data_categories, a.data_types,
+                   a.modalities, a.file_formats, a.geometry_statuses,
+                   COALESCE(a.geometry_checked_count, 0) AS geometry_checked_count,
+                   COALESCE(a.geometry_regular_count, 0) AS geometry_regular_count,
+                   COALESCE(a.geometry_not_regular_count, 0) AS geometry_not_regular_count,
+                   COALESCE(a.geometry_not_checked_count, 0) AS geometry_not_checked_count,
+                   a.managed_systems
             FROM requested r
             JOIN participants p USING(participant_key)
             LEFT JOIN identifier_summary i USING(participant_key)
@@ -2410,16 +2512,37 @@ class TciaQueryService:
         limit = coerce_limit(filters.get("limit"), default=100, maximum=500)
         access_levels = [item.lower() for item in as_list(filters.get("access_levels"))]
         data_domains = [item.lower() for item in as_list(filters.get("data_domains"))]
+        data_categories = [item.lower() for item in as_list(filters.get("data_categories"))]
+        data_types = [item.lower() for item in as_list(filters.get("data_types"))]
+        file_formats = [item.lower() for item in as_list(filters.get("file_formats"))]
+        geometry_statuses = [
+            item.lower() for item in as_list(filters.get("geometry_statuses"))
+        ]
         with self._connect_participants() as conn:
             sql = "SELECT * FROM agent_participant_assets WHERE participant_key = ?"
             params: list[Any] = [key]
+            asset_columns = self._columns(conn, "agent_participant_assets")
             if access_levels:
                 sql += f" AND lower(access_level) IN ({','.join('?' for _ in access_levels)})"
                 params.extend(access_levels)
-            if data_domains:
-                sql += f" AND lower(data_domain) IN ({','.join('?' for _ in data_domains)})"
-                params.extend(data_domains)
-            sql += " ORDER BY data_domain, managed_system, participant_asset_id LIMIT ?"
+            for column, values in (
+                ("data_domain", data_domains),
+                ("data_category", data_categories),
+                ("data_type", data_types),
+                ("file_format", file_formats),
+                ("geometry_status", geometry_statuses),
+            ):
+                if values and column not in asset_columns:
+                    sql += " AND 0 = 1"
+                for value in values if column in asset_columns else []:
+                    sql += (
+                        f" AND instr(',' || lower(replace(replace(COALESCE({column}, ''), "
+                        "';', ','), ' ', '')) || ',', "
+                        "',' || replace(replace(?, ';', ','), ' ', '') || ',') > 0"
+                    )
+                    params.append(value)
+            order_column = "data_category" if "data_category" in asset_columns else "data_domain"
+            sql += f" ORDER BY {order_column}, managed_system, participant_asset_id LIMIT ?"
             params.append(limit)
             rows = [normalize_v2_row(row) for row in conn.execute(sql, params).fetchall()]
         return {
@@ -2510,10 +2633,15 @@ class TciaQueryService:
         file_formats = [item.lower() for item in as_list(filters.get("file_formats"))]
         media_kinds = [item.lower() for item in as_list(filters.get("media_kinds"))]
         object_roles = [item.lower() for item in as_list(filters.get("object_roles"))]
+        modalities = [item.lower() for item in as_list(filters.get("modalities"))]
+        geometry_statuses = [
+            item.lower() for item in as_list(filters.get("geometry_statuses"))
+        ]
         requires_annotations = is_truthy(filters.get("requires_annotations"))
         with self._connect_public_non_dicom() as conn:
             sql = "SELECT * FROM agent_public_non_dicom_assets a WHERE 1 = 1"
             params: list[Any] = []
+            asset_columns = self._columns(conn, "agent_public_non_dicom_assets")
             if short_titles:
                 sql += f" AND lower(a.short_title) IN ({','.join('?' for _ in short_titles)})"
                 params.extend(short_titles)
@@ -2525,10 +2653,14 @@ class TciaQueryService:
                 params.append(participant_id)
             for column, values in (
                 ("file_format", file_formats),
+                ("modality", modalities),
                 ("media_kind", media_kinds),
                 ("object_role", object_roles),
+                ("geometry_status", geometry_statuses),
             ):
-                if values:
+                if values and column not in asset_columns:
+                    sql += " AND 0 = 1"
+                elif values:
                     sql += f" AND lower(COALESCE(a.{column}, '')) IN ({','.join('?' for _ in values)})"
                     params.extend(values)
             if requires_annotations:

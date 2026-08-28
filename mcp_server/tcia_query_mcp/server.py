@@ -230,15 +230,23 @@ def search_participants(
     short_titles: list[str] | None = None,
     dataset_type: str = "both",
     access_levels: list[str] | None = None,
+    data_categories: list[str] | None = None,
+    data_types: list[str] | None = None,
+    file_formats: list[str] | None = None,
+    geometry_statuses: list[str] | None = None,
     modalities: list[str] | None = None,
     limit: int = 25,
 ) -> dict:
-    """Search canonical dataset-scoped participants from the V2 research core."""
+    """Search participants by access, Data Category, Data Type, File Format, or geometry."""
     return service().search_participants(
         query=query,
         short_titles=short_titles,
         dataset_type=dataset_type,
         access_levels=access_levels,
+        data_categories=data_categories,
+        data_types=data_types,
+        file_formats=file_formats,
+        geometry_statuses=geometry_statuses,
         modalities=modalities,
         limit=limit,
     )
@@ -266,13 +274,21 @@ def get_participant(
 def get_participant_assets(
     participant_key: str,
     access_levels: list[str] | None = None,
+    data_categories: list[str] | None = None,
+    data_types: list[str] | None = None,
+    file_formats: list[str] | None = None,
+    geometry_statuses: list[str] | None = None,
     data_domains: list[str] | None = None,
     limit: int = 100,
 ) -> dict:
-    """Return compact participant holdings; use detail artifacts or IDC for drill-down."""
+    """Return participant holdings with public facets and geometry assessment summaries."""
     return service().get_participant_assets(
         participant_key,
         access_levels=access_levels,
+        data_categories=data_categories,
+        data_types=data_types,
+        file_formats=file_formats,
+        geometry_statuses=geometry_statuses,
         data_domains=data_domains,
         limit=limit,
     )
@@ -306,16 +322,20 @@ def find_public_non_dicom_assets(
     short_titles: list[str] | None = None,
     participant_id: str | None = None,
     file_formats: list[str] | None = None,
+    modalities: list[str] | None = None,
+    geometry_statuses: list[str] | None = None,
     media_kinds: list[str] | None = None,
     object_roles: list[str] | None = None,
     requires_annotations: bool = False,
     limit: int = 50,
 ) -> dict:
-    """Query V2 public non-DICOM files, including annotation-like object roles."""
+    """Query V2 public non-DICOM files by format, modality, geometry, or technical role."""
     return service().find_public_non_dicom_assets(
         short_titles=short_titles,
         participant_id=participant_id,
         file_formats=file_formats,
+        modalities=modalities,
+        geometry_statuses=geometry_statuses,
         media_kinds=media_kinds,
         object_roles=object_roles,
         requires_annotations=requires_annotations,

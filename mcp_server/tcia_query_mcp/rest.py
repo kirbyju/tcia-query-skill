@@ -42,6 +42,10 @@ class SearchParticipantsRequest(BaseModel):
     short_titles: list[str] | None = None
     dataset_type: str = "both"
     access_levels: list[str] | None = None
+    data_categories: list[str] | None = None
+    data_types: list[str] | None = None
+    file_formats: list[str] | None = None
+    geometry_statuses: list[str] | None = None
     modalities: list[str] | None = None
     limit: int = Field(default=25, ge=1, le=500)
 
@@ -132,12 +136,20 @@ def create_app(service: TciaQueryService | None = None) -> FastAPI:
     def v2_get_participant_assets(
         participant_key: str,
         access_levels: Annotated[list[str] | None, Query()] = None,
+        data_categories: Annotated[list[str] | None, Query()] = None,
+        data_types: Annotated[list[str] | None, Query()] = None,
+        file_formats: Annotated[list[str] | None, Query()] = None,
+        geometry_statuses: Annotated[list[str] | None, Query()] = None,
         data_domains: Annotated[list[str] | None, Query()] = None,
         limit: int = Query(default=100, ge=1, le=500),
     ) -> dict[str, Any]:
         return S().get_participant_assets(
             participant_key,
             access_levels=access_levels,
+            data_categories=data_categories,
+            data_types=data_types,
+            file_formats=file_formats,
+            geometry_statuses=geometry_statuses,
             data_domains=data_domains,
             limit=limit,
         )
@@ -167,6 +179,8 @@ def create_app(service: TciaQueryService | None = None) -> FastAPI:
         short_titles: Annotated[list[str] | None, Query()] = None,
         participant_id: str | None = None,
         file_formats: Annotated[list[str] | None, Query()] = None,
+        modalities: Annotated[list[str] | None, Query()] = None,
+        geometry_statuses: Annotated[list[str] | None, Query()] = None,
         media_kinds: Annotated[list[str] | None, Query()] = None,
         object_roles: Annotated[list[str] | None, Query()] = None,
         requires_annotations: bool = False,
@@ -176,6 +190,8 @@ def create_app(service: TciaQueryService | None = None) -> FastAPI:
             short_titles=short_titles,
             participant_id=participant_id,
             file_formats=file_formats,
+            modalities=modalities,
+            geometry_statuses=geometry_statuses,
             media_kinds=media_kinds,
             object_roles=object_roles,
             requires_annotations=requires_annotations,

@@ -450,12 +450,30 @@ class V2AuditSplitTests(unittest.TestCase):
             )
             self.assertEqual(manifest["schema_version"], 3)
             materialized = root / "materialized.sqlite"
-            materialization = audit.materialize_assembly_from_companions(
-                research,
-                audit_database,
-                materialized,
-                replace=True,
+            json_fields = audit.CONFIGS["public_non_dicom"]["json_fields"]
+            asset_identifier, asset_fields = json_fields["public_non_dicom_assets"]
+            original_asset_fields = dict(asset_fields)
+            json_fields["public_non_dicom_assets"] = (
+                asset_identifier,
+                {**asset_fields, "future_geometry_json": "{}"},
             )
+            json_fields["future_geometry_assessments"] = (
+                "geometry_assessment_id",
+                {"details_json": "{}"},
+            )
+            try:
+                materialization = audit.materialize_assembly_from_companions(
+                    research,
+                    audit_database,
+                    materialized,
+                    replace=True,
+                )
+            finally:
+                json_fields["public_non_dicom_assets"] = (
+                    asset_identifier,
+                    original_asset_fields,
+                )
+                del json_fields["future_geometry_assessments"]
             self.assertEqual(materialization["integrity_check"], "ok")
             self.assertEqual(
                 materialization["reconstructed_field_provenance"], 2
