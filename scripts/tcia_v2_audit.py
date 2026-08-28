@@ -796,6 +796,12 @@ def materialize_assembly_from_companions(
             "SELECT entity_table, entity_id, field_name, payload_json "
             "FROM audit.agent_entity_payloads"
         )
+        main_tables = {
+            str(row[0])
+            for row in conn.execute(
+                "SELECT name FROM main.sqlite_master WHERE type='table'"
+            )
+        }
         for table in config["audit_tables"]:
             if table not in audit_objects:
                 raise RuntimeError(f"Audit companion is missing {table}")
@@ -810,8 +816,22 @@ def materialize_assembly_from_companions(
                 ).fetchone()[0]
             )
         for table, (identifier, fields) in config["json_fields"].items():
+            # The published research companion may use the previous additive
+            # schema. New tables and JSON columns are created by the subsequent
+            # artifact build, so they cannot be restored during baseline
+            # materialization until they exist.
+            if table not in main_tables:
+                continue
+            table_columns = {
+                str(row[1])
+                for row in conn.execute(
+                    f"PRAGMA main.table_info({quote_identifier(table)})"
+                )
+            }
+            if identifier not in table_columns:
+                continue
             for field in fields:
-                if field == "field_provenance_json":
+                if field == "field_provenance_json" or field not in table_columns:
                     continue
                 before = conn.total_changes
                 conn.execute(

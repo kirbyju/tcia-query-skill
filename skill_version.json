@@ -82,7 +82,7 @@
     "scripts/tcia_publications.py": "fcd1aa1e5abd48d0f556165bbee85af7d30030ba4ece1af573c8a441b720659a",
     "scripts/tcia_skill_version.py": "022626ade6a21b225cc0974c7e0593afb4bc158bc6850c41966205a5a41f796b",
     "scripts/tcia_snapshot.py": "addba5e3a3c4d05b54ef14a7c1b252da25752cc76cfaef6534dee784bb2329f8",
-    "scripts/tcia_v2_audit.py": "ab5c3d2fce0ba70a3765c9930b7bcdbda8d21b78ddcd1f74c3de48120add82d6",
+    "scripts/tcia_v2_audit.py": "20be1db5ce2b0208cbe94cb63ef56d6d146c8bec0df03923d903ba68db43d3d8",
     "scripts/tcia_v2_bundle.py": "629f7be065103218388421acdd1a4c8f78864822454ee2dd934b3901415059b7",
     "scripts/tcia_v2_checkpoint.py": "a25c2e0b7c88aa44d227fe11523bf16a822f8ac52259703fd4483b1efa375bda",
     "scripts/tcia_v2_parity.py": "0a651d86c0bce64ee82c0bb8da3e4fe848bf7738f6a305c4f65da37cbe9f7e69",
@@ -98,13 +98,13 @@
     "scripts/tests/test_tcia_pathology_aspera_inventory.py": "80fb2fd90b2fbeaff8ecc40b089e86fd64a4842e3e657850c9e0a12873e9d3a7",
     "scripts/tests/test_tcia_skill_version.py": "a1106ca1f6736252d4c81a040cb98a5b9cff706437708df96bb6418189b18dbe",
     "scripts/tests/test_tcia_snapshot.py": "35dbe7b25518c09a6160cda5981cc5fd0a5e13e66c544dc19364f04bef059641",
-    "scripts/tests/test_tcia_v2_audit.py": "53be9e9caaccd25064d354b5bdfc033b64d9211ebc0b208dfe03e4155823017e",
+    "scripts/tests/test_tcia_v2_audit.py": "fc2360971fecbc6c54377750735e6b72933c496c9e8611f5e68ce54d73fd6aa1",
     "scripts/tests/test_tcia_v2_bundle.py": "e8f43dbff81d93f567efebef59e85d18bf10d10cffdab499bfd9883fdc033ce4",
     "scripts/tests/test_tcia_v2_checkpoint.py": "4553d2bb4688966bdc8af5cc05aac654a4687a79d8e1f2c1a9e5c64748fc7d28",
     "scripts/tests/test_tcia_v2_parity.py": "27f51ddd8bbc200eb85327cd716db37f2f7d12393bb25445ba4f5d6b6f8301ae",
     "scripts/tests/test_tcia_v2_staging.py": "bcae860516dbd762f9f70f22d7be02ca695193f3cbfebd7c0a0bcf6f47841ac0"
   },
   "schema_version": 1,
-  "skill_version": "2026.08.28.1",
-  "updated_at_utc": "2026-08-28T12:53:56.812071+00:00"
+  "skill_version": "2026.08.28.2",
+  "updated_at_utc": "2026-08-28T14:53:33.175913+00:00"
 }
