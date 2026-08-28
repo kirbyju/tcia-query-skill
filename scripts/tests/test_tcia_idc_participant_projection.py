@@ -77,11 +77,24 @@ class IDCParticipantProjectionTests(unittest.TestCase):
                     },
                 ]
             )
+            geometry = pd.DataFrame(
+                [
+                    {
+                        "SeriesInstanceUID": "series-1",
+                        "regularly_spaced_3d_volume": False,
+                    },
+                    {
+                        "SeriesInstanceUID": "series-2",
+                        "regularly_spaced_3d_volume": True,
+                    },
+                ]
+            )
             result = projection.build_database(
                 output,
                 snapshot_db=snapshot,
                 replace=True,
                 index_frame=frame,
+                geometry_frame=geometry,
                 source_version="v-test",
             )
             self.assertEqual(
@@ -109,6 +122,18 @@ class IDCParticipantProjectionTests(unittest.TestCase):
                         "CT;SEG",
                         '["tumor_annotations"]',
                     ),
+                )
+                self.assertEqual(
+                    conn.execute(
+                        "SELECT geometry_statuses, geometry_eligible_series_count, "
+                        "geometry_checked_series_count, "
+                        "regularly_spaced_volume_series_count, "
+                        "non_regular_volume_series_count, "
+                        "geometry_not_checked_series_count "
+                        "FROM idc_dataset_participants "
+                        "WHERE dataset_type='Analysis Result'"
+                    ).fetchone(),
+                    ("checked_not_regular;checked_regular", 2, 2, 1, 1, 0),
                 )
                 self.assertEqual(
                     conn.execute(

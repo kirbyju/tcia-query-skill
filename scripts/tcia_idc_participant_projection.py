@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 DEFAULT_SNAPSHOT_DB = Path(__file__).resolve().parents[1] / "cache" / "tcia_snapshot.sqlite"
 DEFAULT_DB = Path(__file__).resolve().parents[1] / "cache" / "idc_participant_projection.sqlite"
 DEFAULT_MANIFEST = (
@@ -38,7 +38,14 @@ CREATE TABLE idc_dataset_participants (
     study_count INTEGER NOT NULL DEFAULT 0,
     series_count INTEGER NOT NULL DEFAULT 0,
     modalities TEXT NOT NULL DEFAULT '',
+    object_roles TEXT NOT NULL DEFAULT '',
     source_dois TEXT NOT NULL DEFAULT '',
+    geometry_statuses TEXT NOT NULL DEFAULT '',
+    geometry_eligible_series_count INTEGER NOT NULL DEFAULT 0,
+    geometry_checked_series_count INTEGER NOT NULL DEFAULT 0,
+    regularly_spaced_volume_series_count INTEGER NOT NULL DEFAULT 0,
+    non_regular_volume_series_count INTEGER NOT NULL DEFAULT 0,
+    geometry_not_checked_series_count INTEGER NOT NULL DEFAULT 0,
     idc_version TEXT NOT NULL,
     PRIMARY KEY (dataset_type, short_title, participant_id)
 ) WITHOUT ROWID;
@@ -125,7 +132,25 @@ def unique_text_list(values: Any) -> str:
     return ";".join(sorted({clean_text(value) for value in values if clean_text(value)}))
 
 
-def project_frame(index_frame: Any, snapshot_db: Path, version: str) -> tuple[list[tuple[Any, ...]], list[tuple[Any, ...]]]:
+def idc_object_role(modality: Any) -> str:
+    value = clean_text(modality).upper()
+    if value == "SEG":
+        return "segmentation"
+    if value in {"ANN", "RTSTRUCT", "PR", "KO"}:
+        return "annotation"
+    if value == "SR":
+        return "measurement_report"
+    if value in {"RTDOSE", "RTPLAN", "REG", "RWV"}:
+        return "derived_object"
+    return "source_image"
+
+
+def project_frame(
+    index_frame: Any,
+    snapshot_db: Path,
+    version: str,
+    geometry_frame: Any | None = None,
+) -> tuple[list[tuple[Any, ...]], list[tuple[Any, ...]]]:
     required = {
         "collection_id",
         "analysis_result_id",
@@ -139,6 +164,32 @@ def project_frame(index_frame: Any, snapshot_db: Path, version: str) -> tuple[li
     if missing:
         raise RuntimeError("IDC index is missing required columns: " + ", ".join(missing))
     dataset_maps = visible_dataset_maps(snapshot_db)
+    geometry_by_series: dict[str, str] = {}
+    if geometry_frame is not None:
+        geometry_required = {"SeriesInstanceUID", "regularly_spaced_3d_volume"}
+        geometry_missing = sorted(geometry_required - set(geometry_frame.columns))
+        if geometry_missing:
+            raise RuntimeError(
+                "IDC volume geometry index is missing required columns: "
+                + ", ".join(geometry_missing)
+            )
+        for _, row in geometry_frame.loc[
+            :, ["SeriesInstanceUID", "regularly_spaced_3d_volume"]
+        ].iterrows():
+            series_uid = clean_text(row["SeriesInstanceUID"])
+            if not series_uid:
+                continue
+            regular = row["regularly_spaced_3d_volume"]
+            if regular is None or clean_text(regular).casefold() in {"", "nan", "<na>"}:
+                status = "checked_indeterminate"
+            else:
+                status = "checked_regular" if bool(regular) else "checked_not_regular"
+            previous = geometry_by_series.get(series_uid)
+            if previous and previous != status:
+                raise RuntimeError(
+                    f"Conflicting IDC geometry rows for SeriesInstanceUID {series_uid}"
+                )
+            geometry_by_series[series_uid] = status
     contexts: list[Any] = []
     unmatched_rows: list[tuple[Any, ...]] = []
     for dataset_type, source_column in (
@@ -157,6 +208,12 @@ def project_frame(index_frame: Any, snapshot_db: Path, version: str) -> tuple[li
         frame = index_frame.loc[:, columns].copy()
         frame["source_dataset_id"] = frame[source_column].map(clean_text)
         frame["participant_id"] = frame["PatientID"].map(clean_text)
+        frame["object_role"] = frame["Modality"].map(idc_object_role)
+        frame["geometry_status"] = frame["SeriesInstanceUID"].map(
+            lambda value: geometry_by_series.get(clean_text(value), "not_in_geometry_index_scope")
+            if geometry_frame is not None
+            else "not_checked"
+        )
         frame = frame[
             (frame["source_dataset_id"] != "") & (frame["participant_id"] != "")
         ].copy()
@@ -195,7 +252,29 @@ def project_frame(index_frame: Any, snapshot_db: Path, version: str) -> tuple[li
         study_count=("StudyInstanceUID", "nunique"),
         series_count=("SeriesInstanceUID", "nunique"),
         modalities=("Modality", unique_text_list),
+        object_roles=("object_role", unique_text_list),
         source_dois=("source_DOI", unique_text_list),
+        geometry_statuses=("geometry_status", unique_text_list),
+        geometry_eligible_series_count=(
+            "geometry_status",
+            lambda values: int(sum(str(value).startswith("checked_") for value in values)),
+        ),
+        geometry_checked_series_count=(
+            "geometry_status",
+            lambda values: int(
+                sum(value in {"checked_regular", "checked_not_regular"} for value in values)
+            ),
+        ),
+        regularly_spaced_volume_series_count=(
+            "geometry_status", lambda values: int(sum(value == "checked_regular" for value in values))
+        ),
+        non_regular_volume_series_count=(
+            "geometry_status", lambda values: int(sum(value == "checked_not_regular" for value in values))
+        ),
+        geometry_not_checked_series_count=(
+            "geometry_status",
+            lambda values: int(sum(value == "not_checked" for value in values)),
+        ),
     )
     rows = [
         (
@@ -207,7 +286,14 @@ def project_frame(index_frame: Any, snapshot_db: Path, version: str) -> tuple[li
             int(row.study_count),
             int(row.series_count),
             str(row.modalities),
+            str(row.object_roles),
             str(row.source_dois),
+            str(row.geometry_statuses),
+            int(row.geometry_eligible_series_count),
+            int(row.geometry_checked_series_count),
+            int(row.regularly_spaced_volume_series_count),
+            int(row.non_regular_volume_series_count),
+            int(row.geometry_not_checked_series_count),
             version,
         )
         for (dataset_type, short_title, participant_id), row in grouped.iterrows()
@@ -221,6 +307,7 @@ def build_database(
     snapshot_db: Path,
     replace: bool = False,
     index_frame: Any | None = None,
+    geometry_frame: Any | None = None,
     source_version: str = "",
 ) -> dict[str, Any]:
     if out.exists():
@@ -236,14 +323,21 @@ def build_database(
             ) from exc
         client = index.IDCClient()
         index_frame = client.index
+        client.fetch_index("volume_geometry_index")
+        geometry_frame = getattr(client, "volume_geometry_index", None)
+        if geometry_frame is None:
+            raise RuntimeError("idc-index did not load volume_geometry_index")
         source_version = idc_version(client)
     source_version = source_version or "unknown"
-    rows, unmatched = project_frame(index_frame, snapshot_db, source_version)
+    rows, unmatched = project_frame(
+        index_frame, snapshot_db, source_version, geometry_frame=geometry_frame
+    )
     out.parent.mkdir(parents=True, exist_ok=True)
     with closing(sqlite3.connect(out)) as conn:
         conn.executescript(SCHEMA)
         conn.executemany(
-            "INSERT INTO idc_dataset_participants VALUES (?,?,?,?,?,?,?,?,?,?)", rows
+            "INSERT INTO idc_dataset_participants VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            rows,
         )
         conn.executemany("INSERT INTO idc_unmatched_datasets VALUES (?,?,?,?,?)", unmatched)
         collection_participants = int(
@@ -263,6 +357,11 @@ def build_database(
             "idc_version": source_version,
             "authority": "IDC public DICOM index",
             "scope": "visible TCIA WordPress Collections and Analysis Results",
+            "geometry_source": (
+                "idc-index-data volume_geometry_index"
+                if geometry_frame is not None
+                else "not_checked"
+            ),
         }
         conn.executemany("INSERT INTO idc_participant_projection_meta VALUES (?,?)", metadata.items())
         conn.commit()
@@ -310,7 +409,10 @@ def validate_database(
             conn.execute(
                 "SELECT COUNT(*) FROM idc_dataset_participants "
                 "WHERE dataset_type NOT IN ('Collection','Analysis Result') "
-                "OR short_title='' OR participant_id='' OR study_count < 0 OR series_count < 0"
+                "OR short_title='' OR participant_id='' OR study_count < 0 OR series_count < 0 "
+                "OR geometry_checked_series_count > geometry_eligible_series_count "
+                "OR regularly_spaced_volume_series_count + non_regular_volume_series_count "
+                "   > geometry_checked_series_count"
             ).fetchone()[0]
         )
         if invalid:

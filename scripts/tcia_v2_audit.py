@@ -135,9 +135,21 @@ CONFIGS: dict[str, dict[str, Any]] = {
                     "raw_values_json": "{}",
                     "provenance_json": "{}",
                     "quality_flag_json": "{}",
+                    "geometry_details_json": "{}",
                 },
             ),
             "public_non_dicom_locations": ("location_id", {"provenance_json": "{}"}),
+            "public_non_dicom_geometry_assessments": (
+                "geometry_assessment_id",
+                {
+                    "shape_json": "[]",
+                    "spacing_json": "[]",
+                    "origin_json": "[]",
+                    "direction_json": "[]",
+                    "checks_json": "{}",
+                    "details_json": "{}",
+                },
+            ),
             "public_non_dicom_asset_relationships": (
                 "relationship_id",
                 {"evidence_json": "{}"},
