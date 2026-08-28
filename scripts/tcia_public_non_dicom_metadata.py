@@ -76,6 +76,8 @@ DEFAULT_CPTAC_GBM_CODEX_INVENTORY = SKILL_ROOT / "references" / "cptac_gbm_codex
 DEFAULT_CPTAC_GBM_CODEX_PROVENANCE = SKILL_ROOT / "references" / "cptac_gbm_codex_inventory_v1.json"
 DEFAULT_TCGA_GBM_QI_AIM_INVENTORY = SKILL_ROOT / "references" / "tcga_gbm_qi_radiogenomics_aim_inventory_v1.csv"
 DEFAULT_TCGA_GBM_QI_AIM_PROVENANCE = SKILL_ROOT / "references" / "tcga_gbm_qi_radiogenomics_aim_inventory_v1.json"
+DEFAULT_REVIEWED_PARTICIPANT_INVENTORY = SKILL_ROOT / "references" / "reviewed_analysis_result_participants_v1.csv"
+DEFAULT_REVIEWED_PARTICIPANT_PROVENANCE = SKILL_ROOT / "references" / "reviewed_analysis_result_participants_v1.json"
 DEFAULT_DB = SKILL_ROOT / "cache" / "public_non_dicom_metadata.sqlite"
 DEFAULT_MANIFEST = SKILL_ROOT / "cache" / "public_non_dicom_metadata_manifest.json"
 DEFAULT_RELEASE_TAG = "tcia-metadata-v2-latest"
@@ -3146,6 +3148,246 @@ def ingest_tcga_lgg_mask_inventory(
     return counts
 
 
+def ingest_reviewed_analysis_result_participants(
+    conn: sqlite3.Connection,
+    snapshot_db: Path,
+    *,
+    inventory_path: Path = DEFAULT_REVIEWED_PARTICIPANT_INVENTORY,
+    provenance_path: Path = DEFAULT_REVIEWED_PARTICIPANT_PROVENANCE,
+) -> dict[str, int]:
+    """Link official Analysis Result tables/packages to their stated subjects."""
+    counts = {
+        "inventory_rows": 0,
+        "datasets": 0,
+        "downloads": 0,
+        "participants": 0,
+        "asset_participant_links": 0,
+        "crosswalk_evidence_rows": 0,
+    }
+    if not inventory_path.is_file() or not provenance_path.is_file():
+        return counts
+    provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+    expected_hash = str(provenance.get("inventory_sha256") or "")
+    actual_hash = file_sha256(inventory_path)
+    if not expected_hash or actual_hash != expected_hash:
+        raise RuntimeError(
+            "Reviewed Analysis Result participant inventory digest mismatch: "
+            f"{actual_hash} != {expected_hash or 'missing'}"
+        )
+    with inventory_path.open(newline="", encoding="utf-8-sig") as handle:
+        rows = list(csv.DictReader(handle))
+    counts["inventory_rows"] = len(rows)
+    expected_rows = int(((provenance.get("counts") or {}).get("membership_rows") or 0))
+    if expected_rows != len(rows):
+        raise RuntimeError(
+            "Reviewed Analysis Result participant row-count mismatch: "
+            f"{len(rows)} != {expected_rows}"
+        )
+
+    with closing(connect(snapshot_db)) as source:
+        active_downloads = {
+            (str(row["short_title"]), str(row["download_id"])): dict(row)
+            for row in source.execute(
+                """SELECT * FROM agent_current_downloads
+                   WHERE hidden = 0 AND controlled_access = 0"""
+            )
+        }
+    applicable = [
+        row for row in rows
+        if (str(row["short_title"]), str(row["download_id"])) in active_downloads
+    ]
+    if not applicable:
+        return counts
+
+    source_files = provenance.get("source_files") or {}
+    reviewed_at = str(provenance.get("reviewed_at") or "")
+    grouped: dict[tuple[str, str, str], list[dict[str, str]]] = defaultdict(list)
+    for row in applicable:
+        grouped[(row["dataset_type"], row["short_title"], row["download_id"])].append(row)
+
+    participants: set[tuple[str, str]] = set()
+    datasets: set[str] = set()
+    for (dataset_type, short_title, download_id), membership_rows in sorted(grouped.items()):
+        assets = conn.execute(
+            """SELECT asset_id FROM public_non_dicom_assets
+               WHERE dataset_type=? AND short_title=? AND download_id=?
+                 AND asset_granularity='download'
+               ORDER BY asset_id""",
+            (dataset_type, short_title, download_id),
+        ).fetchall()
+        if not assets:
+            download = active_downloads[(short_title, download_id)]
+            source_names = sorted({row["source_file"] for row in membership_rows})
+            if len(source_names) != 1:
+                raise RuntimeError(
+                    "Reviewed participant inventory metadata asset has multiple source files for "
+                    f"{short_title} download {download_id}: {source_names}"
+                )
+            source_name = source_names[0]
+            source_record = source_files.get(source_name) or {}
+            suffix = Path(source_name).suffix.casefold()
+            file_format = {
+                ".csv": "CSV",
+                ".xlsx": "XLSX",
+                ".json": "JSON",
+                ".txt": "TXT",
+                ".zip": "JSON",
+            }.get(suffix, "OTHER")
+            container_format = "ZIP" if suffix == ".zip" else ""
+            source_url = str(source_record.get("url") or download["download_url"] or "")
+            asset_id = stable_id(
+                "asset", "reviewed_participant_source", dataset_type, short_title,
+                download_id, source_name,
+            )
+            insert_asset(
+                conn,
+                {
+                    "asset_id": asset_id,
+                    "dataset_type": dataset_type,
+                    "short_title": short_title,
+                    "download_row_id": download["download_row_id"],
+                    "download_id": download_id,
+                    "subject_id": "",
+                    "subject_id_namespace": "",
+                    "participant_link_status": "reviewed_source_inventory",
+                    "asset_granularity": "file",
+                    "asset_name": download["download_title"] or source_name,
+                    "file_name": Path(urllib.parse.urlparse(source_url).path).name or source_name,
+                    "package_path": "",
+                    "file_format": file_format,
+                    "container_format": container_format,
+                    "media_kind": "tabular" if file_format in {"CSV", "XLSX"} else "document",
+                    "spatial_dimensionality": "not_applicable",
+                    "temporal_dimensionality": "static",
+                    "imaging_domain": "imaging_annotation",
+                    "modality": "",
+                    "object_role": "participant_metadata_table",
+                    "represented_file_count": 1,
+                    "size_bytes": int(source_record.get("size_bytes") or 0) or None,
+                    "checksum": str(source_record.get("sha256") or ""),
+                    "checksum_algorithm": "sha256",
+                    "representation_provenance_class": "metadata_only",
+                    "source_system": "tcia_wordpress",
+                    "source_record_id": f"reviewed-participant-inventory:{download_id}",
+                    "source_url": source_url,
+                    "raw_values_json": json_dumps({
+                        "published_file_types": parse_list(download["file_types"]),
+                        "published_subject_count": download["subjects"],
+                    }),
+                    "provenance_json": json_dumps({
+                        "source_artifact": "reviewed_analysis_result_participants_v1",
+                        "source_file": source_name,
+                        "source_sha256": source_record.get("sha256") or "",
+                        "reviewed_at": reviewed_at,
+                    }),
+                    "quality_flag_json": json_dumps({
+                        "participant_inventory": "reviewed_source_inventory"
+                    }),
+                },
+            )
+            insert_location(
+                conn,
+                location_values(
+                    asset_id,
+                    source_url,
+                    representation_class="metadata_only",
+                    provenance={
+                        "source_artifact": "reviewed_analysis_result_participants_v1",
+                        "download_id": download_id,
+                    },
+                ),
+            )
+            assets = conn.execute(
+                "SELECT asset_id FROM public_non_dicom_assets WHERE asset_id=?",
+                (asset_id,),
+            ).fetchall()
+        datasets.add(short_title)
+        decision_id = stable_id(
+            "crosswalk_decision", dataset_type, short_title,
+            "official_source_participant_inventory", download_id,
+        )
+        source_names = sorted({row["source_file"] for row in membership_rows})
+        evidence_urls = sorted({
+            str((source_files.get(name) or {}).get("url") or "")
+            for name in source_names
+            if str((source_files.get(name) or {}).get("url") or "")
+        })
+        conn.execute(
+            """INSERT OR REPLACE INTO public_non_dicom_crosswalk_decisions
+               VALUES (?, ?, ?, ?, 'resolved', 'official_source_participant_inventory',
+                       ?, ?, ?, ?)""",
+            (
+                decision_id, dataset_type, short_title, json_dumps([download_id]),
+                "Participant identifiers are read directly from the official TCIA download; raw values and source locators are retained.",
+                evidence_urls[0] if len(evidence_urls) == 1 else "",
+                reviewed_at,
+                json_dumps({
+                    "source_files": source_names,
+                    "source_hashes": {
+                        name: str((source_files.get(name) or {}).get("sha256") or "")
+                        for name in source_names
+                    },
+                    "participant_count": len({row["participant_id"] for row in membership_rows}),
+                }),
+            ),
+        )
+        for asset in assets:
+            asset_id = str(asset["asset_id"])
+            conn.execute(
+                """UPDATE public_non_dicom_assets
+                   SET participant_link_status='reviewed_source_inventory',
+                       quality_flag_json=json_set(
+                           COALESCE(NULLIF(quality_flag_json, ''), '{}'),
+                           '$.participant_inventory', 'reviewed_source_inventory',
+                           '$.crosswalk_decision_id', ?
+                       )
+                   WHERE asset_id=?""",
+                (decision_id, asset_id),
+            )
+            for row in membership_rows:
+                subject_id = str(row["participant_id"]).strip()
+                raw_subject_id = str(row["raw_participant_id"]).strip()
+                evidence = {
+                    "decision_id": decision_id,
+                    "source_file": row["source_file"],
+                    "source_locator": row["source_locator"],
+                    "source_sha256": str(
+                        (source_files.get(row["source_file"]) or {}).get("sha256") or ""
+                    ),
+                    "reviewed_at": reviewed_at,
+                }
+                insert_asset_participant(
+                    conn,
+                    asset_id=asset_id,
+                    short_title=short_title,
+                    subject_id=subject_id,
+                    namespace=f"tcia_dataset:{short_title}",
+                    raw_subject_id=raw_subject_id,
+                    participant_role=str(row["participant_role"]),
+                    link_status="reviewed_source_inventory",
+                    evidence=evidence,
+                )
+                conn.execute(
+                    """INSERT OR REPLACE INTO public_non_dicom_crosswalk_evidence
+                       VALUES (?, ?, ?, ?, ?, 'official_source_participant_identifier',
+                               'high', ?, ?, '', ?, ?)""",
+                    (
+                        stable_id("crosswalk", asset_id, subject_id, "official_source_participant_identifier"),
+                        asset_id, short_title, raw_subject_id, subject_id,
+                        str((source_files.get(row["source_file"]) or {}).get("url") or ""),
+                        "Identifier copied from the official TCIA source file.",
+                        reviewed_at, json_dumps(evidence),
+                    ),
+                )
+                participants.add((short_title, subject_id))
+                counts["asset_participant_links"] += 1
+                counts["crosswalk_evidence_rows"] += 1
+    counts["datasets"] = len(datasets)
+    counts["downloads"] = len(grouped)
+    counts["participants"] = len(participants)
+    return counts
+
+
 def apply_reviewed_remind_nrrd_aggregate(conn: sqlite3.Connection) -> int:
     """Restore package-grain ReMIND counts after WordPress count refresh.
 
@@ -5832,6 +6074,7 @@ def delete_refreshable_assets(conn: sqlite3.Connection) -> int:
         "       AND asset_granularity='download') "
         "   OR source_record_id LIKE 'tcga-lgg-mask-%' "
         "   OR source_record_id LIKE 'tcga-lgg-mask-inventory:%' "
+        "   OR source_record_id LIKE 'reviewed-participant-inventory:%' "
         "   OR source_system='tcia_pathdb'"
     )
     count = int(conn.execute("SELECT COUNT(*) FROM refresh_asset_ids").fetchone()[0])
@@ -6031,6 +6274,8 @@ def build_database(
     tcga_lgg_mask_inventory: Path = DEFAULT_TCGA_LGG_MASK_INVENTORY,
     tcga_lgg_mask_vasari: Path = DEFAULT_TCGA_LGG_MASK_VASARI,
     tcga_lgg_mask_provenance: Path = DEFAULT_TCGA_LGG_MASK_PROVENANCE,
+    reviewed_participant_inventory: Path = DEFAULT_REVIEWED_PARTICIPANT_INVENTORY,
+    reviewed_participant_provenance: Path = DEFAULT_REVIEWED_PARTICIPANT_PROVENANCE,
     staging_db: Path | None = None,
     baseline_db: Path | None = None,
 ) -> dict[str, Any]:
@@ -6127,6 +6372,16 @@ def build_database(
         counts.update(
             {f"tcga_lgg_mask_{key}": value for key, value in tcga_lgg_mask.items()}
         )
+        reviewed_participants = ingest_reviewed_analysis_result_participants(
+            conn,
+            snapshot_db,
+            inventory_path=reviewed_participant_inventory,
+            provenance_path=reviewed_participant_provenance,
+        )
+        counts.update({
+            f"reviewed_analysis_result_participants_{key}": value
+            for key, value in reviewed_participants.items()
+        })
         path_contracts = apply_reviewed_path_contracts(
             conn, clinical_db, crosswalk_curation, pathology_db=pathology_db
         )
@@ -6172,6 +6427,8 @@ def build_database(
             "source_tcga_lgg_mask_inventory": source_meta(tcga_lgg_mask_inventory),
             "source_tcga_lgg_mask_vasari": source_meta(tcga_lgg_mask_vasari),
             "source_tcga_lgg_mask_provenance": source_meta(tcga_lgg_mask_provenance),
+            "source_reviewed_participant_inventory": source_meta(reviewed_participant_inventory),
+            "source_reviewed_participant_provenance": source_meta(reviewed_participant_provenance),
             "source_tcga_gbm_qi_aim_inventory": source_meta(DEFAULT_TCGA_GBM_QI_AIM_INVENTORY),
             "source_tcga_gbm_qi_aim_provenance": source_meta(DEFAULT_TCGA_GBM_QI_AIM_PROVENANCE),
             "source_cptac_gbm_codex_inventory": source_meta(DEFAULT_CPTAC_GBM_CODEX_INVENTORY),
@@ -6337,6 +6594,27 @@ def validate_database(path: Path) -> dict[str, Any]:
                     errors.append(
                         f"BraTS crosswalk coverage regression: {name}={brats_counts[name]} != {expected}"
                     )
+            for short_title, expected in {
+                "DICOM-Glioma-SEG": 167,
+                "ISBI-MR-Prostate-2013": 80,
+                "LIDC-annot-NLST501": 501,
+                "MRQy-Quality-Measures": 233,
+                "TCGA-KIRC-Radiogenomics": 103,
+                "TCGA-OV-Proteogenomics": 20,
+                "TCGA-OV-Radiogenomics": 93,
+            }.items():
+                actual = conn.execute(
+                    "SELECT COUNT(DISTINCT subject_id) "
+                    "FROM public_non_dicom_asset_participants WHERE short_title=?",
+                    (short_title,),
+                ).fetchone()[0]
+                key = re.sub(r"[^a-z0-9]+", "_", short_title.casefold()).strip("_")
+                counts[f"{key}_participants"] = actual
+                if actual != expected:
+                    errors.append(
+                        f"{short_title} participant coverage regression: "
+                        f"{actual} != {expected}"
+                    )
             bcbm_counts = {
                 "bcbm_participants": conn.execute(
                     "SELECT COUNT(DISTINCT subject_id) FROM public_non_dicom_asset_participants WHERE short_title = ?",
@@ -6411,6 +6689,14 @@ def validate_database(path: Path) -> dict[str, Any]:
                 "tcga_gbm_qi_series": 111,
                 "tcga_gbm_qi_sop_instances": 193,
             }.items():
+                if provenance_in_companion and name in {
+                    "tcga_gbm_qi_series",
+                    "tcga_gbm_qi_sop_instances",
+                }:
+                    # These identifiers are intentionally retained in the audit
+                    # companion's raw_values_json payloads, while the compact
+                    # research artifact stores the documented empty placeholder.
+                    continue
                 if tcga_gbm_qi_counts[name] != expected:
                     errors.append(
                         "TCGA-GBM-QI-Radiogenomics coverage regression: "
@@ -6718,6 +7004,14 @@ def parser() -> argparse.ArgumentParser:
     build.add_argument("--tcga-lgg-mask-inventory", default=str(DEFAULT_TCGA_LGG_MASK_INVENTORY))
     build.add_argument("--tcga-lgg-mask-vasari", default=str(DEFAULT_TCGA_LGG_MASK_VASARI))
     build.add_argument("--tcga-lgg-mask-provenance", default=str(DEFAULT_TCGA_LGG_MASK_PROVENANCE))
+    build.add_argument(
+        "--reviewed-participant-inventory",
+        default=str(DEFAULT_REVIEWED_PARTICIPANT_INVENTORY),
+    )
+    build.add_argument(
+        "--reviewed-participant-provenance",
+        default=str(DEFAULT_REVIEWED_PARTICIPANT_PROVENANCE),
+    )
     build.add_argument("--out", default=str(DEFAULT_DB))
     build.add_argument("--gzip-out")
     build.add_argument("--manifest-out")
@@ -6788,6 +7082,8 @@ def main() -> int:
             tcga_lgg_mask_inventory=Path(args.tcga_lgg_mask_inventory),
             tcga_lgg_mask_vasari=Path(args.tcga_lgg_mask_vasari),
             tcga_lgg_mask_provenance=Path(args.tcga_lgg_mask_provenance),
+            reviewed_participant_inventory=Path(args.reviewed_participant_inventory),
+            reviewed_participant_provenance=Path(args.reviewed_participant_provenance),
             include_pathdb_files=not args.no_pathdb_files,
             replace=args.replace,
             staging_db=staging_db,

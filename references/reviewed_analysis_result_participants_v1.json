@@ -1,0 +1,128 @@
+{
+  "artifact": "reviewed_analysis_result_participants_v1",
+  "counts": {
+    "membership_rows": 2470,
+    "participants_by_dataset": {
+      "DICOM-Glioma-SEG": 167,
+      "ISBI-MR-Prostate-2013": 80,
+      "LIDC-annot-NLST501": 501,
+      "MRQy-Quality-Measures": 233,
+      "TCGA-KIRC-Radiogenomics": 103,
+      "TCGA-OV-Proteogenomics": 20,
+      "TCGA-OV-Radiogenomics": 93
+    },
+    "participants_by_download": {
+      "DICOM-Glioma-SEG:45839": 167,
+      "ISBI-MR-Prostate-2013:45663": 60,
+      "ISBI-MR-Prostate-2013:45665": 10,
+      "ISBI-MR-Prostate-2013:45667": 10,
+      "LIDC-annot-NLST501:55710": 501,
+      "LIDC-annot-NLST501:55720": 501,
+      "LIDC-annot-NLST501:55734": 501,
+      "MRQy-Quality-Measures:46111": 133,
+      "MRQy-Quality-Measures:46113": 54,
+      "MRQy-Quality-Measures:46115": 46,
+      "TCGA-KIRC-Radiogenomics:45577": 103,
+      "TCGA-OV-Proteogenomics:45889": 20,
+      "TCGA-OV-Radiogenomics:45691": 93,
+      "TCGA-OV-Radiogenomics:45693": 93,
+      "TCGA-OV-Radiogenomics:45695": 93,
+      "TCGA-OV-Radiogenomics:45697": 85
+    }
+  },
+  "inventory_sha256": "ecf66b68076676f43b18552d319b7eba3c923674362a8367b8d08f48148e7c7c",
+  "review_status": "official_source_participant_inventory",
+  "reviewed_at": "2026-08-27",
+  "source_files": {
+    "DICOM-Glioma-SEG-metadata.zip": {
+      "download_id": "45839",
+      "sha256": "bf9e2e85f27d742a4c8afc44dcc9634d277b29f5a4b2496975c05d7fe1ab7923",
+      "size_bytes": 3090427,
+      "url": "https://www.cancerimagingarchive.net/wp-content/uploads/TCGA_Segmentation-DCMQI-Metadata.zip"
+    },
+    "ISBI-leaderboard.zip": {
+      "download_id": "45665",
+      "sha256": "011945fdd273b2f43f6ba2de8904ad8625800b439dff9d228810b645c65fa0be",
+      "size_bytes": 60647,
+      "url": "https://www.cancerimagingarchive.net/wp-content/uploads/NCI-ISBI-2013-Prostate-Challenge-Leaderboard.zip"
+    },
+    "ISBI-test.zip": {
+      "download_id": "45667",
+      "sha256": "53c2969c035974de47bcb2d3fa20c1342c99096faf2fc87a0097ed62e89d32e3",
+      "size_bytes": 54294,
+      "url": "https://www.cancerimagingarchive.net/wp-content/uploads/NCI-ISBI-2013-Prostate-Challenge-Test.zip"
+    },
+    "ISBI-training.zip": {
+      "download_id": "45663",
+      "sha256": "c3436559b474c60e78633ea98601241f39cb27e30fb9d48b1d29f2821bfbf047",
+      "size_bytes": 286501,
+      "url": "https://www.cancerimagingarchive.net/wp-content/uploads/NCI-ISBI-2013-Prostate-Challenge-Training.zip"
+    },
+    "LIDC-annotations.csv": {
+      "download_id": "55720",
+      "sha256": "5743f7b5f8b957ef588bda083cff44b659673840f05d30a1291c8f6317f31bc4",
+      "size_bytes": 6321879,
+      "url": "https://www.cancerimagingarchive.net/wp-content/uploads/LIDC-annot-NLST501-annotations.csv"
+    },
+    "LIDC-patients.csv": {
+      "download_id": "55734",
+      "sha256": "3aca51f0a01337c39a2843f9202a580d2536ebb9f0fd008f47c455be190d2fae",
+      "size_bytes": 55865,
+      "url": "https://www.cancerimagingarchive.net/wp-content/uploads/LIDC-annot-NLST501-patients.csv"
+    },
+    "MRQy-CPTAC-GBM.xlsx": {
+      "download_id": "46115",
+      "sha256": "9e04c890b4248bf92aed123065c00ec7d952e40fb52a316ee82768546e4b8320",
+      "size_bytes": 20994,
+      "url": "https://www.cancerimagingarchive.net/wp-content/uploads/CPTAC_GBM_MRQy_Results.xlsx"
+    },
+    "MRQy-TCGA-CESC.xlsx": {
+      "download_id": "46113",
+      "sha256": "be92823fcd3e36990047a9c7f4dd0ca5737dbb54a7261cd84cb47e25fe341a43",
+      "size_bytes": 50395,
+      "url": "https://www.cancerimagingarchive.net/wp-content/uploads/TCGA_CESCT1_and_T2_MRQy_Results.xlsx"
+    },
+    "MRQy-TCGA-GBM.xlsx": {
+      "download_id": "46111",
+      "sha256": "e5461743cc3f1512eda5a2ca119b7bb364e53df37c2c058df845260f87b03e4f",
+      "size_bytes": 49737,
+      "url": "https://www.cancerimagingarchive.net/wp-content/uploads/TCGA_GBM_MRQy_Results.xlsx"
+    },
+    "TCGA-KIRC.csv": {
+      "download_id": "45577",
+      "sha256": "11d705c56219641575d13bac29c00f89bdfbe55a67fc3c2c86ce5199ae38c3b6",
+      "size_bytes": 17452,
+      "url": "https://www.cancerimagingarchive.net/wp-content/uploads/FullDataforAnalysis071714.csv"
+    },
+    "TCGA-OV-Proteogenomics.csv": {
+      "download_id": "45889",
+      "sha256": "de1fa3f36722a22a074c6d15b29c5b2dc203183d32b9201ea4eb109146ee5ca1",
+      "size_bytes": 11844,
+      "url": "https://www.cancerimagingarchive.net/wp-content/uploads/2020_02_26_HGSOC_proteomics.csv"
+    },
+    "TCGA-OV-Radiogenomics-clinical.csv": {
+      "download_id": "45695",
+      "sha256": "7f00735ac6206d3de89068bd6f1a6168db0bb465b1b45422790bea06a16e90a4",
+      "size_bytes": 6346,
+      "url": "https://www.cancerimagingarchive.net/wp-content/uploads/ClinicalData101515.csv"
+    },
+    "TCGA-OV-Radiogenomics-clovars.csv": {
+      "download_id": "45697",
+      "sha256": "47c2a781431d488f9335e3030dfb878563fb22a38ed58d5a3afecab929863717",
+      "size_bytes": 5353,
+      "url": "https://www.cancerimagingarchive.net/wp-content/uploads/CLOVARScores121715.csv"
+    },
+    "TCGA-OV-Radiogenomics-consensus.csv": {
+      "download_id": "45693",
+      "sha256": "cad1278a6121eadb15a5e7b44bfa3f5fb453e17498e8da01d09499a799c888eb",
+      "size_bytes": 24541,
+      "url": "https://www.cancerimagingarchive.net/wp-content/uploads/ImageFeatureConsensusMeasurements012116.csv"
+    },
+    "TCGA-OV-Radiogenomics-features.csv": {
+      "download_id": "45691",
+      "sha256": "9d8f73ade6934bd392c80d34cff13d1f7c61c76a2e49a1f034ab1c1ebc5e8d2b",
+      "size_bytes": 175016,
+      "url": "https://www.cancerimagingarchive.net/wp-content/uploads/CompleteImageFeatureData012116.csv"
+    }
+  }
+}

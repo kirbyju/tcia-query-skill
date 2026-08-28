@@ -8,6 +8,7 @@ import gzip
 import hashlib
 import json
 import os
+import re
 import shutil
 import sqlite3
 import tempfile
@@ -1604,6 +1605,34 @@ def validate_database(
                     errors.append(
                         "TCGA-GBM-QI-Radiogenomics participant coverage regression: "
                         f"{name}={tcga_gbm_qi_counts[name]} != {expected}"
+                    )
+            reviewed_analysis_result_expected = {
+                "DICOM-Glioma-SEG": 167,
+                "ISBI-MR-Prostate-2013": 80,
+                "LIDC-annot-NLST501": 501,
+                "MRQy-Quality-Measures": 233,
+                "TCGA-KIRC-Radiogenomics": 103,
+                "TCGA-OV-Proteogenomics": 20,
+                "TCGA-OV-Radiogenomics": 93,
+            }
+            for short_title, expected in reviewed_analysis_result_expected.items():
+                participant_count = conn.execute(
+                    "SELECT COUNT(*) FROM agent_participants WHERE short_title=?",
+                    (short_title,),
+                ).fetchone()[0]
+                public_count = conn.execute(
+                    "SELECT COUNT(*) FROM agent_participants WHERE short_title=? "
+                    "AND has_public_non_dicom=1",
+                    (short_title,),
+                ).fetchone()[0]
+                key = re.sub(r"[^a-z0-9]+", "_", short_title.casefold()).strip("_")
+                counts[f"{key}_participants"] = participant_count
+                counts[f"{key}_with_public_non_dicom"] = public_count
+                if participant_count != expected or public_count != expected:
+                    errors.append(
+                        f"{short_title} participant coverage regression: "
+                        f"participants={participant_count}, public_non_dicom={public_count}, "
+                        f"expected={expected}"
                     )
             cptac_codex_counts = {
                 "cptac_gbm_codex_participants": conn.execute(

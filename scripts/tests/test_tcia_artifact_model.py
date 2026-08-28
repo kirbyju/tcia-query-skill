@@ -1368,6 +1368,88 @@ class BuilderTests(unittest.TestCase):
             )
             conn.close()
 
+    def test_reviewed_analysis_result_participant_inventory_links_metadata_asset(self):
+        import hashlib
+        import json
+        import sqlite3
+
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            snapshot = base / "snapshot.sqlite"
+            output = base / "public.sqlite"
+            inventory = base / "participants.csv"
+            provenance = base / "participants.json"
+            self.build_snapshot(snapshot)
+            conn = sqlite3.connect(snapshot)
+            conn.execute(
+                "INSERT INTO agent_current_downloads VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    201, "Analysis Result", "TCGA-KIRC-Radiogenomics", "45577",
+                    "Radiologist annotations", "TCGA-KIRC-Radiogenomics",
+                    "https://www.cancerimagingarchive.net/wp-content/uploads/source.csv",
+                    "1", "kb", "[]", '["Clinical"]', '["CSV"]',
+                    0, 0, 2, 1,
+                ),
+            )
+            conn.execute(
+                "INSERT INTO agent_datasets VALUES ('Analysis Result', 'TCGA-KIRC-Radiogenomics')"
+            )
+            conn.commit()
+            conn.close()
+            inventory.write_text(
+                "dataset_type,short_title,download_id,participant_id,raw_participant_id,participant_role,source_file,source_locator\n"
+                "Analysis Result,TCGA-KIRC-Radiogenomics,45577,TCGA-AA-0001,TCGA-AA-0001,annotated_subject,source.csv,row:2\n"
+                "Analysis Result,TCGA-KIRC-Radiogenomics,45577,TCGA-AA-0002,TCGA-AA-0002,annotated_subject,source.csv,row:3\n",
+                encoding="utf-8",
+            )
+            inventory_sha256 = hashlib.sha256(inventory.read_bytes()).hexdigest()
+            provenance.write_text(
+                json.dumps(
+                    {
+                        "reviewed_at": "2026-08-27",
+                        "inventory_sha256": inventory_sha256,
+                        "source_files": {
+                            "source.csv": {
+                                "url": "https://www.cancerimagingarchive.net/wp-content/uploads/source.csv",
+                                "sha256": "a" * 64,
+                                "size_bytes": 10,
+                            }
+                        },
+                        "counts": {"membership_rows": 2},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            result = public.build_database(
+                snapshot,
+                output,
+                nifti_db=None,
+                pathology_db=None,
+                include_pathdb_files=False,
+                replace=True,
+                reviewed_participant_inventory=inventory,
+                reviewed_participant_provenance=provenance,
+            )
+            self.assertEqual(
+                result["counts"]["reviewed_analysis_result_participants_participants"], 2
+            )
+            conn = sqlite3.connect(output)
+            self.assertEqual(
+                conn.execute(
+                    "SELECT file_format, representation_provenance_class, participant_link_status "
+                    "FROM public_non_dicom_assets WHERE short_title='TCGA-KIRC-Radiogenomics'"
+                ).fetchone(),
+                ("CSV", "metadata_only", "reviewed_source_inventory"),
+            )
+            self.assertEqual(
+                conn.execute(
+                    "SELECT group_concat(subject_id, ',') FROM ("
+                    "SELECT subject_id FROM public_non_dicom_asset_participants ORDER BY subject_id)"
+                ).fetchone()[0],
+                "TCGA-AA-0001,TCGA-AA-0002",
+            )
+            conn.close()
+
     def test_participant_keys_remain_dataset_scoped(self):
         self.assertNotEqual(
             participants.participant_key("Collection", "Dataset-A", "001"),
