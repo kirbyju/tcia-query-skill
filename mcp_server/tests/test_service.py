@@ -913,6 +913,76 @@ class TciaQueryServiceTests(unittest.TestCase):
         issues = self.service.find_participant_link_issues(statuses=["review_required"])
         self.assertEqual(issues["count"], 1)
 
+    def test_v2_participant_queries_expose_wordpress_facets_and_geometry(self) -> None:
+        with connect(self.participants) as conn:
+            conn.executescript(
+                """
+                ALTER TABLE participant_assets ADD COLUMN data_category TEXT;
+                ALTER TABLE participant_assets ADD COLUMN data_type TEXT;
+                ALTER TABLE participant_assets ADD COLUMN geometry_status TEXT;
+                ALTER TABLE participant_assets ADD COLUMN geometry_checked_count INTEGER;
+                ALTER TABLE participant_assets ADD COLUMN geometry_regular_count INTEGER;
+                ALTER TABLE participant_assets ADD COLUMN geometry_not_regular_count INTEGER;
+                ALTER TABLE participant_assets ADD COLUMN geometry_not_checked_count INTEGER;
+                ALTER TABLE participant_assets ADD COLUMN geometry_source TEXT;
+                ALTER TABLE agent_participant_assets ADD COLUMN data_category TEXT;
+                ALTER TABLE agent_participant_assets ADD COLUMN data_type TEXT;
+                ALTER TABLE agent_participant_assets ADD COLUMN geometry_status TEXT;
+                ALTER TABLE agent_participant_assets ADD COLUMN geometry_checked_count INTEGER;
+                ALTER TABLE agent_participant_assets ADD COLUMN geometry_regular_count INTEGER;
+                ALTER TABLE agent_participant_assets ADD COLUMN geometry_not_regular_count INTEGER;
+                ALTER TABLE agent_participant_assets ADD COLUMN geometry_not_checked_count INTEGER;
+                ALTER TABLE agent_participant_assets ADD COLUMN geometry_source TEXT;
+                UPDATE participant_assets
+                SET data_category='Radiology', data_type=modality,
+                    geometry_status='not_checked', geometry_not_checked_count=1,
+                    geometry_source='not_assessed'
+                WHERE data_domain='radiology';
+                UPDATE participant_assets
+                SET data_category='Clinical Data', data_type='Clinical Data;Tabular Data',
+                    geometry_status='not_applicable', geometry_not_checked_count=0,
+                    geometry_source='not_applicable'
+                WHERE data_domain='clinical';
+                UPDATE agent_participant_assets
+                SET data_category='Radiology', data_type=modality,
+                    geometry_status='not_checked', geometry_not_checked_count=1,
+                    geometry_source='not_assessed'
+                WHERE data_domain='radiology';
+                """
+            )
+
+        participants = self.service.search_participants(
+            query="brca-1",
+            data_categories=["Radiology"],
+            data_types=["MR"],
+            file_formats=["DICOM"],
+            geometry_statuses=["not_checked"],
+            access_levels=["open"],
+        )
+        self.assertEqual(participants["count"], 1)
+        row = participants["participants"][0]
+        self.assertIn("Radiology", row["data_categories"])
+        self.assertIn("MR", row["data_types"])
+        self.assertIn("not_checked", row["geometry_statuses"])
+        self.assertEqual(row["geometry_not_checked_count"], 2)
+
+        cross_asset_mix = self.service.search_participants(
+            query="brca-1",
+            data_categories=["Radiology"],
+            data_types=["Clinical Data"],
+        )
+        self.assertEqual(cross_asset_mix["count"], 0)
+
+        assets = self.service.get_participant_assets(
+            "participant-1",
+            data_categories=["Radiology"],
+            data_types=["MR"],
+            file_formats=["DICOM"],
+            geometry_statuses=["not_checked"],
+        )
+        self.assertEqual(assets["count"], 1)
+        self.assertEqual(assets["assets"][0]["data_category"], "Radiology")
+
     def test_compatibility_participant_queries_use_normalized_modalities(self) -> None:
         with connect(self.participants) as conn:
             conn.execute(
@@ -930,8 +1000,20 @@ class TciaQueryServiceTests(unittest.TestCase):
         self.assertEqual(coverage["participant_count"], 1)
 
     def test_v2_public_non_dicom_query(self) -> None:
+        with connect(self.public_non_dicom) as conn:
+            conn.execute(
+                "ALTER TABLE agent_public_non_dicom_assets ADD COLUMN geometry_status TEXT"
+            )
+            conn.execute(
+                "UPDATE agent_public_non_dicom_assets SET geometry_status = "
+                "CASE WHEN file_format = 'NIfTI' THEN 'not_checked' ELSE 'not_applicable' END"
+            )
         result = self.service.find_public_non_dicom_assets(
-            short_titles=["TCGA-BRCA"], participant_id="brca-1", file_formats=["NIfTI"]
+            short_titles=["TCGA-BRCA"],
+            participant_id="brca-1",
+            file_formats=["NIfTI"],
+            modalities=["MR"],
+            geometry_statuses=["not_checked"],
         )
         self.assertEqual(result["count"], 1)
         self.assertEqual(result["assets"][0]["file_name"], "image.nii.gz")

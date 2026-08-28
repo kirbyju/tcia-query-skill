@@ -46,6 +46,37 @@ class RestV2ContractTests(unittest.TestCase):
             route.endpoint(), {"v2_bundle": {"release_fingerprint": "test"}}
         )
 
+    def test_v2_openapi_exposes_data_facets_and_geometry_filters(self) -> None:
+        schema = create_app().openapi()
+        participant_properties = schema["components"]["schemas"][
+            "SearchParticipantsRequest"
+        ]["properties"]
+        for name in (
+            "data_categories",
+            "data_types",
+            "file_formats",
+            "geometry_statuses",
+        ):
+            self.assertIn(name, participant_properties)
+
+        asset_parameters = {
+            item["name"]
+            for item in schema["paths"]["/v2/participants/{participant_key}/assets"][
+                "get"
+            ]["parameters"]
+        }
+        self.assertTrue(
+            {"data_categories", "data_types", "file_formats", "geometry_statuses"}
+            <= asset_parameters
+        )
+        public_parameters = {
+            item["name"]
+            for item in schema["paths"]["/v2/public-non-dicom/assets"]["get"][
+                "parameters"
+            ]
+        }
+        self.assertTrue({"modalities", "geometry_statuses"} <= public_parameters)
+
 
 if __name__ == "__main__":
     unittest.main()

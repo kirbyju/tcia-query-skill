@@ -74,11 +74,11 @@ pathology, and other public non-DICOM questions through
 
 Recommended tools:
 
-- `search_participants(filters)`: search canonical dataset-scoped participants and compact availability from the V2 research core.
+- `search_participants(filters)`: search canonical dataset-scoped participants and compact availability from the V2 research core. Prefer `data_categories`, `data_types`, and `file_formats`; keep access independent and use `geometry_statuses` only for explicit assessment-state filtering.
 - `get_participant(participant_key)`: return one participant plus every retained source identifier spelling.
-- `get_participant_assets(participant_key, filters)`: return compact holdings and drill-down pointers.
+- `get_participant_assets(participant_key, filters)`: return compact holdings and drill-down pointers, including Data Category, Data Type, File Format, and geometry status/count fields. `data_domains` remains a technical compatibility filter.
 - `get_dataset_participant_coverage(short_title)`: return unlinked dataset assets, source coverage, and linkage-review states.
-- `find_public_non_dicom_assets(filters)`: query optional V2 non-DICOM file-grain detail. Use `requires_annotations=true` for `segmentation`, `annotation`, and `annotation_snapshot` roles; do not infer source relationships. Keep public DICOM in IDC.
+- `find_public_non_dicom_assets(filters)`: query optional V2 non-DICOM file-grain detail. Filter by `file_formats`, `modalities`, and `geometry_statuses`; use `requires_annotations=true` for `segmentation`, `annotation`, and `annotation_snapshot` roles. Treat `media_kinds` and `object_roles` as technical detail filters, do not infer source relationships, and keep public DICOM in IDC.
 - `search_datasets(filters)`: query visible TCIA Collections and Analysis Results by cancer type, body site, modality, access level, DOI, program, and free text.
 - `get_dataset(short_title)`: return one dataset with access/license, DOI, page link, counts, summary, and current downloads.
 - `get_current_downloads(short_title, filters)`: return current download records filtered by modality, download type, file type, access level, or annotation labels.

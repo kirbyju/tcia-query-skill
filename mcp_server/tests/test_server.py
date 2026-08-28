@@ -27,6 +27,22 @@ class McpToolSurfaceTests(unittest.IsolatedAsyncioTestCase):
         tools = await legacy_server.list_tools()
         self.assertEqual(tuple(tool.name for tool in tools), LEGACY_MCP_TOOL_NAMES)
 
+    async def test_participant_tools_advertise_data_facets_and_geometry(self) -> None:
+        tools = {tool.name: tool for tool in await mcp.list_tools()}
+        search_properties = tools["search_participants"].inputSchema["properties"]
+        asset_properties = tools["get_participant_assets"].inputSchema["properties"]
+        for name in (
+            "data_categories",
+            "data_types",
+            "file_formats",
+            "geometry_statuses",
+        ):
+            self.assertIn(name, search_properties)
+            self.assertIn(name, asset_properties)
+        public_properties = tools["find_public_non_dicom_assets"].inputSchema["properties"]
+        self.assertIn("modalities", public_properties)
+        self.assertIn("geometry_statuses", public_properties)
+
 
 if __name__ == "__main__":
     unittest.main()
