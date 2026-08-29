@@ -40,11 +40,47 @@ Recursively list package contents as CSV:
 
 ```bash
 ascli --format=csv faspex5 packages browse \
-  --query=@json:'{"recursive":true,"per_page":500}' \
+  --query=@json:'{"recursive":true}' \
   --url="<TCIA_FASPEX_PACKAGE_URL>" > package.csv
 ```
 
-Recursive browse works for many packages, but large packages can time out or fail. If recursive browse is slow, first look for a package-level `.sums` file, then use staged browsing of known folders.
+Let `ascli` manage pagination by default. Faspex can reject a query that sets
+`limit` without a matching `per_page` value with HTTP 400/code 1035. If an
+explicit page size is needed, set both values to the same number, for example
+`{"recursive":true,"limit":500,"per_page":500}`. This behavior can vary with
+the installed `aspera-cli` and Faspex server versions, so record `ascli -v` when
+troubleshooting.
+
+Recursive browse works for many packages, but large packages can take a long
+time, time out, or fail. If recursive browse is slow, first look for a
+package-level `.sums` file, then use staged browsing of known folders.
+
+## Preserve Only Successful Browse Output
+
+Shell redirection creates or truncates the destination before `ascli` runs. A
+failed browse can therefore leave an empty `package.json` or `package.csv` that
+later parsers misinterpret as a separate JSON/CSV problem. For reusable
+inventory output, write to a temporary file and move it into place only after a
+successful exit:
+
+```bash
+package_tmp="$(mktemp)"
+if ascli --format=json faspex5 packages browse \
+  --query=@json:'{"recursive":true}' \
+  --url="<TCIA_FASPEX_PACKAGE_URL>" > "$package_tmp"; then
+  mv "$package_tmp" package.json
+else
+  rm -f "$package_tmp"
+  exit 1
+fi
+```
+
+Before parsing, also require a nonempty file and validate the selected format.
+For JSON, use:
+
+```bash
+test -s package.json && python -m json.tool package.json >/dev/null
+```
 
 ## Root `.sums` Shortcut
 
@@ -97,7 +133,7 @@ Faspex folder browse supports two paging modes. The default iteration-token pagi
 ```bash
 ascli --format=csv faspex5 packages browse \
   --url="<TCIA_FASPEX_PACKAGE_URL>" \
-  --query=@json:'{"paging":false,"limit":1000}' \
+  --query=@json:'{"paging":false,"limit":1000,"per_page":1000}' \
   /FolderName > folder.csv
 ```
 

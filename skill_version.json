@@ -17,7 +17,7 @@
     "mcp_server/tests/test_server.py": "0e27a99652f90cdee49a6d6e783a68befcccd4e0b8302433ffe378a7ce2cbf38",
     "mcp_server/tests/test_service.py": "49f188bf07243d7741b5f39ab9effaae63c1bc69735c12be0cc1e3a297dbaf47",
     "references/artifact-model-v2.md": "953b773c828f7c8dfc35eef788485e7852eebb2aafd801c7efc7de68f2b139e0",
-    "references/aspera.md": "095b86fb43ae4f99bb521bbc1f83f5d5bc9caf0f35d739f318cd168a7eefd93b",
+    "references/aspera.md": "64fc04697a55ef2d3ba560ae7ca7540b9ab62f4af218b7556ceaaf2b52fcfc32",
     "references/brats2021_tcia_crosswalk_v1.csv": "ba986fab788ee8ad3ea7fa2354d2dae4495ccc8e387d5f341cfd740db4ffcd00",
     "references/brats2021_tcia_crosswalk_v1.json": "462e0dbc3d3c849971e61f4a16f52a3f592eb35a24ba6fcacd3b14d26c053121",
     "references/cda.md": "3c840c39f5c3fd8c892ce91842a6120bd6be873612bdf7f47d42f6612a9b181d",
@@ -105,6 +105,6 @@
     "scripts/tests/test_tcia_v2_staging.py": "bcae860516dbd762f9f70f22d7be02ca695193f3cbfebd7c0a0bcf6f47841ac0"
   },
   "schema_version": 1,
-  "skill_version": "2026.08.28.3",
-  "updated_at_utc": "2026-08-28T15:24:05.154790+00:00"
+  "skill_version": "2026.08.29.1",
+  "updated_at_utc": "2026-08-29T15:36:35.575402+00:00"
 }
