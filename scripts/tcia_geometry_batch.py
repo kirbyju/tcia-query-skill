@@ -5,14 +5,14 @@ The planner reads the V2 public non-DICOM detail database and creates one job
 per public download route.  Download URLs are deliberately retained only in a
 mode-0600 private JSONL plan; the shareable CSV summary omits them.
 
-Geometry analysis is header-only:
+Default geometry analysis is header-only for public non-DICOM volume formats:
 
-* DICOM: pydicom ``stop_before_pixels=True`` and series-level slice geometry.
 * NIfTI: nibabel header/affine inspection without loading the data array.
 * MHA/MHD/NRRD: SimpleITK ``ReadImageInformation()`` without reading pixels.
 
-No command contacts IDC, and the planner includes DICOM only when it is already
-represented in the V2 artifact as a reviewed non-IDC exception.
+The DICOM parser remains available only for explicitly requested diagnostic
+runs. DICOM rows are not part of the public-non-DICOM artifact; public DICOM
+geometry belongs in IDC and idc-index.
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ from typing import Any, Iterable, Iterator, Sequence
 from urllib.parse import urlparse
 
 
-DEFAULT_FORMATS = ("DICOM", "NIFTI", "MHA", "MHD", "NRRD")
+DEFAULT_FORMATS = ("NIFTI", "MHA", "MHD", "NRRD")
 FILE_SUFFIX_FORMATS = {
     ".nii": "NIFTI",
     ".nii.gz": "NIFTI",
@@ -84,11 +84,11 @@ def safe_slug(value: str) -> str:
 
 
 def detect_route(url: str) -> str:
-    parsed = urlparse(url)
     lower = url.lower()
     if "faspex" in lower or "aspera" in lower:
-        if parsed.path.rstrip("/").casefold().startswith("/aspera/faspex"):
-            return "aspera_faspex4_public_link"
+        # TCIA's current Faspex 5 service accepts exact published links that
+        # retain legacy-looking /aspera/faspex paths. URL path shape alone
+        # therefore cannot identify the obsolete Faspex 4 plugin.
         return "aspera_faspex5_public_link"
     if lower.startswith(("https://", "http://")):
         return "http"
@@ -418,27 +418,16 @@ def download_job(job: dict[str, Any], data_root: Path) -> Path:
     if route in {"aspera_faspex4_public_link", "aspera_faspex5_public_link"}:
         if shutil.which("ascli") is None:
             raise RuntimeError("ascli is required for this Aspera job")
-        command = (
-            [
-                "ascli",
-                "faspex",
-                "package",
-                "receive",
-                f"--link={url}",
-                "--to-folder=.",
-            ]
-            if route == "aspera_faspex4_public_link"
-            else [
-                "ascli",
-                "faspex5",
-                "packages",
-                "receive",
-                "ALL",
-                f"--url={url}",
-                "--to-folder=.",
-                "--query=@json:{\"status\":\"completed\"}",
-            ]
-        )
+        # Accept the earlier planner label as a compatibility alias, but use
+        # the Faspex 5 public-link workflow validated against TCIA's service.
+        route = "aspera_faspex5_public_link"
+        command = [
+            "ascli",
+            "faspex5",
+            "packages",
+            "receive",
+            f"--url={url}",
+        ]
         run_checked(command, cwd=target)
     elif route == "http":
         if shutil.which("curl") is None:
@@ -446,22 +435,31 @@ def download_job(job: dict[str, Any], data_root: Path) -> Path:
         parsed_name = Path(urlparse(url).path).name
         archive_name = parsed_name if parsed_name else "payload.zip"
         archive = target / archive_name
-        run_checked(
+        curl_command = [
+            "curl",
+            "-L",
+            "--fail",
+            "--retry",
+            "5",
+        ]
+        curl_help = subprocess.run(
+            ["curl", "--help", "all"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if "--retry-all-errors" in curl_help.stdout:
+            curl_command.append("--retry-all-errors")
+        curl_command.extend(
             [
-                "curl",
-                "-L",
-                "--fail",
-                "--retry",
-                "5",
-                "--retry-all-errors",
                 "--continue-at",
                 "-",
                 "--output",
                 str(archive),
                 url,
-            ],
-            cwd=target,
+            ]
         )
+        run_checked(curl_command, cwd=target)
         extracted = target / "extracted"
         lower = archive.name.lower()
         if lower.endswith(".zip"):
@@ -773,14 +771,41 @@ def load_asset_manifest(job: dict[str, Any]) -> list[dict[str, Any]]:
     return list(iter_jsonl(path)) if path.is_file() else []
 
 
-def map_asset_id(path: Path, root: Path, assets: list[dict[str, Any]]) -> str:
+def format_tokens(value: object) -> set[str]:
+    return {
+        token.strip().upper()
+        for token in re.split(r"[,;]", str(value or ""))
+        if token.strip()
+    }
+
+
+def map_asset_id(
+    path: Path,
+    root: Path,
+    assets: list[dict[str, Any]],
+    file_format: str,
+) -> str:
     relative = path.relative_to(root).as_posix()
     matches: list[tuple[int, str]] = []
     for asset in assets:
+        if file_format not in format_tokens(asset.get("file_format")):
+            continue
         package_path = str(asset.get("package_path") or "").lstrip("/")
-        if package_path and relative.endswith(package_path):
+        path_with_boundaries = f"/{relative.strip('/')}/"
+        package_with_boundaries = f"/{package_path.strip('/')}/"
+        if package_path and package_with_boundaries in path_with_boundaries:
             matches.append((len(package_path), str(asset["asset_id"])))
-    return max(matches, default=(0, ""))[1]
+    if matches:
+        longest = max(length for length, _ in matches)
+        asset_ids = {asset_id for length, asset_id in matches if length == longest}
+        return next(iter(asset_ids)) if len(asset_ids) == 1 else ""
+    download_assets = {
+        str(asset["asset_id"])
+        for asset in assets
+        if str(asset.get("asset_granularity") or "") == "download"
+        and file_format in format_tokens(asset.get("file_format"))
+    }
+    return next(iter(download_assets)) if len(download_assets) == 1 else ""
 
 
 def assessment_base(job: dict[str, Any], local_path: str, file_format: str) -> dict[str, Any]:
@@ -813,8 +838,46 @@ def assessment_base(job: dict[str, Any], local_path: str, file_format: str) -> d
 
 def analyze_job(job: dict[str, Any], data_root: Path, results_dir: Path) -> Path:
     root = data_root / f"{safe_slug(job['short_title'])}--{job['job_id']}"
-    if not (root / ".download_complete.json").is_file():
-        raise RuntimeError(f"download is not complete: {root}")
+    complete_marker = root / ".download_complete.json"
+    partial_marker = root / ".download_partial.json"
+    if not complete_marker.is_file() and not partial_marker.is_file():
+        raise RuntimeError(
+            f"download is not complete or documented partial: {root}"
+        )
+
+    # Aspera packages may deliver ZIP archives without unpacking them.
+    extraction_marker = root / ".archive_extraction_complete.json"
+    if (
+        job["route_type"] in {
+            "aspera_faspex4_public_link",
+            "aspera_faspex5_public_link",
+        }
+        and not extraction_marker.is_file()
+    ):
+        archives = sorted(
+            path
+            for path in root.rglob("*")
+            if path.is_file()
+            and "extracted" not in path.relative_to(root).parts
+            and path.name.lower().endswith(".zip")
+        )
+        for archive in archives:
+            safe_extract_zip(archive, root / "extracted")
+        extraction_marker.write_text(
+            json.dumps(
+                {
+                    "completed_at_utc": utc_now(),
+                    "archives": [
+                        archive.relative_to(root).as_posix()
+                        for archive in archives
+                    ],
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
     results_dir.mkdir(parents=True, exist_ok=True)
     output = results_dir / f"{job['job_id']}.jsonl.gz"
     temp = output.with_suffix(output.suffix + ".part")
@@ -832,7 +895,7 @@ def analyze_job(job: dict[str, Any], data_root: Path, results_dir: Path) -> Path
                 row = assessment_base(
                     job, path.relative_to(root).as_posix(), detected
                 )
-                row["asset_id"] = map_asset_id(path, root, assets)
+                row["asset_id"] = map_asset_id(path, root, assets, detected)
                 try:
                     result = (
                         analyze_nifti(path)
@@ -878,7 +941,9 @@ def analyze_job(job: dict[str, Any], data_root: Path, results_dir: Path) -> Path
             row["assessment_scope"] = "dicom_series"
             row["series_instance_uid"] = series_uid
             row["study_instance_uid"] = instances[0]["study_uid"]
-            row["asset_id"] = map_asset_id(dicom_paths[series_uid][0], root, assets)
+            row["asset_id"] = map_asset_id(
+                dicom_paths[series_uid][0], root, assets, "DICOM"
+            )
             try:
                 row.update(dicom_series_geometry(instances))
             except Exception as exc:
@@ -897,7 +962,9 @@ def analyze_job(job: dict[str, Any], data_root: Path, results_dir: Path) -> Path
 
 def candidate_files(root: Path) -> Iterator[Path]:
     for path in root.rglob("*"):
-        if not path.is_file() or path.name.startswith(".download_complete"):
+        if not path.is_file() or path.name.startswith(".download_"):
+            continue
+        if path.name.startswith("._") or "__MACOSX" in path.parts:
             continue
         if path.name.endswith((".jsonl.gz", ".part")):
             continue

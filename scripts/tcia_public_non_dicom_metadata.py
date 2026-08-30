@@ -86,7 +86,7 @@ DB_ASSET = "public_non_dicom_metadata.sqlite.gz"
 MANIFEST_ASSET = "public_non_dicom_metadata_manifest.json"
 SCHEMA_VERSION = 8
 
-GEOMETRY_CAPABLE_FORMATS = {"DICOM", "NIFTI", "MHA", "MHD", "NRRD"}
+GEOMETRY_CAPABLE_FORMATS = {"NIFTI", "MHA", "MHD", "NRRD"}
 GEOMETRY_STATUSES = {
     "not_checked",
     "not_applicable",
@@ -374,6 +374,22 @@ CREATE TABLE public_non_dicom_geometry_assessments (
     error TEXT,
     source_result_artifact TEXT NOT NULL,
     FOREIGN KEY (asset_id) REFERENCES public_non_dicom_assets(asset_id)
+);
+
+CREATE TABLE public_non_dicom_geometry_job_coverage (
+    job_id TEXT PRIMARY KEY,
+    short_title TEXT NOT NULL,
+    download_status TEXT NOT NULL,
+    complete INTEGER NOT NULL CHECK (complete IN (0, 1)),
+    analyzable INTEGER NOT NULL CHECK (analyzable IN (0, 1)),
+    inventory_non_directory_entries INTEGER,
+    downloaded_files INTEGER,
+    file_count_coverage REAL,
+    missing_paths_json TEXT NOT NULL DEFAULT '[]',
+    source_error_json TEXT NOT NULL DEFAULT '{}',
+    documented_at_utc TEXT,
+    source_coverage_artifact TEXT NOT NULL,
+    coverage_payload_json TEXT NOT NULL
 );
 
 CREATE TABLE public_non_dicom_locations (
@@ -718,6 +734,9 @@ JOIN public_non_dicom_assets a USING (asset_id);
 CREATE VIEW agent_public_non_dicom_metadata_field_coverage AS
 SELECT * FROM public_non_dicom_metadata_field_coverage;
 
+CREATE VIEW agent_public_non_dicom_geometry_job_coverage AS
+SELECT * FROM public_non_dicom_geometry_job_coverage;
+
 CREATE VIEW agent_public_non_dicom_dataset_metadata_notes AS
 SELECT * FROM public_non_dicom_dataset_metadata_notes;
 """
@@ -890,6 +909,25 @@ def ensure_geometry_schema(conn: sqlite3.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS idx_public_geometry_asset "
         "ON public_non_dicom_geometry_assessments(asset_id)"
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS public_non_dicom_geometry_job_coverage (
+            job_id TEXT PRIMARY KEY,
+            short_title TEXT NOT NULL,
+            download_status TEXT NOT NULL,
+            complete INTEGER NOT NULL CHECK (complete IN (0, 1)),
+            analyzable INTEGER NOT NULL CHECK (analyzable IN (0, 1)),
+            inventory_non_directory_entries INTEGER,
+            downloaded_files INTEGER,
+            file_count_coverage REAL,
+            missing_paths_json TEXT NOT NULL DEFAULT '[]',
+            source_error_json TEXT NOT NULL DEFAULT '{}',
+            documented_at_utc TEXT,
+            source_coverage_artifact TEXT NOT NULL,
+            coverage_payload_json TEXT NOT NULL
+        )
+        """
+    )
     conn.execute("DROP VIEW IF EXISTS agent_public_non_dicom_geometry_status")
     conn.execute(
         """
@@ -928,6 +966,13 @@ def ensure_geometry_schema(conn: sqlite3.Connection) -> None:
         JOIN public_non_dicom_assets a USING(asset_id)
         """
     )
+    conn.execute("DROP VIEW IF EXISTS agent_public_non_dicom_geometry_job_coverage")
+    conn.execute(
+        """
+        CREATE VIEW agent_public_non_dicom_geometry_job_coverage AS
+        SELECT * FROM public_non_dicom_geometry_job_coverage
+        """
+    )
 
 
 def geometry_capable_format(value: object) -> bool:
@@ -960,8 +1005,92 @@ def initialize_geometry_statuses(conn: sqlite3.Connection) -> int:
     return len(updates)
 
 
+def geometry_format_tokens(value: object) -> set[str]:
+    return {
+        token.strip().upper()
+        for token in re.split(r"[,;]", str(value or ""))
+        if token.strip()
+    }
+
+
+def geometry_asset_index(
+    conn: sqlite3.Connection,
+) -> tuple[set[str], dict[tuple[str, str], list[sqlite3.Row]]]:
+    valid_ids: set[str] = set()
+    by_download: dict[tuple[str, str], list[sqlite3.Row]] = defaultdict(list)
+    for asset in conn.execute(
+        """
+        SELECT asset_id, short_title, download_id, asset_granularity,
+               package_path, file_format
+        FROM public_non_dicom_assets
+        """
+    ):
+        asset_id = str(asset["asset_id"])
+        valid_ids.add(asset_id)
+        by_download[(str(asset["short_title"]), str(asset["download_id"]))].append(
+            asset
+        )
+    return valid_ids, by_download
+
+
+def resolve_geometry_asset_id(
+    row: sqlite3.Row,
+    valid_ids: set[str],
+    by_download: dict[tuple[str, str], list[sqlite3.Row]],
+) -> tuple[str, str]:
+    supplied = str(row["asset_id"] or "")
+    if supplied in valid_ids:
+        return supplied, "source_asset_id"
+
+    file_format = str(row["file_format"] or "").upper()
+    local_path = str(row["local_relative_path"] or "")
+    candidates = [
+        asset
+        for asset in by_download.get(
+            (str(row["short_title"] or ""), str(row["download_id"] or "")),
+            [],
+        )
+        if file_format in geometry_format_tokens(asset["file_format"])
+    ]
+    suffix_matches: list[tuple[int, str]] = []
+    for asset in candidates:
+        package_path = str(asset["package_path"] or "").lstrip("/")
+        path_with_boundaries = f"/{local_path.strip('/')}/"
+        package_with_boundaries = f"/{package_path.strip('/')}/"
+        if package_path and package_with_boundaries in path_with_boundaries:
+            suffix_matches.append((len(package_path), str(asset["asset_id"])))
+    if suffix_matches:
+        longest = max(length for length, _ in suffix_matches)
+        asset_ids = {
+            asset_id
+            for length, asset_id in suffix_matches
+            if length == longest
+        }
+        if len(asset_ids) == 1:
+            return next(iter(asset_ids)), "unique_package_path"
+        return "", "ambiguous_package_path"
+
+    download_assets = {
+        str(asset["asset_id"])
+        for asset in candidates
+        if str(asset["asset_granularity"] or "") == "download"
+    }
+    if len(download_assets) == 1:
+        return next(iter(download_assets)), "unique_download_asset"
+    return "", "ambiguous_or_missing_asset"
+
+
 def ingest_geometry_results(conn: sqlite3.Connection, path: Path | None) -> dict[str, int]:
-    counts = {"assessment_rows": 0, "matched_rows": 0, "matched_assets": 0, "unmatched_rows": 0}
+    counts = {
+        "assessment_rows": 0,
+        "excluded_dicom_rows": 0,
+        "matched_rows": 0,
+        "matched_assets": 0,
+        "unmatched_rows": 0,
+        "source_asset_id_rows": 0,
+        "package_path_mapped_rows": 0,
+        "download_asset_mapped_rows": 0,
+    }
     if path is None:
         return counts
     if not path.is_file():
@@ -969,12 +1098,15 @@ def ingest_geometry_results(conn: sqlite3.Connection, path: Path | None) -> dict
     source_digest = file_sha256(path)
     source_artifact = f"geometry_results.sqlite:sha256:{source_digest}"
     matched_asset_ids: set[str] = set()
+    valid_asset_ids, assets_by_download = geometry_asset_index(conn)
+    unmatched_examples: list[str] = []
     with closing(connect(path)) as source:
         if not table_exists(source, "geometry_assessments"):
             raise RuntimeError("Geometry result database is missing geometry_assessments")
         for row in source.execute(
             """
-            SELECT assessment_id, asset_id, geometry_status, analyzer, analyzer_version,
+            SELECT assessment_id, short_title, download_id, asset_id,
+                   geometry_status, analyzer, analyzer_version,
                    assessed_at_utc, checks_json, details_json, error,
                    local_relative_path, file_format, assessment_scope,
                    series_instance_uid, study_instance_uid, dimension,
@@ -983,15 +1115,31 @@ def ingest_geometry_results(conn: sqlite3.Connection, path: Path | None) -> dict
             """
         ):
             counts["assessment_rows"] += 1
-            asset_id = str(row["asset_id"] or "")
+            if str(row["file_format"] or "").upper() == "DICOM":
+                counts["excluded_dicom_rows"] += 1
+                continue
+            asset_id, resolution = resolve_geometry_asset_id(
+                row, valid_asset_ids, assets_by_download
+            )
             status = str(row["geometry_status"] or "not_checked")
             if status not in GEOMETRY_STATUSES:
                 raise RuntimeError(f"Unsupported geometry status in {path}: {status}")
-            if not asset_id or conn.execute(
-                "SELECT 1 FROM public_non_dicom_assets WHERE asset_id=?", (asset_id,)
-            ).fetchone() is None:
+            if not asset_id:
                 counts["unmatched_rows"] += 1
+                if len(unmatched_examples) < 10:
+                    unmatched_examples.append(
+                        f"assessment_id={row['assessment_id']} "
+                        f"dataset={row['short_title']} download_id={row['download_id']} "
+                        f"format={row['file_format']} path={row['local_relative_path']} "
+                        f"resolution={resolution}"
+                    )
                 continue
+            if resolution == "source_asset_id":
+                counts["source_asset_id_rows"] += 1
+            elif resolution == "unique_package_path":
+                counts["package_path_mapped_rows"] += 1
+            elif resolution == "unique_download_asset":
+                counts["download_asset_mapped_rows"] += 1
             conn.execute(
                 """
                 INSERT OR REPLACE INTO public_non_dicom_geometry_assessments (
@@ -1028,6 +1176,12 @@ def ingest_geometry_results(conn: sqlite3.Connection, path: Path | None) -> dict
             )
             counts["matched_rows"] += 1
             matched_asset_ids.add(asset_id)
+    if counts["unmatched_rows"]:
+        raise RuntimeError(
+            f"Geometry import could not map {counts['unmatched_rows']} of "
+            f"{counts['assessment_rows']} assessments to V2 assets. Examples: "
+            + " | ".join(unmatched_examples)
+        )
     asset_rows = conn.execute(
         """
         SELECT asset_id, group_concat(DISTINCT geometry_status),
@@ -1065,6 +1219,61 @@ def ingest_geometry_results(conn: sqlite3.Connection, path: Path | None) -> dict
         )
     counts["matched_assets"] = len(matched_asset_ids)
     return counts
+
+
+def ingest_geometry_coverage(
+    conn: sqlite3.Connection, paths: list[Path] | None
+) -> int:
+    conn.execute("DELETE FROM public_non_dicom_geometry_job_coverage")
+    if not paths:
+        return 0
+    inserted = 0
+    for path in paths:
+        if not path.is_file():
+            raise FileNotFoundError(f"Geometry coverage file not found: {path}")
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            raise RuntimeError(f"Geometry coverage must be a JSON object: {path}")
+        job_id = str(payload.get("job_id") or "")
+        short_title = str(payload.get("short_title") or "")
+        if not job_id or not short_title:
+            raise RuntimeError(
+                f"Geometry coverage lacks job_id or short_title: {path}"
+            )
+        coverage = payload.get("file_count_coverage")
+        if coverage is not None and not 0 <= float(coverage) <= 1:
+            raise RuntimeError(f"Invalid file_count_coverage in {path}: {coverage}")
+        if conn.execute(
+            "SELECT 1 FROM public_non_dicom_assets WHERE short_title=? LIMIT 1",
+            (short_title,),
+        ).fetchone() is None:
+            raise RuntimeError(
+                f"Geometry coverage dataset is absent from V2 assets: {short_title}"
+            )
+        source_artifact = f"{path.name}:sha256:{file_sha256(path)}"
+        conn.execute(
+            """
+            INSERT INTO public_non_dicom_geometry_job_coverage VALUES
+            (?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                job_id,
+                short_title,
+                str(payload.get("download_status") or "documented"),
+                int(bool(payload.get("complete"))),
+                int(bool(payload.get("analyzable"))),
+                payload.get("inventory_non_directory_entries"),
+                payload.get("downloaded_files"),
+                float(coverage) if coverage is not None else None,
+                json_dumps(payload.get("missing_paths") or []),
+                json_dumps(payload.get("source_error") or {}),
+                str(payload.get("documented_at_utc") or "") or None,
+                source_artifact,
+                json_dumps(payload),
+            ),
+        )
+        inserted += 1
+    return inserted
 
 
 def insert_location(conn: sqlite3.Connection, values: dict[str, Any]) -> None:
@@ -2182,13 +2391,6 @@ def ingest_bcbm_workbook_metadata(
     return counts
 
 
-BRATS_DICOM_PATH = re.compile(
-    r"^(?P<root>.+/BraTS2021_(?P<cohort>Training|Validation)Set_dcm/"
-    r"(?P<source_group>[^/]+)/(?P<raw_subject_id>\d{5})/(?P<modality>[^/]+))/"
-    r"(?P<file_name>[^/]+\.dcm)$",
-    re.IGNORECASE,
-)
-
 REMIND_NRRD_PATH = re.compile(
     r"(?:^|/)(?P<subject>ReMIND-\d{3})/"
     r"(?P=subject)-(?P<phase>preop|intraop)-SEG-"
@@ -2197,206 +2399,6 @@ REMIND_NRRD_PATH = re.compile(
     re.IGNORECASE,
 )
 EMPTY_FILE_MD5 = "d41d8cd98f00b204e9800998ecf8427e"
-
-
-def ingest_aspera_public_dicom_exceptions(
-    conn: sqlite3.Connection,
-    nifti_db: Path,
-    brats_crosswalk: dict[str, dict[str, str]],
-    brats_provenance: dict[str, Any],
-) -> int:
-    """Import compact participant/modality summaries for public DICOM absent from IDC.
-
-    The legacy NIfTI sidecar intentionally retains every row from package-level
-    ``.sums`` inventories. BraTS 2021 uses that inventory for parallel NIfTI and
-    DICOM trees, including nine participants that occur only in the DICOM tree.
-    Store one logical asset per participant/modality rather than duplicating
-    hundreds of thousands of DICOM-instance rows.
-    """
-    if not nifti_db.exists():
-        return 0
-    with closing(connect(nifti_db)) as source:
-        if not table_exists(source, "aspera_root_sums_inventory"):
-            return 0
-        downloads: dict[tuple[str, str], str] = {}
-        if table_exists(source, "agent_nifti_downloads"):
-            for row in source.execute(
-                "SELECT short_title, download_id, download_url FROM agent_nifti_downloads"
-            ):
-                downloads[(str(row["short_title"]), str(row["download_id"] or ""))] = str(
-                    row["download_url"] or ""
-                )
-        grouped: dict[tuple[str, ...], dict[str, Any]] = {}
-        for row in source.execute(
-            """
-            SELECT dataset_type, short_title, download_id, package_path
-            FROM aspera_root_sums_inventory
-            WHERE lower(short_title) = lower('RSNA-ASNR-MICCAI-BraTS-2021')
-              AND lower(ltrim(file_ext, '.')) = 'dcm'
-            ORDER BY line_number
-            """
-        ):
-            package_path = str(row["package_path"] or "")
-            match = BRATS_DICOM_PATH.match(package_path)
-            if not match:
-                continue
-            raw_subject_id = match.group("raw_subject_id")
-            subject_id = f"BraTS2021_{raw_subject_id}"
-            key = (
-                str(row["dataset_type"] or "Analysis Result"),
-                str(row["short_title"]),
-                str(row["download_id"] or ""),
-                match.group("cohort").title(),
-                match.group("source_group"),
-                raw_subject_id,
-                match.group("modality"),
-                match.group("root"),
-            )
-            item = grouped.setdefault(
-                key,
-                {
-                    "subject_id": subject_id,
-                    "file_count": 0,
-                },
-            )
-            item["file_count"] += 1
-
-        for key, item in grouped.items():
-            (
-                dataset_type,
-                short_title,
-                download_id,
-                cohort,
-                source_group,
-                raw_subject_id,
-                modality,
-                package_root,
-            ) = key
-            challenge_id = str(item["subject_id"])
-            subject_id, namespace, link_status, brats_evidence = brats_participant_projection(
-                challenge_id, brats_crosswalk, brats_provenance
-            )
-            file_count = int(item["file_count"])
-            url = downloads.get((short_title, download_id), "")
-            asset_id = stable_id(
-                "asset",
-                "aspera_public_dicom_exception",
-                short_title,
-                cohort,
-                source_group,
-                raw_subject_id,
-                modality,
-            )
-            insert_asset(
-                conn,
-                {
-                    "asset_id": asset_id,
-                    "dataset_type": dataset_type,
-                    "short_title": short_title,
-                    "download_row_id": None,
-                    "download_id": download_id,
-                    "subject_id": subject_id,
-                    "subject_id_namespace": namespace,
-                    "participant_link_status": link_status,
-                    "asset_granularity": "participant_modality",
-                    "asset_name": f"{subject_id} {modality} DICOM instances",
-                    "file_name": "",
-                    "package_path": package_root,
-                    "file_format": "DICOM",
-                    "container_format": "",
-                    "media_kind": "dicom_instance_collection",
-                    "spatial_dimensionality": "unknown",
-                    "temporal_dimensionality": "unknown",
-                    "imaging_domain": "radiology",
-                    "modality": "MR",
-                    "object_role": "source_image",
-                    "represented_file_count": file_count,
-                    "size_bytes": None,
-                    "checksum": "",
-                    "checksum_algorithm": "",
-                    "representation_provenance_class": "submitted_original",
-                    "source_system": "tcia_aspera",
-                    "source_record_id": (
-                        f"{download_id}:BraTS2021_{cohort}Set_dcm:"
-                        f"{source_group}:{raw_subject_id}:{modality}"
-                    ),
-                    "source_url": url,
-                    "raw_values_json": json_dumps(
-                        {
-                            "challenge_cohort": cohort,
-                            "source_group": source_group,
-                            "raw_subject_folder": raw_subject_id,
-                            "brats_sequence_folder": modality,
-                            "represented_dicom_instances": file_count,
-                            "brats_crosswalk": brats_evidence,
-                        }
-                    ),
-                    "provenance_json": json_dumps(
-                        {
-                            "source_artifact": "nifti_metadata",
-                            "source_table": "aspera_root_sums_inventory",
-                            "inventory_scope": "public_aspera_dicom_not_in_idc",
-                            "identifier_method": "BraTS DICOM folder normalized to challenge ID",
-                            "brats_crosswalk": brats_evidence,
-                        }
-                    ),
-                    "quality_flag_json": json_dumps(
-                        {
-                            "idc_availability": "not_observed",
-                            "file_detail_pointer": "aspera_root_sums_inventory",
-                        }
-                    ),
-                },
-            )
-            insert_asset_participant(
-                conn,
-                asset_id=asset_id,
-                short_title=short_title,
-                subject_id=subject_id,
-                namespace=namespace,
-                raw_subject_id=challenge_id,
-                participant_role="depicted_subject",
-                link_status=link_status,
-                evidence=brats_evidence,
-            )
-            insert_brats_crosswalk_evidence(
-                conn, asset_id, challenge_id, subject_id, brats_evidence
-            )
-            insert_location(
-                conn,
-                location_values(
-                    asset_id,
-                    url,
-                    representation_class="submitted_original",
-                    provenance={
-                        "source_artifact": "nifti_metadata",
-                        "source_table": "aspera_root_sums_inventory",
-                    },
-                ),
-            )
-            merge_image_metadata(
-                conn,
-                asset_id,
-                {
-                    "modality": "MR",
-                    "file_format": "DICOM",
-                    "media_kind": "dicom_instance_collection",
-                    "spatial_dimensionality": "unknown",
-                    "temporal_dimensionality": "unknown",
-                    "object_role": "source_image",
-                    "sequence_name": filename_metadata(package_root).get("sequence_name", ""),
-                },
-                value_role="normalized",
-                source_kind="aspera_package_inventory",
-                source_locator="nifti_metadata.aspera_root_sums_inventory",
-                inference_method="brats_dicom_folder_projection",
-                confidence="high",
-                priority=90,
-                evidence={"package_root": package_root},
-                short_title=short_title,
-                assume_new=True,
-            )
-    return len(grouped)
 
 
 def load_remind_nrrd_reference(
@@ -6389,6 +6391,7 @@ def delete_refreshable_assets(conn: sqlite3.Connection) -> int:
         "SELECT asset_id FROM public_non_dicom_assets "
         "WHERE (source_system IN ('tcia_wordpress', 'tcia_aspera') "
         "       AND asset_granularity='download') "
+        "   OR source_record_id LIKE 'tcga-gbm-qi-aim-inventory:%' "
         "   OR source_record_id LIKE 'tcga-lgg-mask-%' "
         "   OR source_record_id LIKE 'tcga-lgg-mask-inventory:%' "
         "   OR source_record_id LIKE 'reviewed-participant-inventory:%' "
@@ -6415,6 +6418,55 @@ def delete_refreshable_assets(conn: sqlite3.Connection) -> int:
         "WHERE asset_id IN (SELECT asset_id FROM refresh_asset_ids)"
     )
     conn.execute("DROP TABLE refresh_asset_ids")
+    return count
+
+
+def delete_public_dicom_assets(conn: sqlite3.Connection) -> int:
+    """Remove DICOM from the public non-DICOM research domain.
+
+    Public DICOM belongs in IDC and receives geometry status from idc-index.
+    This cleanup also removes compact DICOM exceptions retained by older V2
+    baselines so they cannot leak into a refreshed public-non-DICOM artifact.
+    """
+    conn.execute("DROP TABLE IF EXISTS temp.public_dicom_asset_ids")
+    conn.execute(
+        "CREATE TEMP TABLE public_dicom_asset_ids(asset_id TEXT PRIMARY KEY)"
+    )
+    conn.execute(
+        """
+        INSERT INTO public_dicom_asset_ids
+        SELECT asset_id
+        FROM public_non_dicom_assets
+        WHERE instr(
+            ',' || replace(upper(COALESCE(file_format, '')), ';', ',') || ',',
+            ',DICOM,'
+        ) > 0
+        """
+    )
+    count = int(
+        conn.execute("SELECT COUNT(*) FROM public_dicom_asset_ids").fetchone()[0]
+    )
+    conn.execute(
+        "DELETE FROM public_non_dicom_asset_relationships "
+        "WHERE source_asset_id IN (SELECT asset_id FROM public_dicom_asset_ids) "
+        "   OR target_asset_id IN (SELECT asset_id FROM public_dicom_asset_ids)"
+    )
+    for table in (
+        "public_non_dicom_locations",
+        "public_non_dicom_asset_participants",
+        "public_non_dicom_crosswalk_evidence",
+        "public_non_dicom_image_metadata",
+        "public_non_dicom_geometry_assessments",
+    ):
+        conn.execute(
+            f"DELETE FROM {table} "
+            "WHERE asset_id IN (SELECT asset_id FROM public_dicom_asset_ids)"
+        )
+    conn.execute(
+        "DELETE FROM public_non_dicom_assets "
+        "WHERE asset_id IN (SELECT asset_id FROM public_dicom_asset_ids)"
+    )
+    conn.execute("DROP TABLE public_dicom_asset_ids")
     return count
 
 
@@ -6595,6 +6647,7 @@ def build_database(
     reviewed_participant_inventory: Path = DEFAULT_REVIEWED_PARTICIPANT_INVENTORY,
     reviewed_participant_provenance: Path = DEFAULT_REVIEWED_PARTICIPANT_PROVENANCE,
     geometry_results: Path | None = None,
+    geometry_coverage: list[Path] | None = None,
     staging_db: Path | None = None,
     baseline_db: Path | None = None,
 ) -> dict[str, Any]:
@@ -6625,6 +6678,7 @@ def build_database(
             ensure_geometry_schema(conn)
             conn.execute("DELETE FROM artifact_meta")
             refreshed_assets = delete_refreshable_assets(conn)
+            public_dicom_assets_removed = delete_public_dicom_assets(conn)
             conn.execute("DELETE FROM public_non_dicom_crosswalk_decisions")
             conn.execute("DELETE FROM public_non_dicom_crosswalk_evidence")
             conn.execute("DELETE FROM public_non_dicom_review_issues")
@@ -6635,17 +6689,14 @@ def build_database(
             insert_vocab(conn)
             ensure_geometry_schema(conn)
             refreshed_assets = 0
+            public_dicom_assets_removed = 0
         counts = {
             "baseline_refreshable_assets_removed": refreshed_assets,
+            "public_dicom_assets_removed": public_dicom_assets_removed,
             "wordpress_download_assets": ingest_wordpress(conn, snapshot_db),
             "nifti_file_assets": ingest_nifti(
                 conn, nifti_db, brats_crosswalk, brats_provenance
             ) if nifti_db else 0,
-            "aspera_public_dicom_exception_assets": (
-                ingest_aspera_public_dicom_exceptions(
-                    conn, nifti_db, brats_crosswalk, brats_provenance
-                ) if nifti_db else 0
-            ),
             "remind_nrrd_file_assets": ingest_remind_nrrd_inventory(
                 conn,
                 nifti_db,
@@ -6737,6 +6788,9 @@ def build_database(
         counts.update(
             {f"geometry_results_{key}": value for key, value in geometry_counts.items()}
         )
+        counts["geometry_coverage_rows"] = ingest_geometry_coverage(
+            conn, geometry_coverage
+        )
         generated = datetime.now(timezone.utc).isoformat()
         metadata = {
             "schema_version": SCHEMA_VERSION,
@@ -6758,6 +6812,9 @@ def build_database(
             "source_geometry_results": (
                 source_meta(geometry_results) if geometry_results else {"enabled": False}
             ),
+            "source_geometry_coverage": [
+                source_meta(path) for path in geometry_coverage or []
+            ],
             "source_tcga_gbm_qi_aim_inventory": source_meta(DEFAULT_TCGA_GBM_QI_AIM_INVENTORY),
             "source_tcga_gbm_qi_aim_provenance": source_meta(DEFAULT_TCGA_GBM_QI_AIM_PROVENANCE),
             "source_cptac_gbm_codex_inventory": source_meta(DEFAULT_CPTAC_GBM_CODEX_INVENTORY),
@@ -6838,7 +6895,9 @@ def validate_database(path: Path) -> dict[str, Any]:
             required.update(
                 {
                     "public_non_dicom_geometry_assessments",
+                    "public_non_dicom_geometry_job_coverage",
                     "agent_public_non_dicom_geometry_status",
+                    "agent_public_non_dicom_geometry_job_coverage",
                 }
             )
         missing = sorted(required - objects)
@@ -6851,6 +6910,31 @@ def validate_database(path: Path) -> dict[str, Any]:
             if row[0] not in REPRESENTATION_PROVENANCE_CLASSES:
                 errors.append(f"invalid representation class: {row[0]}")
         if artifact_schema_version >= 8:
+            public_dicom_assets = conn.execute(
+                """
+                SELECT COUNT(*) FROM public_non_dicom_assets
+                WHERE instr(
+                    ',' || replace(upper(COALESCE(file_format, '')), ';', ',') || ',',
+                    ',DICOM,'
+                ) > 0
+                """
+            ).fetchone()[0]
+            if public_dicom_assets:
+                errors.append(
+                    "public DICOM assets belong in IDC, not public_non_dicom: "
+                    f"{public_dicom_assets}"
+                )
+            public_dicom_geometry = conn.execute(
+                """
+                SELECT COUNT(*) FROM public_non_dicom_geometry_assessments
+                WHERE upper(COALESCE(file_format, ''))='DICOM'
+                """
+            ).fetchone()[0]
+            if public_dicom_geometry:
+                errors.append(
+                    "public DICOM geometry belongs in idc-index, not public_non_dicom: "
+                    f"{public_dicom_geometry}"
+                )
             invalid_geometry = [
                 str(row[0])
                 for row in conn.execute(
@@ -6879,7 +6963,7 @@ def validate_database(path: Path) -> dict[str, Any]:
                 """
                 SELECT COUNT(*) FROM public_non_dicom_assets
                 WHERE geometry_status='not_checked'
-                  AND upper(file_format) NOT IN ('DICOM','NIFTI','MHA','MHD','NRRD')
+                  AND upper(file_format) NOT IN ('NIFTI','MHA','MHD','NRRD')
                 """
             ).fetchone()[0]
             if unchecked_non_geometry:
@@ -6934,6 +7018,16 @@ def validate_database(path: Path) -> dict[str, Any]:
             "crosswalk_evidence": conn.execute("SELECT COUNT(*) FROM public_non_dicom_crosswalk_evidence").fetchone()[0],
             "image_metadata_assets": conn.execute("SELECT COUNT(*) FROM public_non_dicom_image_metadata").fetchone()[0],
             "metadata_field_coverage_rows": conn.execute("SELECT COUNT(*) FROM public_non_dicom_metadata_field_coverage").fetchone()[0],
+            "geometry_assessment_rows": conn.execute(
+                "SELECT COUNT(*) FROM public_non_dicom_geometry_assessments"
+            ).fetchone()[0] if artifact_schema_version >= 8 else 0,
+            "geometry_coverage_rows": conn.execute(
+                "SELECT COUNT(*) FROM public_non_dicom_geometry_job_coverage"
+            ).fetchone()[0] if artifact_schema_version >= 8 else 0,
+            "public_dicom_assets": public_dicom_assets
+            if artifact_schema_version >= 8 else 0,
+            "public_dicom_geometry_assessments": public_dicom_geometry
+            if artifact_schema_version >= 8 else 0,
             "dataset_metadata_notes": conn.execute("SELECT COUNT(*) FROM public_non_dicom_dataset_metadata_notes").fetchone()[0],
             "geometry_not_checked": conn.execute(
                 "SELECT COUNT(*) FROM public_non_dicom_assets WHERE geometry_status='not_checked'"
@@ -6968,10 +7062,10 @@ def validate_database(path: Path) -> dict[str, Any]:
             }
             counts.update(brats_counts)
             expected_brats = {
-                "brats_participants": 1479,
-                "brats_challenge_aliases": 1479,
+                "brats_participants": 1470,
+                "brats_challenge_aliases": 1470,
                 "brats_source_collection_identifiers": 1066,
-                "brats_challenge_only_identifiers": 413,
+                "brats_challenge_only_identifiers": 404,
                 "brats_reviewed_source_crosswalks": 1066,
             }
             for name, expected in expected_brats.items():
@@ -7406,6 +7500,15 @@ def parser() -> argparse.ArgumentParser:
             "scripts/tcia_geometry_batch.py; omitted assets remain not_checked."
         ),
     )
+    build.add_argument(
+        "--geometry-coverage",
+        action="append",
+        default=[],
+        help=(
+            "Optional documented job-coverage exception JSON; repeat for "
+            "multiple exceptions."
+        ),
+    )
     build.add_argument("--out", default=str(DEFAULT_DB))
     build.add_argument("--gzip-out")
     build.add_argument("--manifest-out")
@@ -7479,6 +7582,7 @@ def main() -> int:
             reviewed_participant_inventory=Path(args.reviewed_participant_inventory),
             reviewed_participant_provenance=Path(args.reviewed_participant_provenance),
             geometry_results=Path(args.geometry_results) if args.geometry_results else None,
+            geometry_coverage=[Path(value) for value in args.geometry_coverage],
             include_pathdb_files=not args.no_pathdb_files,
             replace=args.replace,
             staging_db=staging_db,

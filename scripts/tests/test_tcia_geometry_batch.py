@@ -16,6 +16,7 @@ from scripts.tcia_geometry_batch import (
     merge_results,
     load_asset_manifest,
     load_job,
+    map_asset_id,
     plan_jobs,
 )
 
@@ -30,17 +31,17 @@ class GeometryBatchTests(unittest.TestCase):
         self.assertTrue(matrix_is_orthonormal([1, 0, 0, 1], 2))
         self.assertFalse(matrix_is_orthonormal([1, 0, 1, 0], 2))
 
-    def test_faspex_public_link_versions_are_distinguished(self):
+    def test_legacy_looking_faspex_link_uses_current_tcia_service(self):
         self.assertEqual(
             detect_route("https://example.org/aspera/faspex/public/package?context=x"),
-            "aspera_faspex4_public_link",
+            "aspera_faspex5_public_link",
         )
         self.assertEqual(
             detect_route("https://faspex.example.org/?context=x"),
             "aspera_faspex5_public_link",
         )
 
-    def test_faspex_download_commands_use_matching_plugins(self):
+    def test_faspex_download_routes_use_faspex5_public_link_workflow(self):
         base = {
             "short_title": "Demo",
             "job_id": "job_1",
@@ -53,15 +54,53 @@ class GeometryBatchTests(unittest.TestCase):
             download_job(
                 {**base, "route_type": "aspera_faspex4_public_link"}, root
             )
-            self.assertEqual(run.call_args.args[0][1:4], ["faspex", "package", "receive"])
+            self.assertEqual(
+                run.call_args.args[0],
+                ["ascli", "faspex5", "packages", "receive", "--url=https://example.org/?context=x"],
+            )
             target = root / "Demo--job_1"
             (target / ".download_complete.json").unlink()
             download_job(
                 {**base, "route_type": "aspera_faspex5_public_link"}, root
             )
             self.assertEqual(
-                run.call_args.args[0][1:4], ["faspex5", "packages", "receive"]
+                run.call_args.args[0],
+                ["ascli", "faspex5", "packages", "receive", "--url=https://example.org/?context=x"],
             )
+
+    def test_map_asset_id_uses_unique_suffix_or_download_asset(self):
+        root = Path("/tmp/job")
+        suffix_asset = {
+            "asset_id": "asset-series",
+            "asset_granularity": "participant_modality",
+            "package_path": "Demo/package/case/T1w",
+            "file_format": "DICOM",
+        }
+        self.assertEqual(
+            map_asset_id(
+                root / "wrapper/Demo/package/case/T1w/1.dcm",
+                root,
+                [suffix_asset],
+                "DICOM",
+            ),
+            "asset-series",
+        )
+        self.assertEqual(
+            map_asset_id(
+                root / "extracted/case.nii.gz",
+                root,
+                [
+                    {
+                        "asset_id": "asset-download",
+                        "asset_granularity": "download",
+                        "package_path": "",
+                        "file_format": "NIFTI",
+                    }
+                ],
+                "NIFTI",
+            ),
+            "asset-download",
+        )
 
     def test_regular_dicom_series(self):
         instances = []

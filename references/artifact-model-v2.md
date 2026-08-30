@@ -12,7 +12,7 @@ installation audience differ. Compose them through the Participant Inventory.
 | --- | --- | --- |
 | Base TCIA snapshot | WordPress publication identity, downloads, licenses, and routes | Required |
 | IDC | Authoritative public DICOM metadata and access | Query/project only; do not duplicate file metadata |
-| Public non-DICOM metadata | Public imaging and imaging-derived objects not represented by IDC; the historical artifact name also carries narrowly scoped Aspera-only public-DICOM exceptions | Optional detail artifact |
+| Public non-DICOM metadata | Public non-DICOM imaging and imaging-derived objects | Optional detail artifact |
 | Controlled-access metadata | Public metadata describing GC/CTDC controlled DICOM and non-DICOM holdings | Optional detail artifact |
 | Clinical metadata | Raw, normalized, harmonized, inferred, and resolved participant facts | Optional enrichment |
 | Participant Inventory | Compact dataset-scoped participant availability across the above sources | Participant Explorer integration artifact |
@@ -117,16 +117,12 @@ losslessly materialize an internal assembly, refresh current WordPress and
 PathDB scopes directly, and apply checksum-pinned reviewed references. The
 retired standalone NIfTI and pathology artifacts are not producer inputs.
 
-Public DICOM normally remains an IDC query concern and is not duplicated here.
-When a TCIA-published public DICOM representation is distributed through an
-Aspera package but is absent from IDC, retain a compact exception in the same
-physical detail artifact with `file_format='DICOM'`,
-`source_system='tcia_aspera'`, and participant/modality-level represented-file
-counts. This keeps the Participant Inventory complete without implying IDC
-availability or copying hundreds of thousands of instance rows. The BraTS 2021
-parallel `*Set_dcm` trees are the initial reviewed exception; their companion
-NIfTI trees are marked `standardized_representation`, while the package DICOM
-trees are marked `submitted_original`.
+Public DICOM remains an IDC query concern and is not duplicated here. If a
+TCIA-published package contains public DICOM that is absent from IDC, treat that
+as a source-remediation gap: submit it to IDC rather than adding an exception to
+`public_non_dicom`. Legacy public-DICOM exception assets are removed during a
+baseline refresh. The BraTS 2021 companion NIfTI trees remain in this artifact;
+the package's DICOM trees are excluded pending IDC submission.
 
 BraTS 2021 participant identity is projected from the official TCIA workbook
 through the hash-pinned references
@@ -137,15 +133,18 @@ Result display identifier and preserve the `BraTS2021_NNNNN` value as an
 alternate challenge identifier. The Analysis Result and Collection remain
 separate participant scopes; `participant_identity_evidence` records the
 explicit workbook relationship. Additional, private, and unnamed groups retain
-their BraTS identifiers. Current builds gate 1,479 total subjects, 1,066 named
-source identifiers, and 413 challenge-only identifiers. The eight numeric
+their BraTS identifiers. The reviewed workbook crosswalk contains 1,479 rows,
+but the public non-DICOM artifact gates the 1,470 participants represented in
+the companion NIfTI trees: 1,066 named source identifiers and 404
+challenge-only identifiers. The nine DICOM-only participants are intentionally
+excluded pending IDC submission. The eight numeric
 BraTS-TCGA test rows are normalized only to their existing BraTS aliases;
 test-set data availability is deliberately outside this crosswalk.
 
 ### Geometry assessment
 
 Keep geometry assessment separate from format, modality, media kind, and object
-role. DICOM, NIfTI, MHA/MHD, and NRRD identify encodings; none proves that a
+role. NIfTI, MHA/MHD, and NRRD identify encodings; none proves that a
 particular object is a coherent volume.
 
 For IDC DICOM, build the compact participant projection from the separately
@@ -154,12 +153,17 @@ as `checked_regular`, `checked_not_regular`, or `checked_indeterminate`; a
 series outside that index's documented scope is
 `not_in_geometry_index_scope`, not an inferred volume.
 
-For non-IDC DICOM and single-file volume formats, initialize eligible assets as
+For single-file non-DICOM volume formats, initialize eligible assets as
 `not_checked`. Import cluster results only from the header-only workflow in
-`references/geometry-batch-slurm.md`. Preserve every file- or DICOM-series-level
-row in `public_non_dicom_geometry_assessments`; the geometry fields on
+`references/geometry-batch-slurm.md`. Preserve every file-level row in
+`public_non_dicom_geometry_assessments`; the geometry fields on
 `public_non_dicom_assets` are summaries and may be `mixed`. Header assessment
 does not establish pixel quality, clinical usability, or semantic correctness.
+When a source package has a documented coverage exception,
+`public_non_dicom_geometry_job_coverage` and
+`agent_public_non_dicom_geometry_job_coverage` retain the complete/partial
+state, counts, missing paths, source error, and sidecar digest. Never infer
+complete package coverage from the presence of an analysis result alone.
 
 ### Non-DICOM annotations
 
@@ -592,6 +596,9 @@ The streamlined release uses compact public audit schema 3. Schema 3 treats
 the original public non-DICOM database
 as a short-lived assembly database and projects fresh research and audit
 outputs rather than clearing columns and vacuuming that multi-GB file in place.
+Capacity and release-size reviews must measure those projected outputs, not the
+assembly: the assembly intentionally repeats entity-local field provenance that
+the audit projection subsequently normalizes and deduplicates.
 It uses integer entity/field links, 32-byte digest BLOBs, and `WITHOUT ROWID`
 link tables. It also removes the redundant entity index that duplicated the
 schema-2 composite primary key.

@@ -1772,9 +1772,9 @@ def validate_database(
             }
             counts.update(brats_counts)
             expected_brats = {
-                "brats_participants": 1479,
+                "brats_participants": 1470,
                 "brats_source_display_ids": 1066,
-                "brats_challenge_display_ids": 413,
+                "brats_challenge_display_ids": 404,
                 "brats_alternate_challenge_aliases": 1066,
                 "brats_linked_source_collection": 1060,
                 "brats_source_participant_not_current": 6,

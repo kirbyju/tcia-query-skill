@@ -395,6 +395,13 @@ class V2AuditSplitTests(unittest.TestCase):
                 )
                 self.assertEqual(
                     conn.execute(
+                        "SELECT SUM(length(field_provenance_json)) "
+                        "FROM public_non_dicom_image_metadata"
+                    ).fetchone()[0],
+                    4,
+                )
+                self.assertEqual(
+                    conn.execute(
                         "SELECT value FROM artifact_meta WHERE key='audit_schema_version'"
                     ).fetchone()[0],
                     "3",

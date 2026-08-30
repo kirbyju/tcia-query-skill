@@ -72,9 +72,10 @@ class VocabularyTests(unittest.TestCase):
                     ("wordpress_download", "Collection", "B", "download", "ZIP", "archive", "unknown", "unknown", "other", "package", "unknown", "tcia_wordpress", "2"),
                     ("aspera_file", "Collection", "A", "file", "NRRD", "image_volume", "3d", "none", "radiology", "segmentation", "submitted_original", "tcia_aspera", "3"),
                     ("pathdb_file", "Collection", "C", "file", "SVS", "whole_slide_image", "2d", "none", "pathology", "source_image", "submitted_original", "tcia_pathdb", "4"),
+                    ("stale_aim_file", "Analysis Result", "TCGA-GBM-QI-Radiogenomics", "file", "XML", "geometric_annotation", "2d", "none", "imaging_annotation", "aim_segmentation_annotation", "derived_asset", "tcia_wordpress", "tcga-gbm-qi-aim-inventory:2"),
                 ],
             )
-            self.assertEqual(public.delete_refreshable_assets(conn), 3)
+            self.assertEqual(public.delete_refreshable_assets(conn), 4)
             self.assertEqual(
                 conn.execute(
                     "SELECT group_concat(asset_id) FROM public_non_dicom_assets"
@@ -1478,7 +1479,7 @@ class BuilderTests(unittest.TestCase):
             participants.participant_key("Collection", "Dataset-B", "001"),
         )
 
-    def test_brats_aspera_dicom_exception_recovers_dicom_only_participants(self):
+    def test_brats_aspera_dicom_is_excluded_from_public_non_dicom(self):
         import sqlite3
 
         with tempfile.TemporaryDirectory() as directory:
@@ -1560,115 +1561,17 @@ class BuilderTests(unittest.TestCase):
                 include_pathdb_files=False,
                 replace=True,
             )
-            self.assertEqual(result["counts"]["aspera_public_dicom_exception_assets"], 4)
+            self.assertNotIn(
+                "aspera_public_dicom_exception_assets", result["counts"]
+            )
 
             conn = sqlite3.connect(public_db)
-            rows = conn.execute(
-                """
-                SELECT subject_id, modality, represented_file_count,
-                       representation_provenance_class, source_system
-                FROM public_non_dicom_assets
-                WHERE file_format='DICOM'
-                ORDER BY subject_id, represented_file_count, asset_name
-                """
-            ).fetchall()
             self.assertEqual(
-                rows,
-                [
-                    ("BraTS2021_00393", "MR", 1, "submitted_original", "tcia_aspera"),
-                    ("BraTS2021_00794", "MR", 1, "submitted_original", "tcia_aspera"),
-                    ("BraTS2021_00794", "MR", 2, "submitted_original", "tcia_aspera"),
-                    ("UCSF-PDGM-0057", "MR", 1, "submitted_original", "tcia_aspera"),
-                ],
-            )
-            crosswalk = conn.execute(
-                """
-                SELECT raw_subject_id, resolved_subject_id, mapping_method
-                FROM public_non_dicom_crosswalk_evidence
-                """
-            ).fetchone()
-            self.assertEqual(
-                crosswalk,
-                ("BraTS2021_00000", "UCSF-PDGM-0057", "official_tcia_brats2021_workbook"),
-            )
-            conn.close()
-
-            audit.split_database(
-                public_db,
-                public_audit_db,
-                artifact="public_non_dicom",
-                replace=True,
-            )
-
-            participants.build_database(
-                participant_db,
-                snapshot_db=snapshot,
-                public_db=public_db,
-                public_audit_db=public_audit_db,
-                controlled_db=base / "missing-controlled.sqlite",
-                clinical_db=base / "missing-clinical.sqlite",
-                replace=True,
-            )
-            conn = sqlite3.connect(participant_db)
-            participant_rows = conn.execute(
-                """
-                SELECT display_participant_id, has_public_dicom,
-                       has_public_non_dicom, file_formats
-                FROM agent_participant_search
-                WHERE short_title='RSNA-ASNR-MICCAI-BraTS-2021'
-                ORDER BY display_participant_id
-                """
-            ).fetchall()
-            self.assertEqual(
-                participant_rows,
-                [
-                    ("BraTS2021_00393", 1, 0, "DICOM"),
-                    ("BraTS2021_00794", 1, 0, "DICOM"),
-                    ("UCSF-PDGM-0057", 1, 0, "DICOM"),
-                ],
-            )
-            file_counts = dict(
                 conn.execute(
-                    """
-                    SELECT p.display_participant_id, a.file_count
-                    FROM participant_assets a JOIN participants p USING(participant_key)
-                    WHERE p.short_title='RSNA-ASNR-MICCAI-BraTS-2021'
-                    """
-                )
-            )
-            self.assertEqual(
-                file_counts,
-                {
-                    "BraTS2021_00393": 1,
-                    "BraTS2021_00794": 3,
-                    "UCSF-PDGM-0057": 1,
-                },
-            )
-            alias = conn.execute(
-                """
-                SELECT display_participant_id, raw_identifier, link_evidence
-                FROM agent_participant_identifiers
-                WHERE identifier_namespace='challenge:BraTS2021'
-                  AND raw_identifier='BraTS2021_00000'
-                """
-            ).fetchone()
-            self.assertEqual(
-                alias,
-                (
-                    "UCSF-PDGM-0057",
-                    "BraTS2021_00000",
-                    "official_tcia_brats2021_workbook",
-                ),
-            )
-            issue = conn.execute(
-                """
-                SELECT issue_code FROM participant_link_issues
-                WHERE raw_identifier='BraTS2021_00000'
-                """
-            ).fetchone()
-            self.assertEqual(
-                issue,
-                ("brats_source_collection_participant_not_current",),
+                    "SELECT COUNT(*) FROM public_non_dicom_assets "
+                    "WHERE file_format='DICOM'"
+                ).fetchone()[0],
+                0,
             )
             conn.close()
 

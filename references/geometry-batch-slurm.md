@@ -1,17 +1,20 @@
-# Non-IDC geometry batch analysis on SLURM
+# Public non-DICOM geometry batch analysis on SLURM
 
-This workflow downloads the open, non-IDC DICOM and volume-capable assets
+This workflow downloads the open, volume-capable non-DICOM assets
 represented in the TCIA Metadata V2 public non-DICOM artifact and analyzes
 their geometry without reading pixel or voxel arrays into memory.
 
 It deliberately excludes:
 
-- ordinary IDC DICOM, which should use `volume_geometry_index`;
+- all public DICOM, which should be submitted to IDC and use
+  `volume_geometry_index`;
 - controlled or restricted assets;
 - pathology, still-image, video, clinical, and supporting-file formats;
 - files not represented by the selected V2 release.
 
-The default formats are DICOM, NIfTI, MHA, MHD, and NRRD. Add another format
+The default formats are NIfTI, MHA, MHD, and NRRD. A DICOM parser remains in
+the utility for explicitly requested diagnostic runs, but those results are not
+imported into `public_non_dicom`. Add another release format
 only after adding an explicit header parser; a filename extension alone is not
 treated as proof of geometric coherence.
 
@@ -26,8 +29,10 @@ home-directory storage.
 The job plan groups transfers by published download route. It does not submit
 one transfer per file. HTTP downloads use resumable `curl`; Aspera downloads
 use the exact Faspex URL from the V2 artifact and `ascli`/`ascp`. The downloader
-distinguishes TCIA's Faspex 4 public-package links from its Faspex 5 public-link
-form and invokes the matching plugin.
+uses the current Faspex 5 public-link workflow even when a published TCIA URL
+retains a legacy-looking `/aspera/faspex/` path. HTTP retry options are detected
+from the installed `curl`, so older cluster releases that lack
+`--retry-all-errors` remain usable.
 
 ## 1. Prepare software
 
@@ -65,8 +70,6 @@ published package links.
 
 If the cluster will create the plan instead, install the current V2 detail
 artifact there first. From a `tcia-query-skill` checkout:
-
-From the `tcia-query-skill` checkout:
 
 ```bash
 python3 scripts/tcia_freshness.py check
@@ -117,6 +120,7 @@ is 53:
 cd "${TCIA_GEOMETRY_ROOT}"
 DOWNLOAD_JOB_ID=$(sbatch --parsable \
   --array=0-53%4 \
+  --export="ALL,TCIA_GEOMETRY_ROOT=${TCIA_GEOMETRY_ROOT},TCIA_GEOMETRY_CODE=${TCIA_GEOMETRY_CODE},TCIA_GEOMETRY_PYTHON=${TCIA_GEOMETRY_PYTHON},PYTHONNOUSERSITE=1" \
   "${TCIA_GEOMETRY_CODE}/slurm/geometry_download.sbatch")
 echo "${DOWNLOAD_JOB_ID}"
 ```
@@ -128,7 +132,9 @@ package or throttled data-transfer node may require more than the template's
 24-hour limit.
 Completed jobs contain `.download_complete.json`; rerunning the same array is
 idempotent and skips those jobs. HTTP transfers resume partial files. Aspera's
-transfer engine manages its own resume behavior.
+transfer engine manages its own resume behavior. The analyzer extracts ZIP
+archives delivered inside Aspera packages and ignores macOS `__MACOSX` and
+AppleDouble `._*` metadata entries.
 
 ## 5. Submit header analysis
 
@@ -138,19 +144,19 @@ After downloads complete successfully:
 ANALYZE_JOB_ID=$(sbatch --parsable \
   --dependency=afterok:${DOWNLOAD_JOB_ID} \
   --array=0-53%12 \
+  --export="ALL,TCIA_GEOMETRY_ROOT=${TCIA_GEOMETRY_ROOT},TCIA_GEOMETRY_CODE=${TCIA_GEOMETRY_CODE},TCIA_GEOMETRY_PYTHON=${TCIA_GEOMETRY_PYTHON},PYTHONNOUSERSITE=1" \
   "${TCIA_GEOMETRY_CODE}/slurm/geometry_analyze.sbatch")
 echo "${ANALYZE_JOB_ID}"
 ```
 
-The analyzer uses:
+The default analyzer uses:
 
-- `pydicom.dcmread(..., stop_before_pixels=True)` for DICOM;
 - nibabel header and affine access with memory mapping for NIfTI;
 - `SimpleITK.ImageFileReader.ReadImageInformation()` for MHA/MHD/NRRD.
 
-DICOM results are one row per Series Instance UID. Single-file results are one
-row per discovered volume file. Enhanced/multiframe DICOM is reported as
-`unsupported_multiframe`; it is not silently classified as a coherent volume.
+Results are one row per discovered volume file. If DICOM is explicitly selected
+for source diagnosis, its results are one row per Series Instance UID and stay
+outside the V2 public-non-DICOM release artifact.
 
 ## 6. Merge and return the compact results
 
@@ -166,10 +172,20 @@ Return these files for artifact integration:
 - `geometry_results.summary.json`
 - `plan/plan_summary.json`
 - `plan/jobs.csv`
+- documented `results/*.coverage.json` exceptions, if any
 - failed SLURM logs, if any
 
 Do not return `jobs.private.jsonl`; it is unnecessary for interpreting the
 results and contains opaque published package routes.
+
+Do not convert a failed transfer into a complete download. If a source package
+itself contains a broken object, retain the recursive package inventory,
+document the missing path and source error in a mode-0640-or-more-restrictive
+`.download_partial.json`, copy the same payload to
+`results/<job_id>.coverage.json`, and notify the dataset curator. The analyzer
+accepts that marker so the available files can be assessed, but the coverage
+record remains explicitly incomplete. Import such a sidecar with the repeatable
+`--geometry-coverage` option when building the V2 detail artifact.
 
 ## Result meanings
 

@@ -35,16 +35,17 @@ TMA block slides. The scalar asset `subject_id` remains a convenience for
 one-participant files and is intentionally empty for multi-participant assets.
 `represented_file_count` and the agent-view `represented_files` totals support
 compact participant/modality summaries when retaining every source file as an
-asset row would be wasteful. The initial use is the reviewed BraTS 2021 public
-DICOM trees that are available through Aspera but absent from IDC; these rows
-remain distinguishable with `file_format='DICOM'` and
-`source_system='tcia_aspera'`.
+asset row would be wasteful. Public DICOM is excluded from this component and
+belongs in IDC; a baseline refresh removes any legacy public-DICOM exceptions.
 
-Schema v8 also initializes DICOM, NIFTI, MHA, MHD, and NRRD assets to
+Schema v8 also initializes NIFTI, MHA, MHD, and NRRD assets to
 `geometry_status='not_checked'` unless a batch result has been imported. The
 `public_non_dicom_geometry_assessments` table retains one row per analyzed file
-or DICOM series, and `agent_public_non_dicom_geometry_status` exposes those
-rows. Asset-level geometry columns are summaries and can be `mixed`.
+and `agent_public_non_dicom_geometry_status` exposes those
+rows. Asset-level geometry columns are summaries and can be `mixed`. The
+`public_non_dicom_geometry_job_coverage` table and matching agent view retain
+documented source-package coverage exceptions without reclassifying a partial
+download as complete.
 
 Participant Inventory schema v7 adds `data_category`, `data_type`, and
 `file_format` facets plus geometry summary counts. Data category is broad
