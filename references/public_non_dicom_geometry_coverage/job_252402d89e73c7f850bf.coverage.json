@@ -1,0 +1,22 @@
+{
+  "analyzable": true,
+  "complete": false,
+  "documented_at_utc": "2026-08-29T19:11:07.604657+00:00",
+  "download_status": "partial_source_broken",
+  "downloaded_files": 4390,
+  "file_count_coverage": 0.9997722614438624,
+  "inventory_file": "faspex-package-1285-recursive.json",
+  "inventory_non_directory_entries": 4391,
+  "inventory_sha256": "f16ec2dd71a0c899f4708a3e73896f0edf0bcfff392923e9cb3a32d1e23b0fe2",
+  "job_id": "job_252402d89e73c7f850bf",
+  "missing_paths": [
+    "/UCSD-VS-Longitudinal/VS_0254_02/VS_0254_02_t2IAC.nii.gz"
+  ],
+  "short_title": "UCSD-VS-Longitudinal",
+  "source_error": {
+    "http_code": 500,
+    "reason": "Internal Server Error",
+    "target_path": null,
+    "type": "broken_symbolic_link"
+  }
+}

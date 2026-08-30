@@ -7,4 +7,5 @@ dist/
 *.sqlite
 *.sqlite.gz
 *_manifest.json
+!references/public_non_dicom_geometry_results_manifest.json
 /outputs

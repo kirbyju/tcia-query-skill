@@ -165,6 +165,21 @@ When a source package has a documented coverage exception,
 state, counts, missing paths, source error, and sidecar digest. Never infer
 complete package coverage from the presence of an analysis result alone.
 
+The reusable geometry evidence is distributed as a separate immutable release
+seed because regenerating it requires large source transfers and an HPC batch
+run. `references/public_non_dicom_geometry_results_manifest.json` pins its
+release tag, asset name, byte sizes, SHA-256 digests, and row/job counts;
+documented partial-source exceptions are small committed sidecars under
+`references/public_non_dicom_geometry_coverage/`. The seed is an internal
+release input, not another user-facing V2 component: its non-DICOM assessment
+rows are imported into the normal `public_non_dicom` research-detail artifact.
+
+Each scheduled build regenerates the current non-DICOM job scope and imports
+only seed jobs whose scope fingerprint is unchanged. New or changed scopes are
+published as `not_checked` and surfaced in a refresh report for a later manual
+HPC run; removed scopes are pruned. Seed corruption is a hard release failure.
+Public DICOM assessments are excluded and remain the authority of IDC/idc-index.
+
 ### Non-DICOM annotations
 
 The unified artifact represents annotation-like files as ordinary logical

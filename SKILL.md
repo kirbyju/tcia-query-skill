@@ -161,7 +161,8 @@ Run scripts from the skill root.
 | `scripts/tcia_skill_version.py` | Generate or validate the committed version/hash manifest for operational skill files. |
 | `scripts/tcia_nifti_metadata.py` | Migration-only builder/validator for the retired standalone NIfTI source; end-user queries use unified V2 detail. |
 | `scripts/tcia_public_non_dicom_metadata.py` | Build, validate, summarize, and query the V2 public non-DICOM logical-asset, geometry-assessment, and managed-location artifact. |
-| `scripts/tcia_geometry_batch.py` | Plan non-IDC open-volume downloads, run header-only DICOM/NIfTI/MHA/MHD/NRRD geometry checks, and merge SLURM results. |
+| `scripts/tcia_geometry_batch.py` | Plan non-IDC open-volume downloads, run header-only DICOM/NIfTI/MHA/MHD/NRRD geometry checks, and merge full or incremental SLURM results. |
+| `scripts/tcia_geometry_seed.py` | Build, validate, verify, and current-scope-filter the immutable public non-DICOM geometry release seed. |
 | `scripts/tcia_participant_inventory.py` | Compose dataset-scoped participant availability from public non-DICOM, controlled, clinical, and IDC participant projections. |
 | `scripts/tcia_idc_participant_projection.py` | Build the compact, WordPress-scoped Collection and Analysis Result participant projection directly from IDC, including `volume_geometry_index` status, for the V2 staging ledger. |
 | `scripts/tcia_v2_bundle.py` | Install a manifest-pinned V2 profile, regenerate compatibility exports, and build or validate the complete V2 release contract. |

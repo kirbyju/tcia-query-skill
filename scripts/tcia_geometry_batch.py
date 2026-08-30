@@ -998,15 +998,22 @@ RESULT_COLUMNS = (
 )
 
 
-def merge_results(results_dir: Path, output_db: Path) -> dict[str, Any]:
+def merge_results(
+    results_dir: Path, output_db: Path, baseline_db: Path | None = None
+) -> dict[str, Any]:
     output_db.parent.mkdir(parents=True, exist_ok=True)
     temp = output_db.with_suffix(output_db.suffix + ".part")
     if temp.exists():
         temp.unlink()
+    if baseline_db:
+        if not baseline_db.is_file():
+            raise FileNotFoundError(f"Geometry baseline not found: {baseline_db}")
+        shutil.copy2(baseline_db, temp)
     conn = sqlite3.connect(temp)
     try:
-        conn.execute(
-            """
+        if baseline_db is None:
+            conn.execute(
+                """
             CREATE TABLE geometry_assessments (
                 assessment_id INTEGER PRIMARY KEY,
                 schema_version INTEGER NOT NULL,
@@ -1033,15 +1040,15 @@ def merge_results(results_dir: Path, output_db: Path) -> dict[str, Any]:
                 details_json TEXT NOT NULL,
                 error TEXT
             )
-            """
-        )
-        conn.execute("CREATE INDEX idx_geometry_asset ON geometry_assessments(asset_id)")
-        conn.execute(
-            "CREATE INDEX idx_geometry_series ON geometry_assessments(series_instance_uid)"
-        )
-        conn.execute(
-            "CREATE INDEX idx_geometry_dataset ON geometry_assessments(short_title, download_id)"
-        )
+                """
+            )
+            conn.execute("CREATE INDEX idx_geometry_asset ON geometry_assessments(asset_id)")
+            conn.execute(
+                "CREATE INDEX idx_geometry_series ON geometry_assessments(series_instance_uid)"
+            )
+            conn.execute(
+                "CREATE INDEX idx_geometry_dataset ON geometry_assessments(short_title, download_id)"
+            )
         insert_sql = """
             INSERT INTO geometry_assessments (
                 schema_version, analyzer, analyzer_version, assessed_at_utc,
@@ -1053,8 +1060,18 @@ def merge_results(results_dir: Path, output_db: Path) -> dict[str, Any]:
             ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """
         files = sorted(results_dir.glob("*.jsonl.gz"))
-        rows = 0
-        statuses: dict[str, int] = defaultdict(int)
+        replacement_jobs: set[str] = set()
+        for path in files:
+            for row in iter_jsonl(path):
+                job_id = str(row.get("job_id") or "")
+                if job_id:
+                    replacement_jobs.add(job_id)
+        if baseline_db and replacement_jobs:
+            conn.executemany(
+                "DELETE FROM geometry_assessments WHERE job_id=?",
+                [(job_id,) for job_id in sorted(replacement_jobs)],
+            )
+        inserted_rows = 0
         for path in files:
             for row in iter_jsonl(path):
                 conn.execute(
@@ -1085,8 +1102,10 @@ def merge_results(results_dir: Path, output_db: Path) -> dict[str, Any]:
                         row.get("error") or None,
                     ),
                 )
-                rows += 1
-                statuses[str(row.get("geometry_status", "not_checked"))] += 1
+                inserted_rows += 1
+        conn.execute(
+            "DROP VIEW IF EXISTS agent_geometry_assessments"
+        )
         conn.execute(
             """
             CREATE VIEW agent_geometry_assessments AS
@@ -1096,6 +1115,13 @@ def merge_results(results_dir: Path, output_db: Path) -> dict[str, Any]:
         conn.execute("PRAGMA user_version=1")
         conn.commit()
         integrity = conn.execute("PRAGMA integrity_check").fetchone()[0]
+        rows = int(conn.execute("SELECT COUNT(*) FROM geometry_assessments").fetchone()[0])
+        statuses = dict(
+            conn.execute(
+                "SELECT geometry_status,COUNT(*) FROM geometry_assessments "
+                "GROUP BY geometry_status ORDER BY geometry_status"
+            )
+        )
     finally:
         conn.close()
     temp.replace(output_db)
@@ -1103,8 +1129,11 @@ def merge_results(results_dir: Path, output_db: Path) -> dict[str, Any]:
         "schema_version": 1,
         "created_at_utc": utc_now(),
         "result_files": len(files),
+        "baseline_db": str(baseline_db.resolve()) if baseline_db else None,
+        "replacement_jobs": len(replacement_jobs),
+        "inserted_rows": inserted_rows,
         "assessment_rows": rows,
-        "geometry_status_counts": dict(sorted(statuses.items())),
+        "geometry_status_counts": statuses,
         "sqlite_integrity": integrity,
         "output_db": str(output_db.resolve()),
         "sha256": sha256_file(output_db),
@@ -1147,6 +1176,11 @@ def parser() -> argparse.ArgumentParser:
     merge = sub.add_parser("merge", help="merge per-job results into SQLite")
     merge.add_argument("--results-dir", type=Path, required=True)
     merge.add_argument("--out", type=Path, required=True)
+    merge.add_argument(
+        "--baseline-db",
+        type=Path,
+        help="Optional prior geometry SQLite; jobs present in results replace prior rows.",
+    )
     return root
 
 
@@ -1168,7 +1202,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         output = analyze_job(job, args.data_root, args.results_dir)
         summary = {"job_id": job["job_id"], "result": str(output.resolve())}
     else:
-        summary = merge_results(args.results_dir, args.out)
+        summary = merge_results(args.results_dir, args.out, args.baseline_db)
     print(json.dumps(summary, indent=2, sort_keys=True))
     return 0
 

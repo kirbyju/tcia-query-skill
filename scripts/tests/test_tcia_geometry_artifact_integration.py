@@ -12,6 +12,33 @@ import tcia_public_non_dicom_metadata as public_metadata
 
 
 class GeometryArtifactIntegrationTests(unittest.TestCase):
+    def test_reset_geometry_surface_clears_evidence_and_resets_all_assets(self):
+        with sqlite3.connect(":memory:") as conn:
+            conn.row_factory = sqlite3.Row
+            conn.executescript(public_metadata.SCHEMA)
+            public_metadata.insert_vocab(conn)
+            for asset_id, file_format in (("nifti", "NIFTI"), ("csv", "CSV")):
+                conn.execute(
+                    """INSERT INTO public_non_dicom_assets (
+                    asset_id,dataset_type,short_title,download_id,
+                    participant_link_status,asset_granularity,file_format,
+                    media_kind,spatial_dimensionality,temporal_dimensionality,
+                    imaging_domain,object_role,representation_provenance_class,
+                    source_system,raw_values_json,provenance_json,quality_flag_json,
+                    geometry_status,geometry_assessment_method,geometry_assessment_source,
+                    geometry_details_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (asset_id, "Collection", "Demo", "1", "unavailable", "file",
+                     file_format, "image_volume", "unknown", "unknown", "radiology",
+                     "source_image", "submitted_original", "tcia_aspera", "{}", "{}",
+                     "{}", "checked_grid_geometry", "old", "old", "{}"),
+                )
+            counts = public_metadata.reset_geometry_surface(conn)
+            self.assertEqual(counts["asset_statuses_reset"], 2)
+            statuses = dict(conn.execute(
+                "SELECT asset_id,geometry_status FROM public_non_dicom_assets"
+            ))
+            self.assertEqual(statuses, {"nifti": "not_checked", "csv": "not_applicable"})
+
     def test_legacy_public_dicom_assets_and_dependents_are_purged(self):
         with sqlite3.connect(":memory:") as conn:
             conn.executescript(public_metadata.SCHEMA)

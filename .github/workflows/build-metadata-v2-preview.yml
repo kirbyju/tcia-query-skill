@@ -72,6 +72,24 @@ jobs:
             gzip -dc "dist/$asset" > "cache/${asset%.gz}"
           done
 
+      - name: Download and verify the canonical non-DICOM geometry seed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          geometry_manifest="references/public_non_dicom_geometry_results_manifest.json"
+          geometry_tag=$(jq -r '.release_tag' "$geometry_manifest")
+          geometry_asset=$(jq -r '.asset_name' "$geometry_manifest")
+          gh release download "$geometry_tag" \
+            --pattern "$geometry_asset" \
+            --dir dist \
+            --clobber
+          python scripts/tcia_geometry_seed.py verify-release \
+            --manifest "$geometry_manifest" \
+            --gzip "dist/$geometry_asset" \
+            --coverage-dir references/public_non_dicom_geometry_coverage \
+            --out cache/public_non_dicom_geometry_seed.sqlite
+
       - name: Capture and validate the unified V2 build baseline
         env:
           GH_TOKEN: ${{ github.token }}
@@ -175,11 +193,44 @@ jobs:
             --crosswalk-curation references/public-non-dicom-crosswalk-curation-v1.json \
             --image-metadata-csv references/public_non_dicom_image_metadata_v1.csv \
             --out cache/public_non_dicom_metadata.sqlite \
+            --reset-geometry \
             --replace \
             "${pathdb_args[@]}"
+          mkdir -p cache/reports
+          python scripts/tcia_geometry_batch.py plan \
+            --db cache/public_non_dicom_metadata.sqlite \
+            --out-dir cache/current-geometry-plan
+          python scripts/tcia_geometry_seed.py compare \
+            --seed-db cache/public_non_dicom_geometry_seed.sqlite \
+            --jobs-csv cache/current-geometry-plan/jobs.csv \
+            --coverage-dir references/public_non_dicom_geometry_coverage \
+            --filtered-coverage-dir cache/current-geometry-coverage \
+            --out cache/current-public-non-dicom-geometry.sqlite \
+            --report-json cache/reports/public_non_dicom_geometry_refresh.json \
+            --report-csv cache/reports/public_non_dicom_geometry_refresh.csv
+          geometry_coverage_args=()
+          shopt -s nullglob
+          for coverage in cache/current-geometry-coverage/*.json; do
+            geometry_coverage_args+=(--geometry-coverage "$coverage")
+          done
+          python scripts/tcia_public_non_dicom_metadata.py import-geometry \
+            --db cache/public_non_dicom_metadata.sqlite \
+            --geometry-results cache/current-public-non-dicom-geometry.sqlite \
+            "${geometry_coverage_args[@]}"
+          {
+            echo "### Public non-DICOM geometry seed"
+            python - <<'PY'
+          import json
+          report = json.load(open("cache/reports/public_non_dicom_geometry_refresh.json"))
+          counts = report["status_counts"]
+          print(f"- Unchanged jobs imported: {counts.get('unchanged', 0)}")
+          print(f"- New jobs requiring HPC analysis: {counts.get('new', 0)}")
+          print(f"- Changed jobs requiring HPC analysis: {counts.get('changed', 0)}")
+          print(f"- Removed jobs pruned: {counts.get('removed', 0)}")
+          PY
+          } >> "$GITHUB_STEP_SUMMARY"
           python scripts/tcia_public_non_dicom_metadata.py validate \
             --db cache/public_non_dicom_metadata.sqlite
-          mkdir -p cache/reports
           mv cache/public_non_dicom_metadata.sqlite cache/public_non_dicom_assembly.sqlite
           python scripts/tcia_v2_audit.py project-v3 \
             --artifact public_non_dicom \

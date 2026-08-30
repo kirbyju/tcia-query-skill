@@ -1005,6 +1005,49 @@ def initialize_geometry_statuses(conn: sqlite3.Connection) -> int:
     return len(updates)
 
 
+def reset_geometry_surface(conn: sqlite3.Connection) -> dict[str, int]:
+    """Atomically clear geometry evidence and reset every asset to a safe default."""
+    assessments = int(
+        conn.execute(
+            "SELECT COUNT(*) FROM public_non_dicom_geometry_assessments"
+        ).fetchone()[0]
+    )
+    coverage = int(
+        conn.execute(
+            "SELECT COUNT(*) FROM public_non_dicom_geometry_job_coverage"
+        ).fetchone()[0]
+    )
+    conn.execute("DELETE FROM public_non_dicom_geometry_assessments")
+    conn.execute("DELETE FROM public_non_dicom_geometry_job_coverage")
+    assets = int(
+        conn.execute("SELECT COUNT(*) FROM public_non_dicom_assets").fetchone()[0]
+    )
+    conn.execute(
+        """
+        UPDATE public_non_dicom_assets
+        SET geometry_status='not_applicable',
+            geometry_assessment_method='not_assessed',
+            geometry_assessment_source='', geometry_assessed_at_utc=NULL,
+            geometry_details_json='{}'
+        """
+    )
+    conn.execute(
+        """
+        UPDATE public_non_dicom_assets
+        SET geometry_status='not_checked'
+        WHERE instr(',' || replace(upper(COALESCE(file_format, '')), ';', ',') || ',', ',NIFTI,') > 0
+           OR instr(',' || replace(upper(COALESCE(file_format, '')), ';', ',') || ',', ',MHA,') > 0
+           OR instr(',' || replace(upper(COALESCE(file_format, '')), ';', ',') || ',', ',MHD,') > 0
+           OR instr(',' || replace(upper(COALESCE(file_format, '')), ';', ',') || ',', ',NRRD,') > 0
+        """
+    )
+    return {
+        "assessment_rows_removed": assessments,
+        "coverage_rows_removed": coverage,
+        "asset_statuses_reset": assets,
+    }
+
+
 def geometry_format_tokens(value: object) -> set[str]:
     return {
         token.strip().upper()
@@ -6648,6 +6691,7 @@ def build_database(
     reviewed_participant_provenance: Path = DEFAULT_REVIEWED_PARTICIPANT_PROVENANCE,
     geometry_results: Path | None = None,
     geometry_coverage: list[Path] | None = None,
+    reset_geometry: bool = False,
     staging_db: Path | None = None,
     baseline_db: Path | None = None,
 ) -> dict[str, Any]:
@@ -6783,14 +6827,26 @@ def build_database(
         counts["participant_crosswalk_review_issue_changes"] = (
             refresh_participant_crosswalk_review_issues(conn)
         )
+        if reset_geometry or geometry_results is not None:
+            reset_counts = reset_geometry_surface(conn)
+            counts.update(
+                {f"geometry_reset_{key}": value for key, value in reset_counts.items()}
+            )
         counts["geometry_statuses_initialized"] = initialize_geometry_statuses(conn)
         geometry_counts = ingest_geometry_results(conn, geometry_results)
         counts.update(
             {f"geometry_results_{key}": value for key, value in geometry_counts.items()}
         )
-        counts["geometry_coverage_rows"] = ingest_geometry_coverage(
-            conn, geometry_coverage
-        )
+        if reset_geometry or geometry_results is not None or geometry_coverage:
+            counts["geometry_coverage_rows"] = ingest_geometry_coverage(
+                conn, geometry_coverage
+            )
+        else:
+            counts["geometry_coverage_rows"] = int(
+                conn.execute(
+                    "SELECT COUNT(*) FROM public_non_dicom_geometry_job_coverage"
+                ).fetchone()[0]
+            )
         generated = datetime.now(timezone.utc).isoformat()
         metadata = {
             "schema_version": SCHEMA_VERSION,
@@ -7450,6 +7506,56 @@ def info(path: Path) -> dict[str, Any]:
     return {"path": str(path), "meta": meta, "counts": counts}
 
 
+def import_geometry_database(
+    db: Path,
+    geometry_results: Path,
+    geometry_coverage: list[Path] | None = None,
+) -> dict[str, Any]:
+    """Replace an assembly's complete geometry surface in one transaction."""
+    if not db.is_file():
+        raise FileNotFoundError(f"Public non-DICOM assembly not found: {db}")
+    with closing(connect(db)) as conn:
+        ensure_geometry_schema(conn)
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            reset_counts = reset_geometry_surface(conn)
+            result_counts = ingest_geometry_results(conn, geometry_results)
+            coverage_rows = ingest_geometry_coverage(conn, geometry_coverage)
+            generated = datetime.now(timezone.utc).isoformat()
+            meta = {
+                "source_geometry_results": source_meta(geometry_results),
+                "source_geometry_coverage": [
+                    source_meta(path) for path in geometry_coverage or []
+                ],
+                "geometry_imported_at_utc": generated,
+                "geometry_import_counts": {
+                    **result_counts,
+                    "coverage_rows": coverage_rows,
+                },
+            }
+            conn.executemany(
+                "INSERT OR REPLACE INTO artifact_meta VALUES (?,?)",
+                [
+                    (key, json_dumps(value) if not isinstance(value, str) else value)
+                    for key, value in meta.items()
+                ],
+            )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        conn.execute("ANALYZE")
+        conn.commit()
+        integrity = conn.execute("PRAGMA integrity_check").fetchone()[0]
+    return {
+        "path": str(db),
+        "integrity_check": integrity,
+        "reset": reset_counts,
+        "geometry_results": result_counts,
+        "geometry_coverage_rows": coverage_rows,
+    }
+
+
 def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(description=__doc__)
     sub = root.add_subparsers(dest="command", required=True)
@@ -7509,6 +7615,14 @@ def parser() -> argparse.ArgumentParser:
             "multiple exceptions."
         ),
     )
+    build.add_argument(
+        "--reset-geometry",
+        action="store_true",
+        help=(
+            "Clear inherited geometry evidence and reset eligible assets to "
+            "not_checked before any optional geometry import."
+        ),
+    )
     build.add_argument("--out", default=str(DEFAULT_DB))
     build.add_argument("--gzip-out")
     build.add_argument("--manifest-out")
@@ -7539,6 +7653,15 @@ def parser() -> argparse.ArgumentParser:
     files.add_argument("--collection", required=True)
     files.add_argument("--participant")
     files.add_argument("--limit", type=int, default=100)
+    import_geometry = sub.add_parser(
+        "import-geometry",
+        help="Atomically replace geometry assessments and coverage in an assembly.",
+    )
+    import_geometry.add_argument("--db", required=True)
+    import_geometry.add_argument("--geometry-results", required=True)
+    import_geometry.add_argument(
+        "--geometry-coverage", action="append", default=[]
+    )
     return root
 
 
@@ -7583,6 +7706,7 @@ def main() -> int:
             reviewed_participant_provenance=Path(args.reviewed_participant_provenance),
             geometry_results=Path(args.geometry_results) if args.geometry_results else None,
             geometry_coverage=[Path(value) for value in args.geometry_coverage],
+            reset_geometry=args.reset_geometry,
             include_pathdb_files=not args.no_pathdb_files,
             replace=args.replace,
             staging_db=staging_db,
@@ -7610,6 +7734,14 @@ def main() -> int:
         return 0
     if args.command == "info":
         print(json.dumps(info(Path(args.db)), indent=2, sort_keys=True))
+        return 0
+    if args.command == "import-geometry":
+        result = import_geometry_database(
+            Path(args.db),
+            Path(args.geometry_results),
+            [Path(value) for value in args.geometry_coverage],
+        )
+        print(json.dumps(result, indent=2, sort_keys=True))
         return 0
     with closing(connect(Path(args.db))) as conn:
         if args.command == "datasets":

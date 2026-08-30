@@ -223,6 +223,46 @@ class GeometryBatchTests(unittest.TestCase):
                 ).fetchone()[0]
             self.assertEqual(status, "checked_grid_geometry")
 
+    def test_incremental_merge_replaces_only_rerun_jobs(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            baseline_results = root / "baseline-results"
+            baseline_results.mkdir()
+            template = {
+                "schema_version": 1, "analyzer": "test", "analyzer_version": "1",
+                "assessed_at_utc": "2026-01-01T00:00:00Z", "dataset_type": "Collection",
+                "short_title": "Demo", "download_id": "1", "asset_id": "",
+                "local_relative_path": "image.nii.gz", "file_format": "NIFTI",
+                "assessment_scope": "file", "series_instance_uid": "",
+                "study_instance_uid": "", "geometry_status": "checked_grid_geometry",
+                "dimension": 3, "shape": [], "spacing": [], "origin": [],
+                "direction": [], "checks": {}, "details": {}, "error": "",
+            }
+            for job_id in ("job-a", "job-b"):
+                row = {**template, "job_id": job_id, "short_title": job_id}
+                with gzip.open(baseline_results / f"{job_id}.jsonl.gz", "wt") as stream:
+                    stream.write(json.dumps(row) + "\n")
+            baseline = root / "baseline.sqlite"
+            merge_results(baseline_results, baseline)
+            update_results = root / "update-results"
+            update_results.mkdir()
+            replacement = {
+                **template, "job_id": "job-a", "short_title": "job-a",
+                "geometry_status": "checked_invalid_geometry",
+            }
+            with gzip.open(update_results / "job-a.jsonl.gz", "wt") as stream:
+                stream.write(json.dumps(replacement) + "\n")
+            merged = root / "merged.sqlite"
+            summary = merge_results(update_results, merged, baseline)
+            self.assertEqual(summary["assessment_rows"], 2)
+            self.assertEqual(summary["replacement_jobs"], 1)
+            with sqlite3.connect(merged) as conn:
+                statuses = dict(conn.execute(
+                    "SELECT job_id,geometry_status FROM geometry_assessments"
+                ))
+            self.assertEqual(statuses["job-a"], "checked_invalid_geometry")
+            self.assertEqual(statuses["job-b"], "checked_grid_geometry")
+
 
 if __name__ == "__main__":
     unittest.main()

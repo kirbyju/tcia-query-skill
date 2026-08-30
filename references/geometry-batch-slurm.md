@@ -178,6 +178,23 @@ Return these files for artifact integration:
 Do not return `jobs.private.jsonl`; it is unnecessary for interpreting the
 results and contains opaque published package routes.
 
+For a later refresh, analyze only the new or changed job indexes and replace
+those jobs in the prior merged result. Unaffected jobs remain represented by
+their prior assessment rows:
+
+```bash
+python3 "${TCIA_GEOMETRY_CODE}/scripts/tcia_geometry_batch.py" merge \
+  --results-dir "${TCIA_GEOMETRY_ROOT}/results-refresh" \
+  --baseline-db /path/to/prior/geometry_results.sqlite \
+  --out "${TCIA_GEOMETRY_ROOT}/geometry_results.updated.sqlite"
+```
+
+Rebuild the canonical release seed from that result and the current safe
+`jobs.csv` with `scripts/tcia_geometry_seed.py build`. The command removes
+DICOM assessments, sanitizes local absolute paths from errors, records a job
+ledger, validates SQLite integrity, and produces a pinned gzip and manifest.
+The private plan and downloaded image payloads are never release assets.
+
 Do not convert a failed transfer into a complete download. If a source package
 itself contains a broken object, retain the recursive package inventory,
 document the missing path and source error in a mode-0640-or-more-restrictive
@@ -204,3 +221,23 @@ record remains explicitly incomplete. Import such a sidecar with the repeatable
 
 These are metadata/header assessments, not statements about image quality,
 clinical usability, or correctness of voxel values.
+
+## Scheduled-release behavior
+
+GitHub Actions does not repeat the HPC transfer or header analysis. The V2
+release workflow downloads the immutable geometry seed named by
+`references/public_non_dicom_geometry_results_manifest.json`, verifies its
+size and SHA-256, regenerates the current safe job plan, and compares current
+download scopes with the seed ledger.
+
+- unchanged jobs are imported into `public_non_dicom`;
+- removed jobs are pruned;
+- new or changed jobs remain explicitly `not_checked` and produce a workflow
+  warning plus JSON/CSV refresh reports;
+- a missing, corrupt, or structurally invalid seed stops the release;
+- public DICOM is excluded and belongs in IDC/idc-index.
+
+Use the refresh report to select the next HPC array indexes. After those jobs
+finish, incrementally merge them, build and publish a new immutable seed, and
+update the committed manifest pointer. This makes the manual HPC dependency
+explicit without blocking ordinary releases or silently retaining stale data.
