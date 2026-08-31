@@ -65,6 +65,17 @@ Analysis Result scope, exposes the BraTS alias in
 `agent_participant_identity_evidence` without merging Collection and Analysis
 Result participants.
 
+Participant Inventory schema v8 also exposes
+`agent_participant_source_links`, the compact Analysis Result participant to
+source Collection participant junction. It includes both participant keys,
+Collection short title, source participant identifier, link status, resolution
+method, confidence, and an evidence pointer. Use this view for cross-dataset
+membership presentation; never join datasets from equal bare identifiers alone.
+The ACRIN-6698/I-SPY2 clinical crosswalk is an explicit participant-level
+exception: it preserves the I-SPY2 research ID as an alias of its DICOM
+PatientID and supports both BreastDCEDL_ISPY2 source links. It is scoped to the
+named Collections and must not link the same bare value in NLST or elsewhere.
+
 For `TCGA-LGG-Mask`, query MATLAB segmentation files with
 `file_format='MATLAB'` and `object_role='segmentation'`. The selected image
 metadata retains `source_study_instance_uid`, `source_series_instance_uid`, and

@@ -200,6 +200,10 @@ CONFIGS: dict[str, dict[str, Any]] = {
                 "identity_evidence_id",
                 {"evidence_json": "{}"},
             ),
+            "participant_source_links": (
+                "participant_source_link_id",
+                {"evidence_json": "{}"},
+            ),
         },
         "audit_tables": (),
     },

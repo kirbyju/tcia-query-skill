@@ -1479,6 +1479,219 @@ class BuilderTests(unittest.TestCase):
             participants.participant_key("Collection", "Dataset-B", "001"),
         )
 
+    def test_reviewed_multi_collection_relationship_links_exact_participants(self):
+        import sqlite3
+
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            snapshot = base / "snapshot.sqlite"
+            reviewed = base / "reviewed.csv"
+            conn = sqlite3.connect(snapshot)
+            conn.execute(
+                "CREATE TABLE agent_datasets (dataset_type TEXT, short_title TEXT)"
+            )
+            conn.executemany(
+                "INSERT INTO agent_datasets VALUES (?, ?)",
+                [
+                    ("Analysis Result", "Derived"),
+                    ("Collection", "Source-A"),
+                    ("Collection", "Source-B"),
+                ],
+            )
+            conn.commit()
+            conn.close()
+            reviewed.write_text(
+                "analysis_result_short_title,source_collection_short_title,"
+                "evidence_source,evidence_pointer,evidence_url,review_status,reviewed_at\n"
+                "Derived,Source-A,reviewed_test,test-a,https://example.test/a,reviewed,2026-08-31\n"
+                "Derived,Source-B,reviewed_test,test-b,https://example.test/b,reviewed,2026-08-31\n",
+                encoding="utf-8",
+            )
+
+            conn = participants.connect(base / "participants.sqlite")
+            conn.executescript(participants.SCHEMA)
+            dataset_types = {
+                "derived": ("Analysis Result", "Derived"),
+                "source-a": ("Collection", "Source-A"),
+                "source-b": ("Collection", "Source-B"),
+            }
+            for dataset_type, short_title, participant_id in (
+                ("Analysis Result", "Derived", "A-001"),
+                ("Analysis Result", "Derived", "B-001"),
+                ("Analysis Result", "Derived", "C-001"),
+                ("Collection", "Source-A", "A-001"),
+                ("Collection", "Source-B", "B-001"),
+            ):
+                participants.ensure_participant(
+                    conn,
+                    dataset_type,
+                    short_title,
+                    participant_id,
+                    managed_system="tcia_wordpress",
+                    namespace=f"tcia_dataset:{short_title}",
+                    evidence="test",
+                    provenance={},
+                )
+            participants.select_display_participant_ids(conn)
+            counts = participants.apply_analysis_result_source_collection_links(
+                conn,
+                snapshot_db=snapshot,
+                idc_db=base / "missing-idc.sqlite",
+                dataset_types=dataset_types,
+                reviewed_relationships=reviewed,
+            )
+            self.assertEqual(counts["linked_source_collection"], 2)
+            self.assertEqual(counts["ambiguous_source_collection"], 0)
+            self.assertEqual(counts["unresolved_source_collection"], 1)
+            self.assertEqual(
+                [tuple(row) for row in conn.execute(
+                    "SELECT analysis_result_participant_id, "
+                    "source_collection_short_title, link_status "
+                    "FROM agent_participant_source_links "
+                    "ORDER BY analysis_result_participant_id"
+                ).fetchall()],
+                [
+                    ("A-001", "Source-A", "linked_source_collection"),
+                    ("B-001", "Source-B", "linked_source_collection"),
+                ],
+            )
+            self.assertEqual(
+                tuple(conn.execute(
+                    "SELECT issue_code, raw_identifier FROM participant_link_issues"
+                ).fetchone()),
+                ("source_collection_match_unresolved", "C-001"),
+            )
+            conn.close()
+
+    def test_acrin_ispy2_clinical_crosswalk_links_scoped_aliases_not_nlst(self):
+        import sqlite3
+
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            snapshot = base / "snapshot.sqlite"
+            clinical = base / "clinical.sqlite"
+            reviewed = base / "reviewed.csv"
+            conn = sqlite3.connect(snapshot)
+            conn.execute(
+                "CREATE TABLE agent_datasets (dataset_type TEXT, short_title TEXT)"
+            )
+            conn.executemany(
+                "INSERT INTO agent_datasets VALUES (?, ?)",
+                [
+                    ("Analysis Result", "BreastDCEDL_ISPY2"),
+                    ("Collection", "ACRIN-6698"),
+                    ("Collection", "ISPY2"),
+                    ("Collection", "NLST"),
+                ],
+            )
+            conn.commit()
+            conn.close()
+            conn = sqlite3.connect(clinical)
+            conn.execute(
+                "CREATE TABLE clinical_rows "
+                "(short_title TEXT, table_name TEXT, row_json TEXT)"
+            )
+            conn.executemany(
+                "INSERT INTO clinical_rows VALUES (?, ?, ?)",
+                [
+                    (
+                        "ACRIN-6698",
+                        "acrin_6698_clinical",
+                        json.dumps({
+                            "dicom_patient_id": "ACRIN-6698-102212",
+                            "i_spy_2_research_id": "102212",
+                        }),
+                    ),
+                    (
+                        "ISPY2",
+                        "ispy2_clinical",
+                        json.dumps({
+                            "dicom_patient_id": "ISPY2-102212",
+                            "patient_id": "102212",
+                        }),
+                    ),
+                ],
+            )
+            conn.commit()
+            conn.close()
+            reviewed.write_text(
+                "analysis_result_short_title,source_collection_short_title,"
+                "evidence_source,evidence_pointer,evidence_url,review_status,reviewed_at\n"
+                "BreastDCEDL_ISPY2,ACRIN-6698,test,crosswalk,,reviewed,2026-08-31\n"
+                "BreastDCEDL_ISPY2,ISPY2,test,crosswalk,,reviewed,2026-08-31\n",
+                encoding="utf-8",
+            )
+
+            conn = participants.connect(base / "participants.sqlite")
+            conn.executescript(participants.SCHEMA)
+            dataset_types = {
+                "breastdcedl_ispy2": ("Analysis Result", "BreastDCEDL_ISPY2"),
+                "acrin-6698": ("Collection", "ACRIN-6698"),
+                "ispy2": ("Collection", "ISPY2"),
+                "nlst": ("Collection", "NLST"),
+            }
+            for dataset_type, short_title, participant_id in (
+                ("Analysis Result", "BreastDCEDL_ISPY2", "ACRIN-6698-102212"),
+                ("Collection", "ACRIN-6698", "ACRIN-6698-102212"),
+                ("Collection", "ISPY2", "102212"),
+                ("Collection", "ISPY2", "ISPY2-102212"),
+                ("Collection", "NLST", "102212"),
+            ):
+                participants.ensure_participant(
+                    conn,
+                    dataset_type,
+                    short_title,
+                    participant_id,
+                    managed_system="tcia_wordpress",
+                    namespace=f"tcia_dataset:{short_title}",
+                    evidence="test",
+                    provenance={},
+                )
+            alias_counts = participants.apply_clinical_participant_aliases(conn, clinical)
+            self.assertEqual(alias_counts["ispy2_clinical_aliases"], 1)
+            participants.select_display_participant_ids(conn)
+            counts = participants.apply_analysis_result_source_collection_links(
+                conn,
+                snapshot_db=snapshot,
+                idc_db=base / "missing-idc.sqlite",
+                clinical_db=clinical,
+                dataset_types=dataset_types,
+                reviewed_relationships=reviewed,
+            )
+            self.assertEqual(counts["linked_source_collection"], 2)
+            self.assertEqual(
+                conn.execute(
+                    "SELECT COUNT(*) FROM participants "
+                    "WHERE short_title='ISPY2'"
+                ).fetchone()[0],
+                1,
+            )
+            self.assertEqual(
+                conn.execute(
+                    "SELECT display_participant_id FROM participants "
+                    "WHERE short_title='ISPY2'"
+                ).fetchone()[0],
+                "ISPY2-102212",
+            )
+            self.assertEqual(
+                [tuple(row) for row in conn.execute(
+                    "SELECT source_collection_short_title, source_participant_id "
+                    "FROM agent_participant_source_links ORDER BY 1"
+                ).fetchall()],
+                [
+                    ("ACRIN-6698", "ACRIN-6698-102212"),
+                    ("ISPY2", "ISPY2-102212"),
+                ],
+            )
+            self.assertEqual(
+                conn.execute(
+                    "SELECT cross_dataset_identity_status FROM participants "
+                    "WHERE short_title='NLST' AND display_participant_id='102212'"
+                ).fetchone()[0],
+                "not_asserted",
+            )
+            conn.close()
+
     def test_brats_aspera_dicom_is_excluded_from_public_non_dicom(self):
         import sqlite3
 
@@ -1741,7 +1954,29 @@ class BuilderTests(unittest.TestCase):
             )
             self.assertEqual(
                 conn.execute("SELECT COUNT(*) FROM participant_link_issues").fetchone()[0],
-                0,
+                1,
+            )
+            self.assertEqual(
+                conn.execute(
+                    "SELECT source_collection_short_title, source_participant_id, "
+                    "link_status, resolution_method "
+                    "FROM agent_participant_source_links "
+                    "WHERE analysis_result_short_title='Outcome-Result'"
+                ).fetchone(),
+                (
+                    "AAPM-RT-MAC",
+                    "CASE-002",
+                    "source_participant_not_current",
+                    "idc_source_collection_and_exact_identifier",
+                ),
+            )
+            self.assertEqual(
+                conn.execute(
+                    "SELECT cross_dataset_identity_status FROM participants "
+                    "WHERE short_title='Outcome-Result' "
+                    "AND display_participant_id='CASE-002'"
+                ).fetchone()[0],
+                "source_participant_not_current",
             )
             self.assertEqual(
                 conn.execute(

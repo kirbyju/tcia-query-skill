@@ -1,0 +1,10 @@
+analysis_result_short_title,source_collection_short_title,evidence_source,evidence_pointer,evidence_url,review_status,reviewed_at
+BreastDCEDL_ISPY2,ACRIN-6698,reviewed_wordpress_source_manifest,ISPY2-Cohort1-inclu-ACRIN6698-full-manifest.tcia,https://www.cancerimagingarchive.net/analysis-result/breastdcedl_ispy2/,reviewed,2026-08-31
+BreastDCEDL_ISPY2,ISPY2,reviewed_wordpress_source_manifest,ISPY2-Cohort1-inclu-ACRIN6698-full-manifest.tcia,https://www.cancerimagingarchive.net/analysis-result/breastdcedl_ispy2/,reviewed,2026-08-31
+CPTAC-Glioblastoma-CODEX,CPTAC-GBM,official_cptac_gbm_codex_workbook,CPTAC-GBM_PatientID,https://www.cancerimagingarchive.net/analysis-result/cptac-glioblastoma-codex/,reviewed,2026-08-31
+CPTAC-Glioblastoma-CODEX,UPENN-GBM,official_cptac_gbm_codex_workbook,UPENN-GBM_PatientID,https://www.cancerimagingarchive.net/analysis-result/cptac-glioblastoma-codex/,reviewed,2026-08-31
+ISBI-MR-Prostate-2013,PROSTATE-DIAGNOSIS,reviewed_wordpress_result_summary,Image data were selected from PROSTATE-DIAGNOSIS and Prostate-3T,https://www.cancerimagingarchive.net/analysis-result/isbi-mr-prostate-2013/,reviewed,2026-08-31
+ISBI-MR-Prostate-2013,Prostate-3T,reviewed_wordpress_result_summary,Image data were selected from PROSTATE-DIAGNOSIS and Prostate-3T,https://www.cancerimagingarchive.net/analysis-result/isbi-mr-prostate-2013/,reviewed,2026-08-31
+Oropharyngeal-Radiomics-Outcomes,HNSCC,reviewed_wordpress_result_summary,This study describes a subset of the HNSCC collection,https://www.cancerimagingarchive.net/analysis-result/oropharyngeal-radiomics-outcomes/,reviewed,2026-08-31
+TCGA-OV-Proteogenomics,TCGA-OV,reviewed_wordpress_result_summary,Study included 20 TCGA-OV patients,https://www.cancerimagingarchive.net/analysis-result/tcga-ov-proteogenomics/,reviewed,2026-08-31
+TCGA-OV-Radiogenomics,TCGA-OV,reviewed_wordpress_result_summary,TCGA-OV Imaging Research Group cohort,https://www.cancerimagingarchive.net/analysis-result/tcga-ov-radiogenomics/,reviewed,2026-08-31

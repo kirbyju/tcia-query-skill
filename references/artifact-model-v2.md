@@ -421,6 +421,23 @@ namespaces, or reviewed mappings for other equivalence claims. Route
 cross-dataset, normalized-but-not-case-equivalent, one-to-many, and conflicting
 matches to `participant_link_issues`.
 
+Participant Inventory schema v8 adds `participant_source_links` and
+`agent_participant_source_links` as the compact, queryable Analysis Result to
+source Collection junction. IDC per-participant source Collection identifiers
+are direct evidence. WordPress source-Collection/download relationships and the
+reviewed relationship registry require an exact, unambiguous participant
+identifier match. Dataset-scoped participant rows remain separate; the junction
+records their verified relationship for clients that consolidate memberships
+for presentation. Missing or ambiguous source participants remain explicit
+coverage issues rather than inferred links.
+
+Official participant-level clinical crosswalks may resolve non-equivalent ID
+spellings. The ACRIN-6698/I-SPY2 source rows explicitly pair the ACRIN DICOM
+PatientID, I-SPY2 research ID, and I-SPY2 DICOM PatientID. Those scoped values
+resolve I-SPY2 aliases and let a BreastDCEDL_ISPY2 participant link to both
+source Collections. Equal bare identifiers in unrelated Collections, such as
+NLST, are not evidence and remain separate.
+
 The reviewed BraTS workbook is the explicit exception to the default
 cross-dataset non-assertion rule: it supplies both the source Collection and
 source PatientID. Current-inventory matches are marked

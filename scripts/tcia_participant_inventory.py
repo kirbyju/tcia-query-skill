@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import gzip
 import hashlib
 import json
@@ -26,6 +27,10 @@ try:
     from tcia_v2_staging import resolve_component as resolve_staging_component
 except ImportError:
     from scripts.tcia_v2_staging import resolve_component as resolve_staging_component
+try:
+    from tcia_clinical_metadata import wordpress_analysis_result_relationships
+except ImportError:
+    from scripts.tcia_clinical_metadata import wordpress_analysis_result_relationships
 
 
 SKILL_ROOT = Path(__file__).resolve().parents[1]
@@ -34,13 +39,16 @@ DEFAULT_PUBLIC_DB = SKILL_ROOT / "cache" / "public_non_dicom_metadata.sqlite"
 DEFAULT_CONTROLLED_DB = SKILL_ROOT / "cache" / "controlled_access_metadata.sqlite"
 DEFAULT_CLINICAL_DB = SKILL_ROOT / "cache" / "clinical_metadata.sqlite"
 DEFAULT_IDC_DB = SKILL_ROOT / "cache" / "idc_participant_projection.sqlite"
+DEFAULT_REVIEWED_SOURCE_RELATIONSHIPS = (
+    SKILL_ROOT / "references" / "reviewed_analysis_result_source_collections_v1.csv"
+)
 DEFAULT_DB = SKILL_ROOT / "cache" / "participant_inventory.sqlite"
 DEFAULT_MANIFEST = SKILL_ROOT / "cache" / "participant_inventory_manifest.json"
 DEFAULT_RELEASE_TAG = "tcia-metadata-v2-latest"
 DEFAULT_REPOSITORY = "kirbyju/tcia-query-skill"
 DB_ASSET = "participant_inventory.sqlite.gz"
 MANIFEST_ASSET = "participant_inventory_manifest.json"
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 GEOMETRY_CAPABLE_FORMATS = {"DICOM", "NIFTI", "MHA", "MHD", "NRRD"}
 GEOMETRY_CHECKED_STATUSES = {
@@ -224,6 +232,23 @@ CREATE TABLE participant_identity_evidence (
     FOREIGN KEY (participant_key) REFERENCES participants(participant_key)
 );
 
+CREATE TABLE participant_source_links (
+    participant_source_link_id TEXT PRIMARY KEY,
+    analysis_result_participant_key TEXT NOT NULL,
+    source_collection_short_title TEXT NOT NULL,
+    source_collection_participant_key TEXT,
+    source_participant_id TEXT NOT NULL,
+    link_status TEXT NOT NULL,
+    resolution_method TEXT NOT NULL,
+    confidence TEXT NOT NULL,
+    evidence_source TEXT NOT NULL,
+    evidence_pointer TEXT,
+    evidence_url TEXT,
+    evidence_json TEXT NOT NULL DEFAULT '{}',
+    FOREIGN KEY (analysis_result_participant_key) REFERENCES participants(participant_key),
+    FOREIGN KEY (source_collection_participant_key) REFERENCES participants(participant_key)
+);
+
 CREATE INDEX idx_pi_participants_dataset ON participants(short_title, display_participant_id);
 CREATE INDEX idx_pi_participants_short_title_nocase ON participants(short_title COLLATE NOCASE);
 CREATE INDEX idx_pi_participants_display_id_nocase ON participants(display_participant_id COLLATE NOCASE);
@@ -234,6 +259,8 @@ CREATE INDEX idx_pi_identifiers_normalized_nocase ON participant_identifiers(nor
 CREATE INDEX idx_pi_assets_participant ON participant_assets(participant_key);
 CREATE INDEX idx_pi_assets_access ON participant_assets(access_level, data_domain);
 CREATE INDEX idx_pi_clinical_participant ON participant_clinical_values(participant_key, concept);
+CREATE INDEX idx_pi_source_links_result ON participant_source_links(analysis_result_participant_key);
+CREATE INDEX idx_pi_source_links_source ON participant_source_links(source_collection_short_title, source_participant_id);
 
 CREATE VIEW agent_participants AS
 SELECT
@@ -315,6 +342,17 @@ CREATE VIEW agent_participant_identity_evidence AS
 SELECT e.*, p.dataset_type, p.short_title, p.display_participant_id
 FROM participant_identity_evidence e
 JOIN participants p USING(participant_key);
+
+CREATE VIEW agent_participant_source_links AS
+SELECT l.*,
+       result.short_title AS analysis_result_short_title,
+       result.display_participant_id AS analysis_result_participant_id,
+       source.display_participant_id AS current_source_participant_id
+FROM participant_source_links l
+JOIN participants result
+  ON result.participant_key = l.analysis_result_participant_key
+LEFT JOIN participants source
+  ON source.participant_key = l.source_collection_participant_key;
 
 CREATE VIEW agent_participant_search AS
 SELECT * FROM agent_participants;
@@ -422,6 +460,586 @@ def resolve_dataset_identity(
         supplied.casefold(),
         (str(fallback_type or "Collection").strip() or "Collection", supplied),
     )
+
+
+def normalize_dataset_name(value: Any) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(value or "").casefold())
+
+
+def load_reviewed_source_relationships(
+    path: Path = DEFAULT_REVIEWED_SOURCE_RELATIONSHIPS,
+) -> list[dict[str, str]]:
+    if not path.exists():
+        return []
+    with path.open(newline="", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+    required = {
+        "analysis_result_short_title",
+        "source_collection_short_title",
+        "evidence_source",
+        "evidence_pointer",
+        "evidence_url",
+        "review_status",
+    }
+    if not rows or not required.issubset(rows[0]):
+        raise RuntimeError(
+            f"Reviewed Analysis Result source relationship file has an invalid schema: {path}"
+        )
+    return [
+        {key: str(row.get(key) or "").strip() for key in required}
+        for row in rows
+        if str(row.get("analysis_result_short_title") or "").strip()
+        and str(row.get("source_collection_short_title") or "").strip()
+    ]
+
+
+def load_acrin_ispy2_clinical_crosswalk(
+    clinical_db: Path,
+) -> list[dict[str, str]]:
+    """Load the explicit ACRIN DICOM ID -> I-SPY2 research/DICOM ID bridge."""
+    if not clinical_db.exists():
+        return []
+    with closing(connect(clinical_db)) as source:
+        if not table_exists(source, "clinical_rows"):
+            return []
+        acrin_rows = source.execute(
+            """
+            SELECT DISTINCT
+                   trim(json_extract(row_json, '$.dicom_patient_id')) AS acrin_id,
+                   trim(json_extract(row_json, '$.i_spy_2_research_id')) AS research_id
+            FROM clinical_rows
+            WHERE short_title = 'ACRIN-6698'
+              AND table_name = 'acrin_6698_clinical'
+              AND COALESCE(trim(json_extract(row_json, '$.dicom_patient_id')), '') <> ''
+              AND COALESCE(trim(json_extract(row_json, '$.i_spy_2_research_id')), '') <> ''
+            """
+        ).fetchall()
+        ispy_rows = source.execute(
+            """
+            SELECT DISTINCT
+                   trim(json_extract(row_json, '$.patient_id')) AS research_id,
+                   trim(json_extract(row_json, '$.dicom_patient_id')) AS ispy_dicom_id
+            FROM clinical_rows
+            WHERE short_title = 'ISPY2'
+              AND table_name = 'ispy2_clinical'
+              AND COALESCE(trim(json_extract(row_json, '$.patient_id')), '') <> ''
+              AND COALESCE(trim(json_extract(row_json, '$.dicom_patient_id')), '') <> ''
+            """
+        ).fetchall()
+    acrin_by_research: dict[str, str] = {}
+    for row in acrin_rows:
+        research_id = str(row["research_id"])
+        acrin_id = str(row["acrin_id"])
+        previous = acrin_by_research.get(research_id)
+        if previous and previous != acrin_id:
+            raise RuntimeError(
+                f"Ambiguous ACRIN-6698 mapping for I-SPY2 research ID {research_id}"
+            )
+        acrin_by_research[research_id] = acrin_id
+    result: list[dict[str, str]] = []
+    seen_ispy: dict[str, str] = {}
+    for row in ispy_rows:
+        research_id = str(row["research_id"])
+        ispy_dicom_id = str(row["ispy_dicom_id"])
+        previous = seen_ispy.get(research_id)
+        if previous and previous != ispy_dicom_id:
+            raise RuntimeError(
+                f"Ambiguous I-SPY2 DICOM mapping for research ID {research_id}"
+            )
+        seen_ispy[research_id] = ispy_dicom_id
+        result.append({
+            "research_id": research_id,
+            "ispy_dicom_id": ispy_dicom_id,
+            "acrin_id": acrin_by_research.get(research_id, ""),
+        })
+    return result
+
+
+def apply_clinical_participant_aliases(
+    conn: sqlite3.Connection, clinical_db: Path
+) -> dict[str, int]:
+    """Merge source-asserted aliases within a Collection, preserving every ID."""
+    counts = {"ispy2_clinical_aliases": 0}
+    for row in load_acrin_ispy2_clinical_crosswalk(clinical_db):
+        canonical_key = participant_key("Collection", "ISPY2", row["ispy_dicom_id"])
+        alias_key = participant_key("Collection", "ISPY2", row["research_id"])
+        if canonical_key == alias_key:
+            continue
+        canonical_present = conn.execute(
+            "SELECT 1 FROM participants WHERE participant_key = ?", (canonical_key,)
+        ).fetchone()
+        alias_present = conn.execute(
+            "SELECT 1 FROM participants WHERE participant_key = ?", (alias_key,)
+        ).fetchone()
+        if not canonical_present or not alias_present:
+            continue
+        for table in (
+            "participant_identifiers",
+            "participant_assets",
+            "participant_clinical_values",
+        ):
+            conn.execute(
+                f"UPDATE {table} SET participant_key = ? WHERE participant_key = ?",
+                (canonical_key, alias_key),
+            )
+        conn.execute("DELETE FROM participants WHERE participant_key = ?", (alias_key,))
+        conn.execute(
+            """
+            UPDATE participants
+            SET within_dataset_identity_status = 'resolved',
+                identity_resolution_method = 'official_clinical_identifier_crosswalk'
+            WHERE participant_key = ?
+            """,
+            (canonical_key,),
+        )
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO participant_identity_evidence
+            VALUES (?, ?, 'within_dataset',
+                    'official_clinical_identifier_crosswalk', 'resolved', 'high', ?, ?)
+            """,
+            (
+                stable_id(
+                    "identity_evidence",
+                    canonical_key,
+                    "official_clinical_identifier_crosswalk",
+                    row["research_id"],
+                ),
+                canonical_key,
+                "The official I-SPY2 clinical row records both the research ID and "
+                "the DICOM PatientID for this participant.",
+                json_dumps({
+                    "source_artifact": "clinical_metadata",
+                    "source_table": "ispy2_clinical",
+                    **row,
+                }),
+            ),
+        )
+        counts["ispy2_clinical_aliases"] += 1
+    return counts
+
+
+def record_source_collection_link(
+    conn: sqlite3.Connection,
+    *,
+    analysis_result_participant_key: str,
+    source_collection_short_title: str,
+    source_participant_id: str,
+    source_collection_participant_key: str | None,
+    link_status: str,
+    resolution_method: str,
+    confidence: str,
+    evidence_source: str,
+    evidence_pointer: str,
+    evidence_url: str,
+    evidence: dict[str, Any],
+) -> None:
+    source_key = source_collection_participant_key or ""
+    link_id = stable_id(
+        "participant_source_link",
+        analysis_result_participant_key,
+        source_collection_short_title,
+        source_participant_id,
+    )
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO participant_source_links
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            link_id,
+            analysis_result_participant_key,
+            source_collection_short_title,
+            source_collection_participant_key,
+            source_participant_id,
+            link_status,
+            resolution_method,
+            confidence,
+            evidence_source,
+            evidence_pointer,
+            evidence_url,
+            json_dumps(evidence),
+        ),
+    )
+    evidence_status = (
+        "resolved" if link_status == "linked_source_collection" else link_status
+    )
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO participant_identity_evidence
+        VALUES (?, ?, 'cross_dataset', ?, ?, ?, ?, ?)
+        """,
+        (
+            stable_id("identity_evidence", link_id, resolution_method),
+            analysis_result_participant_key,
+            resolution_method,
+            evidence_status,
+            confidence,
+            (
+                f"Analysis Result participant links to "
+                f"{source_collection_short_title}/{source_participant_id}."
+            ),
+            json_dumps({
+                **evidence,
+                "source_collection_short_title": source_collection_short_title,
+                "source_collection_participant_key": source_key,
+                "source_collection_participant_present": bool(
+                    source_collection_participant_key
+                ),
+            }),
+        ),
+    )
+    if link_status == "linked_source_collection":
+        conn.execute(
+            "UPDATE participants SET cross_dataset_identity_status = ? "
+            "WHERE participant_key = ?",
+            (link_status, analysis_result_participant_key),
+        )
+    else:
+        conn.execute(
+            "UPDATE participants SET cross_dataset_identity_status = ? "
+            "WHERE participant_key = ? AND cross_dataset_identity_status = 'not_asserted'",
+            (link_status, analysis_result_participant_key),
+        )
+
+
+def apply_analysis_result_source_collection_links(
+    conn: sqlite3.Connection,
+    *,
+    snapshot_db: Path,
+    idc_db: Path,
+    dataset_types: dict[str, tuple[str, str]],
+    clinical_db: Path = DEFAULT_CLINICAL_DB,
+    reviewed_relationships: Path = DEFAULT_REVIEWED_SOURCE_RELATIONSHIPS,
+) -> dict[str, int]:
+    """Resolve cross-dataset links only from authoritative relationship evidence."""
+    counts = {
+        "linked_source_collection": 0,
+        "source_participant_not_current": 0,
+        "ambiguous_source_collection": 0,
+        "unresolved_source_collection": 0,
+    }
+    collection_by_normalized = {
+        normalize_dataset_name(short_title): short_title
+        for dataset_type, short_title in dataset_types.values()
+        if dataset_type == "Collection"
+    }
+    clinical_crosswalk: dict[str, list[dict[str, str]]] = defaultdict(list)
+    for row in load_acrin_ispy2_clinical_crosswalk(clinical_db):
+        if not row["acrin_id"]:
+            continue
+        for identifier in (row["acrin_id"], row["research_id"], row["ispy_dicom_id"]):
+            clinical_crosswalk[identifier.casefold()].append(row)
+
+    # IDC directly records the Collection membership behind each Analysis Result
+    # participant row. This is stronger than dataset-level relationship prose.
+    directly_linked: set[str] = set()
+    if idc_db.exists():
+        with closing(connect(idc_db)) as source:
+            if table_exists(source, "agent_idc_dataset_participants"):
+                rows = source.execute(
+                    """
+                    SELECT short_title, participant_id, source_collection_ids_json
+                    FROM agent_idc_dataset_participants
+                    WHERE dataset_type = 'Analysis Result'
+                    """
+                ).fetchall()
+                for row in rows:
+                    target_type, target_title = resolve_dataset_identity(
+                        dataset_types, str(row["short_title"]), "Analysis Result"
+                    )
+                    participant_id = str(row["participant_id"] or "").strip()
+                    if target_type != "Analysis Result" or not participant_id:
+                        continue
+                    target_key = participant_key(target_type, target_title, participant_id)
+                    if not conn.execute(
+                        "SELECT 1 FROM participants WHERE participant_key = ?",
+                        (target_key,),
+                    ).fetchone():
+                        continue
+                    source_ids = json.loads(
+                        str(row["source_collection_ids_json"] or "[]")
+                    )
+                    for source_id in source_ids:
+                        source_title = collection_by_normalized.get(
+                            normalize_dataset_name(source_id)
+                        )
+                        if not source_title:
+                            continue
+                        expected_source_key = participant_key(
+                            "Collection", source_title, participant_id
+                        )
+                        source_present = bool(
+                            conn.execute(
+                                "SELECT 1 FROM participants WHERE participant_key = ?",
+                                (expected_source_key,),
+                            ).fetchone()
+                        )
+                        status = (
+                            "linked_source_collection"
+                            if source_present
+                            else "source_participant_not_current"
+                        )
+                        record_source_collection_link(
+                            conn,
+                            analysis_result_participant_key=target_key,
+                            source_collection_short_title=source_title,
+                            source_participant_id=participant_id,
+                            source_collection_participant_key=(
+                                expected_source_key if source_present else None
+                            ),
+                            link_status=status,
+                            resolution_method="idc_source_collection_and_exact_identifier",
+                            confidence="high",
+                            evidence_source="idc_participant_projection",
+                            evidence_pointer=(
+                                f"agent_idc_dataset_participants:{target_title}:{participant_id}"
+                            ),
+                            evidence_url="",
+                            evidence={
+                                "source_collection_id": str(source_id),
+                                "analysis_result_short_title": target_title,
+                            },
+                        )
+                        directly_linked.add(target_key)
+                        counts[status] += 1
+                        if not source_present:
+                            conn.execute(
+                                """
+                                INSERT OR REPLACE INTO participant_link_issues
+                                VALUES (?, 'Analysis Result', ?, ?,
+                                        'idc_source_collection_participant_not_current',
+                                        'open', ?, ?)
+                                """,
+                                (
+                                    stable_id(
+                                        "participant_issue", target_key, source_title, "idc"
+                                    ),
+                                    target_title,
+                                    participant_id,
+                                    f"IDC names {source_title} as the source Collection, "
+                                    "but its exact participant identifier is absent from "
+                                    "the current inventory.",
+                                    json_dumps({
+                                        "source_collection_id": str(source_id),
+                                        "source_collection_short_title": source_title,
+                                    }),
+                                ),
+                            )
+
+    relationships: dict[tuple[str, str], list[dict[str, str]]] = defaultdict(list)
+    for row in wordpress_analysis_result_relationships(snapshot_db):
+        target_type, target_title = resolve_dataset_identity(
+            dataset_types, str(row["target_short_title"]), "Analysis Result"
+        )
+        source_type, source_title = resolve_dataset_identity(
+            dataset_types, str(row["source_short_title"]), "Collection"
+        )
+        if target_type != "Analysis Result" or source_type != "Collection":
+            continue
+        relationship_source = str(row["relationship_source"])
+        if "wordpress_source_collections" in relationship_source:
+            evidence_pointer = (
+                f"tcia_snapshot:agent_datasets:{target_title}:source_collections"
+            )
+        else:
+            evidence_pointer = (
+                f"tcia_snapshot:agent_current_downloads:{target_title}:{source_title}"
+            )
+        relationships[(target_title, source_title)].append({
+            "evidence_source": relationship_source,
+            "evidence_pointer": evidence_pointer,
+            "evidence_url": str(row.get("target_url") or ""),
+            "review_status": "wordpress_curated_relationship",
+        })
+    for row in load_reviewed_source_relationships(reviewed_relationships):
+        target_type, target_title = resolve_dataset_identity(
+            dataset_types, row["analysis_result_short_title"], "Analysis Result"
+        )
+        source_type, source_title = resolve_dataset_identity(
+            dataset_types, row["source_collection_short_title"], "Collection"
+        )
+        if target_type != "Analysis Result" or source_type != "Collection":
+            raise RuntimeError(
+                "Reviewed source relationship does not resolve to Analysis Result -> "
+                f"Collection: {target_title} -> {source_title}"
+            )
+        relationships[(target_title, source_title)].append(row)
+
+    sources_by_target: dict[str, set[str]] = defaultdict(set)
+    for target_title, source_title in relationships:
+        sources_by_target[target_title].add(source_title)
+
+    targets = conn.execute(
+        """
+        SELECT participant_key, short_title, display_participant_id
+        FROM participants
+        WHERE dataset_type = 'Analysis Result'
+        ORDER BY short_title, display_participant_id
+        """
+    ).fetchall()
+    for target in targets:
+        target_key = str(target["participant_key"])
+        if target_key in directly_linked:
+            continue
+        target_title = str(target["short_title"])
+        participant_id = str(target["display_participant_id"])
+        candidate_sources = sorted(sources_by_target.get(target_title, ()))
+        if not candidate_sources:
+            continue
+        crosswalk_rows = clinical_crosswalk.get(participant_id.casefold(), ())
+        explicit_matches: dict[str, tuple[str, str]] = {}
+        selected_crosswalk: dict[str, str] | None = None
+        for crosswalk in crosswalk_rows:
+            row_matches: dict[str, tuple[str, str]] = {}
+            for source_title, source_id in (
+                ("ACRIN-6698", crosswalk["acrin_id"]),
+                ("ISPY2", crosswalk["ispy_dicom_id"]),
+            ):
+                if source_title not in candidate_sources or not source_id:
+                    continue
+                source_key = participant_key("Collection", source_title, source_id)
+                if conn.execute(
+                    "SELECT 1 FROM participants WHERE participant_key = ?", (source_key,)
+                ).fetchone():
+                    row_matches[source_title] = (source_id, source_key)
+            if row_matches:
+                if selected_crosswalk and selected_crosswalk != crosswalk:
+                    raise RuntimeError(
+                        f"Ambiguous clinical crosswalk for {target_title}/{participant_id}"
+                    )
+                selected_crosswalk = crosswalk
+                explicit_matches.update(row_matches)
+        if explicit_matches and selected_crosswalk:
+            for source_title, (source_id, source_key) in sorted(explicit_matches.items()):
+                evidence_rows = relationships[(target_title, source_title)]
+                record_source_collection_link(
+                    conn,
+                    analysis_result_participant_key=target_key,
+                    source_collection_short_title=source_title,
+                    source_participant_id=source_id,
+                    source_collection_participant_key=source_key,
+                    link_status="linked_source_collection",
+                    resolution_method="official_acrin_ispy2_clinical_crosswalk",
+                    confidence="high",
+                    evidence_source="official_tcia_clinical_crosswalk;" + ";".join(
+                        sorted({item["evidence_source"] for item in evidence_rows})
+                    ),
+                    evidence_pointer=(
+                        "clinical_metadata:acrin_6698_clinical:"
+                        f"{selected_crosswalk['acrin_id']}"
+                    ),
+                    evidence_url=evidence_rows[0].get("evidence_url", ""),
+                    evidence={
+                        "analysis_result_short_title": target_title,
+                        "acrin_id": selected_crosswalk["acrin_id"],
+                        "ispy_dicom_id": selected_crosswalk["ispy_dicom_id"],
+                        "ispy2_research_id": selected_crosswalk["research_id"],
+                    },
+                )
+                counts["linked_source_collection"] += 1
+            continue
+        matches: list[tuple[str, str]] = []
+        for source_title in candidate_sources:
+            source_key = participant_key("Collection", source_title, participant_id)
+            if conn.execute(
+                "SELECT 1 FROM participants WHERE participant_key = ?", (source_key,)
+            ).fetchone():
+                matches.append((source_title, source_key))
+        if len(matches) == 1:
+            source_title, source_key = matches[0]
+            evidence_rows = relationships[(target_title, source_title)]
+            record_source_collection_link(
+                conn,
+                analysis_result_participant_key=target_key,
+                source_collection_short_title=source_title,
+                source_participant_id=participant_id,
+                source_collection_participant_key=source_key,
+                link_status="linked_source_collection",
+                resolution_method="official_dataset_relationship_and_exact_identifier",
+                confidence="high",
+                evidence_source=";".join(sorted({
+                    item["evidence_source"] for item in evidence_rows
+                })),
+                evidence_pointer=evidence_rows[0]["evidence_pointer"],
+                evidence_url=evidence_rows[0].get("evidence_url", ""),
+                evidence={
+                    "analysis_result_short_title": target_title,
+                    "relationship_evidence_count": len(evidence_rows),
+                },
+            )
+            counts["linked_source_collection"] += 1
+        elif len(matches) > 1:
+            counts["ambiguous_source_collection"] += 1
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO participant_link_issues
+                VALUES (?, 'Analysis Result', ?, ?,
+                        'ambiguous_source_collection_match', 'open', ?, ?)
+                """,
+                (
+                    stable_id("participant_issue", target_key, "ambiguous_source_collection"),
+                    target_title,
+                    participant_id,
+                    "The exact participant identifier occurs in more than one "
+                    "authoritatively related source Collection.",
+                    json_dumps({"candidate_source_collections": [item[0] for item in matches]}),
+                ),
+            )
+        elif len(candidate_sources) == 1:
+            source_title = candidate_sources[0]
+            evidence_rows = relationships[(target_title, source_title)]
+            record_source_collection_link(
+                conn,
+                analysis_result_participant_key=target_key,
+                source_collection_short_title=source_title,
+                source_participant_id=participant_id,
+                source_collection_participant_key=None,
+                link_status="source_participant_not_current",
+                resolution_method="official_dataset_relationship_exact_identifier_absent",
+                confidence="high",
+                evidence_source=";".join(sorted({
+                    item["evidence_source"] for item in evidence_rows
+                })),
+                evidence_pointer=evidence_rows[0]["evidence_pointer"],
+                evidence_url=evidence_rows[0].get("evidence_url", ""),
+                evidence={"analysis_result_short_title": target_title},
+            )
+            counts["source_participant_not_current"] += 1
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO participant_link_issues
+                VALUES (?, 'Analysis Result', ?, ?,
+                        'source_collection_participant_not_current', 'open', ?, ?)
+                """,
+                (
+                    stable_id("participant_issue", target_key, source_title),
+                    target_title,
+                    participant_id,
+                    f"The authoritative dataset relationship names {source_title}, "
+                    "but its exact participant identifier is absent from the current inventory.",
+                    json_dumps({"source_collection_short_title": source_title}),
+                ),
+            )
+        else:
+            counts["unresolved_source_collection"] += 1
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO participant_link_issues
+                VALUES (?, 'Analysis Result', ?, ?,
+                        'source_collection_match_unresolved', 'open', ?, ?)
+                """,
+                (
+                    stable_id("participant_issue", target_key, "source_unresolved"),
+                    target_title,
+                    participant_id,
+                    "The Analysis Result has multiple authoritative source Collections, "
+                    "but this participant identifier does not resolve uniquely to one "
+                    "current source participant.",
+                    json_dumps({"candidate_source_collections": candidate_sources}),
+                ),
+            )
+    return counts
 
 
 def ensure_participant(
@@ -870,33 +1488,19 @@ def apply_brats_source_collection_links(conn: sqlite3.Connection) -> dict[str, i
             else "source_participant_not_current"
         )
         counts[status] += 1
-        conn.execute(
-            "UPDATE participants SET cross_dataset_identity_status = ? WHERE participant_key = ?",
-            (status, row["participant_key"]),
-        )
-        conn.execute(
-            """
-            INSERT OR REPLACE INTO participant_identity_evidence
-            VALUES (?, ?, 'cross_dataset', 'official_tcia_brats2021_workbook',
-                    ?, 'high', ?, ?)
-            """,
-            (
-                stable_id(
-                    "identity_evidence", row["participant_key"], source_collection,
-                    source_patient_id,
-                ),
-                row["participant_key"],
-                "resolved" if source_present else "source_participant_not_current",
-                (
-                    "Official TCIA BraTS workbook links this Analysis Result participant "
-                    f"to {source_collection}/{source_patient_id}."
-                ),
-                json_dumps({
-                    **crosswalk,
-                    "source_collection_participant_key": source_key,
-                    "source_collection_participant_present": source_present,
-                }),
-            ),
+        record_source_collection_link(
+            conn,
+            analysis_result_participant_key=str(row["participant_key"]),
+            source_collection_short_title=source_collection,
+            source_participant_id=source_patient_id,
+            source_collection_participant_key=(source_key if source_present else None),
+            link_status=status,
+            resolution_method="official_tcia_brats2021_workbook",
+            confidence="high",
+            evidence_source="official_tcia_brats2021_workbook",
+            evidence_pointer=str(provenance.get("source_artifact") or ""),
+            evidence_url=str(crosswalk.get("source_url") or ""),
+            evidence=crosswalk,
         )
         if not source_present:
             conn.execute(
@@ -1431,6 +2035,7 @@ def resolve_within_dataset_identifiers(conn: sqlite3.Connection) -> dict[str, in
         FROM participant_identifiers i
         JOIN participants p USING(participant_key)
         WHERE i.link_evidence <> 'official_tcia_brats2021_workbook'
+          AND p.identity_resolution_method = 'source_identifier'
         GROUP BY p.participant_key, p.dataset_type, p.short_title,
                  p.display_participant_id
         HAVING COUNT(DISTINCT i.identifier_namespace) > 1
@@ -1568,12 +2173,25 @@ def build_database(
                 include_clinical_values=include_clinical_values,
             ),
         }
-        brats_links = apply_brats_source_collection_links(conn)
-        counts.update({f"brats_{key}": value for key, value in brats_links.items()})
+        clinical_alias_counts = apply_clinical_participant_aliases(conn, clinical_db)
+        counts.update(clinical_alias_counts)
         counts["display_identifiers_selected"] = select_display_participant_ids(conn)
         resolution_counts = resolve_within_dataset_identifiers(conn)
         counts.update(resolution_counts)
-        counts["within_dataset_identity_resolutions"] = sum(resolution_counts.values())
+        counts["within_dataset_identity_resolutions"] = (
+            sum(resolution_counts.values())
+            + clinical_alias_counts["ispy2_clinical_aliases"]
+        )
+        source_links = apply_analysis_result_source_collection_links(
+            conn,
+            snapshot_db=snapshot_db,
+            idc_db=idc_db,
+            clinical_db=clinical_db,
+            dataset_types=dataset_types,
+        )
+        counts.update({f"source_links_{key}": value for key, value in source_links.items()})
+        brats_links = apply_brats_source_collection_links(conn)
+        counts.update({f"brats_{key}": value for key, value in brats_links.items()})
         metadata = {
             "schema_version": SCHEMA_VERSION,
             "artifact_model_schema_version": MODEL_SCHEMA_VERSION,
@@ -1581,8 +2199,9 @@ def build_database(
             "identity_rule": (
                 "Case-equivalent identifiers from sources attached to the same authoritative "
                 "TCIA dataset resolve to one participant while every source spelling is "
-                "preserved; cross-dataset identity is never asserted from a repeated bare "
-                "identifier."
+                "preserved; cross-dataset identity requires an authoritative Analysis Result "
+                "to Collection relationship plus an exact, unambiguous participant match, "
+                "or direct per-participant IDC/reviewed crosswalk evidence."
             ),
             "display_identifier_rule": (
                 "Prefer TCIA-origin identifier spelling, then other managed-system sources, "
@@ -1602,6 +2221,7 @@ def build_database(
             "participants": conn.execute("SELECT COUNT(*) FROM participants").fetchone()[0],
             "participant_assets": conn.execute("SELECT COUNT(*) FROM participant_assets").fetchone()[0],
             "identifiers": conn.execute("SELECT COUNT(*) FROM participant_identifiers").fetchone()[0],
+            "participant_source_links": conn.execute("SELECT COUNT(*) FROM participant_source_links").fetchone()[0],
             "unlinked_dataset_assets": conn.execute("SELECT COUNT(*) FROM dataset_assets_without_participant_crosswalk").fetchone()[0],
         })
         integrity = conn.execute("PRAGMA integrity_check").fetchone()[0]
@@ -1619,9 +2239,11 @@ def validate_database(
     required = {
         "participants", "participant_identifiers", "participant_assets",
         "participant_clinical_values", "participant_identity_evidence",
+        "participant_source_links",
         "dataset_assets_without_participant_crosswalk", "participant_inventory_sources",
         "agent_participants", "agent_participant_assets", "agent_participant_identifiers",
         "agent_participant_clinical_values", "agent_participant_identity_evidence",
+        "agent_participant_source_links",
         "agent_participant_search",
     }
     errors: list[str] = []
@@ -1646,6 +2268,21 @@ def validate_database(
         ).fetchone()[0]
         if cross_dataset:
             errors.append(f"cross-dataset identities without evidence: {cross_dataset}")
+        cross_dataset_without_link = conn.execute(
+            """
+            SELECT COUNT(*) FROM participants p
+            WHERE p.cross_dataset_identity_status <> 'not_asserted'
+              AND NOT EXISTS (
+                SELECT 1 FROM participant_source_links l
+                WHERE l.analysis_result_participant_key = p.participant_key
+              )
+            """
+        ).fetchone()[0]
+        if cross_dataset_without_link:
+            errors.append(
+                "cross-dataset identities without source link rows: "
+                f"{cross_dataset_without_link}"
+            )
         duplicate_participants = conn.execute(
             """
             SELECT COUNT(*) FROM (
@@ -1686,6 +2323,13 @@ def validate_database(
             JOIN participants p USING(participant_key)
             WHERE casefold(i.normalized_identifier) <> casefold(p.display_participant_id)
               AND i.link_evidence <> 'official_tcia_brats2021_workbook'
+              AND NOT EXISTS (
+                SELECT 1 FROM participant_identity_evidence e
+                WHERE e.participant_key = p.participant_key
+                  AND e.resolution_scope = 'within_dataset'
+                  AND e.resolution_method = 'official_clinical_identifier_crosswalk'
+                  AND e.status = 'resolved'
+              )
             """
         ).fetchone()[0]
         if identifier_case_mismatches:
@@ -1720,6 +2364,21 @@ def validate_database(
         ).fetchone()[0]
         if orphan_assets:
             errors.append(f"orphan participant assets: {orphan_assets}")
+        orphan_source_links = conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM participant_source_links l
+            LEFT JOIN participants result
+              ON result.participant_key = l.analysis_result_participant_key
+            LEFT JOIN participants source
+              ON source.participant_key = l.source_collection_participant_key
+            WHERE result.participant_key IS NULL
+               OR (l.source_collection_participant_key IS NOT NULL
+                   AND source.participant_key IS NULL)
+            """
+        ).fetchone()[0]
+        if orphan_source_links:
+            errors.append(f"orphan participant source links: {orphan_source_links}")
         counts = {
             "participants": conn.execute("SELECT COUNT(*) FROM participants").fetchone()[0],
             "participant_assets": conn.execute("SELECT COUNT(*) FROM participant_assets").fetchone()[0],
@@ -1727,6 +2386,17 @@ def validate_database(
             "clinical_values": conn.execute("SELECT COUNT(*) FROM participant_clinical_values").fetchone()[0],
             "identity_resolutions": conn.execute(
                 "SELECT COUNT(*) FROM participant_identity_evidence WHERE status = 'resolved'"
+            ).fetchone()[0],
+            "participant_source_links": conn.execute(
+                "SELECT COUNT(*) FROM participant_source_links"
+            ).fetchone()[0],
+            "linked_source_collection_participants": conn.execute(
+                "SELECT COUNT(*) FROM participants "
+                "WHERE cross_dataset_identity_status='linked_source_collection'"
+            ).fetchone()[0],
+            "source_participant_not_current": conn.execute(
+                "SELECT COUNT(*) FROM participants "
+                "WHERE cross_dataset_identity_status='source_participant_not_current'"
             ).fetchone()[0],
             "collection_participants": conn.execute(
                 "SELECT COUNT(*) FROM participants WHERE dataset_type='Collection'"
