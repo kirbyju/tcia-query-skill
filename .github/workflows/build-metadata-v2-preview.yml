@@ -276,9 +276,11 @@ jobs:
           # while retaining all 2,586 files as source_confirmed_unavailable.
           # The reviewed BCBM crosswalk also replaces 223 filename-derived
           # identities with the 165 source-confirmed clinical participants.
+          # The official I-SPY2 clinical crosswalk consolidates 985 research-ID
+          # aliases with their corresponding ISPY2-prefixed DICOM PatientIDs.
           python scripts/tcia_participant_inventory.py validate \
             --db cache/participant_inventory.sqlite \
-            --min-collection-participants 125669 \
+            --min-collection-participants 124684 \
             --min-collections 222 \
             --min-analysis-result-participants 11730 \
             --min-analysis-results 29
