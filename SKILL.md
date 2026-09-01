@@ -188,6 +188,7 @@ Examples:
 python scripts/tcia_freshness.py check
 python scripts/tcia_v2_bundle.py install --profile research_core
 python scripts/tcia_v2_bundle.py install --profile research_detail
+python scripts/tcia_v2_bundle.py prune
 python scripts/tcia_snapshot.py info
 python scripts/tcia_snapshot.py build --out cache/tcia_snapshot.sqlite --gzip-out dist/tcia_snapshot.sqlite.gz --manifest-out dist/tcia_snapshot_manifest.json --exports-dir dist
 python scripts/tcia_snapshot.py validate --db cache/tcia_snapshot.sqlite
@@ -212,6 +213,13 @@ python scripts/pathdb_metadata.py --collection CPTAC-STAD --summary
 python scripts/tcia_clinical_metadata.py info --db cache/tcia-metadata-v2-latest/clinical_metadata.sqlite
 python scripts/tcia_clinical_metadata.py export-qc --db cache/tcia-metadata-v2-latest/clinical_metadata.sqlite --out clinical_qc_manual_review.csv
 ```
+
+The V2 installer automatically prunes obsolete files that it owns after a
+successful install. When investigating disk growth, run `prune` first as a dry
+run and use `prune --apply` only after reviewing its JSON report. This cleanup
+is receipt-aware and does not remove arbitrary files, `outputs/`, `dist/`, or
+other maintainer build workspaces. Use `du` to diagnose those separately and
+do not present them as required runtime content.
 
 ## General Commons
 

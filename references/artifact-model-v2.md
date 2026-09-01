@@ -569,7 +569,20 @@ The installer reads the top-level manifest first, stages every changed asset,
 verifies compressed and decompressed hashes plus SQLite integrity, and only
 then replaces installed components. Add `research_detail` for drill-down or
 `audit_support` for verbose provenance and QC. Installed files default to
-`cache/tcia-metadata-v2-latest/`.
+`cache/tcia-metadata-v2-latest/`. After committing the new receipt, it removes
+only obsolete installer-managed files and abandoned staging directories older
+than 24 hours. It never prunes arbitrary operator files or broad build
+workspaces. Audit cleanup before applying it explicitly with:
+
+```bash
+python3 scripts/tcia_v2_bundle.py prune
+python3 scripts/tcia_v2_bundle.py prune --apply
+```
+
+The first command is a dry run that reports active and stale bytes. Top-level
+`outputs/`, `dist/`, and other `cache/` subdirectories are maintainer build
+workspaces rather than installed release content and remain outside this
+receipt-aware cleanup contract.
 
 The V2 build runs after each successful scheduled base-snapshot workflow. It
 captures the source release record, verifies every copied source asset against the

@@ -12,6 +12,7 @@ import os
 import shutil
 import sqlite3
 import tempfile
+import time
 import urllib.request
 from contextlib import closing
 from pathlib import Path
@@ -31,6 +32,7 @@ DEFAULT_SOURCE_TAG = "workflow-artifact:update-tcia-metadata-v2-source-inputs"
 DEFAULT_RELEASE_TAG = "tcia-metadata-v2-latest"
 DEFAULT_INSTALL_DIR = Path(__file__).resolve().parents[1] / "cache" / DEFAULT_RELEASE_TAG
 INSTALL_STATE_ASSET = "tcia_metadata_v2_install.json"
+STALE_STAGE_MIN_AGE_HOURS = 24
 FULL_RELEASE_CONTRACT = "full"
 STREAMLINED_RELEASE_CONTRACT = "streamlined"
 STREAMLINED_CANDIDATE_CONTRACT = "streamlined_candidate"
@@ -91,6 +93,17 @@ EXTRA_ASSETS = {
         "default_download": False,
         "source": "source_workflow_input",
     },
+}
+
+# Exact filenames formerly managed by the stable V2 installer. They are safe
+# prune candidates only inside a directory with a valid official install
+# receipt; arbitrary files and maintainer build directories are never removed.
+LEGACY_INSTALLED_ASSETS = {
+    "agent_datasets.sqlite",
+    "nifti_metadata.sqlite",
+    "nifti_metadata_manifest.json",
+    "pathology_metadata.sqlite",
+    "pathology_metadata_manifest.json",
 }
 
 SOURCE_COMPONENTS = ("snapshot", "controlled_access", "clinical")
@@ -192,6 +205,109 @@ def installed_asset_name(asset: str) -> str:
     if asset in database_assets() and asset.endswith(".gz"):
         return asset[:-3]
     return asset
+
+
+def managed_install_names() -> set[str]:
+    names = {
+        installed_asset_name(name)
+        for name in expected_payload_assets(FULL_RELEASE_CONTRACT)
+    }
+    names.update(str(details["manifest"]) for details in COMPONENTS.values())
+    names.update(LEGACY_INSTALLED_ASSETS)
+    names.update({BUNDLE_MANIFEST_ASSET, INSTALL_STATE_ASSET})
+    return names
+
+
+def inspect_install(
+    install_dir: Path,
+    *,
+    stale_stage_hours: int = STALE_STAGE_MIN_AGE_HOURS,
+) -> dict[str, Any]:
+    """Report receipt-selected and stale installer-managed files without deleting."""
+    directory = install_dir.expanduser().resolve()
+    manifest_path = directory / BUNDLE_MANIFEST_ASSET
+    state_path = directory / INSTALL_STATE_ASSET
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(
+            f"Cannot inspect V2 install without a valid manifest and receipt: {directory}"
+        ) from exc
+    if manifest.get("artifact") != BUNDLE_ARTIFACT:
+        raise RuntimeError(f"Unexpected V2 bundle manifest in {directory}")
+    if state.get("artifact") != "tcia_metadata_v2_install":
+        raise RuntimeError(f"Unexpected V2 install receipt in {directory}")
+    if state.get("release_fingerprint") != manifest.get("release_fingerprint"):
+        raise RuntimeError(f"V2 install receipt and manifest disagree in {directory}")
+    installed_assets = state.get("installed_assets")
+    if not isinstance(installed_assets, list) or not all(
+        isinstance(name, str) for name in installed_assets
+    ):
+        raise RuntimeError(f"Invalid installed_assets receipt in {directory}")
+
+    active_names = {installed_asset_name(name) for name in installed_assets}
+    active_names.update({BUNDLE_MANIFEST_ASSET, INSTALL_STATE_ASSET})
+    active_files = []
+    stale_files = []
+    for name in sorted(managed_install_names()):
+        path = directory / name
+        if not path.is_file():
+            continue
+        item = {"path": str(path), "bytes": path.stat().st_size}
+        (active_files if name in active_names else stale_files).append(item)
+
+    threshold = time.time() - max(stale_stage_hours, 0) * 3600
+    stale_stages = []
+    if directory.parent.is_dir():
+        for path in sorted(directory.parent.glob(".tcia-v2-stage-*")):
+            if path.is_dir() and path.stat().st_mtime <= threshold:
+                size = sum(
+                    child.stat().st_size
+                    for child in path.rglob("*")
+                    if child.is_file()
+                )
+                stale_stages.append({"path": str(path), "bytes": size})
+    return {
+        "install_dir": str(directory),
+        "installed_profile": state.get("installed_profile"),
+        "release_fingerprint": manifest.get("release_fingerprint"),
+        "active_bytes": sum(item["bytes"] for item in active_files),
+        "stale_bytes": sum(item["bytes"] for item in stale_files + stale_stages),
+        "active_files": active_files,
+        "stale_files": stale_files,
+        "stale_stage_directories": stale_stages,
+    }
+
+
+def prune_install(
+    install_dir: Path,
+    *,
+    apply: bool = False,
+    stale_stage_hours: int = STALE_STAGE_MIN_AGE_HOURS,
+) -> dict[str, Any]:
+    """Remove only stale, receipt-unselected files owned by the V2 installer."""
+    report = inspect_install(
+        install_dir,
+        stale_stage_hours=stale_stage_hours,
+    )
+    removed = []
+    if apply:
+        for item in report["stale_files"]:
+            path = Path(item["path"])
+            path.unlink()
+            removed.append(item)
+        for item in report["stale_stage_directories"]:
+            path = Path(item["path"])
+            shutil.rmtree(path)
+            removed.append(item)
+    return {
+        **report,
+        "status": "pruned" if apply and removed else "unchanged",
+        "dry_run": not apply,
+        "removed_bytes": sum(item["bytes"] for item in removed),
+        "removed": removed,
+    }
 
 
 def component_names_for_contract(release_contract: str) -> tuple[str, ...]:
@@ -873,6 +989,7 @@ def install_bundle(
         os.replace(staged_manifest, install_dir / BUNDLE_MANIFEST_ASSET)
         os.replace(staged_state, install_dir / INSTALL_STATE_ASSET)
 
+    cleanup = prune_install(install_dir, apply=True)
     return {
         "status": "downloaded" if downloaded else "unchanged",
         "install_dir": str(install_dir),
@@ -881,6 +998,8 @@ def install_bundle(
         "release_fingerprint": manifest.get("release_fingerprint"),
         "downloaded_assets": downloaded,
         "unchanged_assets": unchanged,
+        "pruned_bytes": cleanup["removed_bytes"],
+        "pruned_files": [item["path"] for item in cleanup["removed"]],
     }
 
 
@@ -944,6 +1063,22 @@ def parser() -> argparse.ArgumentParser:
     install.add_argument("--profile", choices=PROFILE_ORDER, default="research_core")
     install.add_argument("--install-dir", default=str(DEFAULT_INSTALL_DIR))
     install.add_argument("--manifest-url")
+    prune = sub.add_parser(
+        "prune",
+        help="Report or remove stale files owned by an official V2 install.",
+    )
+    prune.add_argument("--install-dir", default=str(DEFAULT_INSTALL_DIR))
+    prune.add_argument(
+        "--apply",
+        action="store_true",
+        help="Delete the reported stale managed files; otherwise perform a dry run.",
+    )
+    prune.add_argument(
+        "--stale-stage-hours",
+        type=int,
+        default=STALE_STAGE_MIN_AGE_HOURS,
+        help="Minimum age for abandoned .tcia-v2-stage-* directories (default: 24).",
+    )
     return root
 
 
@@ -1016,6 +1151,14 @@ def main() -> int:
             profile=args.profile,
             install_dir=Path(args.install_dir),
             manifest_url=args.manifest_url,
+        )
+        print(json.dumps(result, indent=2, sort_keys=True))
+        return 0
+    if args.command == "prune":
+        result = prune_install(
+            Path(args.install_dir),
+            apply=args.apply,
+            stale_stage_hours=args.stale_stage_hours,
         )
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0

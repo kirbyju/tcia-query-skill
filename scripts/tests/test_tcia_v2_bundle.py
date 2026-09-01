@@ -300,6 +300,56 @@ class V2BundleTests(unittest.TestCase):
                 )
             self.assertFalse(destination.exists())
 
+    def test_prune_is_receipt_aware_and_preserves_unmanaged_files(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            install_dir = root / "installed"
+            install_dir.mkdir()
+            fingerprint = "release-fingerprint"
+            (install_dir / BUNDLE.BUNDLE_MANIFEST_ASSET).write_text(
+                json.dumps(
+                    {
+                        "artifact": BUNDLE.BUNDLE_ARTIFACT,
+                        "release_fingerprint": fingerprint,
+                    }
+                )
+            )
+            (install_dir / BUNDLE.INSTALL_STATE_ASSET).write_text(
+                json.dumps(
+                    {
+                        "artifact": "tcia_metadata_v2_install",
+                        "release_fingerprint": fingerprint,
+                        "installed_profile": "research_detail",
+                        "installed_assets": ["tcia_snapshot.sqlite.gz"],
+                    }
+                )
+            )
+            (install_dir / "tcia_snapshot.sqlite").write_bytes(b"active")
+            (install_dir / "pathology_metadata.sqlite").write_bytes(b"legacy")
+            (install_dir / "operator-notes.txt").write_text("preserve me")
+            abandoned = root / ".tcia-v2-stage-abandoned"
+            abandoned.mkdir()
+            (abandoned / "partial.sqlite.gz").write_bytes(b"partial")
+
+            dry_run = BUNDLE.prune_install(
+                install_dir,
+                stale_stage_hours=0,
+            )
+            self.assertTrue(dry_run["dry_run"])
+            self.assertTrue((install_dir / "pathology_metadata.sqlite").exists())
+            self.assertGreater(dry_run["stale_bytes"], 0)
+
+            applied = BUNDLE.prune_install(
+                install_dir,
+                apply=True,
+                stale_stage_hours=0,
+            )
+            self.assertEqual(applied["status"], "pruned")
+            self.assertFalse((install_dir / "pathology_metadata.sqlite").exists())
+            self.assertFalse(abandoned.exists())
+            self.assertTrue((install_dir / "tcia_snapshot.sqlite").exists())
+            self.assertTrue((install_dir / "operator-notes.txt").exists())
+
     def test_install_research_core_validates_and_installs_databases(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

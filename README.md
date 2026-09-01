@@ -100,7 +100,22 @@ python3 scripts/tcia_wordpress_search.py --short-title TCGA-BRCA --json
 The `cache/` directory is intentionally excluded from Git. The installer
 stages changed assets, checks bundle and component hashes, verifies decompressed
 SQLite hashes and integrity, and only then replaces installed files under
-`cache/tcia-metadata-v2-latest/`.
+`cache/tcia-metadata-v2-latest/`. A successful install also removes obsolete
+installer-managed files that are not selected by the new receipt. It does not
+remove arbitrary files or maintainer build directories.
+
+Inspect disk use and abandoned installer staging without deleting anything,
+then explicitly apply the reported cleanup if needed:
+
+```bash
+python3 scripts/tcia_v2_bundle.py prune
+python3 scripts/tcia_v2_bundle.py prune --apply
+```
+
+Large `outputs/`, top-level `dist/`, and non-release directories under `cache/`
+are build workspaces, not part of a normal installed skill. Diagnose them with
+`du` before removing them; the installer deliberately does not delete those
+operator-owned paths.
 
 Install file-grain detail or verbose audit support only when needed:
 
