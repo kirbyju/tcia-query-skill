@@ -710,6 +710,252 @@ class ClinicalMetadataTest(unittest.TestCase):
             "bcr_patient_barcode",
         )
 
+    def test_tcga_breast_cohort_is_exact_feature_assay_intersection(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            snapshot = root / "snapshot.sqlite"
+            with sqlite3.connect(snapshot) as source:
+                source.execute(
+                    """CREATE TABLE agent_datasets (
+                       hidden INTEGER, short_title TEXT, subjects INTEGER)"""
+                )
+                source.execute(
+                    "INSERT INTO agent_datasets VALUES (0, 'TCGA-Breast-Radiogenomics', 84)"
+                )
+            conn = CLINICAL.init_db(root / "clinical.sqlite", replace=True)
+            CLINICAL.insert_source(
+                conn,
+                source_id="official:breast",
+                source_kind="tcia_clinical_download",
+                short_title="TCGA-Breast-Radiogenomics",
+                source_signature_value="test",
+            )
+            cohort = [f"TCGA-AA-{number:04d}" for number in range(84)]
+            feature_only = [f"TCGA-BB-{number:04d}" for number in range(7)]
+            assay_only = [f"TCGA-CC-{number:04d}" for number in range(16)]
+            for row_number, subject_id in enumerate(cohort, 1):
+                CLINICAL.insert_row_and_facts(
+                    conn,
+                    source_id="official:breast",
+                    source_kind="tcia_clinical_download",
+                    short_title="TCGA-Breast-Radiogenomics",
+                    subject_id=subject_id,
+                    table_name="clinical.xls",
+                    row_number=row_number,
+                    row={"bcr_patient_barcode": subject_id},
+                    facts=[("race", "Unknown", "race", None)],
+                )
+            original_read_tables = CLINICAL.read_tables
+
+            def fake_read_tables(data, name, **kwargs):
+                if "91cases" in name:
+                    return [
+                        (
+                            "features",
+                            CLINICAL.SimpleFrame(
+                                ["Lesion Name"],
+                                [
+                                    {"Lesion Name": f"{subject_id}-1.les"}
+                                    for subject_id in cohort + feature_only
+                                ],
+                            ),
+                        )
+                    ]
+                return [
+                    (
+                        "assays",
+                        CLINICAL.SimpleFrame(
+                            ["CLID"],
+                            [{"CLID": subject_id} for subject_id in cohort + assay_only],
+                        ),
+                    )
+                ]
+
+            CLINICAL.read_tables = fake_read_tables
+            try:
+                result = CLINICAL.promote_tcga_breast_radiogenomics_cohort(
+                    conn,
+                    snapshot,
+                    no_fetch=False,
+                    timeout=5,
+                    max_bytes=10_000,
+                    fetcher=lambda *args, **kwargs: b"fixture",
+                )
+            finally:
+                CLINICAL.read_tables = original_read_tables
+            self.assertEqual(result["status"], "promoted")
+            self.assertEqual(result["feature_subjects"], 91)
+            self.assertEqual(result["assay_subjects"], 100)
+            self.assertEqual(result["cohort_subjects"], 84)
+            self.assertEqual(
+                conn.execute(
+                    """SELECT COUNT(*) FROM clinical_imaging_subjects
+                       WHERE short_title = 'TCGA-Breast-Radiogenomics'"""
+                ).fetchone()[0],
+                84,
+            )
+            conn.close()
+
+    def test_cda_unchanged_release_reuses_previous_sources(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            previous_path = root / "previous.sqlite"
+            previous = CLINICAL.init_db(previous_path, replace=True)
+            rows = [
+                {
+                    "data_source": "CDA",
+                    "data_source_version": "test",
+                    "data_source_extraction_date": "2026-01-01",
+                    "cda_table": "subject",
+                    "cda_column": "race",
+                }
+            ]
+            fingerprint = CLINICAL.cda_release_fingerprint(rows)
+            CLINICAL.insert_meta(previous, "schema_version", CLINICAL.SCHEMA_VERSION)
+            CLINICAL.insert_meta(previous, "cda_release_fingerprint", fingerprint)
+            CLINICAL.insert_source(
+                previous,
+                source_id="cda:tcgakirc",
+                source_kind="cda",
+                short_title="TCGA-KIRC",
+                source_signature_value=fingerprint,
+            )
+            CLINICAL.insert_row_and_facts(
+                previous,
+                source_id="cda:tcgakirc",
+                source_kind="cda",
+                short_title="TCGA-KIRC",
+                subject_id="TCGA-BP-4161",
+                table_name="cda.subject",
+                row_number=1,
+                row={"race": "White"},
+                facts=[("race", "White", "race", None)],
+                has_imaging=True,
+            )
+            previous.commit()
+            previous.close()
+
+            class FakeCDA:
+                @staticmethod
+                def release_metadata():
+                    return rows
+
+                @staticmethod
+                def get_subject_data(**kwargs):
+                    raise AssertionError("unchanged release must not be harvested")
+
+            conn = CLINICAL.init_db(root / "current.sqlite", replace=True)
+            result = CLINICAL.ingest_cda_clinical(
+                conn,
+                allowed_short_titles={"TCGA-KIRC"},
+                previous_db=previous_path,
+                refresh=False,
+                no_fetch=False,
+                batch_size=100,
+                client=FakeCDA(),
+            )
+            self.assertEqual(result["status"], "reused_unchanged_release")
+            self.assertEqual(result["sources_reused"], 1)
+            self.assertEqual(
+                conn.execute(
+                    "SELECT COUNT(*) FROM clinical_facts WHERE source_kind='cda'"
+                ).fetchone()[0],
+                1,
+            )
+            conn.close()
+
+    def test_native_cda_harvest_maps_exact_tcga_subject(self) -> None:
+        release_rows = [
+            {
+                "data_source": "CDA",
+                "data_source_version": "test",
+                "data_source_extraction_date": "2026-01-01",
+                "cda_table": "subject",
+                "cda_column": "race",
+            }
+        ]
+
+        class FakeCDA:
+            @staticmethod
+            def release_metadata():
+                return release_rows
+
+            @staticmethod
+            def get_subject_data(**kwargs):
+                return CLINICAL.SimpleFrame(
+                    [
+                        "subject_id",
+                        "race",
+                        "ethnicity",
+                        "observation_data",
+                        "treatment_data",
+                    ],
+                    [
+                        {
+                            "subject_id": "TCGA.TCGA-BP-4161",
+                            "race": "White",
+                            "ethnicity": "Not Hispanic or Latino",
+                            "observation_data": "nested",
+                            "treatment_data": "nested",
+                        }
+                    ],
+                )
+
+            @staticmethod
+            def expand_subject_results(frame, column):
+                if column == "observation_data":
+                    return CLINICAL.SimpleFrame(
+                        ["subject_id", "data_source", "diagnosis", "stage", "sex"],
+                        [
+                            {
+                                "subject_id": "TCGA.TCGA-BP-4161",
+                                "data_source": "GDC",
+                                "diagnosis": "Clear cell adenocarcinoma",
+                                "stage": "Stage I",
+                                "sex": "male",
+                            }
+                        ],
+                    )
+                return CLINICAL.SimpleFrame(
+                    ["subject_id", "data_source", "therapeutic_agent", "treatment_type"],
+                    [
+                        {
+                            "subject_id": "TCGA.TCGA-BP-4161",
+                            "data_source": "GDC",
+                            "therapeutic_agent": "Sunitinib",
+                            "treatment_type": "Targeted Molecular Therapy",
+                        }
+                    ],
+                )
+
+        with tempfile.TemporaryDirectory() as directory:
+            conn = CLINICAL.init_db(Path(directory) / "clinical.sqlite", replace=True)
+            conn.execute(
+                """INSERT INTO clinical_imaging_subjects VALUES
+                   ('tcgakirc:tcga-bp-4161', 'TCGA-KIRC',
+                    'TCGA-BP-4161', 'idc_index')"""
+            )
+            result = CLINICAL.ingest_cda_clinical(
+                conn,
+                allowed_short_titles={"TCGA-KIRC"},
+                previous_db=None,
+                refresh=False,
+                no_fetch=False,
+                batch_size=100,
+                client=FakeCDA(),
+            )
+            self.assertEqual(result["status"], "loaded")
+            self.assertEqual(result["matched_cda_subjects"], 1)
+            facts = dict(
+                conn.execute(
+                    """SELECT concept, value_text FROM clinical_facts
+                       WHERE short_title='TCGA-KIRC'"""
+                )
+            )
+            self.assertEqual(facts["primary_diagnosis"], "Clear cell adenocarcinoma")
+            self.assertEqual(facts["therapeutic_agent"], "Sunitinib")
+            conn.close()
+
     def test_analysis_result_inherits_collection_facts_by_exact_patient_id(
         self,
     ) -> None:
@@ -3119,6 +3365,7 @@ W22,file-2
                 "--manifest-out",
                 str(second_manifest),
                 "--no-fetch-idc-clinical",
+                "--no-fetch-cda",
                 "--replace",
             )
             conn = sqlite3.connect(second)

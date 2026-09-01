@@ -45,6 +45,7 @@ from cdapython import (
     summarize_files,
     get_subject_data,
     get_file_data,
+    release_metadata,
 )
 ```
 
@@ -60,13 +61,20 @@ column_values("anatomic_site")
 
 Use `columns()` before relying on a specific column name. CDA's docs list searchable tables including `subject`, `file`, `observation`, `treatment`, `mutation`, `project`, and `upstream_identifiers`.
 
+For scheduled harvests, call `release_metadata()` first. Normalize and hash
+the returned column/source rows, including `data_source_version`,
+`data_source_extraction_date`, and row/null/value counts. Reuse the prior CDA
+artifact when that fingerprint is unchanged; do not run a full subject import
+merely because the scheduler fired. A manual refresh remains useful for
+validating client or mapper changes.
+
 ## TCIA Cohort Workflow
 
 1. Confirm the dataset is a visible TCIA Collection or Analysis Result in WordPress.
 2. Decide whether CDA is answering a real enrichment question. Use direct TCIA artifacts or IDC clinical tables for official collection clinical data; use CDA for harmonized cross-commons discovery and summaries.
 3. Obtain subject identifiers from IDC/TCIA metadata. For public DICOM, IDC patient/subject metadata is usually the best starting point after WordPress provenance is confirmed.
 4. Validate identifier shape. CDA `subject_id` values may include source/project prefixes, such as `TCGA.TCGA-04-1369`; raw DICOM `PatientID` values may not match directly.
-5. For many subjects, write a TSV with one identifier column and use `match_from_file`. For a few known CDA subject IDs, use `match_all` or `match_any`.
+5. For many subjects, write a TSV with one identifier column and use `match_from_file`. Keep exact-ID batches bounded (the clinical builder uses 100 identifiers per request). For a few known CDA subject IDs, use `match_all` or `match_any`.
 6. Summarize before fetching rows. Use `summarize_subjects()` for demographics/diagnosis-style counts and `summarize_files()` for data source, format, category, and access counts.
 7. Fetch row-level enrichment with `get_subject_data()` only for the filtered cohort.
 

@@ -1610,13 +1610,23 @@ def ingest_clinical(
     with closing(connect(path)) as source:
         codex_projection = cptac_gbm_codex_clinical_projection(source)
         if table_exists(source, "agent_clinical_all_subjects"):
-            for row in source.execute("SELECT short_title, subject_id, source_kinds FROM agent_clinical_all_subjects"):
+            for row in source.execute(
+                """SELECT short_title, subject_id, source_kinds, has_imaging
+                   FROM agent_clinical_all_subjects"""
+            ):
                 raw_id = str(row["subject_id"] or "").strip()
                 if not raw_id:
                     continue
                 dataset_type, short_title = resolve_dataset_identity(
                     dataset_types, str(row["short_title"]), "Collection"
                 )
+                # A Collection-owned clinical table may legitimately contain
+                # more patients than a derived Analysis Result used. For
+                # Analysis Results, promote clinical rows into participant
+                # membership only after the clinical artifact has an explicit
+                # result-owned imaging/crosswalk link.
+                if dataset_type == "Analysis Result" and not row["has_imaging"]:
+                    continue
                 resolved_ids = (
                     codex_projection.get(raw_id, [raw_id])
                     if short_title == CPTAC_GBM_CODEX_SHORT_TITLE

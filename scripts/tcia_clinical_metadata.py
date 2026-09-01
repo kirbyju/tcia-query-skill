@@ -39,7 +39,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 
-SCHEMA_VERSION = 17
+SCHEMA_VERSION = 18
 CLINICAL_ASSET = "clinical_metadata.sqlite.gz"
 CLINICAL_MANIFEST_ASSET = "clinical_metadata_manifest.json"
 SKILL_ROOT = Path(__file__).resolve().parents[1]
@@ -47,6 +47,15 @@ DEFAULT_SNAPSHOT_DB = SKILL_ROOT / "cache" / "tcia_snapshot.sqlite"
 DEFAULT_DB_PATH = SKILL_ROOT / "cache" / "clinical_metadata.sqlite"
 DEFAULT_MANIFEST_PATH = SKILL_ROOT / "cache" / CLINICAL_MANIFEST_ASSET
 USER_AGENT = "tcia-clinical-metadata/0.1"
+CDA_DOCUMENTATION_URL = "https://cda.readthedocs.io/"
+TCGA_BREAST_RADIOGENOMICS_FEATURES_URL = (
+    "https://www.cancerimagingarchive.net/wp-content/uploads/"
+    "TCGA-Run-2014_91cases_features_UChicago-V2010-MRI-Workstation.xls"
+)
+TCGA_BREAST_RADIOGENOMICS_ASSAYS_URL = (
+    "https://www.cancerimagingarchive.net/wp-content/uploads/"
+    "Perou-TCGA-BRCA-MRIsPAM50GHI21NKI70-MAILED.xlsx"
+)
 IVYGAP_TUMOR_DETAILS_URL = (
     "https://glioblastoma.alleninstitute.org/api/v2/gbm/tumor_details.csv"
 )
@@ -2470,12 +2479,14 @@ def copy_nonofficial_previous(
     conn: sqlite3.Connection,
     previous_db: Path,
     allowed_short_titles: set[str],
+    *,
+    excluded_source_kinds: set[str] | None = None,
 ) -> int:
     previous = sqlite3.connect(previous_db)
     previous.row_factory = sqlite3.Row
     try:
         sources = previous.execute(
-            """SELECT source_id, short_title FROM clinical_sources
+            """SELECT source_id, source_kind, short_title FROM clinical_sources
                WHERE source_kind NOT IN
                      ('tcia_clinical_download',
                       'tcia_linked_external_clinical', 'idc_clinical',
@@ -2488,6 +2499,8 @@ def copy_nonofficial_previous(
     previous.close()
     copied = 0
     for source in sources:
+        if source["source_kind"] in (excluded_source_kinds or set()):
+            continue
         if source["short_title"] not in allowed_short_titles:
             continue
         copied += int(copy_source_from_previous(conn, previous_db, source["source_id"]))
@@ -2509,6 +2522,33 @@ def copy_nonofficial_previous(
                 tuple(row),
             )
     previous.close()
+    return copied
+
+
+def copy_previous_source_kind(
+    conn: sqlite3.Connection,
+    previous_db: Path,
+    allowed_short_titles: set[str],
+    source_kind: str,
+) -> int:
+    """Copy one reusable source family from a compatible prior artifact."""
+    previous = sqlite3.connect(previous_db)
+    previous.row_factory = sqlite3.Row
+    try:
+        sources = previous.execute(
+            """SELECT source_id, short_title FROM clinical_sources
+               WHERE source_kind = ? ORDER BY source_id""",
+            (source_kind,),
+        ).fetchall()
+    except sqlite3.Error:
+        previous.close()
+        return 0
+    previous.close()
+    copied = 0
+    for source in sources:
+        if source["short_title"] not in allowed_short_titles:
+            continue
+        copied += int(copy_source_from_previous(conn, previous_db, source["source_id"]))
     return copied
 
 
@@ -5485,6 +5525,545 @@ def import_legacy_seed(
     return counts
 
 
+def promote_tcga_breast_radiogenomics_cohort(
+    conn: sqlite3.Connection,
+    snapshot_db: Path,
+    *,
+    no_fetch: bool,
+    timeout: int,
+    max_bytes: int,
+    fetcher: Any | None = None,
+) -> dict[str, Any]:
+    """Promote the exact published cohort from two result-owned artifacts.
+
+    The radiomics workbook identifies 91 imaged/segmented cases. The molecular
+    assay workbook identifies cases with gene-expression results. Their exact
+    TCGA-barcode intersection is the 84-participant analysis cohort described
+    by the TCIA page; the broader 334-row clinical workbook remains available
+    for source audit but does not define result membership.
+    """
+    result: dict[str, Any] = {
+        "status": "disabled" if no_fetch else "pending",
+        "feature_subjects": 0,
+        "assay_subjects": 0,
+        "cohort_subjects": 0,
+        "expected_subjects": 0,
+        "promoted_imaging_subjects": 0,
+    }
+    if no_fetch:
+        return result
+    snapshot = sqlite3.connect(snapshot_db)
+    try:
+        expected_row = snapshot.execute(
+            """SELECT subjects FROM agent_datasets
+               WHERE hidden = 0
+                 AND short_title = 'TCGA-Breast-Radiogenomics'"""
+        ).fetchone()
+    except sqlite3.Error:
+        expected_row = None
+    snapshot.close()
+    if not expected_row:
+        result["status"] = "not_applicable"
+        return result
+    expected = int(expected_row[0] or 0)
+    result["expected_subjects"] = expected
+    fetcher = fetcher or fetch_url
+    try:
+        feature_data = fetcher(
+            TCGA_BREAST_RADIOGENOMICS_FEATURES_URL,
+            timeout=timeout,
+            max_bytes=max_bytes,
+        )
+        assay_data = fetcher(
+            TCGA_BREAST_RADIOGENOMICS_ASSAYS_URL,
+            timeout=timeout,
+            max_bytes=max_bytes,
+        )
+        feature_tables = read_tables(
+            feature_data,
+            TCGA_BREAST_RADIOGENOMICS_FEATURES_URL,
+        )
+        assay_tables = read_tables(
+            assay_data,
+            TCGA_BREAST_RADIOGENOMICS_ASSAYS_URL,
+        )
+        if not feature_tables or not assay_tables:
+            raise RuntimeError("result-owned cohort workbooks contained no tables")
+        feature_rows = frame_records(feature_tables[0][1])
+        assay_rows = frame_records(assay_tables[0][1])
+        feature_subjects = {
+            match.group(1).upper()
+            for row in feature_rows
+            for match in [
+                re.search(
+                    r"(TCGA-[A-Z0-9]{2}-[A-Z0-9]{4})",
+                    clean_value(row.get("Lesion Name")),
+                    re.IGNORECASE,
+                )
+            ]
+            if match
+        }
+        assay_subjects = {
+            clean_value(row.get("CLID")).upper()
+            for row in assay_rows
+            if re.fullmatch(
+                r"TCGA-[A-Z0-9]{2}-[A-Z0-9]{4}",
+                clean_value(row.get("CLID")),
+                re.IGNORECASE,
+            )
+        }
+        cohort = feature_subjects.intersection(assay_subjects)
+        result.update(
+            {
+                "feature_subjects": len(feature_subjects),
+                "assay_subjects": len(assay_subjects),
+                "cohort_subjects": len(cohort),
+                "features_sha256": sha256_bytes(feature_data),
+                "assays_sha256": sha256_bytes(assay_data),
+                "identity_rule": "exact_tcga_barcode_intersection",
+            }
+        )
+        if not expected or len(cohort) != expected:
+            raise RuntimeError(
+                "TCGA-Breast-Radiogenomics cohort intersection did not match "
+                f"the TCIA subjects count (intersection={len(cohort)}, "
+                f"expected={expected})"
+            )
+        clinical_subjects = {
+            clean_value(row[0]).upper()
+            for row in conn.execute(
+                """SELECT DISTINCT subject_id FROM clinical_rows
+                   WHERE short_title = 'TCGA-Breast-Radiogenomics'"""
+            )
+        }
+        missing_clinical = sorted(cohort - clinical_subjects)
+        if missing_clinical:
+            raise RuntimeError(
+                "Published cohort subjects were missing from the result's "
+                f"clinical workbook: {missing_clinical}"
+            )
+        for subject_id in sorted(cohort):
+            conn.execute(
+                """INSERT OR REPLACE INTO clinical_imaging_subjects
+                   (subject_key, short_title, subject_id, imaging_source)
+                   VALUES (?, 'TCGA-Breast-Radiogenomics', ?,
+                           'tcia_result_artifact_intersection')""",
+                (
+                    f"tcgabreastradiogenomics:{normalize_subject(subject_id)}",
+                    subject_id,
+                ),
+            )
+        result["promoted_imaging_subjects"] = len(cohort)
+        result["status"] = "promoted"
+    except Exception as exc:
+        result["status"] = "failed"
+        result["error"] = str(exc)
+        warning(
+            conn,
+            "tcga_breast_radiogenomics_cohort_failed",
+            str(exc),
+            short_title="TCGA-Breast-Radiogenomics",
+        )
+    return result
+
+
+def cda_release_fingerprint(rows: Iterable[dict[str, Any]]) -> str:
+    """Hash CDA's columnwise release artifact in a stable order."""
+    normalized = sorted(
+        (json_safe(dict(row)) for row in rows),
+        key=lambda row: json_dumps(row),
+    )
+    return sha256_bytes(json_dumps(normalized).encode("utf-8"))
+
+
+def cda_release_summary(rows: Iterable[dict[str, Any]]) -> list[dict[str, str]]:
+    releases = {
+        (
+            clean_value(row.get("data_source")),
+            clean_value(row.get("data_source_version")),
+            clean_value(row.get("data_source_extraction_date")),
+        )
+        for row in rows
+    }
+    return [
+        {
+            "data_source": source,
+            "version": version,
+            "extraction_date": extraction_date,
+        }
+        for source, version, extraction_date in sorted(releases)
+        if source
+    ]
+
+
+def load_cda_client() -> Any:
+    try:
+        import cdapython
+    except ImportError as exc:
+        raise RuntimeError(
+            "Native CDA ingestion requires cdapython; install the maintainer "
+            "dependencies or pass --no-fetch-cda only for isolated tests"
+        ) from exc
+    cdapython.disable_file_logging()
+    return cdapython
+
+
+def tcga_cda_identity_map(
+    conn: sqlite3.Connection,
+) -> dict[str, list[tuple[str, str]]]:
+    """Return globally stable TCGA barcodes already tied to TCIA imaging."""
+    result: dict[str, list[tuple[str, str]]] = {}
+    for row in conn.execute(
+        """SELECT DISTINCT short_title, subject_id
+           FROM clinical_imaging_subjects
+           WHERE upper(subject_id) GLOB 'TCGA-??-????'
+           ORDER BY short_title, subject_id"""
+    ):
+        subject_id = clean_value(row["subject_id"]).upper()
+        if not re.fullmatch(r"TCGA-[A-Z0-9]{2}-[A-Z0-9]{4}", subject_id):
+            continue
+        result.setdefault(normalize_subject(subject_id), []).append(
+            (clean_value(row["short_title"]), subject_id)
+        )
+    return result
+
+
+def cda_result_subject_id(row: dict[str, Any]) -> str:
+    value = clean_value(row.get("subject_id"))
+    if value.upper().startswith("TCGA.TCGA-"):
+        value = value.split(".", 1)[1]
+    return value.upper()
+
+
+def expanded_cda_records(
+    client: Any,
+    result_frame: Any,
+    column: str,
+) -> list[dict[str, Any]]:
+    if not hasattr(result_frame, "columns") or column not in result_frame.columns:
+        return []
+    expanded = client.expand_subject_results(result_frame, column)
+    return frame_records(expanded)
+
+
+def harvest_cda_tcga_clinical(
+    conn: sqlite3.Connection,
+    *,
+    client: Any,
+    release_rows: list[dict[str, Any]],
+    release_fingerprint: str,
+    batch_size: int,
+) -> dict[str, Any]:
+    """Harvest CDA rows for exact TCGA barcodes already linked to TCIA imaging."""
+    identities = tcga_cda_identity_map(conn)
+    result: dict[str, Any] = {
+        "status": "pending",
+        "candidate_subjects": len(identities),
+        "matched_cda_subjects": 0,
+        "dataset_subjects": 0,
+        "subject_rows": 0,
+        "observation_rows": 0,
+        "treatment_rows": 0,
+        "sources": 0,
+        "batches": 0,
+    }
+    if not identities:
+        result["status"] = "no_candidates"
+        return result
+
+    source_date = max(
+        (
+            clean_value(row.get("data_source_extraction_date"))
+            for row in release_rows
+        ),
+        default="",
+    )
+    row_counters: dict[str, int] = {}
+    matched_cda_ids: set[str] = set()
+    matched_dataset_subjects: set[tuple[str, str]] = set()
+    created_sources: set[str] = set()
+    ordered_ids = sorted(identities)
+
+    for offset in range(0, len(ordered_ids), max(1, batch_size)):
+        batch = ordered_ids[offset : offset + max(1, batch_size)]
+        result["batches"] += 1
+        temp_path: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                suffix=".csv",
+                newline="",
+                encoding="utf-8",
+                delete=False,
+            ) as handle:
+                writer = csv.writer(handle)
+                writer.writerow(["subject_id"])
+                writer.writerows([[subject_id.upper()] for subject_id in batch])
+                temp_path = Path(handle.name)
+            frame = client.get_subject_data(
+                match_from_file={
+                    "input_file": str(temp_path),
+                    "input_column": "subject_id",
+                    "cda_column_to_match": "upstream_id",
+                },
+                add_columns=["observation.*", "treatment.*"],
+                collate_results=True,
+                return_data_as="dataframe",
+            )
+        finally:
+            if temp_path and temp_path.exists():
+                temp_path.unlink()
+        if frame is None:
+            raise RuntimeError("CDA returned no result object for a TCGA batch")
+
+        subject_rows = frame_records(frame)
+        observations_by_subject: dict[str, list[dict[str, Any]]] = {}
+        treatments_by_subject: dict[str, list[dict[str, Any]]] = {}
+        for values in expanded_cda_records(client, frame, "observation_data"):
+            observations_by_subject.setdefault(
+                cda_result_subject_id(values), []
+            ).append(values)
+        for values in expanded_cda_records(client, frame, "treatment_data"):
+            treatments_by_subject.setdefault(
+                cda_result_subject_id(values), []
+            ).append(values)
+
+        for subject_row in subject_rows:
+            cda_subject_id = cda_result_subject_id(subject_row)
+            targets = identities.get(normalize_subject(cda_subject_id), [])
+            if not targets:
+                continue
+            matched_cda_ids.add(cda_subject_id)
+            for short_title, subject_id in targets:
+                source_id = f"cda:{normalize_name(short_title)}"
+                if source_id not in created_sources:
+                    insert_source(
+                        conn,
+                        source_id=source_id,
+                        source_kind="cda",
+                        short_title=short_title,
+                        source_signature_value=stable_id(
+                            release_fingerprint, short_title
+                        ),
+                        source_lineage="cda:subject+observation+treatment",
+                        source_url=CDA_DOCUMENTATION_URL,
+                        source_date=source_date,
+                        artifact_sha256=release_fingerprint,
+                        provenance={
+                            "release_fingerprint": release_fingerprint,
+                            "release_summary": cda_release_summary(release_rows),
+                            "identity_match": "exact_tcga_upstream_id",
+                        },
+                    )
+                    created_sources.add(source_id)
+                matched_dataset_subjects.add((short_title, subject_id))
+                subject_facts = [
+                    ("cause_of_death", subject_row.get("cause_of_death"), "cause_of_death", None),
+                    ("ethnicity", subject_row.get("ethnicity"), "ethnicity", None),
+                    ("race", subject_row.get("race"), "race", None),
+                    ("species", subject_row.get("species"), "species", None),
+                    ("year_of_birth", subject_row.get("year_of_birth"), "year_of_birth", "year"),
+                    ("year_of_death", subject_row.get("year_of_death"), "year_of_death", "year"),
+                ]
+                row_counters[source_id] = row_counters.get(source_id, 0) + 1
+                insert_row_and_facts(
+                    conn,
+                    source_id=source_id,
+                    source_kind="cda",
+                    short_title=short_title,
+                    subject_id=subject_id,
+                    table_name="cda.subject",
+                    row_number=row_counters[source_id],
+                    row=subject_row,
+                    facts=subject_facts,
+                    has_imaging=True,
+                    fact_provenance={
+                        "cda_subject_id": clean_value(subject_row.get("subject_id")),
+                        "cda_data_source": json_safe(subject_row.get("data_source")),
+                    },
+                )
+                result["subject_rows"] += 1
+
+                for observation in observations_by_subject.get(cda_subject_id, []):
+                    facts = [
+                        ("age_at_observation", observation.get("age_at_observation"), "age_at_observation", None),
+                        ("primary_diagnosis", observation.get("diagnosis"), "diagnosis", None),
+                        ("grade", observation.get("grade"), "grade", None),
+                        ("morphology", observation.get("morphology"), "morphology", None),
+                        ("primary_site", observation.get("observed_anatomic_site"), "observed_anatomic_site", None),
+                        ("resection_anatomic_site", observation.get("resection_anatomic_site"), "resection_anatomic_site", None),
+                        ("sex_at_birth", observation.get("sex"), "sex", None),
+                        ("stage", observation.get("stage"), "stage", None),
+                        ("vital_status", observation.get("vital_status"), "vital_status", None),
+                        ("year_of_observation", observation.get("year_of_observation"), "year_of_observation", "year"),
+                    ]
+                    row_counters[source_id] += 1
+                    insert_row_and_facts(
+                        conn,
+                        source_id=source_id,
+                        source_kind="cda",
+                        short_title=short_title,
+                        subject_id=subject_id,
+                        table_name="cda.observation",
+                        row_number=row_counters[source_id],
+                        row=observation,
+                        facts=facts,
+                        has_imaging=True,
+                        fact_provenance={
+                            "cda_subject_id": clean_value(subject_row.get("subject_id")),
+                            "cda_data_source": clean_value(observation.get("data_source")),
+                        },
+                    )
+                    result["observation_rows"] += 1
+
+                for treatment in treatments_by_subject.get(cda_subject_id, []):
+                    facts = [
+                        ("therapeutic_agent", treatment.get("therapeutic_agent"), "therapeutic_agent", None),
+                        ("treatment_anatomic_site", treatment.get("treatment_anatomic_site"), "treatment_anatomic_site", None),
+                        ("treatment_type", treatment.get("treatment_type"), "treatment_type", None),
+                    ]
+                    row_counters[source_id] += 1
+                    insert_row_and_facts(
+                        conn,
+                        source_id=source_id,
+                        source_kind="cda",
+                        short_title=short_title,
+                        subject_id=subject_id,
+                        table_name="cda.treatment",
+                        row_number=row_counters[source_id],
+                        row=treatment,
+                        facts=facts,
+                        has_imaging=True,
+                        fact_provenance={
+                            "cda_subject_id": clean_value(subject_row.get("subject_id")),
+                            "cda_data_source": clean_value(treatment.get("data_source")),
+                        },
+                    )
+                    result["treatment_rows"] += 1
+
+    result.update(
+        {
+            "status": "loaded",
+            "matched_cda_subjects": len(matched_cda_ids),
+            "dataset_subjects": len(matched_dataset_subjects),
+            "sources": len(created_sources),
+        }
+    )
+    return result
+
+
+def ingest_cda_clinical(
+    conn: sqlite3.Connection,
+    *,
+    allowed_short_titles: set[str],
+    previous_db: Path | None,
+    refresh: bool,
+    no_fetch: bool,
+    batch_size: int,
+    client: Any | None = None,
+) -> dict[str, Any]:
+    """Release-gated native CDA ingestion with safe prior-artifact fallback."""
+    previous_compatible = bool(
+        previous_db
+        and previous_db.exists()
+        and previous_meta(previous_db, "schema_version") == SCHEMA_VERSION
+    )
+    result: dict[str, Any] = {
+        "status": "disabled" if no_fetch else "pending",
+        "release_fingerprint": "",
+        "release_summary": [],
+        "sources_reused": 0,
+    }
+    if no_fetch:
+        if previous_compatible:
+            result["sources_reused"] = copy_previous_source_kind(
+                conn,
+                previous_db,  # type: ignore[arg-type]
+                allowed_short_titles,
+                "cda",
+            )
+            if result["sources_reused"]:
+                result["status"] = "reused_offline"
+                result["release_fingerprint"] = previous_meta(
+                    previous_db, "cda_release_fingerprint"  # type: ignore[arg-type]
+                ) or ""
+                result["release_summary"] = previous_meta(
+                    previous_db, "cda_release_summary"  # type: ignore[arg-type]
+                ) or []
+        return result
+
+    harvest_savepoint = False
+    try:
+        client = client or load_cda_client()
+        release_rows = [dict(row) for row in client.release_metadata()]
+        if not release_rows:
+            raise RuntimeError("CDA release_metadata returned no release rows")
+        fingerprint = cda_release_fingerprint(release_rows)
+        summary = cda_release_summary(release_rows)
+        result["release_fingerprint"] = fingerprint
+        result["release_summary"] = summary
+        if (
+            previous_compatible
+            and not refresh
+            and previous_meta(previous_db, "cda_release_fingerprint") == fingerprint  # type: ignore[arg-type]
+        ):
+            result["sources_reused"] = copy_previous_source_kind(
+                conn,
+                previous_db,  # type: ignore[arg-type]
+                allowed_short_titles,
+                "cda",
+            )
+            if result["sources_reused"]:
+                result["status"] = "reused_unchanged_release"
+                return result
+        conn.execute("SAVEPOINT cda_refresh")
+        harvest_savepoint = True
+        result.update(
+            harvest_cda_tcga_clinical(
+                conn,
+                client=client,
+                release_rows=release_rows,
+                release_fingerprint=fingerprint,
+                batch_size=batch_size,
+            )
+        )
+        conn.execute("RELEASE SAVEPOINT cda_refresh")
+        harvest_savepoint = False
+        return result
+    except Exception as exc:
+        if harvest_savepoint:
+            conn.execute("ROLLBACK TO SAVEPOINT cda_refresh")
+            conn.execute("RELEASE SAVEPOINT cda_refresh")
+        if previous_compatible:
+            reused = copy_previous_source_kind(
+                conn,
+                previous_db,  # type: ignore[arg-type]
+                allowed_short_titles,
+                "cda",
+            )
+            if reused:
+                warning(
+                    conn,
+                    "cda_refresh_failed_previous_reused",
+                    str(exc),
+                )
+                result.update(
+                    {
+                        "status": "reused_after_refresh_failure",
+                        "sources_reused": reused,
+                        "error": str(exc),
+                        "release_fingerprint": previous_meta(
+                            previous_db, "cda_release_fingerprint"  # type: ignore[arg-type]
+                        ) or "",
+                        "release_summary": previous_meta(
+                            previous_db, "cda_release_summary"  # type: ignore[arg-type]
+                        ) or [],
+                    }
+                )
+                return result
+        raise
+
+
 AGE_CONCEPTS = {
     "age_at_diagnosis",
     "age_at_enrollment_years",
@@ -6705,6 +7284,20 @@ def build(args: argparse.Namespace) -> None:
     insert_meta(conn, "ivygap_allen_clinical_result", ivygap_result)
     conn.commit()
 
+    tcga_breast_result = promote_tcga_breast_radiogenomics_cohort(
+        conn,
+        snapshot_db,
+        no_fetch=args.no_fetch_official,
+        timeout=args.timeout,
+        max_bytes=args.max_artifact_bytes,
+    )
+    insert_meta(
+        conn,
+        "tcga_breast_radiogenomics_cohort_result",
+        tcga_breast_result,
+    )
+    conn.commit()
+
     # Import secondary sources only after official/IDC rows establish the
     # TCIA subject allowlist.
     if args.legacy_seed_db:
@@ -6714,13 +7307,39 @@ def build(args: argparse.Namespace) -> None:
             allowed_short_titles,
         )
         insert_meta(conn, "legacy_seed_counts", seed_counts)
-    elif previous_db and previous_db.exists():
-        copied = copy_nonofficial_previous(
+        cda_result = {
+            "status": "legacy_seed",
+            "release_fingerprint": "",
+            "release_summary": [],
+        }
+    else:
+        cda_result = ingest_cda_clinical(
             conn,
-            previous_db,
-            allowed_short_titles,
+            allowed_short_titles=allowed_short_titles,
+            previous_db=previous_db,
+            refresh=args.refresh_cda,
+            no_fetch=args.no_fetch_cda,
+            batch_size=args.cda_batch_size,
         )
-        insert_meta(conn, "previous_nonofficial_sources_reused", copied)
+        if previous_db and previous_db.exists():
+            copied = copy_nonofficial_previous(
+                conn,
+                previous_db,
+                allowed_short_titles,
+                excluded_source_kinds={"cda"},
+            )
+            insert_meta(conn, "previous_nonofficial_sources_reused", copied)
+    insert_meta(conn, "cda_clinical_result", cda_result)
+    insert_meta(
+        conn,
+        "cda_release_fingerprint",
+        cda_result.get("release_fingerprint", ""),
+    )
+    insert_meta(
+        conn,
+        "cda_release_summary",
+        cda_result.get("release_summary", []),
+    )
 
     conn.execute(
         """UPDATE clinical_rows
@@ -7164,6 +7783,22 @@ def parse_args() -> argparse.Namespace:
         "--refresh-idc-clinical",
         action="store_true",
         help="Re-fetch IDC clinical tables even when the IDC version is unchanged.",
+    )
+    build_parser.add_argument(
+        "--no-fetch-cda",
+        action="store_true",
+        help="Skip CDA release checks and harvesting (intended for isolated tests only).",
+    )
+    build_parser.add_argument(
+        "--refresh-cda",
+        action="store_true",
+        help="Re-harvest CDA clinical rows even when its release fingerprint is unchanged.",
+    )
+    build_parser.add_argument(
+        "--cda-batch-size",
+        type=int,
+        default=100,
+        help="Maximum exact TCGA subject identifiers sent in each CDA query batch.",
     )
     build_parser.add_argument("--limit", type=int)
     build_parser.add_argument("--timeout", type=int, default=120)

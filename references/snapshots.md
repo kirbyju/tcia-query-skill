@@ -218,14 +218,16 @@ is absent, one non-generic WordPress Collection cancer type/location may
 provide a lower-priority diagnosis/site fallback marked as a dataset-scope
 inference.
 
-Bootstrap CDA/DICOM locally from the existing prototype, publish the resulting
-clinical assets once, and let scheduled GitHub Actions reuse that seed.
 Scheduled runs refresh the base snapshot, reuse direct artifacts whose
 Collection Manager signature is unchanged, reuse IDC tables when the IDC
-version is unchanged, fully rebuild IDC clinical tables on a version change,
-fetch small linked external sources on every run, and carry prior CDA/DICOM
-sources forward. Manual workflow inputs can force
-either direct official artifacts or IDC clinical tables to be fetched again.
+version is unchanged, and fully rebuild IDC clinical tables on a version
+change. They make one inexpensive CDA `release_metadata()` request and compare
+its normalized fingerprint with the prior clinical artifact. Unchanged CDA
+releases reuse all prior CDA rows; a changed release triggers a native,
+exact-identifier TCGA harvest in bounded batches. Legacy DICOM fallback rows
+are carried forward from the prior sidecar. Manual workflow inputs can force
+direct official artifacts, IDC clinical tables, or CDA rows to be fetched
+again.
 WordPress dataset-scope inference is inexpensive and is always regenerated
 from the fresh base snapshot rather than reused from the previous sidecar.
 Collections containing `screen*` with one otherwise-eligible diagnosis label
@@ -233,9 +235,9 @@ and no non-cancer designation are placed in the clinical review queue. Their
 Collection-level diagnosis and site fallbacks are suppressed, while any
 patient-level source facts continue through normal precedence.
 
-Do not perform the full CDA harvest twice daily. Refresh the local seed after
-relevant CDA releases or material IDC subject-inventory changes, then upload
-the refreshed clinical assets. See `references/clinical.md`.
+Do not perform the full CDA harvest twice daily. The release fingerprint is
+the normal gate; use `refresh_cda=true` only for a forced validation. See
+`references/clinical.md`.
 
 ## Optional NIfTI SQLite
 

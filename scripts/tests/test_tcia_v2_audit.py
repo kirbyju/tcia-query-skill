@@ -196,9 +196,9 @@ class V2AuditSplitTests(unittest.TestCase):
             with sqlite3.connect(clinical) as conn:
                 conn.execute(
                     "CREATE TABLE agent_clinical_all_subjects "
-                    "(short_title TEXT, subject_id TEXT, source_kinds TEXT)"
+                    "(short_title TEXT, subject_id TEXT, source_kinds TEXT, has_imaging INTEGER)"
                 )
-                conn.execute("INSERT INTO agent_clinical_all_subjects VALUES ('TEST', 'P1', '[\"source\"]')")
+                conn.execute("INSERT INTO agent_clinical_all_subjects VALUES ('TEST', 'P1', '[\"source\"]', 1)")
                 conn.execute(
                     "CREATE TABLE agent_clinical_facts ("
                     "short_title TEXT, subject_id TEXT, concept TEXT, value_text TEXT, "

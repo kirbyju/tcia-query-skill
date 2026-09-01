@@ -675,10 +675,12 @@ class BuilderTests(unittest.TestCase):
             clinical = sqlite3.connect(clinical_db)
             clinical.executescript(
                 """
-                CREATE TABLE clinical_subjects (short_title TEXT, subject_id TEXT);
-                INSERT INTO clinical_subjects VALUES ('DLBCL-Morphology', '13952');
+                CREATE TABLE clinical_subjects (
+                    short_title TEXT, subject_id TEXT, has_imaging INTEGER
+                );
+                INSERT INTO clinical_subjects VALUES ('DLBCL-Morphology', '13952', 1);
                 CREATE VIEW agent_clinical_all_subjects AS
-                SELECT short_title, subject_id FROM clinical_subjects;
+                SELECT short_title, subject_id, has_imaging FROM clinical_subjects;
                 """
             )
             clinical.commit()
@@ -1843,13 +1845,14 @@ class BuilderTests(unittest.TestCase):
             conn = sqlite3.connect(clinical)
             conn.execute(
                 "CREATE TABLE agent_clinical_all_subjects "
-                "(short_title TEXT, subject_id TEXT, source_kinds TEXT)"
+                "(short_title TEXT, subject_id TEXT, source_kinds TEXT, has_imaging INTEGER)"
             )
             conn.executemany(
-                "INSERT INTO agent_clinical_all_subjects VALUES (?,?,?)",
+                "INSERT INTO agent_clinical_all_subjects VALUES (?,?,?,?)",
                 [
-                    ("AAPM-RT-MAC", "RTMAC-LIVE-008", "tcia,idc"),
-                    ("Outcome-Result", "CASE-001", "tcia"),
+                    ("AAPM-RT-MAC", "RTMAC-LIVE-008", "tcia,idc", 1),
+                    ("Outcome-Result", "CASE-001", "tcia", 1),
+                    ("Outcome-Result", "CASE-CLINICAL-ONLY", "tcia", 0),
                 ],
             )
             conn.commit()
@@ -1951,6 +1954,14 @@ class BuilderTests(unittest.TestCase):
                     "WHERE short_title='Outcome-Result'"
                 ).fetchone()[0],
                 "Analysis Result",
+            )
+            self.assertEqual(
+                conn.execute(
+                    """SELECT COUNT(*) FROM participants
+                       WHERE short_title='Outcome-Result'
+                         AND display_participant_id='CASE-CLINICAL-ONLY'"""
+                ).fetchone()[0],
+                0,
             )
             self.assertEqual(
                 conn.execute("SELECT COUNT(*) FROM participant_link_issues").fetchone()[0],

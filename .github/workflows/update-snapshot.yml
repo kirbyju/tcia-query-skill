@@ -19,6 +19,14 @@ on:
         options:
           - "false"
           - "true"
+      refresh_cda:
+        description: "Re-harvest CDA clinical rows even when its release fingerprint is unchanged"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
   schedule:
     - cron: "17 7,19 * * *"
       timezone: "America/New_York"
@@ -43,7 +51,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install optional metadata dependencies
-        run: python -m pip install --upgrade pandas openpyxl xlrd "idc-index>=0.12.3"
+        run: python -m pip install --upgrade pandas openpyxl xlrd "idc-index>=0.12.3" "cdapython==2.1.0"
 
       - name: Prepare previous snapshot fallback
         env:
@@ -113,7 +121,7 @@ jobs:
               rm -f previous/clinical_metadata.sqlite previous/clinical_metadata.sqlite.gz
             fi
           else
-            echo "::warning title=Clinical seed missing::No previous clinical_metadata.sqlite.gz exists. Official TCIA and IDC clinical tables will be harvested, but CDA and DICOM fallback rows require a one-time locally built seed."
+            echo "::warning title=Clinical baseline missing::No previous clinical_metadata.sqlite.gz exists. Official TCIA, IDC, and CDA clinical rows will be harvested; only legacy DICOM fallback rows require a prior artifact."
           fi
 
       - name: Build patient-level clinical metadata
@@ -128,6 +136,9 @@ jobs:
           fi
           if [ "${{ inputs.refresh_idc_clinical || 'false' }}" = "true" ]; then
             clinical_args+=(--refresh-idc-clinical)
+          fi
+          if [ "${{ inputs.refresh_cda || 'false' }}" = "true" ]; then
+            clinical_args+=(--refresh-cda)
           fi
           python scripts/tcia_clinical_metadata.py build \
             --snapshot-db dist/tcia_snapshot.sqlite \

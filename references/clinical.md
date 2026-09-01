@@ -450,7 +450,12 @@ and `agent_clinical_conflicts` before analysis.
 `TCGA-Breast-Radiogenomics` uses the official row's full
 `bcr_patient_barcode` as its subject identifier rather than the abbreviated
 four-character `patient_id`; this permits exact, auditable matches to
-`TCGA-BRCA` while leaving blank or unmatched rows uninherited.
+`TCGA-BRCA` while leaving blank or unmatched rows uninherited. Its 334-row
+clinical workbook is not itself a cohort manifest. Result membership is the
+exact intersection of the 91 barcodes in the result-owned radiomics workbook
+and the 100 barcodes in the result-owned molecular-assay workbook, which must
+equal the WordPress count of 84 before those rows are promoted as image-linked
+Analysis Result participants.
 
 CDA rows are imported only when both their dataset short title matches a
 visible current TCIA dataset and their subject identifier is present in the
@@ -536,23 +541,22 @@ export TCIA_CLINICAL_METADATA_DB=/path/to/clinical_metadata.sqlite
 
 ## Maintainer refresh model
 
-Use a version-aware full IDC refresh plus incremental reuse of larger or less
-transactional sources.
+Use version-aware IDC and CDA refreshes plus incremental reuse of larger or
+less transactional sources.
 
-- Bootstrap CDA and DICOM once from the existing local prototype:
-
-  ```bash
-  python scripts/tcia_clinical_metadata.py build \
-    --snapshot-db cache/tcia_snapshot.sqlite \
-    --legacy-seed-db /path/to/clinical_cda_metadata.sqlite \
-    --out dist/clinical_metadata.sqlite \
-    --gzip-out dist/clinical_metadata.sqlite.gz \
-    --manifest-out dist/clinical_metadata_manifest.json \
-    --replace
-  ```
-
-- Upload the two release assets once. Scheduled GitHub Actions then download
-  the prior clinical SQLite and carry its CDA/DICOM sources forward.
+- Install the pinned native client (`cdapython==2.1.0`). Each scheduled build
+  calls `release_metadata()`, hashes the normalized column/source release
+  rows, and compares that value with `cda_release_fingerprint` in the previous
+  clinical SQLite. When it is unchanged, CDA source rows are copied locally
+  and no subject harvest runs. When it changes or no compatible prior artifact
+  exists, exact TCGA imaging identifiers are harvested natively in batches of
+  100 with `observation.*` and `treatment.*` expansions.
+- If the CDA release check or refresh fails and a schema-compatible prior
+  artifact exists, reuse the prior CDA sources and record
+  `cda_refresh_failed_previous_reused`. A first build without a prior artifact
+  fails instead of silently publishing an empty CDA layer.
+- Legacy DICOM fallback rows may still be bootstrapped with
+  `--legacy-seed-db`; that option is no longer the normal CDA ingestion path.
 - On every run, inspect the current IDC version. Reuse all IDC clinical tables
   when that version matches the prior snapshot. When it changes, fetch the
   complete `clinical_index` plus all collection tables and rebuild them
@@ -569,8 +573,8 @@ transactional sources.
   periodic forced direct-artifact validation.
 - Use workflow dispatch with `refresh_idc_clinical=true` to force a complete
   IDC clinical re-fetch without waiting for a new IDC version.
-- Rebuild the local CDA/DICOM seed when CDA publishes a relevant release or
-  when the IDC/DICOM subject inventory materially changes.
+- Use workflow dispatch with `refresh_cda=true` to force a CDA re-harvest even
+  when the release fingerprint is unchanged.
 
 A complete IDC clinical refresh is small enough to rebuild rather than apply
 row-level deltas. At the IDC v24 baseline, the complete clinical export was
