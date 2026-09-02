@@ -1062,6 +1062,243 @@ class ClinicalMetadataTest(unittest.TestCase):
             )
             conn.close()
 
+    def test_nlst_maps_every_observed_icdo_morphology_code(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            conn = CLINICAL.init_db(Path(directory) / "nlst.sqlite", replace=True)
+            CLINICAL.insert_source(
+                conn,
+                source_id="idc-clinical:nlst:nlst_canc",
+                source_kind="idc_clinical",
+                short_title="NLST",
+                source_signature_value="nlst-all-codes",
+            )
+            for row_number, code in enumerate(
+                CLINICAL.NLST_ICDO3_MORPHOLOGY_LABELS, start=1
+            ):
+                CLINICAL.insert_row_and_facts(
+                    conn,
+                    source_id="idc-clinical:nlst:nlst_canc",
+                    source_kind="idc_clinical",
+                    short_title="NLST",
+                    subject_id=f"NLST-{row_number}",
+                    table_name="nlst_canc",
+                    row_number=row_number,
+                    row={"dicom_patient_id": f"NLST-{row_number}", "de_type": code},
+                    facts=[("primary_diagnosis", code, "de_type", None)],
+                    has_imaging=True,
+                )
+
+            result = CLINICAL.harmonize_nlst_clinical_facts(conn)
+            self.assertEqual(
+                result["morphology_facts_mapped"],
+                len(CLINICAL.NLST_ICDO3_MORPHOLOGY_LABELS),
+            )
+            mapped = dict(
+                conn.execute(
+                    """SELECT value_text, value_resolved FROM clinical_facts
+                       WHERE short_title='NLST'
+                         AND concept='primary_diagnosis'"""
+                )
+            )
+            self.assertEqual(mapped, CLINICAL.NLST_ICDO3_MORPHOLOGY_LABELS)
+            conn.close()
+
+    def test_low_risk_dataset_labels_preserve_raw_values(self) -> None:
+        cases = (
+            ("FDG-PET-CT-Lesions", "diagnosis", "lung_cancer", "Lung Cancer"),
+            (
+                "NSCLC-Radiomics",
+                "histology",
+                "nos",
+                "Non-small Cell Lung Cancer, NOS",
+            ),
+            (
+                "HNSCC",
+                "Cancer subsite of origin",
+                "CUP",
+                "Unknown Primary Site (CUP)",
+            ),
+            (
+                "Head-Neck-PET-CT",
+                "Primary site",
+                "unknown",
+                "Unknown Primary Site",
+            ),
+            ("VAREPOP-APOLLO", "Disease Site", "THYMOMA", "Thymus Gland"),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            conn = CLINICAL.init_db(Path(directory) / "clinical.sqlite", replace=True)
+            for row_number, (dataset, column, raw, _resolved) in enumerate(
+                cases, start=1
+            ):
+                concept = (
+                    "primary_diagnosis"
+                    if dataset in {"FDG-PET-CT-Lesions", "NSCLC-Radiomics"}
+                    else "primary_site"
+                )
+                source_id = f"test:{row_number}"
+                CLINICAL.insert_source(
+                    conn,
+                    source_id=source_id,
+                    source_kind="idc_clinical",
+                    short_title=dataset,
+                    source_signature_value=source_id,
+                )
+                CLINICAL.insert_row_and_facts(
+                    conn,
+                    source_id=source_id,
+                    source_kind="idc_clinical",
+                    short_title=dataset,
+                    subject_id=f"SUB-{row_number}",
+                    table_name="clinical",
+                    row_number=row_number,
+                    row={"subject_id": f"SUB-{row_number}", column: raw},
+                    facts=[(concept, raw, column, None)],
+                    has_imaging=True,
+                )
+
+            result = CLINICAL.harmonize_low_risk_dataset_facts(conn)
+            self.assertEqual(result["dataset_value_labels_mapped"], len(cases))
+            rows = conn.execute(
+                """SELECT short_title, value_text, value_resolved
+                   FROM clinical_facts ORDER BY source_id"""
+            ).fetchall()
+            self.assertEqual(
+                [(row[0], row[1], row[2]) for row in rows],
+                [(dataset, raw, resolved) for dataset, _column, raw, resolved in cases],
+            )
+            conn.close()
+
+    def test_hcc_pathology_becomes_grade_before_wordpress_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            snapshot = root / "snapshot.sqlite"
+            snapshot_conn = sqlite3.connect(snapshot)
+            snapshot_conn.executescript(
+                """
+                CREATE TABLE agent_datasets (
+                    short_title TEXT, title TEXT, link TEXT, date_updated TEXT,
+                    dataset_type TEXT, hidden INTEGER, cancer_types TEXT,
+                    cancer_locations TEXT, summary TEXT, abstract TEXT,
+                    detailed_description TEXT
+                );
+                INSERT INTO agent_datasets VALUES
+                    ('HCC-TACE-Seg', 'HCC TACE Segmentation', '', '2026-01-01',
+                     'Collection', 0, 'Hepatocellular carcinoma', 'Liver',
+                     '', '', '');
+                """
+            )
+            snapshot_conn.close()
+            conn = CLINICAL.init_db(root / "clinical.sqlite", replace=True)
+            CLINICAL.insert_source(
+                conn,
+                source_id="official:hcc",
+                source_kind="tcia_clinical_download",
+                short_title="HCC-TACE-Seg",
+                source_signature_value="hcc-test",
+            )
+            conn.execute(
+                """INSERT INTO clinical_imaging_subjects VALUES
+                   ('hcctaceseg:hcc-1', 'HCC-TACE-Seg', 'HCC-1', 'test')"""
+            )
+            CLINICAL.insert_row_and_facts(
+                conn,
+                source_id="official:hcc",
+                source_kind="tcia_clinical_download",
+                short_title="HCC-TACE-Seg",
+                subject_id="HCC-1",
+                table_name="clinical.csv",
+                row_number=1,
+                row={"PatientID": "HCC-1", "Pathology": "Well differentiated"},
+                facts=[
+                    (
+                        "primary_diagnosis",
+                        "Well differentiated",
+                        "Pathology",
+                        None,
+                    )
+                ],
+                has_imaging=True,
+            )
+
+            CLINICAL.harmonize_low_risk_dataset_facts(conn)
+            CLINICAL.apply_wordpress_dataset_inferences(conn, snapshot)
+            CLINICAL.materialize_clinical_qc(conn)
+            CLINICAL.materialize_subjects(conn)
+            subject = conn.execute(
+                """SELECT primary_diagnosis, primary_site, grade
+                   FROM agent_clinical_subjects
+                   WHERE short_title='HCC-TACE-Seg' AND subject_id='HCC-1'"""
+            ).fetchone()
+            self.assertEqual(
+                tuple(subject),
+                ("Hepatocellular carcinoma", "Liver", "Well differentiated"),
+            )
+            grade = conn.execute(
+                """SELECT value_text, value_resolved FROM clinical_facts
+                   WHERE short_title='HCC-TACE-Seg' AND concept='grade'"""
+            ).fetchone()
+            self.assertEqual(tuple(grade), ("Well differentiated", "Well differentiated"))
+            conn.close()
+
+    def test_wordpress_spelling_only_changes_exact_normalized_matches(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            conn = CLINICAL.init_db(Path(directory) / "clinical.sqlite", replace=True)
+            CLINICAL.insert_source(
+                conn,
+                source_id="test:spelling",
+                source_kind="idc_clinical",
+                short_title="TEST",
+                source_signature_value="spelling-test",
+            )
+            CLINICAL.insert_row_and_facts(
+                conn,
+                source_id="test:spelling",
+                source_kind="idc_clinical",
+                short_title="TEST",
+                subject_id="SUB-1",
+                table_name="clinical",
+                row_number=1,
+                row={"subject_id": "SUB-1"},
+                facts=[
+                    ("primary_diagnosis", "squamous cell carcinoma", "diagnosis", None),
+                    ("primary_diagnosis", "Lung Adenocarcinoma", "subtype", None),
+                    ("primary_site", "kidney", "site", None),
+                ],
+                has_imaging=True,
+            )
+            for concept, label in (
+                ("primary_diagnosis", "Squamous Cell Carcinoma"),
+                ("primary_site", "Kidney"),
+            ):
+                conn.execute(
+                    """INSERT INTO clinical_dataset_inferences
+                       (short_title, concept, source_field, raw_value,
+                        inferred_value, eligible, eligibility_reason)
+                       VALUES ('TEST', ?, 'wordpress', ?, ?, 1, 'eligible')""",
+                    (concept, label, label),
+                )
+
+            result = CLINICAL.harmonize_wordpress_display_spellings(conn)
+            self.assertEqual(result["facts_mapped"], 2)
+            facts = {
+                row[0]: (row[1], row[2])
+                for row in conn.execute(
+                    """SELECT value_text, value_resolved, value_normalized
+                       FROM clinical_facts"""
+                )
+            }
+            self.assertEqual(
+                facts["squamous cell carcinoma"],
+                ("Squamous Cell Carcinoma", "squamous cell carcinoma"),
+            )
+            self.assertEqual(facts["kidney"], ("Kidney", "kidney"))
+            self.assertEqual(
+                facts["Lung Adenocarcinoma"],
+                ("Lung Adenocarcinoma", "lung adenocarcinoma"),
+            )
+            conn.close()
+
     def test_analysis_result_inherits_collection_facts_by_exact_patient_id(
         self,
     ) -> None:

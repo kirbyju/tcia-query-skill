@@ -515,7 +515,8 @@ key use the human-readable value.
   not create a primary site. All recognized `can_scr` values are also retained
   as `screening_result` facts.
 - `nlst_canc.de_type` and `lc_morph` use audited NCI SEER ICD-O-3 morphology
-  preferred terms. `lc_topog` uses the corresponding human-readable ICD-O-3
+  preferred terms for every morphology code observed in the current image-linked
+  NLST cohort. `lc_topog` uses the corresponding human-readable ICD-O-3
   topography label. Equivalent codes from the two morphology columns therefore
   collapse to one filtering value, while diagnoses with different specificity
   remain distinct.
@@ -529,6 +530,37 @@ The ICD-O label source is NCI SEER's ICD-O-3 site/histology material:
 `https://seer.cancer.gov/icd-o-3/sitetype.icdo3.20220429.pdf`. These labels
 support discovery and filtering; the original NLST source values remain the
 authoritative submitted evidence.
+
+### Reviewed low-risk diagnosis and site harmonization
+
+Apply broadly reusable display cleanup only when the normalized clinical value
+is an exact match for one unique visible WordPress Collection label. This may
+align capitalization and spelling (for example, `kidney` to `Kidney`), but it
+must not replace a more specific diagnosis with a broader Collection label.
+Thus `Lung Adenocarcinoma` remains distinct from `Lung Cancer`. Preserve the
+submitted value in `value_text` and `clinical_rows.row_json`.
+
+The following reviewed source-specific repairs occur before WordPress fallback:
+
+- `HCC-TACE-Seg.Pathology` is tumor differentiation/biopsy status, not primary
+  diagnosis. Reclassify populated differentiation values as `grade`, exclude
+  `NOT STATED` and `No biopsy` as grade placeholders, and allow the Collection's
+  single `Hepatocellular carcinoma` diagnosis and `Liver` site to fill otherwise
+  missing participant fields.
+- `NSCLC-Radiomics.histology` maps `large cell` to `Large Cell Carcinoma` and
+  `nos` to `Non-small Cell Lung Cancer, NOS`.
+- reviewed FDG-PET-CT-Lesions diagnosis tokens map `lung_cancer`, `lymphoma`,
+  and `melanoma` to readable labels. `NEGATIVE` remains unchanged pending a
+  source-semantic review rather than assuming it means `Non-Cancer`.
+- HNSCC `CUP` and `NOS` site values resolve to `Unknown Primary Site (CUP)` and
+  `Head-and-Neck, NOS`; Head-Neck-PET-CT `unknown` resolves to
+  `Unknown Primary Site`.
+- VAREPOP-APOLLO `ESOPHAGEAL` and `THYMOMA` disease-site values resolve to
+  `Esophagus` and `Thymus Gland`.
+
+These mappings are restricted to the reviewed dataset and source column. They
+are not global synonym rules and do not collapse values that differ in
+specificity.
 
 ### WordPress fallback validation baseline
 

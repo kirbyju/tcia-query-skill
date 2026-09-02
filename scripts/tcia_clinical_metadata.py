@@ -148,27 +148,46 @@ CANONICAL_DISPLAY_VALUES = {
 # supplies a stable human-readable filtering value.
 NLST_ICDO3_MORPHOLOGY_LABELS = {
     "8000": "Neoplasm, malignant",
+    "8001": "Tumor cells, malignant",
     "8010": "Carcinoma, NOS",
     "8012": "Large cell carcinoma, NOS",
     "8013": "Large cell neuroendocrine carcinoma",
+    "8021": "Carcinoma, anaplastic type, NOS",
+    "8022": "Pleomorphic carcinoma",
+    "8032": "Spindle cell carcinoma",
+    "8033": "Pseudosarcomatous carcinoma",
     "8041": "Small cell carcinoma, NOS",
     "8042": "Oat cell carcinoma",
+    "8044": "Small cell carcinoma, intermediate cell",
+    "8045": "Combined small cell carcinoma",
     "8046": "Non-small cell carcinoma",
+    "8050": "Papillary carcinoma, NOS",
+    "8052": "Papillary squamous cell carcinoma",
     "8070": "Squamous cell carcinoma, NOS",
     "8071": "Squamous cell carcinoma, keratinizing, NOS",
     "8072": "Squamous cell carcinoma, large cell, non-keratinizing",
     "8075": "Squamous cell carcinoma, adenoid",
+    "8083": "Basaloid squamous cell carcinoma",
     "8084": "Squamous cell carcinoma, clear cell type",
     "8140": "Adenocarcinoma, NOS",
     "8240": "Carcinoid tumor, malignant",
     "8246": "Neuroendocrine carcinoma",
+    "8249": "Neuroendocrine tumor",
     "8250": "Lepidic adenocarcinoma",
+    "8252": "Bronchiolo-alveolar carcinoma, non-mucinous",
     "8253": "Invasive mucinous adenocarcinoma",
+    "8254": "Mixed invasive mucinous and non-mucinous adenocarcinoma",
+    "8255": "Adenocarcinoma with mixed subtypes",
     "8260": "Papillary adenocarcinoma, NOS",
+    "8310": "Clear cell adenocarcinoma, NOS",
     "8323": "Mixed cell adenocarcinoma",
     "8480": "Mucinous adenocarcinoma",
+    "8481": "Mucin-producing adenocarcinoma",
+    "8490": "Signet ring cell carcinoma",
     "8550": "Acinar cell carcinoma",
     "8560": "Adenosquamous carcinoma",
+    "8570": "Adenocarcinoma with squamous metaplasia",
+    "8980": "Carcinosarcoma, NOS",
 }
 
 NLST_ICDO3_TOPOGRAPHY_LABELS = {
@@ -187,6 +206,33 @@ NLST_CANCER_SCREEN_LABELS = {
     "2": "Negative Screen",
     "3": "Missed Screen",
     "4": "Post Screening",
+}
+
+# These mappings are restricted to reviewed dataset/column combinations. They
+# repair display syntax or explicit placeholders without broadening a diagnosis
+# or anatomical site. Raw values remain in clinical_facts.value_text and
+# clinical_rows.row_json.
+DATASET_SPECIFIC_CLINICAL_VALUE_LABELS = {
+    ("fdgpetctlesions", "primary_diagnosis", "diagnosis"): {
+        "lung_cancer": "Lung Cancer",
+        "lymphoma": "Lymphoma",
+        "melanoma": "Melanoma",
+    },
+    ("nsclcradiomics", "primary_diagnosis", "histology"): {
+        "large cell": "Large Cell Carcinoma",
+        "nos": "Non-small Cell Lung Cancer, NOS",
+    },
+    ("hnscc", "primary_site", "cancersubsiteoforigin"): {
+        "cup": "Unknown Primary Site (CUP)",
+        "nos": "Head-and-Neck, NOS",
+    },
+    ("headneckpetct", "primary_site", "primarysite"): {
+        "unknown": "Unknown Primary Site",
+    },
+    ("varepopapollo", "primary_site", "diseasesite"): {
+        "esophageal": "Esophagus",
+        "thymoma": "Thymus Gland",
+    },
 }
 
 GENERIC_DATASET_LABELS = {
@@ -349,6 +395,9 @@ SOURCE_COLUMN_CONCEPT_OVERRIDES = {
     ("hnscc", "daystolastfu"): "days_to_last_followup",
     ("hnscc", "aliveordead"): "vital_status",
     ("hnscc", "site"): "primary_site",
+    # The HCC-TACE-Seg Pathology field contains differentiation and biopsy
+    # status, not a primary diagnosis.
+    ("hcctaceseg", "pathology"): "grade",
     # Reviewed bare-ID clinical tables. Preserve every original column/value;
     # these aliases expose the most useful patient-level concepts consistently.
     ("headneckradiomicshn1", "performancestatusecog"): "performance_status",
@@ -575,6 +624,7 @@ SUBJECT_COLUMN_OVERRIDES = {
 # an older no_patient_rows result without forcing every official source to be
 # downloaded again.
 OFFICIAL_SOURCE_TRANSFORM_VERSIONS = {
+    "hcctaceseg": 1,
     "headneckradiomicshn1": 1,
     "tompeicmmd": 1,
     "ucsdptgbm": 1,
@@ -6205,6 +6255,8 @@ def materialize_clinical_qc(conn: sqlite3.Connection) -> dict[str, int]:
     # IDC rows. Reapply it after resetting resolved values so raw codes remain
     # preserved while the filtering/display value stays harmonized.
     harmonize_nlst_clinical_facts(conn)
+    harmonize_low_risk_dataset_facts(conn)
+    harmonize_wordpress_display_spellings(conn)
 
     # Reapply audited dictionaries during QC so incrementally reused facts
     # receive newly added mappings without rewriting their preserved source
@@ -7119,6 +7171,211 @@ def harmonize_nlst_clinical_facts(conn: sqlite3.Connection) -> dict[str, int]:
     return result
 
 
+def harmonize_low_risk_dataset_facts(conn: sqlite3.Connection) -> dict[str, int]:
+    """Apply reviewed concept and label repairs without altering raw values."""
+    result = {
+        "hcc_pathology_reclassified": 0,
+        "hcc_pathology_placeholders_excluded": 0,
+        "dataset_value_labels_mapped": 0,
+    }
+
+    hcc_facts = conn.execute(
+        """SELECT * FROM clinical_facts
+           WHERE lower(replace(short_title, '-', '')) = 'hcctaceseg'
+             AND lower(replace(original_column, '_', '')) = 'pathology'
+             AND concept IN ('primary_diagnosis', 'grade')"""
+    ).fetchall()
+    for fact in hcc_facts:
+        raw_value = clean_value(fact["value_text"])
+        missing = normalize_value(raw_value) in {"not stated", "no biopsy"}
+        try:
+            provenance = json.loads(fact["provenance_json"] or "{}")
+        except json.JSONDecodeError:
+            provenance = {}
+        provenance["harmonization"] = {
+            "method": "reviewed_source_column_concept_reclassification",
+            "source_column": fact["original_column"],
+            "original_concept": fact["concept"],
+            "resolved_concept": "grade",
+            "placeholder_excluded": missing,
+        }
+        conn.execute(
+            """UPDATE clinical_facts
+               SET concept = 'grade', value_resolved = ?,
+                   value_normalized = ?, qc_excluded = ?, qc_status = ?,
+                   provenance_json = ?
+               WHERE fact_id = ?""",
+            (
+                raw_value,
+                normalize_concept_value("grade", raw_value),
+                int(missing),
+                (
+                    "excluded_dataset_placeholder"
+                    if missing
+                    else "normalized_dataset_concept"
+                ),
+                json_dumps(provenance),
+                fact["fact_id"],
+            ),
+        )
+        insert_qc_finding(
+            conn,
+            rule_id="hcc_tace_pathology_is_grade",
+            severity="info",
+            disposition="auto_exclude" if missing else "auto_normalize",
+            short_title=fact["short_title"],
+            subject_id=fact["subject_id"],
+            subject_key=fact["subject_key"],
+            source_id=fact["source_id"],
+            source_row_id=fact["source_row_id"],
+            fact_id=fact["fact_id"],
+            concept="grade",
+            original_value=raw_value,
+            resolved_value="" if missing else raw_value,
+            message=(
+                "Excluded a non-grade Pathology placeholder after reclassifying "
+                "the HCC-TACE-Seg field from diagnosis to grade."
+                if missing
+                else (
+                    "Reclassified the HCC-TACE-Seg Pathology field from primary "
+                    "diagnosis to tumor grade."
+                )
+            ),
+            provenance=provenance["harmonization"],
+        )
+        result["hcc_pathology_reclassified"] += 1
+        result["hcc_pathology_placeholders_excluded"] += int(missing)
+
+    facts = conn.execute(
+        """SELECT * FROM clinical_facts
+           WHERE concept IN ('primary_diagnosis', 'primary_site')"""
+    ).fetchall()
+    for fact in facts:
+        key = (
+            normalize_name(fact["short_title"]),
+            fact["concept"],
+            normalize_name(fact["original_column"]),
+        )
+        labels = DATASET_SPECIFIC_CLINICAL_VALUE_LABELS.get(key)
+        if not labels:
+            continue
+        raw_value = clean_value(fact["value_text"])
+        resolved = labels.get(normalize_value(raw_value))
+        if not resolved:
+            continue
+        try:
+            provenance = json.loads(fact["provenance_json"] or "{}")
+        except json.JSONDecodeError:
+            provenance = {}
+        provenance["harmonization"] = {
+            "method": "reviewed_dataset_value_label",
+            "source_column": fact["original_column"],
+            "raw_value": raw_value,
+            "resolved_label": resolved,
+        }
+        conn.execute(
+            """UPDATE clinical_facts
+               SET value_resolved = ?, value_normalized = ?,
+                   qc_status = 'normalized_dataset_label', provenance_json = ?
+               WHERE fact_id = ?""",
+            (
+                resolved,
+                normalize_concept_value(fact["concept"], resolved),
+                json_dumps(provenance),
+                fact["fact_id"],
+            ),
+        )
+        insert_qc_finding(
+            conn,
+            rule_id="reviewed_dataset_clinical_value_label",
+            severity="info",
+            disposition="auto_normalize",
+            short_title=fact["short_title"],
+            subject_id=fact["subject_id"],
+            subject_key=fact["subject_key"],
+            source_id=fact["source_id"],
+            source_row_id=fact["source_row_id"],
+            fact_id=fact["fact_id"],
+            concept=fact["concept"],
+            original_value=raw_value,
+            resolved_value=resolved,
+            message=(
+                "Mapped a reviewed dataset-specific clinical value to a "
+                "human-readable label while preserving the raw value."
+            ),
+            provenance=provenance["harmonization"],
+        )
+        result["dataset_value_labels_mapped"] += 1
+    return result
+
+
+def harmonize_wordpress_display_spellings(conn: sqlite3.Connection) -> dict[str, int]:
+    """Use WordPress spelling only for semantically identical normalized text."""
+    displays: dict[tuple[str, str], set[str]] = {}
+    for row in conn.execute(
+        """SELECT concept, inferred_value
+           FROM clinical_dataset_inferences
+           WHERE concept IN ('primary_diagnosis', 'primary_site')
+             AND COALESCE(inferred_value, '') <> ''"""
+    ):
+        display = clean_value(row["inferred_value"])
+        normalized = normalize_concept_value(row["concept"], display)
+        if normalized:
+            displays.setdefault((row["concept"], normalized), set()).add(display)
+    preferred = {
+        key: next(iter(values))
+        for key, values in displays.items()
+        if len(values) == 1
+    }
+    mapped = 0
+    for fact in conn.execute(
+        """SELECT * FROM clinical_facts
+           WHERE qc_excluded = 0
+             AND concept IN ('primary_diagnosis', 'primary_site')"""
+    ).fetchall():
+        display = preferred.get((fact["concept"], fact["value_normalized"]))
+        if not display or clean_value(fact["value_resolved"]) == display:
+            continue
+        try:
+            provenance = json.loads(fact["provenance_json"] or "{}")
+        except json.JSONDecodeError:
+            provenance = {}
+        provenance["display_harmonization"] = {
+            "method": "exact_normalized_wordpress_label_spelling",
+            "raw_value": clean_value(fact["value_text"]),
+            "resolved_label": display,
+        }
+        conn.execute(
+            """UPDATE clinical_facts
+               SET value_resolved = ?, qc_status = 'normalized_wordpress_spelling',
+                   provenance_json = ?
+               WHERE fact_id = ?""",
+            (display, json_dumps(provenance), fact["fact_id"]),
+        )
+        insert_qc_finding(
+            conn,
+            rule_id="wordpress_label_display_spelling",
+            severity="info",
+            disposition="auto_normalize",
+            short_title=fact["short_title"],
+            subject_id=fact["subject_id"],
+            subject_key=fact["subject_key"],
+            source_id=fact["source_id"],
+            source_row_id=fact["source_row_id"],
+            fact_id=fact["fact_id"],
+            concept=fact["concept"],
+            original_value=clean_value(fact["value_text"]),
+            resolved_value=display,
+            message=(
+                "Aligned display spelling with an exact normalized WordPress "
+                "diagnosis/site label without changing semantic specificity."
+            ),
+            provenance=provenance["display_harmonization"],
+        )
+        mapped += 1
+    return {"facts_mapped": mapped, "preferred_labels": len(preferred)}
+
+
 def reviewed_analysis_result_participant_ids(
     path: Path | None = REVIEWED_ANALYSIS_RESULT_PARTICIPANTS_CSV,
 ) -> dict[str, dict[str, str]]:
@@ -7691,6 +7948,12 @@ def build(args: argparse.Namespace) -> None:
     insert_meta(conn, "tompei_cmmd_package_cohort_result", tompei_cmmd_result)
     nlst_harmonization_result = harmonize_nlst_clinical_facts(conn)
     insert_meta(conn, "nlst_clinical_harmonization", nlst_harmonization_result)
+    low_risk_harmonization_result = harmonize_low_risk_dataset_facts(conn)
+    insert_meta(
+        conn,
+        "low_risk_clinical_harmonization",
+        low_risk_harmonization_result,
+    )
     inference_result = apply_wordpress_dataset_inferences(conn, snapshot_db)
     # Resolve source Collection subjects first, then use WordPress-confirmed
     # relationships plus exact PatientID matches to backfill Analysis Results.
