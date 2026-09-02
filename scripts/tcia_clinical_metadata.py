@@ -46,6 +46,9 @@ SKILL_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SNAPSHOT_DB = SKILL_ROOT / "cache" / "tcia_snapshot.sqlite"
 DEFAULT_DB_PATH = SKILL_ROOT / "cache" / "clinical_metadata.sqlite"
 DEFAULT_MANIFEST_PATH = SKILL_ROOT / "cache" / CLINICAL_MANIFEST_ASSET
+REVIEWED_ANALYSIS_RESULT_PARTICIPANTS_CSV = (
+    SKILL_ROOT / "references" / "reviewed_analysis_result_participants_v1.csv"
+)
 USER_AGENT = "tcia-clinical-metadata/0.1"
 CDA_DOCUMENTATION_URL = "https://cda.readthedocs.io/"
 TCGA_BREAST_RADIOGENOMICS_FEATURES_URL = (
@@ -136,6 +139,54 @@ CANONICAL_DISPLAY_VALUES = {
         "no": "No",
         "unknown": "Unknown",
     },
+}
+
+# NLST publishes ICD-O-3 morphology and topography codes without display labels
+# in the IDC clinical dictionary. These preferred terms come from NCI SEER's
+# ICD-O-3 site/histology materials. Keep the mapping dataset-scoped: the raw
+# code remains in value_text and clinical_rows.row_json, while value_resolved
+# supplies a stable human-readable filtering value.
+NLST_ICDO3_MORPHOLOGY_LABELS = {
+    "8000": "Neoplasm, malignant",
+    "8010": "Carcinoma, NOS",
+    "8012": "Large cell carcinoma, NOS",
+    "8013": "Large cell neuroendocrine carcinoma",
+    "8041": "Small cell carcinoma, NOS",
+    "8042": "Oat cell carcinoma",
+    "8046": "Non-small cell carcinoma",
+    "8070": "Squamous cell carcinoma, NOS",
+    "8071": "Squamous cell carcinoma, keratinizing, NOS",
+    "8072": "Squamous cell carcinoma, large cell, non-keratinizing",
+    "8075": "Squamous cell carcinoma, adenoid",
+    "8084": "Squamous cell carcinoma, clear cell type",
+    "8140": "Adenocarcinoma, NOS",
+    "8240": "Carcinoid tumor, malignant",
+    "8246": "Neuroendocrine carcinoma",
+    "8250": "Lepidic adenocarcinoma",
+    "8253": "Invasive mucinous adenocarcinoma",
+    "8260": "Papillary adenocarcinoma, NOS",
+    "8323": "Mixed cell adenocarcinoma",
+    "8480": "Mucinous adenocarcinoma",
+    "8550": "Acinar cell carcinoma",
+    "8560": "Adenosquamous carcinoma",
+}
+
+NLST_ICDO3_TOPOGRAPHY_LABELS = {
+    "C34.0": "Main bronchus",
+    "C34.1": "Upper lobe of lung",
+    "C34.2": "Middle lobe of lung",
+    "C34.3": "Lower lobe of lung",
+    "C34.8": "Overlapping lesion of lung",
+    "C34.9": "Lung, NOS",
+    "C38.3": "Mediastinum, part unspecified",
+}
+
+NLST_CANCER_SCREEN_LABELS = {
+    "0": "No Cancer",
+    "1": "Positive Screen",
+    "2": "Negative Screen",
+    "3": "Missed Screen",
+    "4": "Post Screening",
 }
 
 GENERIC_DATASET_LABELS = {
@@ -6150,6 +6201,10 @@ def materialize_clinical_qc(conn: sqlite3.Connection) -> dict[str, int]:
                qc_excluded = 0,
                qc_status = 'accepted'"""
     )
+    # This deterministic post-ingestion pass also covers incrementally reused
+    # IDC rows. Reapply it after resetting resolved values so raw codes remain
+    # preserved while the filtering/display value stays harmonized.
+    harmonize_nlst_clinical_facts(conn)
 
     # Reapply audited dictionaries during QC so incrementally reused facts
     # receive newly added mappings without rewriting their preserved source
@@ -6880,15 +6935,234 @@ def materialize_subjects(conn: sqlite3.Connection) -> None:
     write_subject(current_facts)
 
 
+def harmonize_nlst_clinical_facts(conn: sqlite3.Connection) -> dict[str, int]:
+    """Resolve audited NLST screening and ICD-O codes without altering raw data."""
+    result = {
+        "morphology_facts_mapped": 0,
+        "topography_facts_mapped": 0,
+        "screening_result_facts": 0,
+        "non_cancer_diagnosis_facts": 0,
+    }
+    mapping_source = (
+        "https://seer.cancer.gov/icd-o-3/sitetype.icdo3.20220429.pdf"
+    )
+    for concept, columns, labels, count_key in (
+        (
+            "primary_diagnosis",
+            {"de_type", "lc_morph"},
+            NLST_ICDO3_MORPHOLOGY_LABELS,
+            "morphology_facts_mapped",
+        ),
+        (
+            "primary_site",
+            {"lc_topog"},
+            NLST_ICDO3_TOPOGRAPHY_LABELS,
+            "topography_facts_mapped",
+        ),
+    ):
+        placeholders = ",".join("?" for _ in columns)
+        rows = conn.execute(
+            f"""SELECT fact_id, source_id, source_row_id, subject_id,
+                       subject_key, value_text, provenance_json
+                FROM clinical_facts
+                WHERE lower(short_title) = 'nlst'
+                  AND concept = ?
+                  AND lower(original_column) IN ({placeholders})""",
+            (concept, *sorted(columns)),
+        ).fetchall()
+        for row in rows:
+            code = clean_value(row["value_text"]).upper()
+            resolved = labels.get(code)
+            if not resolved:
+                continue
+            try:
+                provenance = json.loads(row["provenance_json"] or "{}")
+            except json.JSONDecodeError:
+                provenance = {}
+            provenance["harmonization"] = {
+                "method": "dataset_scoped_icdo3_code_map",
+                "raw_code": clean_value(row["value_text"]),
+                "resolved_label": resolved,
+                "vocabulary": "ICD-O-3",
+                "mapping_source": mapping_source,
+            }
+            conn.execute(
+                """UPDATE clinical_facts
+                   SET value_resolved = ?, value_normalized = ?,
+                       qc_status = 'normalized_dataset_code',
+                       provenance_json = ?
+                   WHERE fact_id = ?""",
+                (
+                    resolved,
+                    normalize_concept_value(concept, resolved),
+                    json_dumps(provenance),
+                    row["fact_id"],
+                ),
+            )
+            insert_qc_finding(
+                conn,
+                rule_id="nlst_icdo3_code_harmonization",
+                severity="info",
+                disposition="auto_normalize",
+                short_title="NLST",
+                subject_id=row["subject_id"],
+                subject_key=row["subject_key"],
+                source_id=row["source_id"],
+                source_row_id=row["source_row_id"],
+                fact_id=row["fact_id"],
+                concept=concept,
+                original_value=clean_value(row["value_text"]),
+                resolved_value=resolved,
+                message=(
+                    "Mapped an NLST ICD-O-3 code to its NCI SEER preferred "
+                    "display term while preserving the raw source code."
+                ),
+                provenance=provenance["harmonization"],
+            )
+            result[count_key] += 1
+
+    participant_rows = conn.execute(
+        """SELECT r.source_row_id, r.source_id, r.short_title, r.subject_id,
+                  r.subject_key, r.table_name, r.row_number, r.row_json,
+                  s.source_kind, s.source_priority, s.source_url
+           FROM clinical_rows r
+           JOIN clinical_sources s USING (source_id)
+           WHERE lower(r.short_title) = 'nlst'
+             AND lower(r.table_name) = 'nlst_prsn'"""
+    ).fetchall()
+    for row in participant_rows:
+        try:
+            source_values = json.loads(row["row_json"])
+        except json.JSONDecodeError:
+            continue
+        raw_code = normalize_dictionary_code(source_values.get("can_scr"))
+        screen_label = NLST_CANCER_SCREEN_LABELS.get(raw_code)
+        if not screen_label:
+            continue
+        facts = [("screening_result", screen_label)]
+        if raw_code == "0":
+            facts.append(("primary_diagnosis", "Non-Cancer"))
+        for concept, resolved in facts:
+            normalized = normalize_concept_value(concept, resolved)
+            fact_id = stable_id(
+                row["source_row_id"], concept, normalized, "can_scr"
+            )
+            conn.execute(
+                """INSERT OR REPLACE INTO clinical_facts
+                   (fact_id, source_row_id, source_id, source_kind,
+                    source_priority, short_title, subject_id, subject_key,
+                    concept, value_text, value_resolved, value_normalized,
+                    value_number, unit, original_column, evidence_scope,
+                    is_inferred, qc_excluded, qc_status, provenance_json)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL,
+                           'can_scr', 'patient', 0, 0, 'accepted', ?)""",
+                (
+                    fact_id,
+                    row["source_row_id"],
+                    row["source_id"],
+                    row["source_kind"],
+                    row["source_priority"],
+                    row["short_title"],
+                    row["subject_id"],
+                    row["subject_key"],
+                    concept,
+                    raw_code,
+                    resolved,
+                    normalized,
+                    json_dumps(
+                        {
+                            "table_name": row["table_name"],
+                            "row_number": row["row_number"],
+                            "harmonization": {
+                                "method": "nlst_can_scr_dictionary_map",
+                                "raw_code": raw_code,
+                                "resolved_label": resolved,
+                                "dictionary_label": (
+                                    "Result of screen associated with the first "
+                                    "confirmed lung cancer diagnosis"
+                                ),
+                                "source_url": row["source_url"],
+                            },
+                        }
+                    ),
+                ),
+            )
+            insert_qc_finding(
+                conn,
+                rule_id="nlst_can_scr_harmonization",
+                severity="info",
+                disposition="auto_normalize",
+                short_title=row["short_title"],
+                subject_id=row["subject_id"],
+                subject_key=row["subject_key"],
+                source_id=row["source_id"],
+                source_row_id=row["source_row_id"],
+                fact_id=fact_id,
+                concept=concept,
+                original_value=raw_code,
+                resolved_value=resolved,
+                message=(
+                    "Mapped the NLST can_scr code using its dataset-specific "
+                    "dictionary; No Cancer resolves to the canonical "
+                    "Non-Cancer diagnosis without assigning a primary site."
+                ),
+                provenance={
+                    "method": "nlst_can_scr_dictionary_map",
+                    "source_url": row["source_url"],
+                },
+            )
+            result[
+                "non_cancer_diagnosis_facts"
+                if concept == "primary_diagnosis"
+                else "screening_result_facts"
+            ] += 1
+    return result
+
+
+def reviewed_analysis_result_participant_ids(
+    path: Path | None = REVIEWED_ANALYSIS_RESULT_PARTICIPANTS_CSV,
+) -> dict[str, dict[str, str]]:
+    """Load reviewed result membership as normalized ID -> display ID."""
+    if path is None or not path.exists():
+        return {}
+    result: dict[str, dict[str, str]] = {}
+    with path.open(newline="", encoding="utf-8-sig") as handle:
+        for row in csv.DictReader(handle):
+            if clean_value(row.get("dataset_type")) != "Analysis Result":
+                continue
+            short_title = clean_value(row.get("short_title"))
+            participant_id = clean_value(row.get("participant_id"))
+            normalized_id = normalize_subject(participant_id)
+            if not short_title or not normalized_id:
+                continue
+            dataset_ids = result.setdefault(normalize_name(short_title), {})
+            existing = dataset_ids.get(normalized_id)
+            if existing is None or participant_id.casefold() < existing.casefold():
+                dataset_ids[normalized_id] = participant_id
+    return result
+
+
 def inherit_analysis_result_clinical_facts(
-    conn: sqlite3.Connection, snapshot_db: Path
+    conn: sqlite3.Connection,
+    snapshot_db: Path,
+    reviewed_participants_csv: Path | None = REVIEWED_ANALYSIS_RESULT_PARTICIPANTS_CSV,
 ) -> dict[str, int]:
     """Inherit source-Collection facts after relationship and ID validation."""
     conn.execute("DELETE FROM clinical_dataset_relationships")
     relationships = wordpress_analysis_result_relationships(snapshot_db)
+    reviewed_participants = reviewed_analysis_result_participant_ids(
+        reviewed_participants_csv
+    )
+    reviewed_signature = (
+        file_sha256(reviewed_participants_csv)
+        if reviewed_participants_csv is not None
+        and reviewed_participants_csv.exists()
+        else ""
+    )
     totals = {
         "relationships": len(relationships),
         "relationships_with_matches": 0,
+        "relationships_using_reviewed_participants": 0,
         "target_subjects": 0,
         "matched_subjects": 0,
         "inherited_facts": 0,
@@ -6922,6 +7196,30 @@ def inherit_analysis_result_clinical_facts(
             for row in candidate_rows
             if clean_value(row["subject_id"])
         }
+        reviewed_target_subjects = reviewed_participants.get(
+            normalize_name(target), {}
+        )
+        for normalized_id, participant_id in reviewed_target_subjects.items():
+            existing = target_subjects.get(normalized_id)
+            target_subjects[normalized_id] = (
+                existing[0] if existing else participant_id,
+                True,
+            )
+        relationship_provenance = dict(relationship)
+        if reviewed_target_subjects:
+            totals["relationships_using_reviewed_participants"] += 1
+            relationship_provenance["target_participant_inventory"] = {
+                "source": "reviewed_analysis_result_participants_v1",
+                "path": (
+                    str(reviewed_participants_csv.relative_to(SKILL_ROOT))
+                    if reviewed_participants_csv is not None
+                    and reviewed_participants_csv.is_relative_to(SKILL_ROOT)
+                    else str(reviewed_participants_csv or "")
+                ),
+                "sha256": reviewed_signature,
+                "participants": len(reviewed_target_subjects),
+                "identity_rule": "exact_normalized_patient_id",
+            }
         source_subjects = {
             normalize_subject(row["subject_id"]): row
             for row in conn.execute(
@@ -6945,13 +7243,14 @@ def inherit_analysis_result_clinical_facts(
                 source_signature_value=stable_id(
                     relationship["relationship_id"],
                     relationship["relationship_evidence"],
+                    reviewed_signature if reviewed_target_subjects else "",
                 ),
                 source_lineage=(
                     "wordpress-analysis-result-patient-crosswalk:"
                     f"{normalize_name(target)}:{normalize_name(source)}"
                 ),
                 source_url=relationship["target_url"],
-                provenance=relationship,
+                provenance=relationship_provenance,
             )
             for row_number, normalized_id in enumerate(matching_ids, start=1):
                 target_subject_id, target_has_imaging = target_subjects[
@@ -7065,7 +7364,7 @@ def inherit_analysis_result_clinical_facts(
                 len(matching_ids),
                 inherited_facts,
                 status,
-                json_dumps(relationship),
+                json_dumps(relationship_provenance),
             ),
         )
         totals["target_subjects"] += len(target_subjects)
@@ -7390,6 +7689,8 @@ def build(args: argparse.Namespace) -> None:
         max_bytes=args.max_artifact_bytes,
     )
     insert_meta(conn, "tompei_cmmd_package_cohort_result", tompei_cmmd_result)
+    nlst_harmonization_result = harmonize_nlst_clinical_facts(conn)
+    insert_meta(conn, "nlst_clinical_harmonization", nlst_harmonization_result)
     inference_result = apply_wordpress_dataset_inferences(conn, snapshot_db)
     # Resolve source Collection subjects first, then use WordPress-confirmed
     # relationships plus exact PatientID matches to backfill Analysis Results.

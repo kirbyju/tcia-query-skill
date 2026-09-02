@@ -504,6 +504,32 @@ The first IDC validation established:
 
 Treat these as regression expectations for IDC v24, not timeless constants.
 
+NLST receives a dataset-scoped harmonization pass after IDC ingestion, including
+when the source rows were incrementally reused from a prior compatible build.
+The raw codes remain in `clinical_facts.value_text` and
+`clinical_rows.row_json`; only `value_resolved` and its normalized filtering
+key use the human-readable value.
+
+- `nlst_prsn.can_scr = 0` uses the official dictionary meaning `No Cancer` and
+  resolves `primary_diagnosis` to TCIA's canonical `Non-Cancer` label. It does
+  not create a primary site. All recognized `can_scr` values are also retained
+  as `screening_result` facts.
+- `nlst_canc.de_type` and `lc_morph` use audited NCI SEER ICD-O-3 morphology
+  preferred terms. `lc_topog` uses the corresponding human-readable ICD-O-3
+  topography label. Equivalent codes from the two morphology columns therefore
+  collapse to one filtering value, while diagnoses with different specificity
+  remain distinct.
+- The committed reviewed Analysis Result participant inventory supplies the
+  501 target PatientIDs for `LIDC-annot-NLST501`. Together with the explicit
+  WordPress `NLST` relationship and exact normalized PatientID matching, this
+  permits auditable patient-fact inheritance without copying unmatched NLST
+  participants.
+
+The ICD-O label source is NCI SEER's ICD-O-3 site/histology material:
+`https://seer.cancer.gov/icd-o-3/sitetype.icdo3.20220429.pdf`. These labels
+support discovery and filtering; the original NLST source values remain the
+authoritative submitted evidence.
+
 ### WordPress fallback validation baseline
 
 Against the full visible-TCIA IDC-only validation build and the July 2026 base

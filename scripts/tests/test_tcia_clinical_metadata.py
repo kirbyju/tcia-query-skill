@@ -956,6 +956,112 @@ class ClinicalMetadataTest(unittest.TestCase):
             self.assertEqual(facts["therapeutic_agent"], "Sunitinib")
             conn.close()
 
+    def test_nlst_harmonizes_no_cancer_and_icdo_codes_without_losing_raw_values(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            conn = CLINICAL.init_db(
+                Path(directory) / "nlst.sqlite", replace=True
+            )
+            CLINICAL.insert_source(
+                conn,
+                source_id="idc-clinical:nlst:nlst_prsn",
+                source_kind="idc_clinical",
+                short_title="NLST",
+                source_signature_value="nlst-test",
+                source_url="https://example.test/nlst-dictionary",
+            )
+            CLINICAL.insert_row_and_facts(
+                conn,
+                source_id="idc-clinical:nlst:nlst_prsn",
+                source_kind="idc_clinical",
+                short_title="NLST",
+                subject_id="NO-CANCER",
+                table_name="nlst_prsn",
+                row_number=2,
+                row={"dicom_patient_id": "NO-CANCER", "can_scr": "0"},
+                facts=[],
+                has_imaging=True,
+            )
+            CLINICAL.insert_row_and_facts(
+                conn,
+                source_id="idc-clinical:nlst:nlst_prsn",
+                source_kind="idc_clinical",
+                short_title="NLST",
+                subject_id="CANCER",
+                table_name="nlst_prsn",
+                row_number=3,
+                row={"dicom_patient_id": "CANCER", "can_scr": "1"},
+                facts=[],
+                has_imaging=True,
+            )
+            CLINICAL.insert_row_and_facts(
+                conn,
+                source_id="idc-clinical:nlst:nlst_prsn",
+                source_kind="idc_clinical",
+                short_title="NLST",
+                subject_id="CANCER",
+                table_name="nlst_canc",
+                row_number=2,
+                row={
+                    "dicom_patient_id": "CANCER",
+                    "de_type": "8250",
+                    "lc_morph": "8250",
+                    "lc_topog": "C34.1",
+                },
+                facts=[
+                    ("primary_diagnosis", "8250", "de_type", None),
+                    ("primary_diagnosis", "8250", "lc_morph", None),
+                    ("primary_site", "C34.1", "lc_topog", None),
+                ],
+                has_imaging=True,
+            )
+
+            result = CLINICAL.harmonize_nlst_clinical_facts(conn)
+            self.assertEqual(result["morphology_facts_mapped"], 2)
+            self.assertEqual(result["topography_facts_mapped"], 1)
+            self.assertEqual(result["screening_result_facts"], 2)
+            self.assertEqual(result["non_cancer_diagnosis_facts"], 1)
+            CLINICAL.materialize_clinical_qc(conn)
+            CLINICAL.materialize_subjects(conn)
+
+            no_cancer = conn.execute(
+                """SELECT primary_diagnosis, primary_site, screening_result
+                   FROM agent_clinical_subjects
+                   WHERE short_title='NLST' AND subject_id='NO-CANCER'"""
+            ).fetchone()
+            self.assertEqual(tuple(no_cancer), ("Non-Cancer", None, "No Cancer"))
+            cancer = conn.execute(
+                """SELECT primary_diagnosis, primary_site, screening_result,
+                          conflict_count
+                   FROM agent_clinical_subjects
+                   WHERE short_title='NLST' AND subject_id='CANCER'"""
+            ).fetchone()
+            self.assertEqual(
+                tuple(cancer),
+                (
+                    "Lepidic adenocarcinoma",
+                    "Upper lobe of lung",
+                    "Positive Screen",
+                    0,
+                ),
+            )
+            raw_and_resolved = conn.execute(
+                """SELECT value_text, value_resolved
+                   FROM agent_clinical_facts
+                   WHERE short_title='NLST' AND subject_id='CANCER'
+                     AND concept='primary_diagnosis'
+                   ORDER BY original_column"""
+            ).fetchall()
+            self.assertEqual(
+                [tuple(row) for row in raw_and_resolved],
+                [
+                    ("8250", "Lepidic adenocarcinoma"),
+                    ("8250", "Lepidic adenocarcinoma"),
+                ],
+            )
+            conn.close()
+
     def test_analysis_result_inherits_collection_facts_by_exact_patient_id(
         self,
     ) -> None:
@@ -1091,6 +1197,98 @@ class ClinicalMetadataTest(unittest.TestCase):
             )
             self.assertEqual(
                 provenance["inherited_from_subject_id"], "TCGA-01-0001"
+            )
+            conn.close()
+
+    def test_analysis_result_inherits_from_reviewed_participant_inventory(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            snapshot = root / "snapshot.sqlite"
+            snapshot_conn = sqlite3.connect(snapshot)
+            snapshot_conn.executescript(
+                """
+                CREATE TABLE agent_datasets (
+                    source TEXT, short_title TEXT, title TEXT, link TEXT,
+                    hidden INTEGER, source_collections TEXT
+                );
+                INSERT INTO agent_datasets VALUES
+                    ('collections', 'NLST', 'National Lung Screening Trial',
+                     'https://example.test/nlst', 0, ''),
+                    ('analysis-results', 'LIDC-annot-NLST501',
+                     'NLST annotations', 'https://example.test/lidc-nlst', 0,
+                     'Patients and images from NLST');
+                CREATE TABLE agent_current_downloads (
+                    short_title TEXT, parent_source TEXT, hidden INTEGER
+                );
+                """
+            )
+            snapshot_conn.close()
+            reviewed = root / "reviewed.csv"
+            reviewed.write_text(
+                "dataset_type,short_title,download_id,participant_id,"
+                "raw_participant_id,participant_role,source_file,source_locator\n"
+                "Analysis Result,LIDC-annot-NLST501,55734,100206,100206,"
+                "described_subject,LIDC-patients.csv,row:2\n",
+                encoding="utf-8",
+            )
+
+            conn = CLINICAL.init_db(root / "clinical.sqlite", replace=True)
+            CLINICAL.insert_source(
+                conn,
+                source_id="idc-clinical:nlst:nlst_prsn",
+                source_kind="idc_clinical",
+                short_title="NLST",
+                source_signature_value="nlst-test",
+            )
+            CLINICAL.insert_row_and_facts(
+                conn,
+                source_id="idc-clinical:nlst:nlst_prsn",
+                source_kind="idc_clinical",
+                short_title="NLST",
+                subject_id="100206",
+                table_name="nlst_prsn",
+                row_number=2,
+                row={"dicom_patient_id": "100206", "can_scr": "0"},
+                facts=[("sex_at_birth", "Female", "gender", None)],
+                has_imaging=True,
+            )
+            CLINICAL.harmonize_nlst_clinical_facts(conn)
+            CLINICAL.materialize_clinical_qc(conn)
+            CLINICAL.materialize_subjects(conn)
+
+            result = CLINICAL.inherit_analysis_result_clinical_facts(
+                conn, snapshot, reviewed_participants_csv=reviewed
+            )
+            CLINICAL.materialize_clinical_qc(conn)
+            CLINICAL.materialize_subjects(conn)
+            self.assertEqual(result["relationships_using_reviewed_participants"], 1)
+            self.assertEqual(result["target_subjects"], 1)
+            self.assertEqual(result["matched_subjects"], 1)
+            inherited = conn.execute(
+                """SELECT primary_diagnosis, primary_site, sex_at_birth,
+                          screening_result
+                   FROM agent_clinical_subjects
+                   WHERE short_title='LIDC-annot-NLST501'
+                     AND subject_id='100206'"""
+            ).fetchone()
+            self.assertEqual(
+                tuple(inherited), ("Non-Cancer", None, "Female", "No Cancer")
+            )
+            relationship = conn.execute(
+                """SELECT target_subjects, matched_subjects, status,
+                          provenance_json
+                   FROM agent_clinical_dataset_relationships"""
+            ).fetchone()
+            self.assertEqual(tuple(relationship)[:3], (1, 1, "matched"))
+            provenance = json.loads(relationship["provenance_json"])
+            self.assertEqual(
+                provenance["target_participant_inventory"]["participants"], 1
+            )
+            self.assertEqual(
+                provenance["target_participant_inventory"]["sha256"],
+                CLINICAL.file_sha256(reviewed),
             )
             conn.close()
 
