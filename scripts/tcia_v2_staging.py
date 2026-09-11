@@ -27,9 +27,18 @@ CROSS_COMPONENT_FOREIGN_KEYS = {
         {
             "child_table": "public_non_dicom_crosswalk_evidence",
             "child_column": "asset_id",
+            "child_bundle_component": "public_non_dicom_audit",
+            "child_database_asset": "public_non_dicom_audit.sqlite.gz",
+            "child_profile": "audit_support",
+            "child_schema_version": 3,
             "parent_component": "public_non_dicom_baseline",
             "parent_table": "public_non_dicom_assets",
             "parent_column": "asset_id",
+            "parent_bundle_component": "public_non_dicom",
+            "parent_database_asset": "public_non_dicom_metadata.sqlite.gz",
+            "parent_profile": "research_detail",
+            "parent_schema_version": 8,
+            "coherence_column": "short_title",
         },
     ),
 }
@@ -98,6 +107,7 @@ def validate_component_foreign_keys(
     conn: sqlite3.Connection,
     components: dict[str, tuple[Path, Path]],
     *,
+    baseline_bundle_manifest_path: Path | None = None,
     limit: int = 20,
 ) -> list[dict[str, Any]]:
     """Validate standalone FKs plus explicitly declared cross-component FKs."""
@@ -116,9 +126,12 @@ def validate_component_foreign_keys(
     for contract in contracts:
         child_table = str(contract["child_table"])
         child_column = str(contract["child_column"])
+        child_bundle_component = str(contract["child_bundle_component"])
         parent_component = str(contract["parent_component"])
         parent_table = str(contract["parent_table"])
         parent_column = str(contract["parent_column"])
+        parent_bundle_component = str(contract["parent_bundle_component"])
+        coherence_column = str(contract["coherence_column"])
         declarations = list(
             conn.execute(f"PRAGMA foreign_key_list({quote_identifier(child_table)})")
         )
@@ -171,6 +184,20 @@ def validate_component_foreign_keys(
             )
         parent_database, parent_manifest_path = parent_entry
         parent_manifest = load_json(parent_manifest_path)
+        child_manifest = load_json(components[component][1])
+        bundle_pin = validate_cross_component_bundle_pin(
+            baseline_bundle_manifest_path,
+            child_manifest=child_manifest,
+            child_bundle_component=child_bundle_component,
+            child_database_asset=str(contract["child_database_asset"]),
+            child_profile=str(contract["child_profile"]),
+            child_schema_version=int(contract["child_schema_version"]),
+            parent_manifest=parent_manifest,
+            parent_bundle_component=parent_bundle_component,
+            parent_database_asset=str(contract["parent_database_asset"]),
+            parent_profile=str(contract["parent_profile"]),
+            parent_schema_version=int(contract["parent_schema_version"]),
+        )
         parent_digest = file_sha256(parent_database)
         if parent_digest != str(parent_manifest.get("sqlite_sha256") or ""):
             raise RuntimeError(
@@ -184,6 +211,31 @@ def validate_component_foreign_keys(
             (f"file:{parent_database}?mode=ro",),
         )
         try:
+            audit_meta = dict(
+                conn.execute("SELECT key, value FROM main.audit_meta")
+            ) if conn.execute(
+                "SELECT 1 FROM main.sqlite_master WHERE type='table' AND name='audit_meta'"
+            ).fetchone() else {}
+            parent_meta = dict(
+                conn.execute(f"SELECT key, value FROM {alias}.artifact_meta")
+            ) if conn.execute(
+                f"SELECT 1 FROM {alias}.sqlite_master "
+                "WHERE type='table' AND name='artifact_meta'"
+            ).fetchone() else {}
+            if (
+                audit_meta.get("research_artifact") != parent_bundle_component
+                or audit_meta.get("research_database_asset")
+                != parent_manifest.get("database_asset")
+                or parent_meta.get("provenance_storage")
+                != "companion_audit_artifact"
+                or parent_meta.get("audit_companion_asset")
+                != child_manifest.get("database_asset")
+                or str(parent_meta.get("audit_schema_version"))
+                != str(child_manifest.get("schema_version"))
+            ):
+                raise RuntimeError(
+                    f"{component} cross-component database pairing metadata mismatch"
+                )
             parent_columns = {
                 str(row[1]): row
                 for row in conn.execute(
@@ -209,6 +261,40 @@ def validate_component_foreign_keys(
                 raise RuntimeError(
                     f"{component} cross-component child key is nullable: "
                     f"{child_table}.{child_column}"
+                )
+            parent_type = str(parent_columns[parent_column][2]).upper()
+            child_type = str(child_columns[child_column][2]).upper()
+            if not parent_type or parent_type != child_type:
+                raise RuntimeError(
+                    f"{component} cross-component key type mismatch: "
+                    f"child={child_type or 'untyped'}, parent={parent_type or 'untyped'}"
+                )
+            for table, columns, column in (
+                (child_table, child_columns, coherence_column),
+                (parent_table, parent_columns, coherence_column),
+            ):
+                if column not in columns:
+                    raise RuntimeError(
+                        f"{component} cross-component coherence column is unavailable: "
+                        f"{table}.{column}"
+                    )
+            parent_nulls = int(
+                conn.execute(
+                    f"SELECT COUNT(*) FROM {alias}.{quote_identifier(parent_table)} "
+                    f"WHERE {quote_identifier(parent_column)} IS NULL"
+                ).fetchone()[0]
+            )
+            parent_duplicates = int(
+                conn.execute(
+                    f"SELECT COUNT(*) FROM (SELECT {quote_identifier(parent_column)} "
+                    f"FROM {alias}.{quote_identifier(parent_table)} "
+                    f"GROUP BY {quote_identifier(parent_column)} HAVING COUNT(*) > 1)"
+                ).fetchone()[0]
+            )
+            if parent_nulls or parent_duplicates:
+                raise RuntimeError(
+                    f"{component} cross-component parent key defect: "
+                    f"nulls={parent_nulls}, duplicate_keys={parent_duplicates}"
                 )
             orphan_count = int(
                 conn.execute(
@@ -240,6 +326,47 @@ def validate_component_foreign_keys(
                     f"WHERE {quote_identifier(child_column)} IS NOT NULL"
                 ).fetchone()[0]
             )
+            distinct_child_keys = int(
+                conn.execute(
+                    f"SELECT COUNT(DISTINCT {quote_identifier(child_column)}) "
+                    f"FROM main.{quote_identifier(child_table)}"
+                ).fetchone()[0]
+            )
+            matched_distinct_keys = int(
+                conn.execute(
+                    f"SELECT COUNT(DISTINCT child.{quote_identifier(child_column)}) "
+                    f"FROM main.{quote_identifier(child_table)} child "
+                    f"JOIN {alias}.{quote_identifier(parent_table)} parent "
+                    f"ON parent.{quote_identifier(parent_column)}="
+                    f"child.{quote_identifier(child_column)}"
+                ).fetchone()[0]
+            )
+            coherence_mismatches = int(
+                conn.execute(
+                    f"SELECT COUNT(*) FROM main.{quote_identifier(child_table)} child "
+                    f"JOIN {alias}.{quote_identifier(parent_table)} parent "
+                    f"ON parent.{quote_identifier(parent_column)}="
+                    f"child.{quote_identifier(child_column)} "
+                    f"WHERE child.{quote_identifier(coherence_column)} "
+                    f"IS NOT parent.{quote_identifier(coherence_column)}"
+                ).fetchone()[0]
+            )
+            coherence_sample = [
+                list(row)
+                for row in conn.execute(
+                    f"SELECT child.{quote_identifier(child_column)}, "
+                    f"child.{quote_identifier(coherence_column)}, "
+                    f"parent.{quote_identifier(coherence_column)} "
+                    f"FROM main.{quote_identifier(child_table)} child "
+                    f"JOIN {alias}.{quote_identifier(parent_table)} parent "
+                    f"ON parent.{quote_identifier(parent_column)}="
+                    f"child.{quote_identifier(child_column)} "
+                    f"WHERE child.{quote_identifier(coherence_column)} "
+                    f"IS NOT parent.{quote_identifier(coherence_column)} "
+                    f"ORDER BY child.{quote_identifier(child_column)} LIMIT ?",
+                    (limit,),
+                )
+            ]
         finally:
             conn.execute(f"DETACH DATABASE {alias}")
         if orphan_count:
@@ -249,6 +376,19 @@ def validate_component_foreign_keys(
                 f"{parent_table}.{parent_column}; count={orphan_count}; "
                 f"first {limit}={canonical_json(orphan_sample)}"
             )
+        if coherence_mismatches:
+            raise RuntimeError(
+                f"{component} cross-component coherence mismatches: "
+                f"{coherence_column}; count={coherence_mismatches}; "
+                f"first {limit}={canonical_json(coherence_sample)}"
+            )
+        standalone_violation_rows = int(
+            conn.execute(
+                "SELECT COUNT(*) FROM pragma_foreign_key_check "
+                'WHERE "table"=? AND parent=? AND fkid=?',
+                (child_table, parent_table, foreign_key_id),
+            ).fetchone()[0]
+        )
         verified.append(
             {
                 "child_component": component,
@@ -257,7 +397,15 @@ def validate_component_foreign_keys(
                 "parent_component": parent_component,
                 "parent_table": parent_table,
                 "parent_column": parent_column,
-                "verified_rows": child_rows,
+                "bundle_release_fingerprint": bundle_pin,
+                "standalone_violation_rows": standalone_violation_rows,
+                "child_rows": child_rows,
+                "matched_rows": child_rows - orphan_count,
+                "distinct_child_keys": distinct_child_keys,
+                "matched_distinct_keys": matched_distinct_keys,
+                "orphan_rows": orphan_count,
+                "coherence_column": coherence_column,
+                "coherence_mismatches": coherence_mismatches,
             }
         )
 
@@ -274,6 +422,101 @@ def validate_component_foreign_keys(
             + canonical_json(unexpected)
         )
     return verified
+
+
+def validate_cross_component_bundle_pin(
+    path: Path | None,
+    *,
+    child_manifest: dict[str, Any],
+    child_bundle_component: str,
+    child_database_asset: str,
+    child_profile: str,
+    child_schema_version: int,
+    parent_manifest: dict[str, Any],
+    parent_bundle_component: str,
+    parent_database_asset: str,
+    parent_profile: str,
+    parent_schema_version: int,
+) -> str:
+    """Bind a split component pair to one self-fingerprinted bundle manifest."""
+    if path is None or not path.is_file():
+        raise RuntimeError("cross-component foreign key requires a bundle manifest pin")
+    bundle = load_json(path)
+    if (
+        bundle.get("artifact") != "tcia_metadata_v2_bundle"
+        or bundle.get("schema_version") != 2
+        or bundle.get("release_contract") != "streamlined"
+    ):
+        raise RuntimeError("cross-component bundle manifest contract mismatch")
+    source = bundle.get("source") or {}
+    fingerprint_payload = {
+        "artifact": bundle.get("artifact"),
+        "schema_version": bundle.get("schema_version"),
+        "release_channel": bundle.get("release_channel"),
+        "release_tag": bundle.get("release_tag"),
+        "release_contract": bundle.get("release_contract"),
+        "source": {
+            "repository": source.get("repository"),
+            "release_tag": source.get("release_tag"),
+        },
+        "producer": bundle.get("producer"),
+        "assets": {
+            name: (details or {}).get("sha256")
+            for name, details in sorted((bundle.get("assets") or {}).items())
+        },
+    }
+    expected_fingerprint = hashlib.sha256(
+        canonical_json(fingerprint_payload).encode("utf-8")
+    ).hexdigest()
+    if bundle.get("release_fingerprint") != expected_fingerprint:
+        raise RuntimeError("cross-component bundle release fingerprint mismatch")
+    bundle_components = bundle.get("components") or {}
+    for role, manifest, name, database_asset, profile, schema_version in (
+        (
+            "child", child_manifest, child_bundle_component,
+            child_database_asset, child_profile, child_schema_version,
+        ),
+        (
+            "parent", parent_manifest, parent_bundle_component,
+            parent_database_asset, parent_profile, parent_schema_version,
+        ),
+    ):
+        pinned = bundle_components.get(name)
+        if not isinstance(pinned, dict) or manifest != pinned:
+            raise RuntimeError(
+                f"cross-component {role} manifest does not match pinned bundle component"
+            )
+        if manifest.get("schema_version") != schema_version:
+            raise RuntimeError(f"cross-component {role} schema version mismatch")
+        if (
+            manifest.get("database_asset") != database_asset
+            or manifest.get("profile") != profile
+        ):
+            raise RuntimeError(f"cross-component {role} asset contract mismatch")
+        asset = (bundle.get("assets") or {}).get(database_asset)
+        if not isinstance(asset, dict) or manifest.get("gzip_sha256") != asset.get("sha256"):
+            raise RuntimeError(
+                f"cross-component {role} compressed digest is not bundle-pinned"
+            )
+    parent_storage = parent_manifest.get("provenance") or {}
+    if (
+        parent_storage.get("provenance_storage") != "companion_audit_artifact"
+        or parent_storage.get("audit_companion_asset")
+        != child_manifest.get("database_asset")
+        or str(parent_storage.get("audit_schema_version"))
+        != str(child_manifest.get("schema_version"))
+    ):
+        raise RuntimeError("cross-component companion storage contract mismatch")
+    audit_profile = (bundle.get("profiles") or {}).get("audit_support") or {}
+    profile_assets = set(audit_profile.get("assets") or [])
+    if {
+        str(child_manifest.get("database_asset") or ""),
+        str(parent_manifest.get("database_asset") or ""),
+    } - profile_assets:
+        raise RuntimeError("cross-component pair is not complete in audit_support profile")
+    if "research_detail" not in set(audit_profile.get("depends_on") or []):
+        raise RuntimeError("cross-component audit_support dependency contract mismatch")
+    return expected_fingerprint
 
 
 def quote_identifier(value: str) -> str:
@@ -327,6 +570,7 @@ def build_staging_database(
     *,
     components: dict[str, tuple[Path, Path]],
     source_release_json: Path | None = None,
+    baseline_bundle_manifest_path: Path | None = None,
     replace: bool = False,
 ) -> dict[str, Any]:
     missing_components = sorted(set(COMPONENT_ORDER) - set(components))
@@ -362,7 +606,12 @@ def build_staging_database(
             if integrity != "ok":
                 raise RuntimeError(f"{component} integrity_check={integrity}")
             cross_component_checks.extend(
-                validate_component_foreign_keys(component, source, components)
+                validate_component_foreign_keys(
+                    component,
+                    source,
+                    components,
+                    baseline_bundle_manifest_path=baseline_bundle_manifest_path,
+                )
             )
             for object_name, object_type, sql_digest, row_count in inventory_objects(source):
                 object_rows.append(
@@ -529,6 +778,7 @@ def parser() -> argparse.ArgumentParser:
         build.add_argument(f"--{component.replace('_', '-')}-db", required=True)
         build.add_argument(f"--{component.replace('_', '-')}-manifest", required=True)
     build.add_argument("--source-release-json")
+    build.add_argument("--baseline-bundle-manifest")
     build.add_argument("--out", required=True)
     build.add_argument("--replace", action="store_true")
     validate = sub.add_parser("validate")
@@ -554,6 +804,11 @@ def main() -> int:
             Path(args.out),
             components=components,
             source_release_json=Path(args.source_release_json) if args.source_release_json else None,
+            baseline_bundle_manifest_path=(
+                Path(args.baseline_bundle_manifest)
+                if args.baseline_bundle_manifest
+                else None
+            ),
             replace=args.replace,
         )
         print(json.dumps(result, indent=2, sort_keys=True))

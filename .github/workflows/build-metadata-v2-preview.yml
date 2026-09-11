@@ -181,6 +181,7 @@ jobs:
             --clinical-manifest dist/clinical_metadata_manifest.json \
             --idc-participants-db cache/idc_participant_projection.sqlite \
             --idc-participants-manifest cache/idc_participant_projection_manifest.json \
+            --baseline-bundle-manifest dist/tcia_metadata_v2_bundle_manifest.json \
             --out cache/tcia_metadata_v2_staging.sqlite \
             --replace
           python scripts/tcia_v2_staging.py validate \

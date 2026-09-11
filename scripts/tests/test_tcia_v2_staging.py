@@ -54,18 +54,44 @@ class V2StagingTests(unittest.TestCase):
         unrelated_orphan: bool = False,
         local_shadow_parent: bool = False,
         foreign_parent_table: str = "public_non_dicom_assets",
-    ) -> None:
+        short_title_mismatch: bool = False,
+        parent_has_primary_key: bool = True,
+    ) -> Path:
         research, research_manifest = components["public_non_dicom_baseline"]
         research.unlink()
         with closing(sqlite3.connect(research)) as conn:
             conn.execute(
                 "CREATE TABLE public_non_dicom_assets "
-                "(asset_id TEXT PRIMARY KEY, value TEXT)"
+                f"(asset_id TEXT {'PRIMARY KEY' if parent_has_primary_key else ''}, "
+                "short_title TEXT NOT NULL, value TEXT)"
             )
-            conn.execute("INSERT INTO public_non_dicom_assets VALUES ('asset-1', 'ok')")
+            conn.execute(
+                "INSERT INTO public_non_dicom_assets VALUES ('asset-1', 'TEST', 'ok')"
+            )
+            conn.execute("CREATE TABLE artifact_meta (key TEXT PRIMARY KEY, value TEXT)")
+            conn.executemany(
+                "INSERT INTO artifact_meta VALUES (?, ?)",
+                (
+                    ("provenance_storage", "companion_audit_artifact"),
+                    ("audit_companion_asset", "public_non_dicom_audit.sqlite.gz"),
+                    ("audit_schema_version", "3"),
+                ),
+            )
             conn.commit()
         research_payload = json.loads(research_manifest.read_text())
-        research_payload["sqlite_sha256"] = staging.file_sha256(research)
+        research_payload.update({
+            "schema_version": 8,
+            "sqlite_sha256": staging.file_sha256(research),
+            "gzip_sha256": hashlib.sha256(b"research-gzip").hexdigest(),
+            "database_asset": "public_non_dicom_metadata.sqlite.gz",
+            "profile": "research_detail",
+            "provenance": {
+                "provenance_storage": "companion_audit_artifact",
+                "audit_companion_asset": "public_non_dicom_audit.sqlite.gz",
+                "audit_schema_version": "3",
+            },
+            "storage_contract": None,
+        })
         research_manifest.write_text(json.dumps(research_payload))
 
         audit_database, audit_manifest = components["public_non_dicom_audit_baseline"]
@@ -75,11 +101,25 @@ class V2StagingTests(unittest.TestCase):
             conn.execute(
                 "CREATE TABLE public_non_dicom_crosswalk_evidence ("
                 "crosswalk_id TEXT PRIMARY KEY, asset_id TEXT NOT NULL, "
+                "short_title TEXT NOT NULL, "
                 f"FOREIGN KEY(asset_id) REFERENCES {foreign_parent_table}(asset_id))"
             )
             conn.execute(
-                "INSERT INTO public_non_dicom_crosswalk_evidence VALUES (?, ?)",
-                ("crosswalk-1", orphan_asset_id or "asset-1"),
+                "INSERT INTO public_non_dicom_crosswalk_evidence VALUES (?, ?, ?)",
+                (
+                    "crosswalk-1",
+                    orphan_asset_id or "asset-1",
+                    "OTHER" if short_title_mismatch else "TEST",
+                ),
+            )
+            conn.execute("CREATE TABLE audit_meta (key TEXT PRIMARY KEY, value TEXT)")
+            conn.executemany(
+                "INSERT INTO audit_meta VALUES (?, ?)",
+                (
+                    ("research_artifact", "public_non_dicom"),
+                    ("research_database_asset", "public_non_dicom_metadata.sqlite.gz"),
+                    ("schema_version", "3"),
+                ),
             )
             if local_shadow_parent:
                 conn.execute(
@@ -95,8 +135,64 @@ class V2StagingTests(unittest.TestCase):
                 conn.execute("INSERT INTO local_children VALUES (42)")
             conn.commit()
         audit_payload = json.loads(audit_manifest.read_text())
-        audit_payload["sqlite_sha256"] = staging.file_sha256(audit_database)
+        audit_payload.update({
+            "schema_version": 3,
+            "sqlite_sha256": staging.file_sha256(audit_database),
+            "gzip_sha256": hashlib.sha256(b"audit-gzip").hexdigest(),
+            "database_asset": "public_non_dicom_audit.sqlite.gz",
+            "profile": "audit_support",
+            "storage_contract": None,
+        })
         audit_manifest.write_text(json.dumps(audit_payload))
+        bundle = {
+            "artifact": "tcia_metadata_v2_bundle",
+            "schema_version": 2,
+            "release_channel": "stable",
+            "release_tag": "tcia-metadata-v2-latest",
+            "release_contract": "streamlined",
+            "source": {"repository": "example/repository", "release_tag": "source"},
+            "producer": {"commit": "a" * 40},
+            "assets": {
+                research_payload["database_asset"]: {
+                    "sha256": research_payload["gzip_sha256"], "bytes": 1
+                },
+                audit_payload["database_asset"]: {
+                    "sha256": audit_payload["gzip_sha256"], "bytes": 1
+                },
+            },
+            "components": {
+                "public_non_dicom": research_payload,
+                "public_non_dicom_audit": audit_payload,
+            },
+            "profiles": {
+                "audit_support": {
+                    "assets": [
+                        research_payload["database_asset"],
+                        audit_payload["database_asset"],
+                    ],
+                    "depends_on": ["research_core", "research_detail"],
+                }
+            },
+        }
+        fingerprint_payload = {
+            "artifact": bundle["artifact"],
+            "schema_version": bundle["schema_version"],
+            "release_channel": bundle["release_channel"],
+            "release_tag": bundle["release_tag"],
+            "release_contract": bundle["release_contract"],
+            "source": bundle["source"],
+            "producer": bundle["producer"],
+            "assets": {
+                name: details["sha256"]
+                for name, details in sorted(bundle["assets"].items())
+            },
+        }
+        bundle["release_fingerprint"] = hashlib.sha256(
+            staging.canonical_json(fingerprint_payload).encode()
+        ).hexdigest()
+        bundle_path = research.parent / "baseline_bundle_manifest.json"
+        bundle_path.write_text(json.dumps(bundle))
+        return bundle_path
 
     def test_build_validate_and_resolve_runner_local_staging_ledger(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -195,23 +291,23 @@ class V2StagingTests(unittest.TestCase):
                 component: self.create_component(root, component)
                 for component in staging.COMPONENT_ORDER
             }
-            self.create_legacy_public_cross_component_pair(components)
+            bundle_manifest = self.create_legacy_public_cross_component_pair(components)
             ledger = root / "staging.sqlite"
             result = staging.build_staging_database(
-                ledger, components=components, replace=True
+                ledger,
+                components=components,
+                baseline_bundle_manifest_path=bundle_manifest,
+                replace=True,
             )
-            self.assertEqual(
-                result["cross_component_foreign_keys"],
-                [{
-                    "child_component": "public_non_dicom_audit_baseline",
-                    "child_table": "public_non_dicom_crosswalk_evidence",
-                    "child_column": "asset_id",
-                    "parent_component": "public_non_dicom_baseline",
-                    "parent_table": "public_non_dicom_assets",
-                    "parent_column": "asset_id",
-                    "verified_rows": 1,
-                }],
-            )
+            self.assertEqual(len(result["cross_component_foreign_keys"]), 1)
+            check = result["cross_component_foreign_keys"][0]
+            self.assertEqual(check["child_rows"], 1)
+            self.assertEqual(check["matched_rows"], 1)
+            self.assertEqual(check["distinct_child_keys"], 1)
+            self.assertEqual(check["matched_distinct_keys"], 1)
+            self.assertEqual(check["orphan_rows"], 0)
+            self.assertEqual(check["coherence_mismatches"], 0)
+            self.assertEqual(len(check["bundle_release_fingerprint"]), 64)
             with closing(sqlite3.connect(ledger)) as conn:
                 recorded = json.loads(
                     conn.execute(
@@ -228,14 +324,17 @@ class V2StagingTests(unittest.TestCase):
                 component: self.create_component(root, component)
                 for component in staging.COMPONENT_ORDER
             }
-            self.create_legacy_public_cross_component_pair(
+            bundle_manifest = self.create_legacy_public_cross_component_pair(
                 components, orphan_asset_id="missing-asset"
             )
             with self.assertRaisesRegex(
                 RuntimeError, "cross-component foreign-key orphans.*count=1"
             ):
                 staging.build_staging_database(
-                    root / "staging.sqlite", components=components, replace=True
+                    root / "staging.sqlite",
+                    components=components,
+                    baseline_bundle_manifest_path=bundle_manifest,
+                    replace=True,
                 )
 
     def test_build_rejects_unrecognized_orphan_alongside_valid_cross_component_fk(self):
@@ -245,14 +344,17 @@ class V2StagingTests(unittest.TestCase):
                 component: self.create_component(root, component)
                 for component in staging.COMPONENT_ORDER
             }
-            self.create_legacy_public_cross_component_pair(
+            bundle_manifest = self.create_legacy_public_cross_component_pair(
                 components, unrelated_orphan=True
             )
             with self.assertRaisesRegex(
                 RuntimeError, "unrecognized foreign_key_check violations"
             ):
                 staging.build_staging_database(
-                    root / "staging.sqlite", components=components, replace=True
+                    root / "staging.sqlite",
+                    components=components,
+                    baseline_bundle_manifest_path=bundle_manifest,
+                    replace=True,
                 )
 
     def test_build_rejects_local_shadow_for_declared_cross_component_parent(self):
@@ -262,14 +364,17 @@ class V2StagingTests(unittest.TestCase):
                 component: self.create_component(root, component)
                 for component in staging.COMPONENT_ORDER
             }
-            self.create_legacy_public_cross_component_pair(
+            bundle_manifest = self.create_legacy_public_cross_component_pair(
                 components, local_shadow_parent=True
             )
             with self.assertRaisesRegex(
                 RuntimeError, "cross-component parent unexpectedly exists locally"
             ):
                 staging.build_staging_database(
-                    root / "staging.sqlite", components=components, replace=True
+                    root / "staging.sqlite",
+                    components=components,
+                    baseline_bundle_manifest_path=bundle_manifest,
+                    replace=True,
                 )
 
     def test_build_rejects_redirected_cross_component_declaration(self):
@@ -279,14 +384,17 @@ class V2StagingTests(unittest.TestCase):
                 component: self.create_component(root, component)
                 for component in staging.COMPONENT_ORDER
             }
-            self.create_legacy_public_cross_component_pair(
+            bundle_manifest = self.create_legacy_public_cross_component_pair(
                 components, foreign_parent_table="redirected_assets"
             )
             with self.assertRaisesRegex(
                 RuntimeError, "cross-component foreign-key declaration mismatch"
             ):
                 staging.build_staging_database(
-                    root / "staging.sqlite", components=components, replace=True
+                    root / "staging.sqlite",
+                    components=components,
+                    baseline_bundle_manifest_path=bundle_manifest,
+                    replace=True,
                 )
 
     def test_build_rejects_cross_component_parent_manifest_digest_mismatch(self):
@@ -296,14 +404,105 @@ class V2StagingTests(unittest.TestCase):
                 component: self.create_component(root, component)
                 for component in staging.COMPONENT_ORDER
             }
-            self.create_legacy_public_cross_component_pair(components)
+            bundle_manifest = self.create_legacy_public_cross_component_pair(components)
             _database, parent_manifest = components["public_non_dicom_baseline"]
             payload = json.loads(parent_manifest.read_text())
             payload["sqlite_sha256"] = "0" * 64
             parent_manifest.write_text(json.dumps(payload))
             with self.assertRaisesRegex(RuntimeError, "does not match"):
                 staging.build_staging_database(
-                    root / "staging.sqlite", components=components, replace=True
+                    root / "staging.sqlite",
+                    components=components,
+                    baseline_bundle_manifest_path=bundle_manifest,
+                    replace=True,
+                )
+
+    def test_build_rejects_cross_component_pair_from_different_bundle_generation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            components = {
+                component: self.create_component(root, component)
+                for component in staging.COMPONENT_ORDER
+            }
+            bundle_manifest = self.create_legacy_public_cross_component_pair(components)
+            _database, audit_manifest = components["public_non_dicom_audit_baseline"]
+            payload = json.loads(audit_manifest.read_text())
+            payload["release_fingerprint"] = "f" * 64
+            audit_manifest.write_text(json.dumps(payload))
+            with self.assertRaisesRegex(
+                RuntimeError, "child manifest does not match pinned bundle component"
+            ):
+                staging.build_staging_database(
+                    root / "staging.sqlite",
+                    components=components,
+                    baseline_bundle_manifest_path=bundle_manifest,
+                    replace=True,
+                )
+
+    def test_build_rejects_tampered_parent_even_with_updated_free_manifest(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            components = {
+                component: self.create_component(root, component)
+                for component in staging.COMPONENT_ORDER
+            }
+            bundle_manifest = self.create_legacy_public_cross_component_pair(components)
+            parent_database, parent_manifest = components["public_non_dicom_baseline"]
+            with closing(sqlite3.connect(parent_database)) as conn:
+                conn.execute(
+                    "UPDATE public_non_dicom_assets SET value='tampered' "
+                    "WHERE asset_id='asset-1'"
+                )
+                conn.commit()
+            payload = json.loads(parent_manifest.read_text())
+            payload["sqlite_sha256"] = staging.file_sha256(parent_database)
+            parent_manifest.write_text(json.dumps(payload))
+            with self.assertRaisesRegex(
+                RuntimeError, "parent manifest does not match pinned bundle component"
+            ):
+                staging.build_staging_database(
+                    root / "staging.sqlite",
+                    components=components,
+                    baseline_bundle_manifest_path=bundle_manifest,
+                    replace=True,
+                )
+
+    def test_build_rejects_cross_component_parent_key_schema_defect(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            components = {
+                component: self.create_component(root, component)
+                for component in staging.COMPONENT_ORDER
+            }
+            bundle_manifest = self.create_legacy_public_cross_component_pair(
+                components, parent_has_primary_key=False
+            )
+            with self.assertRaisesRegex(RuntimeError, "parent key is not a primary key"):
+                staging.build_staging_database(
+                    root / "staging.sqlite",
+                    components=components,
+                    baseline_bundle_manifest_path=bundle_manifest,
+                    replace=True,
+                )
+
+    def test_build_rejects_cross_component_short_title_mismatch(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            components = {
+                component: self.create_component(root, component)
+                for component in staging.COMPONENT_ORDER
+            }
+            bundle_manifest = self.create_legacy_public_cross_component_pair(
+                components, short_title_mismatch=True
+            )
+            with self.assertRaisesRegex(
+                RuntimeError, "cross-component coherence mismatches.*count=1"
+            ):
+                staging.build_staging_database(
+                    root / "staging.sqlite",
+                    components=components,
+                    baseline_bundle_manifest_path=bundle_manifest,
+                    replace=True,
                 )
 
 

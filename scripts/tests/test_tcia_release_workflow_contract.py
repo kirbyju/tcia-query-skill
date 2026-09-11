@@ -172,6 +172,18 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
         self.assertIn(manifest_read, block)
         self.assertLess(block.index(guard), block.index(manifest_read))
 
+    def test_staging_cross_component_checks_use_validated_bundle_generation(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        staging_step = workflow.index("Build the runner-local V2 staging ledger")
+        next_step = workflow.index(
+            "Regenerate the complete web export set", staging_step
+        )
+        block = workflow[staging_step:next_step]
+        self.assertIn(
+            "--baseline-bundle-manifest dist/tcia_metadata_v2_bundle_manifest.json",
+            block,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
