@@ -1265,6 +1265,7 @@
           "value_text": "Well differentiated"
         }
       ],
+      "aliases_sha256": "b64bccbe60443cbe2771bd0e2ef518b9731e33f22526806a613c33e6a99265f2",
       "approved_at": "2026-09-11T16:11:16Z",
       "artifact": "clinical",
       "effect_count": 210,

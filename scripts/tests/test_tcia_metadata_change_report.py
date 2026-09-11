@@ -185,6 +185,26 @@ class MetadataChangeReportTest(unittest.TestCase):
                        evidence_sha256 TEXT,executed_at TEXT)"""
                 )
                 conn.execute(
+                    "CREATE TABLE correction_releases (release_fingerprint TEXT PRIMARY KEY)"
+                )
+                conn.execute(
+                    """CREATE TABLE correction_release_revisions (
+                       release_fingerprint TEXT,revision_id TEXT,
+                       PRIMARY KEY (release_fingerprint,revision_id))"""
+                )
+                conn.execute(
+                    """CREATE TABLE correction_effects (
+                       effect_id TEXT PRIMARY KEY,revision_id TEXT,artifact TEXT,
+                       entity_table TEXT,entity_id TEXT,field_name TEXT,
+                       effect_kind TEXT,before_sha256 TEXT,after_sha256 TEXT,
+                       before_value_json TEXT,after_value_json TEXT,
+                       effect_status TEXT,build_fingerprint TEXT)"""
+                )
+                conn.execute(
+                    """CREATE TABLE correction_decisions (
+                       revision_id TEXT PRIMARY KEY,source_kind TEXT)"""
+                )
+                conn.execute(
                     "INSERT INTO correction_validations VALUES ('v','initial_registry_bootstrap','passed',?,'now')",
                     (evidence_sha,),
                 )
@@ -214,6 +234,40 @@ class MetadataChangeReportTest(unittest.TestCase):
             self.assertEqual(unrelated.returncode, 2)
             self.assertEqual(len(json.loads(report.read_text())["baseline_modes"]), 1)
             self.assertIn("public_non_dicom.public_non_dicom_assets", unrelated.stdout)
+            prior_state_cases = (
+                (
+                    "release-link",
+                    "INSERT INTO correction_releases VALUES ('released')",
+                    "DELETE FROM correction_releases",
+                ),
+                (
+                    "release-member",
+                    "INSERT INTO correction_release_revisions VALUES ('released','revision')",
+                    "DELETE FROM correction_release_revisions",
+                ),
+                (
+                    "consumed-effect",
+                    """INSERT INTO correction_effects VALUES
+                       ('effect','revision','clinical','clinical_facts','id','',
+                        'removed','before','','{}','null','consumed','report')""",
+                    "DELETE FROM correction_effects",
+                ),
+            )
+            for label, insert_sql, delete_sql in prior_state_cases:
+                with self.subTest(prior_state=label):
+                    with sqlite3.connect(db) as conn:
+                        conn.execute(insert_sql)
+                        conn.commit()
+                    reused = subprocess.run(
+                        [sys.executable, str(SCRIPT), "--correction-new", str(db),
+                         "--fail-on-unexplained-high"],
+                        text=True, capture_output=True,
+                    )
+                    self.assertEqual(reused.returncode, 1)
+                    self.assertIn("cannot authorize a missing prior registry", reused.stdout)
+                    with sqlite3.connect(db) as conn:
+                        conn.execute(delete_sql)
+                        conn.commit()
             with sqlite3.connect(db) as conn:
                 conn.execute("DELETE FROM registry_meta WHERE key='bootstrap_evidence_sha256'")
                 conn.commit()

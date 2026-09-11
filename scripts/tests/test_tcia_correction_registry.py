@@ -171,14 +171,14 @@ class CorrectionIdentityTests(unittest.TestCase):
                     lambda value: value["migration_batches"][0]["aliases"][0].update(
                         old_fact_id="f" * 64
                     ),
-                    "set fingerprints mismatch",
+                    "full alias-record digest mismatch",
                 ),
                 (
                     "row-digest",
                     lambda value: value["migration_batches"][0]["aliases"][0].update(
                         old_row_digest="f" * 64
                     ),
-                    "set fingerprints mismatch",
+                    "full alias-record digest mismatch",
                 ),
                 (
                     "evidence",
@@ -211,6 +211,49 @@ class CorrectionIdentityTests(unittest.TestCase):
                     with self.assertRaisesRegex(ValueError, message):
                         registry.build_registry(
                             root / f"tampered-{name}.sqlite",
+                            semantic_explanations=tampered,
+                            observed_at="2026-09-11T16:11:16Z",
+                        )
+
+            def mutate_value(value):
+                if isinstance(value, int):
+                    return value + 1
+                if isinstance(value, str):
+                    return ("e" * 64) if len(value) == 64 else value + "-tampered"
+                if isinstance(value, list):
+                    return [*value, "tampered"]
+                if isinstance(value, dict):
+                    return {**value, "tampered": True}
+                self.fail(f"unsupported migration test value: {value!r}")
+
+            batch = payload["migration_batches"][0]
+            for section in ("aliases", "evidence"):
+                for field, original in batch[section][0].items():
+                    with self.subTest(section=section, field=field):
+                        changed = copy.deepcopy(payload)
+                        changed["migration_batches"][0][section][0][field] = mutate_value(
+                            original
+                        )
+                        tampered = root / f"tampered-{section}-{field}.json"
+                        tampered.write_text(json.dumps(changed))
+                        with self.assertRaises(ValueError):
+                            registry.build_registry(
+                                root / f"tampered-{section}-{field}.sqlite",
+                                semantic_explanations=tampered,
+                                observed_at="2026-09-11T16:11:16Z",
+                            )
+
+            for field, original in batch.items():
+                if field in {"aliases", "evidence"}:
+                    continue
+                with self.subTest(section="batch", field=field):
+                    changed = copy.deepcopy(payload)
+                    changed["migration_batches"][0][field] = mutate_value(original)
+                    tampered = root / f"tampered-batch-{field}.json"
+                    tampered.write_text(json.dumps(changed))
+                    with self.assertRaises(ValueError):
+                        registry.build_registry(
+                            root / f"tampered-batch-{field}.sqlite",
                             semantic_explanations=tampered,
                             observed_at="2026-09-11T16:11:16Z",
                         )

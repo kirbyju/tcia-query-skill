@@ -538,6 +538,24 @@ def correction_baseline_mode(path: Path) -> dict[str, object]:
         ).fetchall()
         if len(validation) != 1 or tuple(validation[0]) != ("passed", evidence_sha):
             raise RuntimeError("correction baseline validation is missing or inconsistent")
+        prior_state_counts = {
+            "correction_releases": conn.execute(
+                "SELECT COUNT(*) FROM correction_releases"
+            ).fetchone()[0],
+            "correction_release_revisions": conn.execute(
+                "SELECT COUNT(*) FROM correction_release_revisions"
+            ).fetchone()[0],
+            "consumed_effects": conn.execute(
+                """SELECT COUNT(*) FROM correction_effects
+                   WHERE effect_status='consumed' OR build_fingerprint!=''"""
+            ).fetchone()[0],
+        }
+        if any(prior_state_counts.values()):
+            raise RuntimeError(
+                "correction baseline cannot authorize a missing prior registry after "
+                "release linkage or semantic-effect consumption: "
+                + json.dumps(prior_state_counts, sort_keys=True)
+            )
         return {
             "component": "correction_registry",
             "prior_release_fingerprint": prior["release_fingerprint"],

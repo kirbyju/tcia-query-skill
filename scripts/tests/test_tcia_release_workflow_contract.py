@@ -53,6 +53,7 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
         self.assertNotIn("tcia-metadata-v2-source", diagnostic_block)
         validated_block = source[source_upload:]
         self.assertNotIn("tcia-metadata-v2-diagnostics", validated_block)
+        self.assertNotIn("metadata_diagnostic_status.json", validated_block)
 
     def test_prior_release_api_failure_cannot_establish_correction_baseline(self) -> None:
         source = SOURCE_WORKFLOW.read_text(encoding="utf-8")

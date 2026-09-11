@@ -33,6 +33,15 @@ DEFAULT_CLINICAL_MODULE = ROOT / "scripts/tcia_clinical_metadata.py"
 DEFAULT_ASSERTIONS = ROOT / "references/correction-assertions-v1.json"
 DEFAULT_SEMANTIC_EXPLANATIONS = ROOT / "references/correction-semantic-explanations-v1.json"
 LEGACY_POLICY_REVIEWED_AT = "2026-09-02T00:00:00Z"
+HCC_MIGRATION_ALIAS_SET_SHA256 = (
+    "b64bccbe60443cbe2771bd0e2ef518b9731e33f22526806a613c33e6a99265f2"
+)
+HCC_MIGRATION_EVIDENCE_SET_SHA256 = (
+    "4cd121b0306e82476aeee382280e9d5a7f630dbd6af1abf3c36ccdd83cf2e974"
+)
+HCC_MIGRATION_BATCH_SHA256 = (
+    "fcbc115f4be428850f0119e8d326ff00f596874ddbaf0e1d84ddf2d26a981daa"
+)
 
 DECISION_STATUSES = {
     "proposed", "needs_review", "approved", "rejected", "superseded",
@@ -1000,7 +1009,7 @@ def migrate_semantic_explanations(conn: sqlite3.Connection, path: Path) -> int:
             "migration_id", "artifact", "entity_table", "primary_key_column",
             "reviewer", "approved_at", "rationale", "evidence", "aliases",
             "alias_count", "effect_count", "set_fingerprints", "source_identity",
-            "negative_scope", "evidence_sha256",
+            "negative_scope", "aliases_sha256", "evidence_sha256",
         }
         if not isinstance(batch, dict) or not required.issubset(batch):
             raise ValueError("semantic migration batch is missing required fields")
@@ -1048,7 +1057,10 @@ def migrate_semantic_explanations(conn: sqlite3.Connection, path: Path) -> int:
             ):
                 raise ValueError("semantic migration evidence identity is invalid")
         evidence_sha = digest(evidence)
-        if evidence_sha != batch["evidence_sha256"]:
+        if (
+            evidence_sha != batch["evidence_sha256"]
+            or evidence_sha != HCC_MIGRATION_EVIDENCE_SET_SHA256
+        ):
             raise ValueError("semantic migration evidence digest mismatch")
         required_alias = {
             "old_fact_id", "new_fact_id", "old_row_digest", "new_row_digest",
@@ -1069,6 +1081,12 @@ def migrate_semantic_explanations(conn: sqlite3.Connection, path: Path) -> int:
             values = [str(alias[field]) for alias in aliases]
             if len(values) != len(set(values)):
                 raise ValueError(f"semantic migration aliases duplicate {field}")
+        aliases_sha = digest(aliases)
+        if (
+            aliases_sha != batch["aliases_sha256"]
+            or aliases_sha != HCC_MIGRATION_ALIAS_SET_SHA256
+        ):
+            raise ValueError("semantic migration full alias-record digest mismatch")
         fingerprints = {
             "removed_pk_set_sha256": hashlib.sha256(
                 "\n".join(sorted(str(a["old_fact_id"]) for a in aliases)).encode()
@@ -1085,6 +1103,8 @@ def migrate_semantic_explanations(conn: sqlite3.Connection, path: Path) -> int:
         }
         if fingerprints != batch["set_fingerprints"]:
             raise ValueError("semantic migration set fingerprints mismatch")
+        if digest(batch) != HCC_MIGRATION_BATCH_SHA256:
+            raise ValueError("semantic migration full batch contract digest mismatch")
         expected_effects: list[dict[str, Any]] = []
         for alias in aliases:
             expected_effects.extend((
@@ -1119,7 +1139,7 @@ def migrate_semantic_explanations(conn: sqlite3.Connection, path: Path) -> int:
             resolution={
                 "migration_id": batch["migration_id"],
                 "alias_count": len(aliases),
-                "aliases_sha256": digest(aliases),
+                "aliases_sha256": aliases_sha,
                 "evidence_sha256": evidence_sha,
                 "aliases": aliases,
                 "set_fingerprints": fingerprints,
