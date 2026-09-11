@@ -160,6 +160,18 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
             workflow.index('gh release upload "$tag" "${payload_assets[@]}" --clobber'),
         )
 
+    def test_deployment_lag_report_skips_when_assembly_never_produced_manifest(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        marker = "Report published versus deployed fingerprint lag"
+        block = workflow[workflow.index(marker):]
+        guard = 'if [ ! -s "$manifest_path" ]; then'
+        manifest_read = "json.load(open(sys.argv[1]))"
+        self.assertIn('manifest_path="release-dist/tcia_metadata_v2_bundle_manifest.json"', block)
+        self.assertIn(guard, block)
+        self.assertIn("no release manifest was assembled", block)
+        self.assertIn(manifest_read, block)
+        self.assertLess(block.index(guard), block.index(manifest_read))
+
 
 if __name__ == "__main__":
     unittest.main()

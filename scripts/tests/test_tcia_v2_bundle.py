@@ -583,6 +583,7 @@ class V2BundleTests(unittest.TestCase):
                             {
                                 "name": name,
                                 "digest": "sha256:" + BUNDLE.file_sha256(root / name),
+                                "size": (root / name).stat().st_size,
                             }
                             for name in names
                         ],
@@ -596,6 +597,125 @@ class V2BundleTests(unittest.TestCase):
                 release_json_path=release_path,
             )
             self.assertTrue(result["ok"], result["errors"])
+
+    def test_legacy_schema_two_baseline_allows_only_canonical_manifest_omissions(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.create_bundle_files(root)
+            payload = BUNDLE.build_bundle_manifest(
+                root, release_contract=BUNDLE.STREAMLINED_RELEASE_CONTRACT
+            )
+            payload["schema_version"] = 2
+            payload.pop("source_health")
+            payload.pop("decision_sets")
+            correction = payload["components"].pop("correction_registry")
+            payload["assets"].pop(correction["database_asset"], None)
+            for component_name, component in payload["components"].items():
+                component.pop("source_manifest", None)
+                component["manifest_asset"] = BUNDLE.COMPONENTS[component_name]["manifest"]
+            payload["asset_count"] = len(payload["assets"])
+            for profile in BUNDLE.PROFILE_ORDER:
+                payload["profiles"][profile]["assets"] = BUNDLE.assets_for_profile_schema(
+                    profile, 2, payload["release_contract"]
+                )
+            source = payload["source"]
+            fingerprint_payload = {
+                "artifact": payload["artifact"],
+                "schema_version": 2,
+                "release_channel": payload["release_channel"],
+                "release_tag": payload["release_tag"],
+                "release_contract": payload["release_contract"],
+                "source": {
+                    "repository": source["repository"],
+                    "release_tag": source["release_tag"],
+                },
+                "producer": payload["producer"],
+                "assets": {
+                    name: details["sha256"]
+                    for name, details in sorted(payload["assets"].items())
+                },
+            }
+            payload["release_fingerprint"] = BUNDLE.hashlib.sha256(
+                BUNDLE.canonical_json(fingerprint_payload).encode()
+            ).hexdigest()
+            manifest_path = root / BUNDLE.BUNDLE_MANIFEST_ASSET
+            manifest_path.write_text(json.dumps(payload))
+            names = [
+                "public_non_dicom_metadata.sqlite.gz",
+                "public_non_dicom_audit.sqlite.gz",
+                "participant_inventory.sqlite.gz",
+            ]
+            release_path = root / "release.json"
+            release_path.write_text(json.dumps({
+                "tag_name": BUNDLE.DEFAULT_RELEASE_TAG,
+                "assets": [
+                    {
+                        "name": name,
+                        "digest": "sha256:" + BUNDLE.file_sha256(root / name),
+                        "size": (root / name).stat().st_size,
+                    }
+                    for name in names
+                ],
+            }))
+
+            result = BUNDLE.validate_selected_bundle_assets(
+                root, manifest_path, names, release_json_path=release_path
+            )
+            self.assertTrue(result["ok"], result["errors"])
+            self.assertEqual(
+                len(result["legacy_schema2_component_manifest_omissions"]), 7
+            )
+
+            cases = []
+            schema_three = json.loads(json.dumps(payload))
+            schema_three["schema_version"] = 3
+            cases.append(("schema three", schema_three))
+            noncanonical = json.loads(json.dumps(payload))
+            noncanonical["components"]["clinical"]["manifest_asset"] = "arbitrary.json"
+            cases.append(("noncanonical pointer", noncanonical))
+            missing_selected = json.loads(json.dumps(payload))
+            missing_selected["assets"].pop(names[0])
+            cases.append(("missing selected asset", missing_selected))
+            for label, invalid in cases:
+                with self.subTest(label=label):
+                    manifest_path.write_text(json.dumps(invalid))
+                    rejected = BUNDLE.validate_selected_bundle_assets(
+                        root, manifest_path, names, release_json_path=release_path
+                    )
+                    self.assertFalse(rejected["ok"], rejected)
+
+            manifest_path.write_text(json.dumps(payload))
+            release = json.loads(release_path.read_text())
+            release["assets"][0]["digest"] = "sha256:" + "0" * 64
+            release_path.write_text(json.dumps(release))
+            rejected = BUNDLE.validate_selected_bundle_assets(
+                root, manifest_path, names, release_json_path=release_path
+            )
+            self.assertFalse(rejected["ok"], rejected)
+            self.assertTrue(any("digest mismatch" in error for error in rejected["errors"]))
+
+            for label, release_mutation, expected_error in (
+                ("empty release", {"tag_name": BUNDLE.DEFAULT_RELEASE_TAG, "assets": []},
+                 "captured release does not contain"),
+                ("wrong remote size", {
+                    **release,
+                    "assets": [
+                        {**asset, "size": asset["size"] + 1}
+                        if index == 0 else asset
+                        for index, asset in enumerate(release["assets"])
+                    ],
+                }, "captured release byte-size mismatch"),
+            ):
+                with self.subTest(label=label):
+                    release_path.write_text(json.dumps(release_mutation))
+                    rejected = BUNDLE.validate_selected_bundle_assets(
+                        root, manifest_path, names, release_json_path=release_path
+                    )
+                    self.assertFalse(rejected["ok"], rejected)
+                    self.assertTrue(
+                        any(expected_error in error for error in rejected["errors"]),
+                        rejected["errors"],
+                    )
 
     def test_published_release_digests_match_bundle(self):
         with tempfile.TemporaryDirectory() as temporary:

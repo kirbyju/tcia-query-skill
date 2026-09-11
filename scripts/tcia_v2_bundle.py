@@ -1303,9 +1303,14 @@ def validate_selected_bundle_assets(
     """Validate a pinned subset used as an internal V2 build baseline."""
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     errors = validate_manifest_contract(manifest)
+    legacy_omissions = legacy_schema_two_component_manifest_omissions(
+        manifest, selected_assets=set(asset_names)
+    )
+    errors = [error for error in errors if error not in legacy_omissions]
     manifest_assets = manifest.get("assets") or {}
     release_assets: dict[str, dict[str, Any]] = {}
     release_tag = ""
+    release_supplied = release_json_path is not None
     if release_json_path:
         release = json.loads(release_json_path.read_text(encoding="utf-8"))
         release_tag = str(release.get("tag_name") or "")
@@ -1327,7 +1332,7 @@ def validate_selected_bundle_assets(
             errors.append(f"selected bundle asset hash mismatch: {name}")
         if path.stat().st_size != details.get("bytes"):
             errors.append(f"selected bundle asset byte-size mismatch: {name}")
-        if release_assets:
+        if release_supplied:
             release_asset = release_assets.get(name)
             if not release_asset:
                 errors.append(f"captured release does not contain selected asset: {name}")
@@ -1337,14 +1342,60 @@ def validate_selected_bundle_assets(
                 )
                 if not release_digest or release_digest != digest:
                     errors.append(f"captured release digest mismatch: {name}")
+                release_size = release_asset.get("size")
+                if release_size != path.stat().st_size:
+                    errors.append(f"captured release byte-size mismatch: {name}")
         verified[name] = {"bytes": path.stat().st_size, "sha256": digest}
     return {
         "ok": not errors,
         "errors": errors,
         "release_tag": release_tag or manifest.get("release_tag"),
         "release_fingerprint": manifest.get("release_fingerprint"),
+        "legacy_schema2_component_manifest_omissions": sorted(legacy_omissions),
         "assets": verified,
     }
+
+
+def legacy_schema_two_component_manifest_omissions(
+    manifest: dict[str, Any], *, selected_assets: set[str]
+) -> set[str]:
+    """Identify the exact dangling pointers in the legacy schema-2 baseline.
+
+    Streamlined schema-2 releases published component databases but retained
+    canonical component-manifest pointers in the top manifest.  This exception
+    is intentionally limited to subset validation of that historical contract;
+    the authoritative manifest validator remains strict for every release built
+    by current code.
+    """
+    if manifest.get("schema_version") != 2:
+        return set()
+    release_contract = str(manifest.get("release_contract") or FULL_RELEASE_CONTRACT)
+    if release_contract != STREAMLINED_RELEASE_CONTRACT:
+        return set()
+    manifest_assets = manifest.get("assets") or {}
+    try:
+        expected_assets = expected_payload_assets_for_schema(2, release_contract)
+        expected_components = set(component_names_for_schema(2, release_contract))
+    except ValueError:
+        return set()
+    components = manifest.get("components") or {}
+    if sorted(manifest_assets) != expected_assets or set(components) != expected_components:
+        return set()
+
+    allowed: set[str] = set()
+    for component in sorted(expected_components):
+        pointer = str((components.get(component) or {}).get("manifest_asset") or "")
+        canonical = str(COMPONENTS[component]["manifest"])
+        if (
+            pointer == canonical
+            and pointer not in manifest_assets
+            and pointer not in selected_assets
+            and pointer not in expected_assets
+        ):
+            allowed.add(
+                f"component {component} manifest_asset is not a published asset: {pointer}"
+            )
+    return allowed
 
 
 def build_bundle_manifest(

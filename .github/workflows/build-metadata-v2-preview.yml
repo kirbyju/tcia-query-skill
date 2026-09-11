@@ -617,7 +617,12 @@ jobs:
           DEPLOYED_INFO_URL: ${{ vars.TCIA_V2_DEPLOYED_INFO_URL }}
         run: |
           set -euo pipefail
-          published="$(python -c 'import json; print(json.load(open("release-dist/tcia_metadata_v2_bundle_manifest.json"))["release_fingerprint"])')"
+          manifest_path="release-dist/tcia_metadata_v2_bundle_manifest.json"
+          if [ ! -s "$manifest_path" ]; then
+            echo "- Deployment lag check: skipped because no release manifest was assembled." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          published="$(python -c 'import json, sys; print(json.load(open(sys.argv[1]))["release_fingerprint"])' "$manifest_path")"
           if [ -z "$DEPLOYED_INFO_URL" ]; then
             echo "- Deployment lag check: not configured (set repository variable TCIA_V2_DEPLOYED_INFO_URL)." >> "$GITHUB_STEP_SUMMARY"
             exit 0
