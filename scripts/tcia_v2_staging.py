@@ -22,6 +22,17 @@ COMPONENT_ORDER = (
     "clinical",
     "idc_participants",
 )
+CROSS_COMPONENT_FOREIGN_KEYS = {
+    "public_non_dicom_audit_baseline": (
+        {
+            "child_table": "public_non_dicom_crosswalk_evidence",
+            "child_column": "asset_id",
+            "parent_component": "public_non_dicom_baseline",
+            "parent_table": "public_non_dicom_assets",
+            "parent_column": "asset_id",
+        },
+    ),
+}
 
 SCHEMA = """
 PRAGMA foreign_keys = ON;
@@ -80,6 +91,189 @@ def canonical_json(value: Any) -> str:
 def foreign_key_violations(conn: sqlite3.Connection, limit: int = 20) -> list[list[Any]]:
     """Return a bounded, JSON-serializable foreign-key violation sample."""
     return [list(row) for row in conn.execute("PRAGMA foreign_key_check").fetchmany(limit)]
+
+
+def validate_component_foreign_keys(
+    component: str,
+    conn: sqlite3.Connection,
+    components: dict[str, tuple[Path, Path]],
+    *,
+    limit: int = 20,
+) -> list[dict[str, Any]]:
+    """Validate standalone FKs plus explicitly declared cross-component FKs."""
+    violations = foreign_key_violations(conn, limit=limit)
+    contracts = CROSS_COMPONENT_FOREIGN_KEYS.get(component, ())
+    if not contracts:
+        if not violations:
+            return []
+        raise RuntimeError(
+            f"{component} foreign_key_check violations (first {limit}): "
+            + canonical_json(violations)
+        )
+
+    verified: list[dict[str, Any]] = []
+    accepted_violation_keys: set[tuple[str, str, int]] = set()
+    for contract in contracts:
+        child_table = str(contract["child_table"])
+        child_column = str(contract["child_column"])
+        parent_component = str(contract["parent_component"])
+        parent_table = str(contract["parent_table"])
+        parent_column = str(contract["parent_column"])
+        declarations = list(
+            conn.execute(f"PRAGMA foreign_key_list({quote_identifier(child_table)})")
+        )
+        if not declarations:
+            continue
+        matches = [
+            row
+            for row in declarations
+            if (
+                str(row[2]),
+                str(row[3]),
+                str(row[4]),
+                str(row[5]),
+                str(row[6]),
+                str(row[7]),
+            )
+            == (
+                parent_table,
+                child_column,
+                parent_column,
+                "NO ACTION",
+                "NO ACTION",
+                "NONE",
+            )
+            and int(row[1]) == 0
+        ]
+        if len(declarations) != 1 or len(matches) != 1:
+            raise RuntimeError(
+                f"{component} cross-component foreign-key declaration mismatch: "
+                f"{child_table}.{child_column} -> {parent_component}."
+                f"{parent_table}.{parent_column}"
+            )
+        foreign_key_id = int(matches[0][0])
+        accepted_violation_keys.add((child_table, parent_table, foreign_key_id))
+        local_parent = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+            (parent_table,),
+        ).fetchone()
+        if local_parent is not None:
+            raise RuntimeError(
+                f"{component} cross-component parent unexpectedly exists locally: "
+                f"{parent_table}"
+            )
+
+        parent_entry = components.get(parent_component)
+        if parent_entry is None:
+            raise RuntimeError(
+                f"{component} cross-component foreign-key parent is unavailable: "
+                f"{parent_component}"
+            )
+        parent_database, parent_manifest_path = parent_entry
+        parent_manifest = load_json(parent_manifest_path)
+        parent_digest = file_sha256(parent_database)
+        if parent_digest != str(parent_manifest.get("sqlite_sha256") or ""):
+            raise RuntimeError(
+                f"{component} cross-component parent does not match manifest: "
+                f"{parent_component}"
+            )
+
+        alias = "cross_component_parent"
+        conn.execute(
+            f"ATTACH DATABASE ? AS {alias}",
+            (f"file:{parent_database}?mode=ro",),
+        )
+        try:
+            parent_columns = {
+                str(row[1]): row
+                for row in conn.execute(
+                    f"PRAGMA {alias}.table_info({quote_identifier(parent_table)})"
+                )
+            }
+            child_columns = {
+                str(row[1]): row
+                for row in conn.execute(
+                    f"PRAGMA main.table_info({quote_identifier(child_table)})"
+                )
+            }
+            if parent_column not in parent_columns or child_column not in child_columns:
+                raise RuntimeError(
+                    f"{component} cross-component foreign-key columns are unavailable"
+                )
+            if int(parent_columns[parent_column][5]) != 1:
+                raise RuntimeError(
+                    f"{component} cross-component parent key is not a primary key: "
+                    f"{parent_table}.{parent_column}"
+                )
+            if int(child_columns[child_column][3]) != 1:
+                raise RuntimeError(
+                    f"{component} cross-component child key is nullable: "
+                    f"{child_table}.{child_column}"
+                )
+            orphan_count = int(
+                conn.execute(
+                    f"SELECT COUNT(*) FROM main.{quote_identifier(child_table)} child "
+                    f"LEFT JOIN {alias}.{quote_identifier(parent_table)} parent "
+                    f"ON parent.{quote_identifier(parent_column)}="
+                    f"child.{quote_identifier(child_column)} "
+                    f"WHERE child.{quote_identifier(child_column)} IS NOT NULL "
+                    f"AND parent.{quote_identifier(parent_column)} IS NULL"
+                ).fetchone()[0]
+            )
+            orphan_sample = [
+                row[0]
+                for row in conn.execute(
+                    f"SELECT child.{quote_identifier(child_column)} "
+                    f"FROM main.{quote_identifier(child_table)} child "
+                    f"LEFT JOIN {alias}.{quote_identifier(parent_table)} parent "
+                    f"ON parent.{quote_identifier(parent_column)}="
+                    f"child.{quote_identifier(child_column)} "
+                    f"WHERE child.{quote_identifier(child_column)} IS NOT NULL "
+                    f"AND parent.{quote_identifier(parent_column)} IS NULL "
+                    f"ORDER BY child.{quote_identifier(child_column)} LIMIT ?",
+                    (limit,),
+                )
+            ]
+            child_rows = int(
+                conn.execute(
+                    f"SELECT COUNT(*) FROM main.{quote_identifier(child_table)} "
+                    f"WHERE {quote_identifier(child_column)} IS NOT NULL"
+                ).fetchone()[0]
+            )
+        finally:
+            conn.execute(f"DETACH DATABASE {alias}")
+        if orphan_count:
+            raise RuntimeError(
+                f"{component} cross-component foreign-key orphans: "
+                f"{child_table}.{child_column} -> {parent_component}."
+                f"{parent_table}.{parent_column}; count={orphan_count}; "
+                f"first {limit}={canonical_json(orphan_sample)}"
+            )
+        verified.append(
+            {
+                "child_component": component,
+                "child_table": child_table,
+                "child_column": child_column,
+                "parent_component": parent_component,
+                "parent_table": parent_table,
+                "parent_column": parent_column,
+                "verified_rows": child_rows,
+            }
+        )
+
+    unexpected: list[list[Any]] = []
+    for row in conn.execute("PRAGMA foreign_key_check"):
+        if (str(row[0]), str(row[2]), int(row[3])) in accepted_violation_keys:
+            continue
+        unexpected.append(list(row))
+        if len(unexpected) == limit:
+            break
+    if unexpected:
+        raise RuntimeError(
+            f"{component} unrecognized foreign_key_check violations (first {limit}): "
+            + canonical_json(unexpected)
+        )
+    return verified
 
 
 def quote_identifier(value: str) -> str:
@@ -146,6 +340,7 @@ def build_staging_database(
     release_tag, release_assets = source_release_details(source_release_json)
     source_rows: list[tuple[Any, ...]] = []
     object_rows: list[tuple[Any, ...]] = []
+    cross_component_checks: list[dict[str, Any]] = []
     ordered_components = COMPONENT_ORDER + tuple(
         sorted(set(components) - set(COMPONENT_ORDER))
     )
@@ -166,12 +361,9 @@ def build_staging_database(
             integrity = str(source.execute("PRAGMA integrity_check").fetchone()[0])
             if integrity != "ok":
                 raise RuntimeError(f"{component} integrity_check={integrity}")
-            violations = foreign_key_violations(source)
-            if violations:
-                raise RuntimeError(
-                    f"{component} foreign_key_check violations (first 20): "
-                    + canonical_json(violations)
-                )
+            cross_component_checks.extend(
+                validate_component_foreign_keys(component, source, components)
+            )
             for object_name, object_type, sql_digest, row_count in inventory_objects(source):
                 object_rows.append(
                     (component, object_name, object_type, sql_digest, row_count)
@@ -223,6 +415,10 @@ def build_staging_database(
                     "storage_contract",
                     "runner_local_ledger_with_path_independent_audit_checkpoint",
                 ),
+                (
+                    "cross_component_foreign_keys",
+                    canonical_json(cross_component_checks),
+                ),
             ),
         )
         conn.commit()
@@ -233,6 +429,7 @@ def build_staging_database(
         "source_fingerprint": fingerprint,
         "components": len(source_rows),
         "objects": len(object_rows),
+        "cross_component_foreign_keys": cross_component_checks,
         "integrity_check": integrity,
     }
 

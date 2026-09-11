@@ -46,6 +46,58 @@ class V2StagingTests(unittest.TestCase):
         )
         return database, manifest
 
+    def create_legacy_public_cross_component_pair(
+        self,
+        components: dict[str, tuple[Path, Path]],
+        *,
+        orphan_asset_id: str | None = None,
+        unrelated_orphan: bool = False,
+        local_shadow_parent: bool = False,
+        foreign_parent_table: str = "public_non_dicom_assets",
+    ) -> None:
+        research, research_manifest = components["public_non_dicom_baseline"]
+        research.unlink()
+        with closing(sqlite3.connect(research)) as conn:
+            conn.execute(
+                "CREATE TABLE public_non_dicom_assets "
+                "(asset_id TEXT PRIMARY KEY, value TEXT)"
+            )
+            conn.execute("INSERT INTO public_non_dicom_assets VALUES ('asset-1', 'ok')")
+            conn.commit()
+        research_payload = json.loads(research_manifest.read_text())
+        research_payload["sqlite_sha256"] = staging.file_sha256(research)
+        research_manifest.write_text(json.dumps(research_payload))
+
+        audit_database, audit_manifest = components["public_non_dicom_audit_baseline"]
+        audit_database.unlink()
+        with closing(sqlite3.connect(audit_database)) as conn:
+            conn.execute("PRAGMA foreign_keys=OFF")
+            conn.execute(
+                "CREATE TABLE public_non_dicom_crosswalk_evidence ("
+                "crosswalk_id TEXT PRIMARY KEY, asset_id TEXT NOT NULL, "
+                f"FOREIGN KEY(asset_id) REFERENCES {foreign_parent_table}(asset_id))"
+            )
+            conn.execute(
+                "INSERT INTO public_non_dicom_crosswalk_evidence VALUES (?, ?)",
+                ("crosswalk-1", orphan_asset_id or "asset-1"),
+            )
+            if local_shadow_parent:
+                conn.execute(
+                    "CREATE TABLE public_non_dicom_assets (asset_id TEXT PRIMARY KEY)"
+                )
+                conn.execute("INSERT INTO public_non_dicom_assets VALUES ('asset-1')")
+            if unrelated_orphan:
+                conn.execute("CREATE TABLE local_parents (id INTEGER PRIMARY KEY)")
+                conn.execute(
+                    "CREATE TABLE local_children "
+                    "(parent_id INTEGER REFERENCES local_parents(id))"
+                )
+                conn.execute("INSERT INTO local_children VALUES (42)")
+            conn.commit()
+        audit_payload = json.loads(audit_manifest.read_text())
+        audit_payload["sqlite_sha256"] = staging.file_sha256(audit_database)
+        audit_manifest.write_text(json.dumps(audit_payload))
+
     def test_build_validate_and_resolve_runner_local_staging_ledger(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -132,6 +184,124 @@ class V2StagingTests(unittest.TestCase):
             payload["sqlite_sha256"] = staging.file_sha256(database)
             manifest.write_text(json.dumps(payload))
             with self.assertRaisesRegex(RuntimeError, "foreign_key_check"):
+                staging.build_staging_database(
+                    root / "staging.sqlite", components=components, replace=True
+                )
+
+    def test_build_validates_legacy_cross_component_foreign_key_against_pair(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            components = {
+                component: self.create_component(root, component)
+                for component in staging.COMPONENT_ORDER
+            }
+            self.create_legacy_public_cross_component_pair(components)
+            ledger = root / "staging.sqlite"
+            result = staging.build_staging_database(
+                ledger, components=components, replace=True
+            )
+            self.assertEqual(
+                result["cross_component_foreign_keys"],
+                [{
+                    "child_component": "public_non_dicom_audit_baseline",
+                    "child_table": "public_non_dicom_crosswalk_evidence",
+                    "child_column": "asset_id",
+                    "parent_component": "public_non_dicom_baseline",
+                    "parent_table": "public_non_dicom_assets",
+                    "parent_column": "asset_id",
+                    "verified_rows": 1,
+                }],
+            )
+            with closing(sqlite3.connect(ledger)) as conn:
+                recorded = json.loads(
+                    conn.execute(
+                        "SELECT value FROM staging_meta "
+                        "WHERE key='cross_component_foreign_keys'"
+                    ).fetchone()[0]
+                )
+            self.assertEqual(recorded, result["cross_component_foreign_keys"])
+
+    def test_build_rejects_legacy_cross_component_orphan(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            components = {
+                component: self.create_component(root, component)
+                for component in staging.COMPONENT_ORDER
+            }
+            self.create_legacy_public_cross_component_pair(
+                components, orphan_asset_id="missing-asset"
+            )
+            with self.assertRaisesRegex(
+                RuntimeError, "cross-component foreign-key orphans.*count=1"
+            ):
+                staging.build_staging_database(
+                    root / "staging.sqlite", components=components, replace=True
+                )
+
+    def test_build_rejects_unrecognized_orphan_alongside_valid_cross_component_fk(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            components = {
+                component: self.create_component(root, component)
+                for component in staging.COMPONENT_ORDER
+            }
+            self.create_legacy_public_cross_component_pair(
+                components, unrelated_orphan=True
+            )
+            with self.assertRaisesRegex(
+                RuntimeError, "unrecognized foreign_key_check violations"
+            ):
+                staging.build_staging_database(
+                    root / "staging.sqlite", components=components, replace=True
+                )
+
+    def test_build_rejects_local_shadow_for_declared_cross_component_parent(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            components = {
+                component: self.create_component(root, component)
+                for component in staging.COMPONENT_ORDER
+            }
+            self.create_legacy_public_cross_component_pair(
+                components, local_shadow_parent=True
+            )
+            with self.assertRaisesRegex(
+                RuntimeError, "cross-component parent unexpectedly exists locally"
+            ):
+                staging.build_staging_database(
+                    root / "staging.sqlite", components=components, replace=True
+                )
+
+    def test_build_rejects_redirected_cross_component_declaration(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            components = {
+                component: self.create_component(root, component)
+                for component in staging.COMPONENT_ORDER
+            }
+            self.create_legacy_public_cross_component_pair(
+                components, foreign_parent_table="redirected_assets"
+            )
+            with self.assertRaisesRegex(
+                RuntimeError, "cross-component foreign-key declaration mismatch"
+            ):
+                staging.build_staging_database(
+                    root / "staging.sqlite", components=components, replace=True
+                )
+
+    def test_build_rejects_cross_component_parent_manifest_digest_mismatch(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            components = {
+                component: self.create_component(root, component)
+                for component in staging.COMPONENT_ORDER
+            }
+            self.create_legacy_public_cross_component_pair(components)
+            _database, parent_manifest = components["public_non_dicom_baseline"]
+            payload = json.loads(parent_manifest.read_text())
+            payload["sqlite_sha256"] = "0" * 64
+            parent_manifest.write_text(json.dumps(payload))
+            with self.assertRaisesRegex(RuntimeError, "does not match"):
                 staging.build_staging_database(
                     root / "staging.sqlite", components=components, replace=True
                 )
