@@ -14,19 +14,44 @@ from pydantic import BaseModel, Field
 
 from . import __version__
 from .models import (
+    AccessSummaryResponse,
     AssetsResponse,
+    BundleResponse,
+    ClinicalConflictsResponse,
+    ClinicalDatasetsResponse,
+    ClinicalFactsResponse,
+    ClinicalSubjectsResponse,
+    ControlledDatasetsResponse,
+    ControlledFilesResponse,
+    CoverageResponse,
     DatasetDetailResponse,
     DatasetSearchResponse,
+    DatasetVersionsResponse,
+    DicomAnnotationsResponse,
     DownloadsResponse,
     HealthResponse,
+    LinkIssuesResponse,
+    ParticipantDetailResponse,
     ParticipantsResponse,
     ProblemDetail,
-    PublicResponse,
+    V1ReleasesResponse,
 )
 from .service import TciaQueryService, TciaServiceError
 
 API_PREFIX = "/v1"
 V2_API_PREFIX = "/v2"
+V1_DEPRECATION = "@1798675199"
+V1_SUNSET = "Fri, 31 Dec 2027 23:59:59 GMT"
+V1_SUCCESSOR = (
+    '</v2/docs>; rel="successor-version", '
+    '<https://github.com/kirbyju/tcia-query-skill/blob/main/references/api-upgrade-notes.md>; '
+    'rel="deprecation"'
+)
+RETIRED_SIDECAR_DETAIL = (
+    "This standalone V1 NIfTI/pathology surface is retired. "
+    "Use /v2/public-non-dicom/assets with file-format, modality, object-role, "
+    "participant, or dataset filters."
+)
 
 
 class SearchDatasetsRequest(BaseModel):
@@ -78,6 +103,7 @@ PROBLEM_RESPONSES = {
 def _problem(status: int, detail: str, code: str, retryable: bool = False) -> JSONResponse:
     titles = {
         404: "Not Found",
+        410: "Gone",
         422: "Unprocessable Content",
         503: "Service Unavailable",
         500: "Internal Server Error",
@@ -96,6 +122,10 @@ def _problem(status: int, detail: str, code: str, retryable: bool = False) -> JS
     )
 
 
+def _retired_sidecar_response() -> JSONResponse:
+    return _problem(410, RETIRED_SIDECAR_DETAIL, "retired_surface")
+
+
 def _service_from_app(app: FastAPI) -> TciaQueryService:
     return app.state.tcia_service
 
@@ -112,6 +142,15 @@ def create_app(service: TciaQueryService | None = None) -> FastAPI:
         openapi_url=f"{V2_API_PREFIX}/openapi.json",
     )
     app.state.tcia_service = service or TciaQueryService()
+
+    @app.middleware("http")
+    async def _v1_deprecation_headers(request: Request, call_next: Any):
+        response = await call_next(request)
+        if request.url.path == API_PREFIX or request.url.path.startswith(API_PREFIX + "/"):
+            response.headers["Deprecation"] = V1_DEPRECATION
+            response.headers["Sunset"] = V1_SUNSET
+            response.headers["Link"] = V1_SUCCESSOR
+        return response
 
     @app.exception_handler(TciaServiceError)
     async def _service_error_handler(_request: Request, exc: TciaServiceError):
@@ -136,7 +175,7 @@ def create_app(service: TciaQueryService | None = None) -> FastAPI:
             "docs": f"{V2_API_PREFIX}/docs",
             "liveness": f"{V2_API_PREFIX}/live",
             "readiness": f"{V2_API_PREFIX}/ready",
-            "compatibility_api": API_PREFIX,
+            "deprecated_v1_alias": API_PREFIX,
         }
 
     @app.get(f"{V2_API_PREFIX}/live", response_model=HealthResponse)
@@ -154,7 +193,7 @@ def create_app(service: TciaQueryService | None = None) -> FastAPI:
     def v2_health() -> dict[str, str]:
         return {"status": "ok", "default_api": "v2"}
 
-    @app.get(f"{V2_API_PREFIX}/bundle", response_model=PublicResponse)
+    @app.get(f"{V2_API_PREFIX}/bundle", response_model=BundleResponse)
     def v2_bundle_info() -> dict[str, Any]:
         return S().bundle_info()
 
@@ -192,7 +231,7 @@ def create_app(service: TciaQueryService | None = None) -> FastAPI:
             limit=limit,
         )
 
-    @app.get(f"{V2_API_PREFIX}/datasets/{{short_title}}/access", response_model=PublicResponse)
+    @app.get(f"{V2_API_PREFIX}/datasets/{{short_title}}/access", response_model=AccessSummaryResponse)
     def v2_summarize_access(short_title: str) -> dict[str, Any]:
         return S().summarize_access(short_title=short_title)
 
@@ -203,7 +242,7 @@ def create_app(service: TciaQueryService | None = None) -> FastAPI:
     def v2_search_participants(request: SearchParticipantsRequest) -> dict[str, Any]:
         return S().search_participants(**request.model_dump())
 
-    @app.get(f"{V2_API_PREFIX}/participants/{{participant_key}}", response_model=PublicResponse)
+    @app.get(f"{V2_API_PREFIX}/participants/{{participant_key}}", response_model=ParticipantDetailResponse)
     def v2_get_participant(participant_key: str) -> dict[str, Any]:
         return S().get_participant(participant_key=participant_key)
 
@@ -234,7 +273,7 @@ def create_app(service: TciaQueryService | None = None) -> FastAPI:
             limit=limit,
         )
 
-    @app.get(f"{V2_API_PREFIX}/datasets/{{short_title}}/participant-coverage", response_model=PublicResponse)
+    @app.get(f"{V2_API_PREFIX}/datasets/{{short_title}}/participant-coverage", response_model=CoverageResponse)
     def v2_get_dataset_participant_coverage(
         short_title: str, dataset_type: str | None = None
     ) -> dict[str, Any]:
@@ -247,7 +286,7 @@ def create_app(service: TciaQueryService | None = None) -> FastAPI:
     def v2_get_dataset(short_title: str) -> dict[str, Any]:
         return S().get_dataset(short_title=short_title)
 
-    @app.get(f"{V2_API_PREFIX}/participant-link-issues", response_model=PublicResponse)
+    @app.get(f"{V2_API_PREFIX}/participant-link-issues", response_model=LinkIssuesResponse)
     def v2_find_participant_link_issues(
         short_titles: Annotated[list[str] | None, Query()] = None,
         statuses: Annotated[list[str] | None, Query()] = None,
@@ -283,7 +322,7 @@ def create_app(service: TciaQueryService | None = None) -> FastAPI:
             limit=limit,
         )
 
-    @app.get(f"{V2_API_PREFIX}/datasets/{{short_title}}/versions", response_model=PublicResponse)
+    @app.get(f"{V2_API_PREFIX}/datasets/{{short_title}}/versions", response_model=DatasetVersionsResponse)
     def v2_get_dataset_versions(
         short_title: str,
         limit: int = Query(default=100, ge=1, le=500),
@@ -292,12 +331,13 @@ def create_app(service: TciaQueryService | None = None) -> FastAPI:
             short_title=short_title, limit=limit
         )
 
-    @app.get(f"{V2_API_PREFIX}/release-history/v1-releases", response_model=PublicResponse)
+    @app.get(f"{V2_API_PREFIX}/release-history/v1-releases", response_model=V1ReleasesResponse)
     def v2_get_dataset_v1_releases(
         short_titles: Annotated[list[str] | None, Query()] = None,
         dataset_type: str = "both",
         released_since: str | None = None,
         released_before: str | None = None,
+        cursor: str | None = None,
         limit: int = Query(default=50, ge=1, le=500),
     ) -> dict[str, Any]:
         return S().get_dataset_v1_releases(
@@ -305,10 +345,11 @@ def create_app(service: TciaQueryService | None = None) -> FastAPI:
             dataset_type=dataset_type,
             released_since=released_since,
             released_before=released_before,
+            cursor=cursor,
             limit=limit,
         )
 
-    @app.get(f"{V2_API_PREFIX}/controlled-access/datasets", response_model=PublicResponse)
+    @app.get(f"{V2_API_PREFIX}/controlled-access/datasets", response_model=ControlledDatasetsResponse)
     def v2_find_controlled_access_datasets(
         modalities: Annotated[list[str] | None, Query()] = None,
         file_types: Annotated[list[str] | None, Query()] = None,
@@ -324,7 +365,7 @@ def create_app(service: TciaQueryService | None = None) -> FastAPI:
             limit=limit,
         )
 
-    @app.get(f"{V2_API_PREFIX}/controlled-access/{{short_title}}/files", response_model=PublicResponse)
+    @app.get(f"{V2_API_PREFIX}/controlled-access/{{short_title}}/files", response_model=ControlledFilesResponse)
     def v2_get_controlled_access_files(
         short_title: str,
         route_systems: Annotated[list[str] | None, Query()] = None,
@@ -348,7 +389,7 @@ def create_app(service: TciaQueryService | None = None) -> FastAPI:
             limit=limit,
         )
 
-    @app.get(f"{V2_API_PREFIX}/dicom/annotation-downloads", response_model=PublicResponse)
+    @app.get(f"{V2_API_PREFIX}/dicom/annotation-downloads", response_model=DicomAnnotationsResponse)
     def v2_find_dicom_annotations(
         query: str | None = None,
         short_titles: Annotated[list[str] | None, Query()] = None,
@@ -364,7 +405,7 @@ def create_app(service: TciaQueryService | None = None) -> FastAPI:
             limit=limit,
         )
 
-    @app.get(f"{V2_API_PREFIX}/clinical/datasets", response_model=PublicResponse)
+    @app.get(f"{V2_API_PREFIX}/clinical/datasets", response_model=ClinicalDatasetsResponse)
     def v2_find_clinical_datasets(
         short_titles: Annotated[list[str] | None, Query()] = None,
         source_kinds: Annotated[list[str] | None, Query()] = None,
@@ -382,7 +423,7 @@ def create_app(service: TciaQueryService | None = None) -> FastAPI:
             limit=limit,
         )
 
-    @app.get(f"{V2_API_PREFIX}/clinical/{{short_title}}/subjects", response_model=PublicResponse)
+    @app.get(f"{V2_API_PREFIX}/clinical/{{short_title}}/subjects", response_model=ClinicalSubjectsResponse)
     def v2_get_clinical_subjects(
         short_title: str,
         subject_ids: Annotated[list[str] | None, Query()] = None,
@@ -400,7 +441,7 @@ def create_app(service: TciaQueryService | None = None) -> FastAPI:
             limit=limit,
         )
 
-    @app.get(f"{V2_API_PREFIX}/clinical/{{short_title}}/facts", response_model=PublicResponse)
+    @app.get(f"{V2_API_PREFIX}/clinical/{{short_title}}/facts", response_model=ClinicalFactsResponse)
     def v2_get_clinical_facts(
         short_title: str,
         subject_id: str | None = None,
@@ -418,7 +459,7 @@ def create_app(service: TciaQueryService | None = None) -> FastAPI:
             limit=limit,
         )
 
-    @app.get(f"{V2_API_PREFIX}/clinical/{{short_title}}/conflicts", response_model=PublicResponse)
+    @app.get(f"{V2_API_PREFIX}/clinical/{{short_title}}/conflicts", response_model=ClinicalConflictsResponse)
     def v2_get_clinical_conflicts(
         short_title: str,
         subject_id: str | None = None,
@@ -492,6 +533,7 @@ def create_app(service: TciaQueryService | None = None) -> FastAPI:
         dataset_type: str = "both",
         released_since: str | None = None,
         released_before: str | None = None,
+        cursor: str | None = None,
         limit: int = Query(default=50, ge=1, le=500),
     ) -> dict[str, Any]:
         return S().get_dataset_v1_releases(
@@ -499,6 +541,7 @@ def create_app(service: TciaQueryService | None = None) -> FastAPI:
             dataset_type=dataset_type,
             released_since=released_since,
             released_before=released_before,
+            cursor=cursor,
             limit=limit,
         )
 
@@ -565,12 +608,7 @@ def create_app(service: TciaQueryService | None = None) -> FastAPI:
         requires_derived_objects: bool = False,
         limit: int = Query(default=25, ge=1, le=200),
     ) -> dict[str, Any]:
-        return S().find_nifti_datasets(
-            short_titles=short_titles,
-            modalities=modalities,
-            requires_derived_objects=requires_derived_objects,
-            limit=limit,
-        )
+        return _retired_sidecar_response()
 
     @app.get(f"{API_PREFIX}/nifti/{{short_title}}/files", include_in_schema=False)
     def get_nifti_files(
@@ -582,15 +620,7 @@ def create_app(service: TciaQueryService | None = None) -> FastAPI:
         has_source_uids: bool | None = None,
         limit: int = Query(default=50, ge=1, le=500),
     ) -> dict[str, Any]:
-        return S().get_nifti_files(
-            short_title=short_title,
-            modalities=modalities,
-            subject_id=subject_id,
-            file_name_contains=file_name_contains,
-            derived_only=derived_only,
-            has_source_uids=has_source_uids,
-            limit=limit,
-        )
+        return _retired_sidecar_response()
 
     @app.get(f"{API_PREFIX}/nifti/{{short_title}}/derived-objects", include_in_schema=False)
     def get_nifti_derived_objects(
@@ -600,13 +630,7 @@ def create_app(service: TciaQueryService | None = None) -> FastAPI:
         confidence: str | None = None,
         limit: int = Query(default=50, ge=1, le=500),
     ) -> dict[str, Any]:
-        return S().get_nifti_derived_objects(
-            short_title=short_title,
-            linked_only=linked_only,
-            file_name_contains=file_name_contains,
-            confidence=confidence,
-            limit=limit,
-        )
+        return _retired_sidecar_response()
 
     @app.get(f"{API_PREFIX}/nifti/{{short_title}}/characteristics", include_in_schema=False)
     def get_nifti_characteristics(
@@ -619,16 +643,7 @@ def create_app(service: TciaQueryService | None = None) -> FastAPI:
         has_source_reference: bool | None = None,
         limit: int = Query(default=50, ge=1, le=500),
     ) -> dict[str, Any]:
-        return S().get_nifti_characteristics(
-            short_title=short_title,
-            object_roles=object_roles,
-            associated_imaging_modalities=associated_imaging_modalities,
-            source_access_levels=source_access_levels,
-            subject_id=subject_id,
-            file_name_contains=file_name_contains,
-            has_source_reference=has_source_reference,
-            limit=limit,
-        )
+        return _retired_sidecar_response()
 
     @app.get(f"{API_PREFIX}/nifti/review-issues", include_in_schema=False)
     def find_nifti_review_issues(
@@ -637,12 +652,7 @@ def create_app(service: TciaQueryService | None = None) -> FastAPI:
         severities: Annotated[list[str] | None, Query()] = None,
         limit: int = Query(default=50, ge=1, le=500),
     ) -> dict[str, Any]:
-        return S().find_nifti_review_issues(
-            short_titles=short_titles,
-            statuses=statuses,
-            severities=severities,
-            limit=limit,
-        )
+        return _retired_sidecar_response()
 
     @app.get(f"{API_PREFIX}/nifti/{{short_title}}/package-files", include_in_schema=False)
     def get_nifti_package_files(
@@ -652,13 +662,7 @@ def create_app(service: TciaQueryService | None = None) -> FastAPI:
         metadata_candidates: bool | None = None,
         limit: int = Query(default=50, ge=1, le=500),
     ) -> dict[str, Any]:
-        return S().get_nifti_package_files(
-            short_title=short_title,
-            file_exts=file_exts,
-            file_name_contains=file_name_contains,
-            metadata_candidates=metadata_candidates,
-            limit=limit,
-        )
+        return _retired_sidecar_response()
 
     @app.get(f"{API_PREFIX}/pathology/datasets", include_in_schema=False)
     def find_pathology_datasets(
@@ -668,20 +672,14 @@ def create_app(service: TciaQueryService | None = None) -> FastAPI:
         has_pathdb: bool | None = None,
         limit: int = Query(default=25, ge=1, le=200),
     ) -> dict[str, Any]:
-        return S().find_pathology_datasets(
-            short_titles=short_titles,
-            package_inventory_status=package_inventory_status,
-            with_package_inventory=with_package_inventory,
-            has_pathdb=has_pathdb,
-            limit=limit,
-        )
+        return _retired_sidecar_response()
 
     @app.get(f"{API_PREFIX}/pathology/downloads", include_in_schema=False)
     def get_pathology_downloads(
         short_titles: Annotated[list[str] | None, Query()] = None,
         limit: int = Query(default=25, ge=1, le=200),
     ) -> dict[str, Any]:
-        return S().get_pathology_downloads(short_titles=short_titles, limit=limit)
+        return _retired_sidecar_response()
 
     @app.get(f"{API_PREFIX}/pathology/{{short_title}}/package-files", include_in_schema=False)
     def get_pathology_package_files(
@@ -692,14 +690,7 @@ def create_app(service: TciaQueryService | None = None) -> FastAPI:
         file_name_contains: str | None = None,
         limit: int = Query(default=50, ge=1, le=500),
     ) -> dict[str, Any]:
-        return S().get_pathology_package_files(
-            short_title=short_title,
-            file_exts=file_exts,
-            file_roles=file_roles,
-            download_id=download_id,
-            file_name_contains=file_name_contains,
-            limit=limit,
-        )
+        return _retired_sidecar_response()
 
     @app.get(f"{API_PREFIX}/pathology/{{short_title}}/files", include_in_schema=False)
     def get_pathology_file_objects(
@@ -709,13 +700,7 @@ def create_app(service: TciaQueryService | None = None) -> FastAPI:
         file_name_contains: str | None = None,
         limit: int = Query(default=50, ge=1, le=500),
     ) -> dict[str, Any]:
-        return S().get_pathology_file_objects(
-            short_title=short_title,
-            file_exts=file_exts,
-            file_roles=file_roles,
-            file_name_contains=file_name_contains,
-            limit=limit,
-        )
+        return _retired_sidecar_response()
 
     @app.get(f"{API_PREFIX}/pathology/disparities", include_in_schema=False)
     def get_pathology_disparities(
@@ -723,11 +708,7 @@ def create_app(service: TciaQueryService | None = None) -> FastAPI:
         disparity_types: Annotated[list[str] | None, Query()] = None,
         limit: int = Query(default=25, ge=1, le=200),
     ) -> dict[str, Any]:
-        return S().get_pathology_disparities(
-            short_titles=short_titles,
-            disparity_types=disparity_types,
-            limit=limit,
-        )
+        return _retired_sidecar_response()
 
     @app.get(f"{API_PREFIX}/clinical/datasets", include_in_schema=False)
     def find_clinical_datasets(

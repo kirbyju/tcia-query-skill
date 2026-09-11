@@ -72,8 +72,10 @@ file-grain geometry review.
 The default REST documentation is under `/v2/docs`. V2 routes cover dataset and
 release history, participants, public non-DICOM detail, controlled-access public
 metadata, clinical detail, and TCIA DICOM annotation-download signals. Public
-DICOM series relationships remain an IDC/idc-index concern; legacy specialized
-NIfTI and pathology routes remain compatibility-only under `/v1/`.
+DICOM series relationships remain an IDC/idc-index concern. Retired specialized
+NIfTI and pathology tools are not available on the MCP surface. Their retired
+standalone REST paths remain under `/v1/` only as stable `410 Gone` migration
+responses; use `/v2/public-non-dicom/assets`.
 
 ## Public Contract
 
@@ -83,16 +85,22 @@ NIfTI and pathology routes remain compatibility-only under `/v1/`.
   and complete download/access detail.
 - High-volume dataset, participant, download, participant-asset, and public
   non-DICOM searches return `has_more`, `truncated`, and an opaque
-  `next_cursor`. Reuse the same filters and limit with that cursor.
+  `next_cursor`. Reuse the same filters and limit with that cursor. Cursors are
+  bound to the installed release/component and actual file generation, and are
+  rejected after an install or in-place artifact change.
+- Public response schemas are closed: undeclared fields and incorrect types are
+  rejected, with variable provenance confined to named typed metadata objects.
 - Invalid limits/cursors are errors; limits are never silently clamped.
 - MCP tools advertise structured output and read-only, non-destructive,
   idempotent, snapshot-local metadata.
 - REST errors use RFC 9457-style `application/problem+json` documents with
   stable `code` and `retryable` fields.
-- `/v2/live` reports process liveness. `/v2/ready` performs cheap artifact and
-  required-query-surface checks. `/v2/health` remains an undocumented alias.
-- The V2 OpenAPI document omits every V1 route, although explicit V1 URLs
-  remain functional.
+- `/v2/live` reports process liveness. `/v2/ready` validates the install
+  manifest/receipt, component schemas and query surfaces, and visible dataset
+  coherence; unchanged results are cached. `/v2/health` remains an undocumented alias.
+- The V2 OpenAPI document omits every V1 route. Supported V1 URLs remain
+  breaking deprecated aliases; retired NIfTI/pathology URLs return `410 Gone`.
+  All return `Deprecation`, `Sunset`, and migration `Link` headers.
 
 See [API upgrade notes](../references/api-upgrade-notes.md) for intentional
 client-visible changes in server 0.3.0.

@@ -51,9 +51,9 @@ interface for new clients.
 
 Server 0.3.0 adds compact discovery responses, opaque cursor pagination,
 typed problem responses, and separate liveness/readiness checks. It removes
-the hidden-record switch from public contracts while retaining explicit V1
-URLs as undocumented compatibility routes. See
-[API upgrade notes](./references/api-upgrade-notes.md).
+the hidden-record switch from public contracts. Supported V1 URLs are deprecated
+breaking aliases with migration headers; retired standalone NIfTI/pathology V1
+URLs return `410 Gone`. See [API upgrade notes](./references/api-upgrade-notes.md).
 
 See [mcp_server/README.md](./mcp_server/README.md) for the tool surface and
 instructions for running your own MCP/REST server.

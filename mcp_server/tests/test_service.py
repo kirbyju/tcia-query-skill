@@ -10,7 +10,36 @@ from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
-from mcp_server.tcia_query_mcp.service import InvalidRequestError, TciaQueryService
+from pydantic import ValidationError
+
+from mcp_server.tcia_query_mcp.models import (
+    AccessSummaryResponse,
+    AssetsResponse,
+    BundleResponse,
+    ClinicalConflictsResponse,
+    ClinicalDatasetsResponse,
+    ClinicalFactsResponse,
+    ClinicalSubjectsResponse,
+    ControlledDatasetsResponse,
+    ControlledFilesResponse,
+    CoverageResponse,
+    DatasetDetailResponse,
+    DatasetSearchResponse,
+    DatasetVersionsResponse,
+    DicomAnnotationsResponse,
+    DownloadsResponse,
+    LinkIssuesResponse,
+    ParticipantDetailResponse,
+    ParticipantsResponse,
+    V1ReleasesResponse,
+)
+from mcp_server.tcia_query_mcp.service import (
+    InvalidRequestError,
+    NotFoundError,
+    REQUIRED_PUBLIC_QUERY_OBJECTS,
+    ServiceUnavailableError,
+    TciaQueryService,
+)
 
 
 def q(value):
@@ -90,7 +119,7 @@ def create_base_snapshot(path: Path) -> None:
             );
             """
         )
-        conn.execute("INSERT INTO snapshot_meta VALUES (?, ?)", ("schema_version", q("test")))
+        conn.execute("INSERT INTO snapshot_meta VALUES (?, ?)", ("schema_version", q(19)))
         dataset = (
             "collections",
             "Collection",
@@ -144,6 +173,18 @@ def create_base_snapshot(path: Path) -> None:
             )
             """,
             dataset,
+        )
+        conn.execute(
+            "INSERT INTO agent_dataset_access_summary "
+            "SELECT * FROM agent_dataset_access_summary WHERE short_title='TCGA-BRCA'"
+        )
+        conn.execute(
+            "UPDATE agent_dataset_access_summary SET short_title='AAPM-RT-MAC', "
+            "title='Controlled RT collection', id='2', slug='aapm-rt-mac', "
+            "resolved_access_level='controlled', access_level='controlled', controlled_access=1, "
+            "has_external_clinical_resource=0, external_resources='[]', "
+            "external_resource_labels='[]' "
+            "WHERE rowid=(SELECT max(rowid) FROM agent_dataset_access_summary)"
         )
         conn.execute(
             """
@@ -205,6 +246,7 @@ def create_controlled_db(path: Path) -> None:
         conn.executescript(
             """
             CREATE TABLE controlled_meta (key TEXT PRIMARY KEY, value TEXT);
+            INSERT INTO controlled_meta VALUES ('schema_version', '5');
             CREATE TABLE agent_controlled_dataset_summary (
                 short_title TEXT, dataset_type TEXT, title TEXT
             );
@@ -660,35 +702,50 @@ class TciaQueryServiceTests(unittest.TestCase):
         create_clinical_db(self.clinical)
         create_participant_db(self.participants)
         create_public_non_dicom_db(self.public_non_dicom)
+        installed_assets = [
+            "tcia_snapshot.sqlite.gz",
+            "participant_inventory.sqlite.gz",
+            "public_non_dicom_metadata.sqlite.gz",
+            "controlled_access_metadata.sqlite.gz",
+            "clinical_metadata.sqlite.gz",
+        ]
+        components = {
+            name: {
+                "database_asset": asset,
+                "schema_version": schema,
+                "sqlite_sha256": character * 64,
+            }
+            for name, asset, schema, character in (
+                ("snapshot", "tcia_snapshot.sqlite.gz", 19, "a"),
+                ("participant_inventory", "participant_inventory.sqlite.gz", 6, "b"),
+                ("public_non_dicom", "public_non_dicom_metadata.sqlite.gz", 7, "c"),
+                ("controlled_access", "controlled_access_metadata.sqlite.gz", 5, "d"),
+                ("clinical", "clinical_metadata.sqlite.gz", 13, "e"),
+            )
+        }
         self.bundle_manifest.write_text(json.dumps({
             "artifact": "tcia_metadata_v2_bundle",
             "schema_version": 2,
             "release_channel": "stable",
             "release_tag": "tcia-metadata-v2-latest",
-            "release_fingerprint": "test-fingerprint",
+            "release_fingerprint": "f" * 64,
             "producer": {"commit": "test"},
-            "components": {},
+            "assets": {
+                asset: {"sha256": "0" * 64, "bytes": 1}
+                for asset in installed_assets
+            },
+            "components": components,
             "profiles": {
                 "research_detail": {
-                    "assets": [
-                        "tcia_snapshot.sqlite.gz",
-                        "participant_inventory.sqlite.gz",
-                        "public_non_dicom_metadata.sqlite.gz",
-                        "controlled_access_metadata.sqlite.gz",
-                        "clinical_metadata.sqlite.gz",
-                    ]
+                    "assets": installed_assets,
                 }
             },
         }))
         self.bundle_install_state.write_text(json.dumps({
+            "artifact": "tcia_metadata_v2_install",
+            "release_fingerprint": "f" * 64,
             "installed_profile": "research_detail",
-            "installed_assets": [
-                "tcia_snapshot.sqlite.gz",
-                "participant_inventory.sqlite.gz",
-                "public_non_dicom_metadata.sqlite.gz",
-                "controlled_access_metadata.sqlite.gz",
-                "clinical_metadata.sqlite.gz",
-            ],
+            "installed_assets": installed_assets,
         }))
         self.service = TciaQueryService(
             snapshot_db=self.snapshot,
@@ -762,7 +819,7 @@ class TciaQueryServiceTests(unittest.TestCase):
         ):
             setattr(self.service, name, lambda: self.fail("bundle_info opened SQLite"))
         info = self.service.bundle_info()
-        self.assertEqual(info["v2_bundle"]["release_fingerprint"], "test-fingerprint")
+        self.assertEqual(info["v2_bundle"]["release_fingerprint"], "f" * 64)
         self.assertTrue(info["v2_capabilities"]["participant_search"])
         self.assertTrue(info["v2_capabilities"]["public_non_dicom_detail"])
         self.assertNotIn("participant_counts", info)
@@ -811,14 +868,23 @@ class TciaQueryServiceTests(unittest.TestCase):
                 "UPDATE agent_dataset_access_summary SET short_title='ZZZ-TEST', title='Second' "
                 "WHERE rowid=(SELECT max(rowid) FROM agent_dataset_access_summary)"
             )
-        first = self.service.search_datasets(limit=1)
+        search_filters = {"short_titles": ["TCGA-BRCA", "ZZZ-TEST"], "limit": 1}
+        first = self.service.search_datasets(**search_filters)
         self.assertTrue(first["has_more"])
         self.assertTrue(first["truncated"])
-        second = self.service.search_datasets(limit=1, cursor=first["next_cursor"])
+        second = self.service.search_datasets(
+            **search_filters, cursor=first["next_cursor"]
+        )
         self.assertEqual(second["datasets"][0]["short_title"], "ZZZ-TEST")
         self.assertFalse(second["has_more"])
         with self.assertRaises(InvalidRequestError):
             self.service.search_datasets(query="different", limit=1, cursor=first["next_cursor"])
+        with self.assertRaises(InvalidRequestError):
+            self.service.search_datasets(
+                short_titles=search_filters["short_titles"],
+                limit=2,
+                cursor=first["next_cursor"],
+            )
 
     def test_limit_validation_does_not_silently_clamp(self) -> None:
         for invalid in (0, 201, "many"):
@@ -840,14 +906,149 @@ class TciaQueryServiceTests(unittest.TestCase):
     def test_readiness_is_cheap_and_artifact_aware(self) -> None:
         readiness = self.service.readiness_info()
         self.assertEqual(readiness["status"], "ready")
-        self.assertEqual(readiness["release_fingerprint"], "test-fingerprint")
+        self.assertEqual(readiness["release_fingerprint"], "f" * 64)
+        with patch.object(
+            self.service, "_connect_participants",
+            side_effect=AssertionError("cached readiness reopened SQLite"),
+        ):
+            self.assertEqual(self.service.readiness_info(), readiness)
+
+    def test_readiness_rejects_malformed_and_incoherent_install_state(self) -> None:
+        manifest_text = self.bundle_manifest.read_text()
+        receipt_text = self.bundle_install_state.read_text()
+        schema_mismatch = json.loads(manifest_text)
+        schema_mismatch["components"]["snapshot"]["schema_version"] = 999
+        mutations = (
+            (self.bundle_manifest, "{bad"),
+            (self.bundle_install_state, "{bad"),
+            (
+                self.bundle_manifest,
+                json.dumps({**json.loads(manifest_text), "release_fingerprint": ""}),
+            ),
+            (
+                self.bundle_install_state,
+                json.dumps({**json.loads(receipt_text), "release_fingerprint": "x" * 64}),
+            ),
+            (
+                self.bundle_install_state,
+                json.dumps({**json.loads(receipt_text), "installed_profile": "unknown"}),
+            ),
+            (
+                self.bundle_manifest,
+                json.dumps({**json.loads(manifest_text), "components": {}}),
+            ),
+            (self.bundle_manifest, json.dumps(schema_mismatch)),
+        )
+        for path, payload in mutations:
+            with self.subTest(payload=payload[:40]):
+                self.bundle_manifest.write_text(manifest_text)
+                self.bundle_install_state.write_text(receipt_text)
+                path.write_text(payload)
+                self.service._readiness_cache = None
+                with self.assertRaises(ServiceUnavailableError):
+                    self.service.readiness_info()
+        self.bundle_manifest.write_text(manifest_text)
+        self.bundle_install_state.write_text(receipt_text)
+
+    def test_readiness_inventory_covers_clinical_only_subject_query(self) -> None:
+        self.assertIn(
+            "agent_clinical_all_subjects",
+            REQUIRED_PUBLIC_QUERY_OBJECTS["clinical_metadata.sqlite.gz"],
+        )
+        with connect(self.clinical) as conn:
+            conn.execute("DROP TABLE agent_clinical_all_subjects")
+        self.service._readiness_cache = None
+        with self.assertRaisesRegex(
+            ServiceUnavailableError, "agent_clinical_all_subjects"
+        ):
+            self.service.readiness_info()
+
+    def test_readiness_rejects_component_dataset_mismatch(self) -> None:
+        with connect(self.public_non_dicom) as conn:
+            conn.execute(
+                "INSERT INTO agent_public_non_dicom_assets "
+                "SELECT * FROM agent_public_non_dicom_assets WHERE asset_id='pnd-1'"
+            )
+            conn.execute(
+                "UPDATE agent_public_non_dicom_assets SET asset_id='hidden-asset', "
+                "short_title='HIDDEN' WHERE rowid=(SELECT max(rowid) FROM agent_public_non_dicom_assets)"
+            )
+        self.service._readiness_cache = None
+        with self.assertRaisesRegex(ServiceUnavailableError, "absent from the visible"):
+            self.service.readiness_info()
+        with patch.object(
+            self.service, "_connect_public_non_dicom",
+            side_effect=AssertionError("cached failure reopened SQLite"),
+        ), self.assertRaisesRegex(ServiceUnavailableError, "absent from the visible"):
+            self.service.readiness_info()
+
+    def test_cursor_rejects_install_identity_change(self) -> None:
+        first = self.service.search_datasets(limit=1)
+        manifest = json.loads(self.bundle_manifest.read_text())
+        receipt = json.loads(self.bundle_install_state.read_text())
+        manifest["release_fingerprint"] = "9" * 64
+        receipt["release_fingerprint"] = "9" * 64
+        self.bundle_manifest.write_text(json.dumps(manifest))
+        self.bundle_install_state.write_text(json.dumps(receipt))
+        with self.assertRaisesRegex(InvalidRequestError, "does not match"):
+            self.service.search_datasets(limit=1, cursor=first["next_cursor"])
+
+    def test_cursor_rejects_same_declared_identity_file_mutations(self) -> None:
+        first = self.service.search_datasets(limit=1)
+        with connect(self.snapshot) as conn:
+            conn.execute(
+                "INSERT INTO agent_dataset_access_summary "
+                "SELECT * FROM agent_dataset_access_summary WHERE short_title='TCGA-BRCA'"
+            )
+            conn.execute(
+                "UPDATE agent_dataset_access_summary SET id='inserted', "
+                "short_title='000-FIRST', title='Inserted first' "
+                "WHERE rowid=(SELECT max(rowid) FROM agent_dataset_access_summary)"
+            )
+        with self.assertRaisesRegex(InvalidRequestError, "does not match"):
+            self.service.search_datasets(limit=1, cursor=first["next_cursor"])
+
+        after_insert = self.service.search_datasets(limit=1)
+        with connect(self.snapshot) as conn:
+            conn.execute(
+                "DELETE FROM agent_dataset_access_summary WHERE id='inserted'"
+            )
+        with self.assertRaisesRegex(InvalidRequestError, "does not match"):
+            self.service.search_datasets(limit=1, cursor=after_insert["next_cursor"])
+
+        before_reorder = self.service.search_datasets(limit=1)
+        with connect(self.snapshot) as conn:
+            conn.execute(
+                "UPDATE agent_dataset_access_summary SET short_title='000-REORDERED' "
+                "WHERE short_title='TCGA-BRCA'"
+            )
+        with self.assertRaisesRegex(InvalidRequestError, "does not match"):
+            self.service.search_datasets(limit=1, cursor=before_reorder["next_cursor"])
 
     def test_release_history_tools(self) -> None:
         versions = self.service.get_dataset_versions("TCGA-BRCA")
         self.assertTrue(versions["available"])
         self.assertEqual(versions["versions"][0]["version_number"], "1")
-        releases = self.service.get_dataset_v1_releases(released_since="2025-01-01")
-        self.assertEqual(releases["v1_releases"][0]["v1_release_date"], "2025-05-01")
+        with connect(self.snapshot) as conn:
+            conn.execute(
+                "INSERT INTO agent_dataset_v1_releases "
+                "SELECT * FROM agent_dataset_v1_releases"
+            )
+            conn.execute(
+                "UPDATE agent_dataset_v1_releases SET id='2', version_id='202', "
+                "v1_release_date='2026-05-01' "
+                "WHERE rowid=(SELECT max(rowid) FROM agent_dataset_v1_releases)"
+            )
+        releases = self.service.get_dataset_v1_releases(
+            released_since="2025-01-01", limit=1
+        )
+        self.assertEqual(releases["v1_releases"][0]["v1_release_date"], "2026-05-01")
+        self.assertTrue(releases["has_more"])
+        second = self.service.get_dataset_v1_releases(
+            released_since="2025-01-01", limit=1, cursor=releases["next_cursor"]
+        )
+        self.assertEqual(second["v1_releases"][0]["v1_release_date"], "2025-05-01")
+        self.assertIn("newest-first", releases["note"])
 
     def test_controlled_access_sidecar_query(self) -> None:
         result = self.service.get_controlled_access_files(
@@ -1101,6 +1302,194 @@ class TciaQueryServiceTests(unittest.TestCase):
         )
         self.assertEqual(result["count"], 1)
         self.assertEqual(result["downloads"][0]["download_id"], "download-1")
+
+    def test_annotation_matching_uses_exact_labels_and_bounded_text(self) -> None:
+        with connect(self.snapshot) as conn:
+            for row_id, title, download_types, data_types in (
+                ("unlabeled", "Unlabeled DICOM images", '["Radiology Images"]', '["CT"]'),
+                ("srs", "SRS imaging package", '["Radiology Images"]', '["MR"]'),
+                ("measurement", "Lesion measurements", '["Radiology Images"]', '["MR"]'),
+            ):
+                conn.execute(
+                    "INSERT INTO agent_current_downloads "
+                    "SELECT * FROM agent_current_downloads WHERE short_title='TCGA-BRCA' LIMIT 1"
+                )
+                conn.execute(
+                    "UPDATE agent_current_downloads SET download_row_id=?, download_id=?, "
+                    "download_title=?, description=?, download_types=?, data_types=?, "
+                    "file_types='[\"DICOM\"]' WHERE rowid=(SELECT max(rowid) FROM agent_current_downloads)",
+                    (row_id, row_id, title, title, download_types, data_types),
+                )
+        result = self.service.get_current_downloads(
+            "TCGA-BRCA", requires_annotations=True, limit=25
+        )
+        ids = {row["download_id"] for row in result["downloads"]}
+        self.assertIn("download-1", ids)
+        self.assertIn("measurement", ids)
+        self.assertNotIn("unlabeled", ids)
+        self.assertNotIn("srs", ids)
+
+    def test_detail_surfaces_intersect_visible_wordpress_datasets(self) -> None:
+        with connect(self.snapshot) as conn:
+            conn.execute(
+                "INSERT INTO agent_current_downloads "
+                "SELECT * FROM agent_current_downloads WHERE short_title='TCGA-BRCA'"
+            )
+            conn.execute(
+                "UPDATE agent_current_downloads SET download_row_id='wrong-type', "
+                "download_id='wrong-type', dataset_type='Analysis Result' "
+                "WHERE rowid=(SELECT max(rowid) FROM agent_current_downloads)"
+            )
+        self.assertNotIn(
+            "wrong-type",
+            {row["download_id"] for row in self.service.get_dataset("TCGA-BRCA")["current_downloads"]},
+        )
+        self.assertNotIn(
+            "wrong-type",
+            {row["download_id"] for row in self.service.get_current_downloads("TCGA-BRCA")["downloads"]},
+        )
+
+        with connect(self.public_non_dicom) as conn:
+            conn.execute(
+                "INSERT INTO agent_public_non_dicom_assets "
+                "SELECT * FROM agent_public_non_dicom_assets WHERE asset_id='pnd-1'"
+            )
+            conn.execute(
+                "UPDATE agent_public_non_dicom_assets SET asset_id='unknown-public', "
+                "short_title='UNKNOWN' WHERE rowid=(SELECT max(rowid) FROM agent_public_non_dicom_assets)"
+            )
+            conn.execute(
+                "INSERT INTO agent_public_non_dicom_assets "
+                "SELECT * FROM agent_public_non_dicom_assets WHERE asset_id='pnd-1'"
+            )
+            conn.execute(
+                "UPDATE agent_public_non_dicom_assets SET asset_id='wrong-type-public', "
+                "dataset_type='Analysis Result' "
+                "WHERE rowid=(SELECT max(rowid) FROM agent_public_non_dicom_assets)"
+            )
+        self.assertEqual(
+            self.service.find_public_non_dicom_assets(short_titles=["UNKNOWN"])["count"], 0
+        )
+        self.assertNotIn(
+            "wrong-type-public",
+            {row["asset_id"] for row in self.service.find_public_non_dicom_assets()["assets"]},
+        )
+
+        with connect(self.participants) as conn:
+            conn.execute(
+                "INSERT INTO participants VALUES "
+                "('unknown-participant','Collection','UNKNOWN','U-1','dataset_scoped',"
+                "'resolved','source_identifier','not_asserted')"
+            )
+            conn.execute(
+                "INSERT INTO agent_participant_search SELECT * FROM agent_participant_search LIMIT 1"
+            )
+            conn.execute(
+                "UPDATE agent_participant_search SET participant_key='unknown-participant', "
+                "short_title='UNKNOWN', display_participant_id='U-1' "
+                "WHERE rowid=(SELECT max(rowid) FROM agent_participant_search)"
+            )
+            conn.execute(
+                "INSERT INTO agent_participant_assets SELECT * FROM agent_participant_assets LIMIT 1"
+            )
+            conn.execute(
+                "UPDATE agent_participant_assets SET participant_asset_id='unknown-asset', "
+                "short_title='UNKNOWN' WHERE rowid=(SELECT max(rowid) FROM agent_participant_assets)"
+            )
+            conn.execute(
+                "INSERT INTO agent_participant_assets SELECT * FROM agent_participant_assets LIMIT 1"
+            )
+            conn.execute(
+                "UPDATE agent_participant_assets SET participant_asset_id='wrong-type-asset', "
+                "dataset_type='Analysis Result', short_title='TCGA-BRCA' "
+                "WHERE rowid=(SELECT max(rowid) FROM agent_participant_assets)"
+            )
+        self.assertEqual(
+            self.service.search_participants(short_titles=["UNKNOWN"])["count"], 0
+        )
+        with self.assertRaises(NotFoundError):
+            self.service.get_participant(participant_key="unknown-participant")
+        visible_assets = self.service.get_participant_assets("participant-1")
+        self.assertNotIn(
+            "unknown-asset", {row["participant_asset_id"] for row in visible_assets["assets"]}
+        )
+        self.assertNotIn(
+            "wrong-type-asset", {row["participant_asset_id"] for row in visible_assets["assets"]}
+        )
+
+        with connect(self.clinical) as conn:
+            conn.execute(
+                "INSERT INTO agent_clinical_dataset_summary SELECT * FROM agent_clinical_dataset_summary"
+            )
+            conn.execute(
+                "UPDATE agent_clinical_dataset_summary SET short_title='UNKNOWN' "
+                "WHERE rowid=(SELECT max(rowid) FROM agent_clinical_dataset_summary)"
+            )
+        self.assertEqual(
+            self.service.find_clinical_datasets(short_titles=["UNKNOWN"])["count"], 0
+        )
+        with self.assertRaises(NotFoundError):
+            self.service.get_clinical_subjects("UNKNOWN")
+
+        with self.assertRaises(NotFoundError):
+            self.service.get_controlled_access_files("UNKNOWN")
+        with connect(self.controlled) as conn:
+            conn.execute(
+                "INSERT INTO agent_controlled_files SELECT * FROM agent_controlled_files"
+            )
+            conn.execute(
+                "UPDATE agent_controlled_files SET file_id='wrong-type-controlled', "
+                "dataset_type='Analysis Result' "
+                "WHERE rowid=(SELECT max(rowid) FROM agent_controlled_files)"
+            )
+        controlled = self.service.get_controlled_access_files("AAPM-RT-MAC")
+        self.assertNotIn(
+            "wrong-type-controlled", {row["file_id"] for row in controlled["files"]}
+        )
+
+    def test_real_fixture_payloads_validate_against_public_v2_models(self) -> None:
+        cases = (
+            (BundleResponse, self.service.bundle_info()),
+            (DatasetSearchResponse, self.service.search_datasets()),
+            (DatasetDetailResponse, self.service.get_dataset("TCGA-BRCA")),
+            (DownloadsResponse, self.service.get_current_downloads("TCGA-BRCA")),
+            (AccessSummaryResponse, self.service.summarize_access("TCGA-BRCA")),
+            (ParticipantsResponse, self.service.search_participants()),
+            (ParticipantDetailResponse, self.service.get_participant(participant_key="participant-1")),
+            (AssetsResponse, self.service.get_participant_assets("participant-1")),
+            (CoverageResponse, self.service.get_dataset_participant_coverage("TCGA-BRCA")),
+            (LinkIssuesResponse, self.service.find_participant_link_issues()),
+            (AssetsResponse, self.service.find_public_non_dicom_assets()),
+            (DatasetVersionsResponse, self.service.get_dataset_versions("TCGA-BRCA")),
+            (V1ReleasesResponse, self.service.get_dataset_v1_releases()),
+            (ControlledDatasetsResponse, self.service.find_controlled_access_datasets()),
+            (ControlledFilesResponse, self.service.get_controlled_access_files("AAPM-RT-MAC")),
+            (DicomAnnotationsResponse, self.service.find_dicom_annotations()),
+            (ClinicalDatasetsResponse, self.service.find_clinical_datasets()),
+            (ClinicalSubjectsResponse, self.service.get_clinical_subjects("TCGA-BRCA")),
+            (ClinicalFactsResponse, self.service.get_clinical_facts("TCGA-BRCA")),
+            (ClinicalConflictsResponse, self.service.get_clinical_conflicts("TCGA-BRCA")),
+        )
+        for model, payload in cases:
+            with self.subTest(model=model.__name__):
+                model.model_validate(payload)
+
+    def test_public_models_reject_unknown_and_malformed_fields(self) -> None:
+        search = self.service.search_datasets()
+        with self.assertRaises(ValidationError):
+            DatasetSearchResponse.model_validate({**search, "unexpected": True})
+        with self.assertRaises(ValidationError):
+            DatasetSearchResponse.model_validate(
+                {**search, "datasets": [{**search["datasets"][0], "unexpected": True}]}
+            )
+
+        controlled = self.service.get_controlled_access_files("AAPM-RT-MAC")
+        with self.assertRaises(ValidationError):
+            ControlledFilesResponse.model_validate(
+                {**controlled, "files": [{**controlled["files"][0], "anything": True}]}
+            )
+        with self.assertRaises(ValidationError):
+            ControlledFilesResponse.model_validate({**controlled, "count": "1"})
 
 
 if __name__ == "__main__":

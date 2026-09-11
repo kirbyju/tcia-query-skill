@@ -39,6 +39,11 @@ ANNOTATION_LABELS = {
     "labels",
     "radiotherapy structure set",
 }
+ANNOTATION_FREE_TEXT_PATTERN = re.compile(
+    r"\b(?:image\s+annotations?|radiotherapy\s+structure\s+sets?|rtstruct|"
+    r"segmentations?|classifications?|measurements?|fiducials?|labels?|seg|sr)\b",
+    re.IGNORECASE,
+)
 NON_DICOM_ANNOTATION_ROLES = {
     "annotation",
     "annotation_snapshot",
@@ -47,6 +52,41 @@ NON_DICOM_ANNOTATION_ROLES = {
 DEFAULT_LIMIT = 25
 MAX_LIMIT = 200
 V2_RELEASE_TAG = "tcia-metadata-v2-latest"
+REQUIRED_PUBLIC_QUERY_OBJECTS = {
+    "tcia_snapshot.sqlite.gz": (
+        "agent_dataset_access_summary",
+        "agent_current_downloads",
+        "agent_dataset_versions",
+        "agent_dataset_v1_releases",
+    ),
+    "participant_inventory.sqlite.gz": (
+        "participants",
+        "participant_identifiers",
+        "participant_assets",
+        "agent_participant_search",
+        "agent_participant_identifiers",
+        "agent_participant_assets",
+        "agent_dataset_assets_without_participant_crosswalk",
+        "agent_participant_link_issues",
+        "participant_inventory_sources",
+    ),
+    "controlled_access_metadata.sqlite.gz": (
+        "agent_controlled_dataset_summary",
+        "agent_controlled_files",
+    ),
+    "clinical_metadata.sqlite.gz": (
+        "agent_clinical_dataset_summary",
+        "agent_clinical_subjects",
+        "agent_clinical_all_subjects",
+        "agent_clinical_facts",
+        "agent_clinical_conflicts",
+    ),
+    "public_non_dicom_metadata.sqlite.gz": (
+        "agent_public_non_dicom_assets",
+        "agent_public_non_dicom_asset_participants",
+        "agent_public_non_dicom_review_issues",
+    ),
+}
 
 
 class TciaServiceError(RuntimeError):
@@ -165,7 +205,7 @@ def pagination_filters(filters: dict[str, Any]) -> dict[str, Any]:
     return {
         key: value
         for key, value in filters.items()
-        if key not in {"cursor", "limit"} and value not in (None, "", [], ())
+        if key != "cursor" and value not in (None, "", [], ())
     }
 
 
@@ -807,6 +847,9 @@ class TciaQueryService:
             or v2_root / "tcia_metadata_v2_bundle_manifest.json"
         )
         self.v2_install_state = self.bundle_manifest.with_name("tcia_metadata_v2_install.json")
+        self._readiness_cache: tuple[
+            tuple[tuple[str, int, int, int, int, int], ...], dict[str, Any] | str
+        ] | None = None
 
     def _connect_snapshot(self) -> sqlite3.Connection:
         if not self.snapshot_db.exists():
@@ -912,6 +955,196 @@ class TciaQueryService:
                 output[row["key"]] = row["value"]
         return output
 
+    def _read_json_object(self, path: Path, label: str) -> dict[str, Any]:
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ServiceUnavailableError(f"{label} is unreadable or malformed: {exc}") from None
+        if not isinstance(payload, dict):
+            raise ServiceUnavailableError(f"{label} must contain a JSON object")
+        return payload
+
+    def _installed_contract(self) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Validate the cheap manifest/receipt identity and profile contract."""
+        if not self.bundle_manifest.is_file() or not self.v2_install_state.is_file():
+            missing = []
+            if not self.bundle_manifest.is_file():
+                missing.append("bundle manifest")
+            if not self.v2_install_state.is_file():
+                missing.append("install receipt")
+            raise ServiceUnavailableError("Required V2 install metadata is unavailable: " + ", ".join(missing))
+        manifest = self._read_json_object(self.bundle_manifest, "V2 bundle manifest")
+        receipt = self._read_json_object(self.v2_install_state, "V2 install receipt")
+        errors: list[str] = []
+        if manifest.get("artifact") != "tcia_metadata_v2_bundle":
+            errors.append("unexpected manifest artifact")
+        schema_version = manifest.get("schema_version")
+        if not isinstance(schema_version, int) or isinstance(schema_version, bool) or schema_version not in {2, 3}:
+            errors.append("unsupported manifest schema_version")
+        fingerprint = manifest.get("release_fingerprint")
+        if not isinstance(fingerprint, str) or not fingerprint.strip():
+            errors.append("manifest release_fingerprint is missing")
+        if receipt.get("artifact") != "tcia_metadata_v2_install":
+            errors.append("unexpected install receipt artifact")
+        if receipt.get("release_fingerprint") != fingerprint:
+            errors.append("manifest and install receipt release_fingerprint differ")
+        profiles = manifest.get("profiles")
+        components = manifest.get("components")
+        assets = manifest.get("assets")
+        if not isinstance(profiles, dict) or not profiles:
+            errors.append("manifest profiles are missing")
+            profiles = {}
+        if not isinstance(components, dict) or not components:
+            errors.append("manifest components are missing")
+            components = {}
+        if not isinstance(assets, dict) or not assets:
+            errors.append("manifest assets are missing")
+            assets = {}
+        profile = receipt.get("installed_profile")
+        installed_assets = receipt.get("installed_assets")
+        if not isinstance(profile, str) or profile not in profiles:
+            errors.append("receipt installed_profile is not declared by the manifest")
+            expected_assets: list[str] = []
+        else:
+            expected_assets = (profiles.get(profile) or {}).get("assets") or []
+            if not isinstance(expected_assets, list) or not all(isinstance(item, str) for item in expected_assets):
+                errors.append("installed profile assets are malformed")
+                expected_assets = []
+        if not isinstance(installed_assets, list) or not all(isinstance(item, str) for item in installed_assets):
+            errors.append("receipt installed_assets are malformed")
+            installed_assets = []
+        elif installed_assets != expected_assets:
+            errors.append("receipt installed_assets do not match the installed profile")
+        for name in installed_assets:
+            details = assets.get(name)
+            if not isinstance(details, dict) or not details.get("sha256") or not isinstance(details.get("bytes"), int):
+                errors.append(f"installed asset metadata is incomplete: {name}")
+        component_assets: set[str] = set()
+        for name, details in components.items():
+            if not isinstance(details, dict):
+                errors.append(f"component metadata is malformed: {name}")
+                continue
+            database_asset = details.get("database_asset")
+            if not isinstance(database_asset, str) or database_asset not in assets:
+                errors.append(f"component database asset is undeclared: {name}")
+                continue
+            component_assets.add(database_asset)
+            if database_asset in installed_assets:
+                if not details.get("sqlite_sha256"):
+                    errors.append(f"installed component has no sqlite_sha256: {name}")
+                if not isinstance(details.get("schema_version"), (str, int)):
+                    errors.append(f"installed component has no schema_version: {name}")
+        for required in ("tcia_snapshot.sqlite.gz", "participant_inventory.sqlite.gz"):
+            if required not in installed_assets:
+                errors.append(f"required research_core asset is not installed: {required}")
+            if required not in component_assets:
+                errors.append(f"required research_core component is not declared: {required}")
+        if errors:
+            raise ServiceUnavailableError("Invalid V2 install contract: " + "; ".join(errors))
+        return manifest, receipt
+
+    def _component_identity(self, database_asset: str) -> str:
+        manifest, receipt = self._installed_contract()
+        if database_asset not in (receipt.get("installed_assets") or []):
+            raise ServiceUnavailableError(f"Required V2 component is not installed: {database_asset}")
+        component = next(
+            (
+                details for details in (manifest.get("components") or {}).values()
+                if isinstance(details, dict) and details.get("database_asset") == database_asset
+            ),
+            None,
+        )
+        if component is None:
+            raise ServiceUnavailableError(f"Required V2 component is not declared: {database_asset}")
+        component_path = self._component_paths().get(database_asset)
+        if component_path is None or not component_path.is_file():
+            raise ServiceUnavailableError(f"Required V2 component is unavailable: {database_asset}")
+        generation = self._file_generation(component_path)
+        return ":".join(
+            (
+                str(manifest["release_fingerprint"]),
+                database_asset,
+                str(component.get("sqlite_sha256") or ""),
+                *(str(value) for value in generation),
+            )
+        )
+
+    def _component_paths(self) -> dict[str, Path]:
+        return {
+            "tcia_snapshot.sqlite.gz": self.snapshot_db,
+            "participant_inventory.sqlite.gz": self.participant_db,
+            "controlled_access_metadata.sqlite.gz": self.controlled_db,
+            "clinical_metadata.sqlite.gz": self.clinical_db,
+            "public_non_dicom_metadata.sqlite.gz": self.public_non_dicom_db,
+        }
+
+    @staticmethod
+    def _file_generation(path: Path) -> tuple[int, int, int, int, int]:
+        stat = path.stat()
+        return (
+            stat.st_dev,
+            stat.st_ino,
+            stat.st_size,
+            stat.st_mtime_ns,
+            stat.st_ctime_ns,
+        )
+
+    def _cursor_filters(self, filters: dict[str, Any], database_asset: str) -> dict[str, Any]:
+        return {
+            **pagination_filters(filters),
+            "_component_identity": self._component_identity(database_asset),
+        }
+
+    def _visible_dataset_keys(self) -> set[tuple[str, str]]:
+        with self._connect_snapshot() as conn:
+            return {
+                (str(row[0]).strip().casefold(), str(row[1]).strip().casefold())
+                for row in conn.execute(
+                    "SELECT DISTINCT dataset_type, short_title "
+                    "FROM agent_dataset_access_summary WHERE hidden = 0"
+                )
+                if row[0] and row[1]
+            }
+
+    @staticmethod
+    def _visible_pair_sql(
+        keys: set[tuple[str, str]], *, alias: str = ""
+    ) -> tuple[str, list[str]]:
+        prefix = f"{alias}." if alias else ""
+        if not keys:
+            return "0 = 1", []
+        grouped: dict[str, list[str]] = {}
+        for dataset_type, short_title in sorted(keys):
+            grouped.setdefault(dataset_type, []).append(short_title)
+        clauses: list[str] = []
+        params: list[str] = []
+        for dataset_type, titles in grouped.items():
+            clauses.append(
+                f"(lower({prefix}dataset_type) = ? AND lower({prefix}short_title) "
+                f"IN ({','.join('?' for _ in titles)}))"
+            )
+            params.extend([dataset_type, *titles])
+        return "(" + " OR ".join(clauses) + ")", params
+
+    def _visible_types_for_title(self, short_title: str) -> list[str]:
+        title = short_title.strip().casefold()
+        return sorted(dataset_type for dataset_type, candidate in self._visible_dataset_keys() if candidate == title)
+
+    def _require_visible_dataset(
+        self, short_title: str, dataset_type: str | None = None
+    ) -> list[str]:
+        types = self._visible_types_for_title(short_title)
+        if dataset_type:
+            requested = dataset_type.strip().casefold()
+            if (requested, short_title.strip().casefold()) not in self._visible_dataset_keys():
+                raise NotFoundError(
+                    f"No visible TCIA dataset found for dataset_type={dataset_type!r}, short_title={short_title!r}"
+                )
+            return [requested]
+        if not types:
+            raise NotFoundError(f"No visible TCIA dataset found for short_title={short_title!r}")
+        return types
+
     def bundle_info(self) -> dict[str, Any]:
         """Return the installed V2 contract without scanning SQLite payloads."""
         info: dict[str, Any] = {
@@ -970,42 +1203,146 @@ class TciaQueryService:
         return info
 
     def readiness_info(self) -> dict[str, Any]:
-        """Perform cheap artifact-aware readiness checks without counting rows."""
+        """Validate installed identity and query surfaces, cached until a file changes."""
+        manifest, receipt = self._installed_contract()
+        installed_assets = set(receipt["installed_assets"])
+        component_paths = self._component_paths()
+        active_paths = [self.bundle_manifest, self.v2_install_state]
         missing: list[str] = []
-        if not self.bundle_manifest.is_file():
-            missing.append("bundle_manifest")
-        if not self.snapshot_db.is_file():
-            missing.append("base_snapshot")
-        if not self.participant_db.is_file():
-            missing.append("participant_inventory")
+        for asset, path in component_paths.items():
+            if asset in installed_assets:
+                active_paths.append(path)
+                if not path.is_file():
+                    missing.append(asset)
+                expected_path = self.bundle_manifest.parent / asset.removesuffix(".gz")
+                if path.resolve() != expected_path.resolve():
+                    missing.append(f"{asset}:configured path is outside the installed bundle")
         if missing:
-            raise ServiceUnavailableError(
-                "Required V2 artifacts are unavailable: " + ", ".join(missing)
-            )
+            raise ServiceUnavailableError("Installed V2 artifacts are unavailable: " + ", ".join(missing))
+        signature = tuple(
+            (str(path), *self._file_generation(path)) for path in active_paths
+        )
+        if self._readiness_cache and self._readiness_cache[0] == signature:
+            cached = self._readiness_cache[1]
+            if isinstance(cached, str):
+                raise ServiceUnavailableError(cached)
+            return dict(cached)
+
+        required_objects = REQUIRED_PUBLIC_QUERY_OBJECTS
         try:
             with self._connect_snapshot() as conn:
-                if not self._object_exists(conn, "agent_dataset_access_summary"):
-                    missing.append("agent_dataset_access_summary")
-            with self._connect_participants() as conn:
-                if not (
-                    self._object_exists(conn, "participants")
-                    or self._object_exists(conn, "agent_participant_search")
-                ):
-                    missing.append("participant_search")
+                for name in required_objects["tcia_snapshot.sqlite.gz"]:
+                    if not self._object_exists(conn, name):
+                        missing.append(f"snapshot:{name}")
+                snapshot_component = next(
+                    details for details in manifest["components"].values()
+                    if details.get("database_asset") == "tcia_snapshot.sqlite.gz"
+                )
+                snapshot_schema = self._read_meta_table(conn, "snapshot_meta").get("schema_version")
+                if snapshot_schema is None:
+                    missing.append("tcia_snapshot.sqlite.gz:schema_version metadata")
+                elif str(snapshot_schema) != str(snapshot_component.get("schema_version")):
+                    missing.append(
+                        "tcia_snapshot.sqlite.gz:schema_version "
+                        f"{snapshot_schema!r} does not match manifest "
+                        f"{snapshot_component.get('schema_version')!r}"
+                    )
+            connectors = {
+                "participant_inventory.sqlite.gz": self._connect_participants,
+                "controlled_access_metadata.sqlite.gz": self._connect_controlled,
+                "clinical_metadata.sqlite.gz": self._connect_clinical,
+                "public_non_dicom_metadata.sqlite.gz": self._connect_public_non_dicom,
+            }
+            meta_tables = {
+                "participant_inventory.sqlite.gz": "participant_inventory_meta",
+                "controlled_access_metadata.sqlite.gz": "controlled_meta",
+                "clinical_metadata.sqlite.gz": "clinical_meta",
+                "public_non_dicom_metadata.sqlite.gz": "artifact_meta",
+            }
+            for asset, connector in connectors.items():
+                if asset not in installed_assets:
+                    continue
+                with connector() as conn:
+                    for name in required_objects[asset]:
+                        if not self._object_exists(conn, name):
+                            missing.append(f"{asset}:{name}")
+                    component = next(
+                        details for details in manifest["components"].values()
+                        if details.get("database_asset") == asset
+                    )
+                    metadata = self._read_meta_table(conn, meta_tables[asset])
+                    actual_schema = metadata.get("schema_version")
+                    if actual_schema is None:
+                        missing.append(f"{asset}:schema_version metadata")
+                    elif str(actual_schema) != str(component.get("schema_version")):
+                        missing.append(
+                            f"{asset}:schema_version {actual_schema!r} does not match "
+                            f"manifest {component.get('schema_version')!r}"
+                        )
         except sqlite3.Error as exc:
             raise ServiceUnavailableError(f"A required SQLite artifact is not queryable: {exc}") from None
         if missing:
-            raise ServiceUnavailableError(
-                "Required V2 query surfaces are unavailable: " + ", ".join(missing)
+            message = "Required V2 query surfaces are unavailable: " + ", ".join(missing)
+            self._readiness_cache = (signature, message)
+            raise ServiceUnavailableError(message)
+
+        visible = self._visible_dataset_keys()
+        mismatches: list[str] = []
+
+        def check_pairs(asset: str, connector: Any, tables: tuple[str, ...]) -> None:
+            if asset not in installed_assets:
+                return
+            with connector() as conn:
+                for table in tables:
+                    rows = conn.execute(
+                        f"SELECT DISTINCT dataset_type, short_title FROM {table}"
+                    )
+                    for dataset_type, short_title in rows:
+                        key = (str(dataset_type or "").strip().casefold(), str(short_title or "").strip().casefold())
+                        if key not in visible and len(mismatches) < 10:
+                            mismatches.append(f"{asset}:{table}:{dataset_type}/{short_title}")
+
+        check_pairs(
+            "participant_inventory.sqlite.gz", self._connect_participants,
+            ("participants",),
+        )
+        check_pairs(
+            "controlled_access_metadata.sqlite.gz", self._connect_controlled,
+            ("agent_controlled_dataset_summary",),
+        )
+        check_pairs(
+            "public_non_dicom_metadata.sqlite.gz", self._connect_public_non_dicom,
+            ("agent_public_non_dicom_assets",),
+        )
+        if "clinical_metadata.sqlite.gz" in installed_assets:
+            visible_title_types: dict[str, set[str]] = {}
+            for dataset_type, title in visible:
+                visible_title_types.setdefault(title, set()).add(dataset_type)
+            with self._connect_clinical() as conn:
+                for table in ("agent_clinical_dataset_summary",):
+                    for (short_title,) in conn.execute(
+                        f"SELECT DISTINCT short_title FROM {table}"
+                    ):
+                        title = str(short_title or "").strip().casefold()
+                        if len(visible_title_types.get(title, set())) != 1 and len(mismatches) < 10:
+                            mismatches.append(f"clinical_metadata.sqlite.gz:{table}:{short_title}")
+        if mismatches:
+            message = (
+                "Installed V2 components contain datasets absent from the visible WordPress snapshot: "
+                + ", ".join(mismatches)
             )
-        bundle = self.bundle_info()
-        manifest = bundle.get("v2_bundle") or {}
-        return {
+            self._readiness_cache = (signature, message)
+            raise ServiceUnavailableError(message)
+
+        result = {
             "status": "ready",
-            "release_fingerprint": manifest.get("release_fingerprint"),
+            "release_fingerprint": manifest["release_fingerprint"],
             "release_tag": manifest.get("release_tag"),
-            "capabilities": bundle.get("v2_capabilities", {}),
+            "installed_profile": receipt["installed_profile"],
+            "capabilities": self.bundle_info().get("v2_capabilities", {}),
         }
+        self._readiness_cache = (signature, dict(result))
+        return result
 
     def snapshot_info(self) -> dict[str, Any]:
         info: dict[str, Any] = {
@@ -1184,7 +1521,7 @@ class TciaQueryService:
 
     def search_datasets(self, **filters: Any) -> dict[str, Any]:
         limit = coerce_limit(filters.get("limit"))
-        cursor_filters = pagination_filters(filters)
+        cursor_filters = self._cursor_filters(filters, "tcia_snapshot.sqlite.gz")
         offset = decode_cursor(filters.get("cursor"), cursor_filters)
         query = str(filters.get("query") or "").strip()
         dataset_type = str(filters.get("dataset_type") or "both").strip().lower()
@@ -1258,7 +1595,7 @@ class TciaQueryService:
                 sql += " AND COALESCE(has_external_clinical_resource, 0) = ?"
                 params.append(1 if is_truthy(has_external_clinical_resource) else 0)
 
-            sql += " ORDER BY lower(short_title), source LIMIT ? OFFSET ?"
+            sql += " ORDER BY lower(short_title), source, id LIMIT ? OFFSET ?"
             params.extend([limit + 1, offset])
             rows = [compact_dataset(row) for row in conn.execute(sql, params).fetchall()]
         result = page_envelope(
@@ -1284,10 +1621,16 @@ class TciaQueryService:
             if not rows:
                 raise NotFoundError(f"No visible TCIA dataset found for short_title={short_title!r}")
             downloads = conn.execute(
-                f"""
-                SELECT *
-                FROM agent_current_downloads
-                WHERE lower(short_title) = ? AND hidden = 0
+                """
+                SELECT d.*
+                FROM agent_current_downloads AS d
+                WHERE lower(d.short_title) = ? AND d.hidden = 0
+                  AND EXISTS (
+                    SELECT 1 FROM agent_dataset_access_summary AS s
+                    WHERE s.hidden = 0
+                      AND lower(s.dataset_type) = lower(d.dataset_type)
+                      AND lower(s.short_title) = lower(d.short_title)
+                  )
                 ORDER BY download_id, download_title
                 """,
                 (title,),
@@ -1337,9 +1680,15 @@ class TciaQueryService:
                 }
             rows = conn.execute(
                 f"""
-                SELECT *
-                FROM agent_dataset_versions
-                WHERE lower(short_title) = ? AND hidden = 0
+                SELECT v.*
+                FROM agent_dataset_versions AS v
+                WHERE lower(v.short_title) = ? AND v.hidden = 0
+                  AND EXISTS (
+                    SELECT 1 FROM agent_dataset_access_summary AS s
+                    WHERE s.hidden = 0
+                      AND lower(s.dataset_type) = lower(v.dataset_type)
+                      AND lower(s.short_title) = lower(v.short_title)
+                  )
                 ORDER BY
                   CASE WHEN trim(COALESCE(version_number, '')) = '' THEN 1 ELSE 0 END,
                   CAST(NULLIF(version_number, '') AS INTEGER),
@@ -1363,6 +1712,8 @@ class TciaQueryService:
 
     def get_dataset_v1_releases(self, **filters: Any) -> dict[str, Any]:
         limit = coerce_limit(filters.get("limit"), default=50, maximum=500)
+        cursor_filters = self._cursor_filters(filters, "tcia_snapshot.sqlite.gz")
+        offset = decode_cursor(filters.get("cursor"), cursor_filters)
         short_titles = [item.lower() for item in as_list(filters.get("short_titles"))]
         dataset_type = str(filters.get("dataset_type") or "both").strip().lower()
         released_since = str(filters.get("released_since") or "").strip()
@@ -1373,14 +1724,23 @@ class TciaQueryService:
                     "available": False,
                     "v1_releases": [],
                     "count": 0,
+                    "limit": limit,
+                    "has_more": False,
+                    "truncated": False,
+                    "next_cursor": None,
                     "note": (
                         "The loaded snapshot does not include agent_dataset_v1_releases. "
                         "Refresh with `python scripts/tcia_v2_bundle.py install --profile research_core`."
                     ),
                 }
-            sql = "SELECT * FROM agent_dataset_v1_releases WHERE 1 = 1"
+            sql = "SELECT r.* FROM agent_dataset_v1_releases AS r WHERE 1 = 1"
             params: list[Any] = []
-            sql += " AND hidden = 0"
+            sql += (
+                " AND r.hidden = 0 AND EXISTS ("
+                "SELECT 1 FROM agent_dataset_access_summary AS s WHERE s.hidden = 0 "
+                "AND lower(s.dataset_type) = lower(r.dataset_type) "
+                "AND lower(s.short_title) = lower(r.short_title))"
+            )
             if short_titles:
                 sql += f" AND lower(short_title) IN ({','.join('?' for _ in short_titles)})"
                 params.extend(short_titles)
@@ -1394,26 +1754,34 @@ class TciaQueryService:
             if released_before:
                 sql += " AND COALESCE(v1_release_date, '') < ?"
                 params.append(released_before)
-            sql += " ORDER BY v1_release_date, lower(short_title), source LIMIT ?"
-            params.append(limit)
+            sql += (
+                " ORDER BY v1_release_date DESC, lower(short_title), source, id "
+                "LIMIT ? OFFSET ?"
+            )
+            params.extend([limit + 1, offset])
             rows = conn.execute(sql, params).fetchall()
-        return {
+        result = page_envelope(
+            "v1_releases", [compact_v1_release(row) for row in rows],
+            limit=limit, offset=offset, cursor_filters=cursor_filters,
+        )
+        result.update({
             "available": True,
-            "v1_releases": [compact_v1_release(row) for row in rows],
-            "count": len(rows),
-            "limit": limit,
             "note": (
                 "v1_release_date prefers matched WordPress version-1 rows and falls back to "
-                "date_updated only for current records still on version 1."
+                "date_updated only for current records still on version 1; results are newest-first."
             ),
-        }
+        })
+        return result
 
     def get_current_downloads(self, short_title: str, **filters: Any) -> dict[str, Any]:
         title = short_title.strip().lower()
         if not title:
             raise InvalidRequestError("short_title is required")
         limit = coerce_limit(filters.get("limit"))
-        cursor_filters = {"short_title": title, **pagination_filters(filters)}
+        cursor_filters = {
+            "short_title": title,
+            **self._cursor_filters(filters, "tcia_snapshot.sqlite.gz"),
+        }
         offset = decode_cursor(filters.get("cursor"), cursor_filters)
         access_levels = [item.lower() for item in as_list(filters.get("access_levels"))]
         modalities = as_list(filters.get("modalities"))
@@ -1422,7 +1790,13 @@ class TciaQueryService:
         file_types = as_list(filters.get("file_types"))
         requires_annotations = is_truthy(filters.get("requires_annotations"))
 
-        sql = "SELECT * FROM agent_current_downloads WHERE lower(short_title) = ? AND hidden = 0"
+        sql = (
+            "SELECT d.* FROM agent_current_downloads AS d "
+            "WHERE lower(d.short_title) = ? AND d.hidden = 0 AND EXISTS ("
+            "SELECT 1 FROM agent_dataset_access_summary AS s WHERE s.hidden = 0 "
+            "AND lower(s.dataset_type) = lower(d.dataset_type) "
+            "AND lower(s.short_title) = lower(d.short_title))"
+        )
         params: list[Any] = [title]
         if access_levels:
             sql += f" AND lower(COALESCE(access_level, '')) IN ({','.join('?' for _ in access_levels)})"
@@ -1435,20 +1809,15 @@ class TciaQueryService:
             for value in requested:
                 sql += f" AND lower(COALESCE({column}, '')) LIKE ?"
                 params.append(f"%{value.lower()}%")
-        if requires_annotations:
-            labels = sorted(ANNOTATION_LABELS)
-            clauses: list[str] = []
-            for _label in labels:
-                clauses.append(
-                    "lower(COALESCE(download_types, '') || ' ' || COALESCE(data_types, '') || ' ' || "
-                    "COALESCE(file_types, '') || ' ' || COALESCE(download_title, '')) LIKE ?"
-                )
-            sql += " AND (" + " OR ".join(clauses) + ")"
-            params.extend(f"%{label}%" for label in labels)
-        sql += " ORDER BY download_id, download_title LIMIT ? OFFSET ?"
-        params.extend([limit + 1, offset])
+        sql += " ORDER BY download_id, download_title, download_row_id"
+        if not requires_annotations:
+            sql += " LIMIT ? OFFSET ?"
+            params.extend([limit + 1, offset])
         with self._connect_snapshot() as conn:
             rows = [compact_download(row) for row in conn.execute(sql, params).fetchall()]
+        if requires_annotations:
+            rows = [row for row in rows if self._download_has_annotation(row)]
+            rows = rows[offset : offset + limit + 1]
         result = page_envelope(
             "downloads", rows, limit=limit, offset=offset, cursor_filters=cursor_filters
         )
@@ -1495,24 +1864,37 @@ class TciaQueryService:
             ).fetchall()
             downloads = conn.execute(
                 """
-                SELECT *
-                FROM agent_current_downloads
-                WHERE hidden = 0
-                  AND access_level IN ('controlled', 'mixed')
+                SELECT d.*
+                FROM agent_current_downloads AS d
+                WHERE d.hidden = 0
+                  AND d.access_level IN ('controlled', 'mixed')
+                  AND EXISTS (
+                    SELECT 1 FROM agent_dataset_access_summary AS s
+                    WHERE s.hidden = 0
+                      AND lower(s.dataset_type) = lower(d.dataset_type)
+                      AND lower(s.short_title) = lower(d.short_title)
+                  )
                 ORDER BY lower(short_title), download_id, download_title
                 """
             ).fetchall()
 
-        by_title: dict[str, list[dict[str, Any]]] = {}
+        by_dataset: dict[tuple[str, str], list[dict[str, Any]]] = {}
         for row in downloads:
             compact = compact_download(row)
-            by_title.setdefault(str(compact.get("short_title") or "").lower(), []).append(compact)
+            key = (
+                str(compact.get("dataset_type") or "").casefold(),
+                str(compact.get("short_title") or "").casefold(),
+            )
+            by_dataset.setdefault(key, []).append(compact)
 
         matches: list[dict[str, Any]] = []
         for row in summaries:
             dataset = compact_dataset(row)
-            title = str(dataset.get("short_title") or "").lower()
-            evidence = by_title.get(title, [])
+            key = (
+                str(dataset.get("dataset_type") or "").casefold(),
+                str(dataset.get("short_title") or "").casefold(),
+            )
+            evidence = by_dataset.get(key, [])
             labels: list[str] = []
             for download in evidence:
                 labels.extend(json_text_values(download, ["download_types", "data_types", "file_types"]))
@@ -1521,7 +1903,9 @@ class TciaQueryService:
                 continue
             if file_types and not all(self._label_matches(labels, file_type) for file_type in file_types):
                 continue
-            if requires_annotations and not self._labels_have_annotation(labels):
+            if requires_annotations and not any(
+                self._download_has_annotation(download) for download in evidence
+            ):
                 continue
             matches.append({"dataset": dataset, "matching_downloads": evidence})
             if len(matches) >= limit:
@@ -1538,6 +1922,7 @@ class TciaQueryService:
         title = short_title.strip().lower()
         if not title:
             raise TciaServiceError("short_title is required")
+        visible_types = self._require_visible_dataset(short_title)
         limit = coerce_limit(filters.get("limit"), default=50, maximum=500)
         route_systems = [item.lower() for item in as_list(filters.get("route_systems"))]
         modalities = [item.upper() for item in as_list(filters.get("modalities"))]
@@ -1547,8 +1932,12 @@ class TciaQueryService:
         patient_id = str(filters.get("patient_id") or "").strip().lower()
         has_drs_uri = filters.get("has_drs_uri")
 
-        sql = "SELECT * FROM agent_controlled_files WHERE lower(short_title) = ?"
+        sql = (
+            "SELECT * FROM agent_controlled_files WHERE lower(short_title) = ? "
+            f"AND lower(dataset_type) IN ({','.join('?' for _ in visible_types)})"
+        )
         params: list[Any] = [title]
+        params.extend(visible_types)
         if route_systems:
             sql += f" AND lower(COALESCE(route_system, '')) IN ({','.join('?' for _ in route_systems)})"
             params.extend(route_systems)
@@ -1596,7 +1985,13 @@ class TciaQueryService:
         access_levels = [item.lower() for item in as_list(filters.get("access_levels"))]
         short_titles = [item.lower() for item in as_list(filters.get("short_titles"))]
 
-        sql = "SELECT * FROM agent_current_downloads WHERE hidden = 0 AND lower(COALESCE(file_types, '')) LIKE '%dicom%'"
+        sql = (
+            "SELECT d.* FROM agent_current_downloads AS d WHERE d.hidden = 0 "
+            "AND lower(COALESCE(d.file_types, '')) LIKE '%dicom%' AND EXISTS ("
+            "SELECT 1 FROM agent_dataset_access_summary AS s WHERE s.hidden = 0 "
+            "AND lower(s.dataset_type) = lower(d.dataset_type) "
+            "AND lower(s.short_title) = lower(d.short_title))"
+        )
         params: list[Any] = []
         if short_titles:
             sql += f" AND lower(short_title) IN ({','.join('?' for _ in short_titles)})"
@@ -2133,6 +2528,14 @@ class TciaQueryService:
 
     def find_clinical_datasets(self, **filters: Any) -> dict[str, Any]:
         limit = coerce_limit(filters.get("limit"))
+        visible = self._visible_dataset_keys()
+        visible_title_types: dict[str, set[str]] = {}
+        for dataset_type, title in visible:
+            visible_title_types.setdefault(title, set()).add(dataset_type)
+        visible_titles = sorted(
+            title for title, dataset_types in visible_title_types.items()
+            if len(dataset_types) == 1
+        )
         short_titles = [item.lower() for item in as_list(filters.get("short_titles"))]
         source_kinds = [item.lower() for item in as_list(filters.get("source_kinds"))]
         concepts = [item.lower() for item in as_list(filters.get("concepts"))]
@@ -2141,6 +2544,8 @@ class TciaQueryService:
         with self._connect_clinical() as conn:
             sql = "SELECT s.* FROM agent_clinical_dataset_summary AS s WHERE 1 = 1"
             params: list[Any] = []
+            sql += f" AND lower(s.short_title) IN ({','.join('?' for _ in visible_titles)})" if visible_titles else " AND 0 = 1"
+            params.extend(visible_titles)
             if short_titles:
                 sql += f" AND lower(s.short_title) IN ({','.join('?' for _ in short_titles)})"
                 params.extend(short_titles)
@@ -2163,6 +2568,10 @@ class TciaQueryService:
             sql += " ORDER BY lower(s.short_title) LIMIT ?"
             params.append(limit)
             rows = [compact_clinical_summary(row) for row in conn.execute(sql, params).fetchall()]
+        for row in rows:
+            row["dataset_types"] = sorted(
+                visible_title_types.get(str(row.get("short_title") or "").casefold(), set())
+            )
         return {
             "datasets": rows,
             "count": len(rows),
@@ -2174,6 +2583,11 @@ class TciaQueryService:
         title = short_title.strip()
         if not title:
             raise TciaServiceError("short_title is required")
+        visible_types = self._require_visible_dataset(short_title)
+        if len(visible_types) != 1:
+            raise ServiceUnavailableError(
+                "Clinical component cannot disambiguate this short_title across dataset types"
+            )
         limit = coerce_limit(filters.get("limit"), default=50, maximum=500)
         subject_ids = [item.lower() for item in as_list(filters.get("subject_ids"))]
         include_clinical_only = is_truthy(filters.get("include_clinical_only"))
@@ -2195,6 +2609,7 @@ class TciaQueryService:
             rows = [compact_clinical_subject(row) for row in conn.execute(sql, params).fetchall()]
         return {
             "short_title": title,
+            "dataset_types": visible_types,
             "subjects": rows,
             "count": len(rows),
             "limit": limit,
@@ -2206,6 +2621,11 @@ class TciaQueryService:
         title = short_title.strip()
         if not title:
             raise TciaServiceError("short_title is required")
+        visible_types = self._require_visible_dataset(short_title)
+        if len(visible_types) != 1:
+            raise ServiceUnavailableError(
+                "Clinical component cannot disambiguate this short_title across dataset types"
+            )
         limit = coerce_limit(filters.get("limit"), default=100, maximum=500)
         subject_id = str(filters.get("subject_id") or "").strip()
         concepts = [item.lower() for item in as_list(filters.get("concepts"))]
@@ -2231,6 +2651,7 @@ class TciaQueryService:
             rows = [compact_clinical_fact(row) for row in conn.execute(sql, params).fetchall()]
         return {
             "short_title": title,
+            "dataset_types": visible_types,
             "facts": rows,
             "count": len(rows),
             "limit": limit,
@@ -2241,6 +2662,11 @@ class TciaQueryService:
         title = short_title.strip()
         if not title:
             raise TciaServiceError("short_title is required")
+        visible_types = self._require_visible_dataset(short_title)
+        if len(visible_types) != 1:
+            raise ServiceUnavailableError(
+                "Clinical component cannot disambiguate this short_title across dataset types"
+            )
         limit = coerce_limit(filters.get("limit"), default=100, maximum=500)
         subject_id = str(filters.get("subject_id") or "").strip()
         concepts = [item.lower() for item in as_list(filters.get("concepts"))]
@@ -2258,6 +2684,7 @@ class TciaQueryService:
             rows = [compact_clinical_conflict(row) for row in conn.execute(sql, params).fetchall()]
         return {
             "short_title": title,
+            "dataset_types": visible_types,
             "conflicts": rows,
             "count": len(rows),
             "limit": limit,
@@ -2267,7 +2694,7 @@ class TciaQueryService:
     def search_participants(self, **filters: Any) -> dict[str, Any]:
         """Search canonical dataset-scoped participants from the V2 research core."""
         limit = coerce_limit(filters.get("limit"), default=25, maximum=500)
-        cursor_filters = pagination_filters(filters)
+        cursor_filters = self._cursor_filters(filters, "participant_inventory.sqlite.gz")
         offset = decode_cursor(filters.get("cursor"), cursor_filters)
         query = str(filters.get("query") or "").strip().lower()
         short_titles = [item.lower() for item in as_list(filters.get("short_titles"))]
@@ -2280,6 +2707,7 @@ class TciaQueryService:
             item.lower() for item in as_list(filters.get("geometry_statuses"))
         ]
         access_levels = [item.lower() for item in as_list(filters.get("access_levels"))]
+        visible = self._visible_dataset_keys()
         with self._connect_participants() as conn:
             if all(
                 self._object_exists(conn, name)
@@ -2296,6 +2724,7 @@ class TciaQueryService:
                     file_formats=file_formats,
                     geometry_statuses=geometry_statuses,
                     access_levels=access_levels,
+                    visible_keys=visible,
                     limit=limit + 1,
                     offset=offset,
                 )
@@ -2314,6 +2743,9 @@ class TciaQueryService:
                 return result
             sql = "SELECT * FROM agent_participant_search WHERE 1 = 1"
             params: list[Any] = []
+            visible_sql, visible_params = self._visible_pair_sql(visible)
+            sql += " AND " + visible_sql
+            params.extend(visible_params)
             if query:
                 sql += (
                     " AND (lower(short_title) LIKE ? OR lower(display_participant_id) LIKE ? "
@@ -2356,7 +2788,10 @@ class TciaQueryService:
                         "',' || replace(replace(?, ';', ','), ' ', '') || ',') > 0"
                     )
                     params.append(value)
-            sql += " ORDER BY lower(short_title), lower(display_participant_id) LIMIT ? OFFSET ?"
+            sql += (
+                " ORDER BY lower(short_title), lower(display_participant_id), participant_key "
+                "LIMIT ? OFFSET ?"
+            )
             params.extend([limit + 1, offset])
             rows = [normalize_v2_row(row) for row in conn.execute(sql, params).fetchall()]
         result = page_envelope(
@@ -2381,6 +2816,7 @@ class TciaQueryService:
         file_formats: list[str],
         geometry_statuses: list[str],
         access_levels: list[str],
+        visible_keys: set[tuple[str, str]],
         limit: int,
         offset: int,
     ) -> list[str]:
@@ -2391,6 +2827,9 @@ class TciaQueryService:
         ) -> list[str]:
             params = list(match_params)
             sql = f"SELECT p.participant_key FROM participants p {match_sql} WHERE 1 = 1"
+            visible_sql, visible_params = self._visible_pair_sql(visible_keys, alias="p")
+            sql += " AND " + visible_sql
+            params.extend(visible_params)
             if short_titles:
                 sql += (
                     f" AND p.short_title COLLATE NOCASE IN "
@@ -2437,7 +2876,7 @@ class TciaQueryService:
                 sql += " AND " + "".join(asset_sql)
             sql += (
                 " ORDER BY p.short_title COLLATE NOCASE, "
-                "p.display_participant_id COLLATE NOCASE LIMIT ? OFFSET ?"
+                "p.display_participant_id COLLATE NOCASE, p.participant_key LIMIT ? OFFSET ?"
             )
             params.extend([page_limit, page_offset])
             return [str(row[0]) for row in conn.execute(sql, params)]
@@ -2624,13 +3063,22 @@ class TciaQueryService:
                 row = rows[0] if rows else None
             if row is None:
                 raise NotFoundError("No participant matched the supplied dataset-scoped identity")
+            visible_key = (
+                str(row["dataset_type"] or "").strip().casefold(),
+                str(row["short_title"] or "").strip().casefold(),
+            )
+            if visible_key not in self._visible_dataset_keys():
+                raise NotFoundError("Participant belongs to a dataset absent from the visible TCIA snapshot")
             key = str(row["participant_key"])
             identifiers = [
                 normalize_v2_row(item)
                 for item in conn.execute(
                     "SELECT * FROM agent_participant_identifiers "
-                    "WHERE participant_key = ? ORDER BY managed_system, identifier_namespace, raw_identifier",
-                    (key,),
+                    "WHERE participant_key = ? "
+                    "AND lower(dataset_type) = lower(?) "
+                    "AND lower(short_title) = lower(?) "
+                    + " ORDER BY managed_system, identifier_namespace, raw_identifier",
+                    [key, row["dataset_type"], row["short_title"]],
                 ).fetchall()
             ]
         return {
@@ -2645,7 +3093,10 @@ class TciaQueryService:
         if not key:
             raise InvalidRequestError("participant_key is required")
         limit = coerce_limit(filters.get("limit"), default=100, maximum=500)
-        cursor_filters = {"participant_key": key, **pagination_filters(filters)}
+        cursor_filters = {
+            "participant_key": key,
+            **self._cursor_filters(filters, "participant_inventory.sqlite.gz"),
+        }
         offset = decode_cursor(filters.get("cursor"), cursor_filters)
         access_levels = [item.lower() for item in as_list(filters.get("access_levels"))]
         data_domains = [item.lower() for item in as_list(filters.get("data_domains"))]
@@ -2656,8 +3107,22 @@ class TciaQueryService:
             item.lower() for item in as_list(filters.get("geometry_statuses"))
         ]
         with self._connect_participants() as conn:
-            sql = "SELECT * FROM agent_participant_assets WHERE participant_key = ?"
-            params: list[Any] = [key]
+            participant = conn.execute(
+                "SELECT dataset_type, short_title FROM participants WHERE participant_key = ?",
+                (key,),
+            ).fetchone()
+            if participant is None:
+                raise NotFoundError(f"No participant found for participant_key={participant_key!r}")
+            if (
+                str(participant["dataset_type"] or "").strip().casefold(),
+                str(participant["short_title"] or "").strip().casefold(),
+            ) not in self._visible_dataset_keys():
+                raise NotFoundError("Participant belongs to a dataset absent from the visible TCIA snapshot")
+            sql = (
+                "SELECT * FROM agent_participant_assets WHERE participant_key = ? "
+                "AND lower(dataset_type) = lower(?) AND lower(short_title) = lower(?)"
+            )
+            params: list[Any] = [key, participant["dataset_type"], participant["short_title"]]
             asset_columns = self._columns(conn, "agent_participant_assets")
             if access_levels:
                 sql += f" AND lower(access_level) IN ({','.join('?' for _ in access_levels)})"
@@ -2697,6 +3162,7 @@ class TciaQueryService:
         title = short_title.strip()
         if not title:
             raise TciaServiceError("short_title is required")
+        self._require_visible_dataset(short_title, dataset_type)
         with self._connect_participants() as conn:
             type_sql = " AND lower(dataset_type) = lower(?)" if dataset_type else ""
             type_params: list[Any] = [dataset_type] if dataset_type else []
@@ -2727,7 +3193,11 @@ class TciaQueryService:
                 ).fetchall()
             ]
             sources = [
-                normalize_v2_row(row)
+                {
+                    key: value
+                    for key, value in normalize_v2_row(row).items()
+                    if key != "source_path"
+                }
                 for row in conn.execute(
                     "SELECT * FROM participant_inventory_sources ORDER BY source_name"
                 ).fetchall()
@@ -2749,9 +3219,13 @@ class TciaQueryService:
         limit = coerce_limit(filters.get("limit"), default=50, maximum=500)
         short_titles = [item.lower() for item in as_list(filters.get("short_titles"))]
         statuses = [item.lower() for item in as_list(filters.get("statuses"))]
+        visible = self._visible_dataset_keys()
         with self._connect_participants() as conn:
             sql = "SELECT * FROM agent_participant_link_issues WHERE 1 = 1"
             params: list[Any] = []
+            visible_sql, visible_params = self._visible_pair_sql(visible)
+            sql += " AND " + visible_sql
+            params.extend(visible_params)
             if short_titles:
                 sql += f" AND lower(short_title) IN ({','.join('?' for _ in short_titles)})"
                 params.extend(short_titles)
@@ -2766,7 +3240,7 @@ class TciaQueryService:
     def find_public_non_dicom_assets(self, **filters: Any) -> dict[str, Any]:
         """Query V2 public non-DICOM detail; public DICOM remains an IDC concern."""
         limit = coerce_limit(filters.get("limit"), default=50, maximum=500)
-        cursor_filters = pagination_filters(filters)
+        cursor_filters = self._cursor_filters(filters, "public_non_dicom_metadata.sqlite.gz")
         offset = decode_cursor(filters.get("cursor"), cursor_filters)
         short_titles = [item.lower() for item in as_list(filters.get("short_titles"))]
         participant_id = str(filters.get("participant_id") or "").strip().lower()
@@ -2778,9 +3252,13 @@ class TciaQueryService:
             item.lower() for item in as_list(filters.get("geometry_statuses"))
         ]
         requires_annotations = is_truthy(filters.get("requires_annotations"))
+        visible = self._visible_dataset_keys()
         with self._connect_public_non_dicom() as conn:
             sql = "SELECT * FROM agent_public_non_dicom_assets a WHERE 1 = 1"
             params: list[Any] = []
+            visible_sql, visible_params = self._visible_pair_sql(visible, alias="a")
+            sql += " AND " + visible_sql
+            params.extend(visible_params)
             asset_columns = self._columns(conn, "agent_public_non_dicom_assets")
             if short_titles:
                 sql += f" AND lower(a.short_title) IN ({','.join('?' for _ in short_titles)})"
@@ -2829,16 +3307,24 @@ class TciaQueryService:
 
     def _download_has_annotation(self, row: dict[str, Any]) -> bool:
         labels = json_text_values(row, ["download_types", "data_types", "file_types"])
-        labels.append(str(row.get("download_title") or ""))
-        return self._labels_have_annotation(labels)
+        if self._labels_have_annotation(labels):
+            return True
+        free_text = " | ".join(
+            str(row.get(name) or "") for name in ("download_title", "description")
+        )
+        return ANNOTATION_FREE_TEXT_PATTERN.search(free_text) is not None
 
     def _labels_have_annotation(self, labels: list[str]) -> bool:
-        text = " | ".join(labels).lower()
-        tokens = {label.lower() for label in labels}
-        if tokens & ANNOTATION_LABELS:
-            return True
-        return any(re.search(rf"\b{re.escape(label)}\b", text) for label in ANNOTATION_LABELS)
+        normalized = {
+            re.sub(r"[^a-z0-9]+", " ", str(label).casefold()).strip()
+            for label in labels
+            if str(label).strip()
+        }
+        return bool(normalized & ANNOTATION_LABELS)
 
     def _label_matches(self, labels: list[str], requested: str) -> bool:
-        needle = requested.strip().lower()
-        return any(needle == str(label).strip().lower() or needle in str(label).strip().lower() for label in labels)
+        needle = re.sub(r"[^a-z0-9]+", " ", requested.casefold()).strip()
+        return any(
+            needle == re.sub(r"[^a-z0-9]+", " ", str(label).casefold()).strip()
+            for label in labels
+        )

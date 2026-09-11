@@ -33,7 +33,7 @@ If code is out of date, ask the user to update it. If remote freshness verificat
 3. Use download-level labels for modality, file type, access, and route decisions. Split mixed datasets into open and controlled components.
 4. Check related visible Analysis Results before saying a Collection lacks annotations, segmentations, labels, or ground truth.
 5. Use `search_participants` for availability, `get_participant_assets` for drill-down, and `get_dataset_participant_coverage` before completeness claims. Participant identity is dataset-scoped; Collections and Analysis Results remain distinct.
-6. Follow `next_cursor` while `has_more` is true. Keep the same filters and limit because cursors are snapshot-local and query-bound.
+6. Follow `next_cursor` while `has_more` is true. Keep the same filters and limit because cursors are release/component/file-generation-local and query-bound; restart after any artifact change.
 7. Cite the TCIA page and DOI where available. State access/license caveats and distinguish verified, published, deployed, and unverified status.
 
 ## Route To The Right Reference

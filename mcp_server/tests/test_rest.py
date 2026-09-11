@@ -4,7 +4,13 @@ import unittest
 
 from fastapi.testclient import TestClient
 
-from mcp_server.tcia_query_mcp.rest import create_app
+from mcp_server.tcia_query_mcp.rest import (
+    RETIRED_SIDECAR_DETAIL,
+    V1_DEPRECATION,
+    V1_SUCCESSOR,
+    V1_SUNSET,
+    create_app,
+)
 from mcp_server.tcia_query_mcp.service import NotFoundError
 
 
@@ -37,7 +43,11 @@ class RestV2ContractTests(unittest.TestCase):
         route_paths = {route.path for route in app.routes}
         self.assertIn("/v1/datasets/search", route_paths)
         self.assertIn("/v1/snapshot", route_paths)
-        self.assertEqual(TestClient(app).get("/v1/health").status_code, 200)
+        response = TestClient(app).get("/v1/health")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["deprecation"], V1_DEPRECATION)
+        self.assertEqual(response.headers["sunset"], V1_SUNSET)
+        self.assertEqual(response.headers["link"], V1_SUCCESSOR)
         self.assertIn("/v2/live", paths)
         self.assertIn("/v2/ready", paths)
         self.assertNotIn("/v2/health", paths)
@@ -103,6 +113,26 @@ class RestV2ContractTests(unittest.TestCase):
             "include_hidden",
             schema["components"]["schemas"]["SearchDatasetsRequest"]["properties"],
         )
+        self.assertNotIn("PublicResponse", schema["components"]["schemas"])
+        dataset_fields = schema["components"]["schemas"]["DatasetSummary"]["properties"]
+        self.assertFalse(
+            schema["components"]["schemas"]["DatasetSearchResponse"]["additionalProperties"]
+        )
+        self.assertFalse(
+            schema["components"]["schemas"]["DatasetSummary"]["additionalProperties"]
+        )
+        self.assertFalse(
+            schema["components"]["schemas"]["ControlledFile"]["additionalProperties"]
+        )
+        self.assertTrue(
+            {"date_updated", "license_status", "current_download_count", "cancer_types"}
+            <= set(dataset_fields)
+        )
+        bundle_ref = schema["paths"]["/v2/bundle"]["get"]["responses"]["200"]
+        self.assertEqual(
+            bundle_ref["content"]["application/json"]["schema"]["$ref"],
+            "#/components/schemas/BundleResponse",
+        )
 
     def test_service_errors_use_problem_json(self) -> None:
         class Service:
@@ -114,6 +144,45 @@ class RestV2ContractTests(unittest.TestCase):
         self.assertEqual(response.headers["content-type"], "application/problem+json")
         self.assertEqual(response.json()["code"], "not_found")
         self.assertFalse(response.json()["retryable"])
+
+    def test_v1_errors_keep_deprecation_headers(self) -> None:
+        class Service:
+            def get_dataset(self, short_title):
+                raise NotFoundError(f"missing {short_title}")
+
+        response = TestClient(create_app(Service())).get("/v1/datasets/NOPE")
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.headers["deprecation"], V1_DEPRECATION)
+        self.assertEqual(response.headers["sunset"], V1_SUNSET)
+        self.assertEqual(response.headers["link"], V1_SUCCESSOR)
+
+    def test_retired_v1_sidecars_are_stable_gone_responses(self) -> None:
+        paths = (
+            "/v1/nifti/datasets",
+            "/v1/nifti/STALE/files",
+            "/v1/nifti/STALE/derived-objects",
+            "/v1/nifti/STALE/characteristics",
+            "/v1/nifti/review-issues",
+            "/v1/nifti/STALE/package-files",
+            "/v1/pathology/datasets",
+            "/v1/pathology/downloads",
+            "/v1/pathology/STALE/package-files",
+            "/v1/pathology/STALE/files",
+            "/v1/pathology/disparities",
+        )
+        app = create_app(object())
+        client = TestClient(app)
+        self.assertTrue(set(paths).isdisjoint(app.openapi()["paths"]))
+        for path in paths:
+            with self.subTest(path=path):
+                response = client.get(path)
+                self.assertEqual(response.status_code, 410)
+                self.assertEqual(response.headers["content-type"], "application/problem+json")
+                self.assertEqual(response.headers["deprecation"], V1_DEPRECATION)
+                self.assertEqual(response.headers["sunset"], V1_SUNSET)
+                self.assertEqual(response.headers["link"], V1_SUCCESSOR)
+                self.assertEqual(response.json()["code"], "retired_surface")
+                self.assertEqual(response.json()["detail"], RETIRED_SIDECAR_DETAIL)
 
 
 if __name__ == "__main__":

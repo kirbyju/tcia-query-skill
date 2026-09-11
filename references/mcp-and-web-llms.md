@@ -99,7 +99,12 @@ The five high-volume discovery surfaces (`search_datasets`,
 `find_public_non_dicom_assets`) use the same page envelope: `count`, `limit`,
 `has_more`, `truncated`, and `next_cursor`. A client must treat the cursor as
 opaque and send it with unchanged filters and limit. The cursor is stable for
-the installed immutable snapshot and rejected when used with another query.
+the installed immutable snapshot and rejected when used with another query or
+after the installed component file changes, even if declared metadata is stale.
+
+Retired standalone `/v1/nifti/...` and `/v1/pathology/...` routes return `410
+Gone` with deprecation and migration headers. They do not query legacy sidecars;
+use `/v2/public-non-dicom/assets`.
 
 REST clients should use `/v2/live` for liveness and `/v2/ready` for readiness.
 REST errors are `application/problem+json` with 404, 422, 503, or 500 status;

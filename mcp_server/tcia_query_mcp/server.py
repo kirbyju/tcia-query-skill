@@ -23,12 +23,25 @@ from starlette.routing import Route
 
 from . import __version__
 from .models import (
+    AccessSummaryResponse,
     AssetsResponse,
+    BundleResponse,
+    ClinicalConflictsResponse,
+    ClinicalDatasetsResponse,
+    ClinicalFactsResponse,
+    ClinicalSubjectsResponse,
+    ControlledDatasetsResponse,
+    ControlledFilesResponse,
     DatasetDetailResponse,
     DatasetSearchResponse,
+    DatasetVersionsResponse,
+    DicomAnnotationsResponse,
     DownloadsResponse,
+    LinkIssuesResponse,
+    ParticipantDetailResponse,
     ParticipantsResponse,
-    PublicResponse,
+    CoverageResponse,
+    V1ReleasesResponse,
 )
 from .service import CONTROLLED_ACCESS_POLICY_URL, TciaQueryService, TciaServiceError
 
@@ -76,8 +89,8 @@ Recommended workflow:
    conflicts. Subject identity is scoped by `(short_title, subject_id)`; retain
    source provenance and distinguish dataset-scope inferred values.
 9. Use `find_public_non_dicom_assets` for V2 NIfTI, pathology, and other
-   non-DICOM detail. Legacy NIfTI/pathology tools are not part of the default
-   public MCP surface.
+   non-DICOM detail. Retired standalone NIfTI/pathology tools cannot be enabled
+   on the public MCP server.
 """
 
 PUBLIC_V2_TOOL_NAMES = (
@@ -217,7 +230,7 @@ def guard(fn: Callable[..., Any]) -> Callable[..., Any]:
 
 @mcp.tool(annotations=QUERY_ANNOTATIONS, meta={"snapshot_local": True}, structured_output=True)
 @guard
-def get_snapshot_info() -> PublicResponse:
+def get_snapshot_info() -> BundleResponse:
     """Return the installed V2 manifest, profile, component schemas, and capabilities."""
 
     return service().bundle_info()
@@ -261,7 +274,7 @@ def get_participant(
     short_title: str | None = None,
     participant_id: str | None = None,
     dataset_type: str | None = None,
-) -> PublicResponse:
+) -> ParticipantDetailResponse:
     """Return one canonical participant and every retained source identifier spelling."""
     return service().get_participant(
         participant_key=participant_key,
@@ -302,7 +315,7 @@ def get_participant_assets(
 @guard
 def get_dataset_participant_coverage(
     short_title: str, dataset_type: str | None = None
-) -> PublicResponse:
+) -> CoverageResponse:
     """Report participant counts, unlinked assets, source coverage, and link issues."""
     return service().get_dataset_participant_coverage(short_title, dataset_type=dataset_type)
 
@@ -313,7 +326,7 @@ def find_participant_link_issues(
     short_titles: list[str] | None = None,
     statuses: list[str] | None = None,
     limit: int = 50,
-) -> dict[str, Any]:
+) -> LinkIssuesResponse:
     """Find explicit V2 participant linkage and crosswalk review states."""
     return service().find_participant_link_issues(
         short_titles=short_titles, statuses=statuses, limit=limit
@@ -408,7 +421,7 @@ def get_dataset(short_title: str) -> DatasetDetailResponse:
 
 @mcp.tool(annotations=QUERY_ANNOTATIONS, meta={"snapshot_local": True}, structured_output=True)
 @guard
-def get_dataset_versions(short_title: str, limit: int = 100) -> dict[str, Any]:
+def get_dataset_versions(short_title: str, limit: int = 100) -> DatasetVersionsResponse:
     """Return WordPress version-history rows matched to one TCIA dataset short title."""
 
     return service().get_dataset_versions(
@@ -424,8 +437,9 @@ def get_dataset_v1_releases(
     dataset_type: str = "both",
     released_since: str | None = None,
     released_before: str | None = None,
+    cursor: str | None = None,
     limit: int = 50,
-) -> PublicResponse:
+) -> V1ReleasesResponse:
     """Return best-available first-release dates from agent_dataset_v1_releases."""
 
     return service().get_dataset_v1_releases(
@@ -433,6 +447,7 @@ def get_dataset_v1_releases(
         dataset_type=dataset_type,
         released_since=released_since,
         released_before=released_before,
+        cursor=cursor,
         limit=limit,
     )
 
@@ -471,7 +486,7 @@ def get_current_downloads(
 
 @mcp.tool(annotations=QUERY_ANNOTATIONS, meta={"snapshot_local": True}, structured_output=True)
 @guard
-def summarize_access(short_title: str) -> dict[str, Any]:
+def summarize_access(short_title: str) -> AccessSummaryResponse:
     """Summarize dataset/download access and split open, noncommercial, controlled, and mixed routes."""
 
     return service().summarize_access(short_title=short_title)
@@ -485,7 +500,7 @@ def find_controlled_access_datasets(
     requires_annotations: bool = False,
     include_mixed: bool = True,
     limit: int = 25,
-) -> dict[str, Any]:
+) -> ControlledDatasetsResponse:
     """Find controlled or mixed-access TCIA datasets from the base WordPress snapshot."""
 
     return service().find_controlled_access_datasets(
@@ -509,7 +524,7 @@ def get_controlled_access_files(
     patient_id: str | None = None,
     has_drs_uri: bool | None = None,
     limit: int = 50,
-) -> dict[str, Any]:
+) -> ControlledFilesResponse:
     """Query public file-grain metadata for controlled-access downloads.
 
     This returns metadata only. It does not grant authorization and must not be used to directly
@@ -537,7 +552,7 @@ def find_dicom_annotations(
     modalities: list[str] | None = None,
     access_levels: list[str] | None = None,
     limit: int = 25,
-) -> dict[str, Any]:
+) -> DicomAnnotationsResponse:
     """Find TCIA DICOM annotation download signals; use IDC for series relationships."""
 
     return service().find_dicom_annotations(
@@ -759,7 +774,7 @@ def find_clinical_datasets(
     has_conflicts: bool | None = None,
     has_clinical_only_subjects: bool | None = None,
     limit: int = 25,
-) -> dict[str, Any]:
+) -> ClinicalDatasetsResponse:
     """Summarize dataset coverage in the optional patient-level clinical SQLite sidecar."""
 
     return service().find_clinical_datasets(
@@ -781,7 +796,7 @@ def get_clinical_subjects(
     has_conflicts: bool | None = None,
     include_inferred: bool = True,
     limit: int = 50,
-) -> dict[str, Any]:
+) -> ClinicalSubjectsResponse:
     """Return resolved patient-level clinical rows for one TCIA dataset.
 
     By default, only image-linked subjects are returned. Dataset-scope inferred diagnosis/site
@@ -807,7 +822,7 @@ def get_clinical_facts(
     source_kinds: list[str] | None = None,
     inferred: bool | None = None,
     limit: int = 100,
-) -> dict[str, Any]:
+) -> ClinicalFactsResponse:
     """Return long-form clinical facts with source priority, provenance, and inference flags."""
 
     return service().get_clinical_facts(
@@ -827,7 +842,7 @@ def get_clinical_conflicts(
     subject_id: str | None = None,
     concepts: list[str] | None = None,
     limit: int = 100,
-) -> dict[str, Any]:
+) -> ClinicalConflictsResponse:
     """Return patient/concept disagreements retained by the clinical sidecar."""
 
     return service().get_clinical_conflicts(
@@ -836,32 +851,6 @@ def get_clinical_conflicts(
         concepts=concepts,
         limit=limit,
     )
-
-
-LEGACY_MCP_TOOLS = (
-    find_nifti_datasets,
-    get_nifti_files,
-    get_nifti_derived_objects,
-    get_nifti_characteristics,
-    find_nifti_review_issues,
-    get_nifti_package_files,
-    find_pathology_datasets,
-    get_pathology_downloads,
-    get_pathology_package_files,
-    get_pathology_file_objects,
-    get_pathology_disparities,
-)
-
-
-def register_legacy_mcp_tools(server: FastMCP) -> None:
-    """Register unsupported legacy tools for an explicitly opted-in host."""
-
-    for tool in LEGACY_MCP_TOOLS:
-        server.tool()(tool)
-
-
-if _env_bool("TCIA_ENABLE_LEGACY_MCP_TOOLS", default=False):
-    register_legacy_mcp_tools(mcp)
 
 
 @mcp.resource("tcia://guide", mime_type="text/markdown")
