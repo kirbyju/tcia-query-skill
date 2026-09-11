@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import gzip
 import json
 import sqlite3
 import tempfile
@@ -19,6 +20,154 @@ spec.loader.exec_module(registry)
 
 
 class CorrectionIdentityTests(unittest.TestCase):
+    def test_release_package_is_deterministic_hash_pinned_and_queryable(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            db = root / "registry.sqlite"
+            first_gzip = root / "first.sqlite.gz"
+            second_gzip = root / "second.sqlite.gz"
+            first_manifest = root / "first.json"
+            second_manifest = root / "second.json"
+            registry.build_registry(db, observed_at="2026-09-11T12:00:00Z")
+            first = registry.package_registry(
+                db, gzip_out=first_gzip, manifest_out=first_manifest
+            )
+            second = registry.package_registry(
+                db, gzip_out=second_gzip, manifest_out=second_manifest
+            )
+            self.assertEqual(first_gzip.read_bytes(), second_gzip.read_bytes())
+            self.assertEqual(first["gzip_sha256"], registry.file_sha256(first_gzip))
+            self.assertEqual(first["sqlite_sha256"], registry.file_sha256(db))
+            self.assertEqual(first["decision_set_summary"], second["decision_set_summary"])
+            self.assertEqual(first["storage_contract"]["profile"], "audit_support")
+            unpacked = root / "unpacked.sqlite"
+            unpacked.write_bytes(gzip.decompress(first_gzip.read_bytes()))
+            self.assertTrue(registry.validate_database(unpacked)["ok"])
+
+    def test_stable_promotion_waivers_are_exact_current_and_single_use(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            db = Path(directory) / "registry.sqlite"
+            registry.build_registry(db, observed_at="2026-09-11T12:00:00Z")
+            with sqlite3.connect(db) as conn:
+                validation_id = "release-validation"
+                conn.execute(
+                    "INSERT INTO correction_validations VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (validation_id, None, "row-change", "v1", "high", "failed",
+                     "{}", "{}", "a" * 64, "2026-09-11T11:00:00Z", "", "test"),
+                )
+                conn.commit()
+            blocked = registry.validate_promotion_waivers(
+                db, at="2026-09-11T12:00:00Z"
+            )
+            self.assertFalse(blocked["ok"])
+
+            waiver = registry.add_waiver(
+                db, rule_id="row-change", owner="release-owner", reason="reviewed",
+                scope={"validation_id": validation_id, "evidence_sha256": "a" * 64},
+                created_at="2026-09-11T11:30:00Z",
+                expires_at="2026-09-12T11:30:00Z",
+            )
+            allowed = registry.validate_promotion_waivers(
+                db, at="2026-09-11T12:00:00Z"
+            )
+            self.assertTrue(allowed["ok"], allowed["errors"])
+            self.assertEqual(allowed["used_waiver_ids"], [waiver["waiver_id"]])
+
+            with sqlite3.connect(db) as conn:
+                conn.execute(
+                    "UPDATE correction_waivers SET status='revoked' WHERE waiver_id=?",
+                    (waiver["waiver_id"],),
+                )
+                conn.commit()
+            revoked = registry.validate_promotion_waivers(
+                db, at="2026-09-11T12:00:00Z"
+            )
+            self.assertFalse(revoked["ok"])
+
+            with sqlite3.connect(db) as conn:
+                conn.execute(
+                    "UPDATE correction_waivers SET status='active',expires_at='2026-09-11T11:45:00Z' WHERE waiver_id=?",
+                    (waiver["waiver_id"],),
+                )
+                conn.commit()
+            expired = registry.validate_promotion_waivers(
+                db, at="2026-09-11T12:00:00Z"
+            )
+            self.assertFalse(expired["ok"])
+            with sqlite3.connect(db) as conn:
+                conn.execute(
+                    "UPDATE correction_waivers SET expires_at=?,scope_json='{}' WHERE waiver_id=?",
+                    ("2026-09-12T11:30:00Z", waiver["waiver_id"]),
+                )
+                conn.commit()
+            malformed = registry.validate_promotion_waivers(
+                db, at="2026-09-11T12:00:00Z"
+            )
+            self.assertFalse(malformed["ok"])
+            with sqlite3.connect(db) as conn:
+                conn.execute(
+                    "UPDATE correction_waivers SET scope_json=? WHERE waiver_id=?",
+                    (json.dumps({"validation_id": "wrong", "evidence_sha256": "a" * 64}),
+                     waiver["waiver_id"]),
+                )
+                conn.commit()
+            unused = registry.validate_promotion_waivers(
+                db, at="2026-09-11T12:00:00Z"
+            )
+            self.assertFalse(unused["ok"])
+
+    def test_declarative_semantic_explanation_stays_consumed_across_refresh(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            db = root / "registry.sqlite"
+            declarations = root / "explanations.json"
+            declarations.write_text(json.dumps({
+                "schema_version": 1,
+                "explanations": [{
+                    "artifact": "public_non_dicom",
+                    "entity_table": "public_non_dicom_assets",
+                    "primary_key": [["asset_id", "asset-1"]],
+                    "change_kind": "modified",
+                    "before_sha256": "a" * 64,
+                    "after_sha256": "b" * 64,
+                    "reviewer": "release-reviewer",
+                    "approved_at": "2026-09-11T11:00:00Z",
+                    "rationale": "Reviewed exact before and after rows.",
+                }],
+            }))
+            registry.build_registry(
+                db, observed_at="2026-09-11T12:00:00Z",
+                semantic_explanations=declarations,
+            )
+            with sqlite3.connect(db) as conn:
+                effect_id = conn.execute(
+                    "SELECT effect_id FROM correction_effects WHERE effect_status='approved'"
+                ).fetchone()[0]
+            report = root / "report.json"
+            report.write_text(json.dumps({
+                "report_sha256": "c" * 64,
+                "unexplained_high_severity": [],
+                "semantic_explanations": {
+                    "consumed_effect_ids": [effect_id],
+                    "duplicate_matches": [], "malformed_effects": [],
+                    "unused_effect_ids": [],
+                },
+            }))
+            consumed = registry.consume_semantic_explanations(db, report)
+            self.assertEqual(consumed["consumed"], 1)
+            registry.build_registry(
+                db, observed_at="2026-09-11T13:00:00Z", replace=True,
+                semantic_explanations=declarations,
+            )
+            with sqlite3.connect(db) as conn:
+                self.assertEqual(
+                    conn.execute(
+                        "SELECT effect_status,build_fingerprint FROM correction_effects WHERE effect_id=?",
+                        (effect_id,),
+                    ).fetchone(),
+                    ("consumed", "c" * 64),
+                )
+
     def base_record(self) -> dict[str, object]:
         scope = {
             "dataset_type": "Collection",

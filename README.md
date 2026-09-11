@@ -137,6 +137,12 @@ python3 scripts/tcia_v2_bundle.py install --profile research_detail
 python3 scripts/tcia_v2_bundle.py install --profile audit_support
 ```
 
+`audit_support` includes the hash-pinned full
+`tcia_correction_registry.sqlite` for correction provenance and release audit.
+Routine `research_core` and `research_detail` installs exclude that database;
+their top manifest still carries the compact correction decision-set digest,
+counts, and source-health status used in the release fingerprint.
+
 Most routine snapshot and manifest helpers use the Python standard library.
 Install task-specific packages such as `idc-index`, `pydicom`, or `cdapython`
 only when the requested workflow needs them. Maintainer/build dependencies are

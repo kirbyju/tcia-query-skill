@@ -30,10 +30,17 @@ class V2BundleTests(unittest.TestCase):
             web_exports[name] = {"sha256": BUNDLE.file_sha256(path)}
         for component, details in BUNDLE.COMPONENTS.items():
             database = root / details["database"]
-            database.write_bytes((component + " database").encode())
+            sqlite_path = root / f".{component}.sqlite"
+            with closing(sqlite3.connect(sqlite_path)) as conn:
+                conn.execute("CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT)")
+                conn.execute("INSERT INTO metadata VALUES ('component', ?)", (component,))
+                conn.commit()
+            raw = sqlite_path.read_bytes()
+            database.write_bytes(gzip.compress(raw, mtime=0))
+            sqlite_path.unlink()
             manifest = {
                 "schema_version": 3,
-                "sqlite_sha256": "sqlite-" + component,
+                "sqlite_sha256": BUNDLE.hashlib.sha256(raw).hexdigest(),
                 "gzip_sha256": BUNDLE.file_sha256(database),
                 "release_fingerprint": "fingerprint-" + component,
             }
@@ -64,7 +71,9 @@ class V2BundleTests(unittest.TestCase):
             manifest_path.write_text(json.dumps(manifest))
         return assets, BUNDLE.build_bundle_manifest(assets)
 
-    def install_from_assets(self, assets: Path, payload: dict, install_dir: Path) -> dict:
+    def install_from_assets(
+        self, assets: Path, payload: dict, install_dir: Path, *, profile: str = "research_core"
+    ) -> dict:
         bundle_body = json.dumps(payload).encode()
 
         def fake_fetch(url: str, **_kwargs) -> bytes:
@@ -81,7 +90,7 @@ class V2BundleTests(unittest.TestCase):
         with mock.patch.object(BUNDLE, "fetch_bytes", side_effect=fake_fetch), mock.patch.object(
             BUNDLE, "download_to_path", side_effect=fake_download
         ):
-            return BUNDLE.install_bundle(install_dir=install_dir)
+            return BUNDLE.install_bundle(install_dir=install_dir, profile=profile)
 
     def test_complete_bundle_manifest_is_stable_and_valid(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -90,13 +99,40 @@ class V2BundleTests(unittest.TestCase):
             first = BUNDLE.build_bundle_manifest(root)
             second = BUNDLE.build_bundle_manifest(root)
             self.assertEqual(first["release_fingerprint"], second["release_fingerprint"])
-            self.assertEqual(first["asset_count"], 23)
+            self.assertEqual(first["asset_count"], 25)
             manifest = root / BUNDLE.BUNDLE_MANIFEST_ASSET
             manifest.write_text(json.dumps(first))
             result = BUNDLE.validate_bundle(root, manifest)
             self.assertTrue(result["ok"], result["errors"])
             self.assertEqual(first["release_channel"], "stable")
             self.assertEqual(first["release_tag"], "tcia-metadata-v2-latest")
+
+    def test_correction_summary_is_compact_and_fingerprinted(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.create_bundle_files(root)
+            manifest_path = root / BUNDLE.COMPONENTS["correction_registry"]["manifest"]
+            component = json.loads(manifest_path.read_text())
+            component["decision_set_summary"] = {
+                "sha256": "a" * 64,
+                "status": "verified_current",
+                "counts": {"active_revisions": 3, "failed_validations": 0},
+            }
+            component["source_status"] = {"snapshot": "live"}
+            manifest_path.write_text(json.dumps(component))
+            first = BUNDLE.build_bundle_manifest(root)
+            self.assertEqual(
+                first["decision_sets"]["correction_registry"],
+                component["decision_set_summary"],
+            )
+            self.assertEqual(
+                first["source_health"]["components"]["correction_registry"]["status"],
+                "healthy",
+            )
+            component["decision_set_summary"]["counts"]["active_revisions"] = 4
+            manifest_path.write_text(json.dumps(component))
+            second = BUNDLE.build_bundle_manifest(root)
+            self.assertNotEqual(first["release_fingerprint"], second["release_fingerprint"])
 
     def test_schema_two_manifest_remains_install_contract_compatible(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -105,6 +141,15 @@ class V2BundleTests(unittest.TestCase):
             payload = BUNDLE.build_bundle_manifest(root)
             payload["schema_version"] = 2
             payload.pop("source_health")
+            payload.pop("decision_sets")
+            correction = payload["components"].pop("correction_registry")
+            for name in (correction["database_asset"], correction["manifest_asset"]):
+                payload["assets"].pop(name)
+            payload["asset_count"] = len(payload["assets"])
+            for profile in BUNDLE.PROFILE_ORDER:
+                payload["profiles"][profile]["assets"] = BUNDLE.assets_for_profile_schema(
+                    profile, 2, payload["release_contract"]
+                )
             fingerprint_payload = {
                 "artifact": payload["artifact"],
                 "schema_version": 2,
@@ -126,7 +171,39 @@ class V2BundleTests(unittest.TestCase):
             ).hexdigest()
             self.assertEqual(BUNDLE.validate_manifest_contract(payload), [])
 
-    def test_streamlined_candidate_has_nine_payloads_and_one_bundle_manifest(self):
+    def test_schema_two_streamlined_manifest_remains_compatible_without_correction(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.create_bundle_files(root)
+            payload = BUNDLE.build_bundle_manifest(
+                root, release_contract=BUNDLE.STREAMLINED_RELEASE_CONTRACT
+            )
+            payload["schema_version"] = 2
+            payload.pop("source_health")
+            payload.pop("decision_sets")
+            payload["components"].pop("correction_registry")
+            payload["assets"].pop("tcia_correction_registry.sqlite.gz")
+            payload["asset_count"] = len(payload["assets"])
+            for profile in BUNDLE.PROFILE_ORDER:
+                payload["profiles"][profile]["assets"] = BUNDLE.assets_for_profile_schema(
+                    profile, 2, payload["release_contract"]
+                )
+            source = payload["source"]
+            fingerprint_payload = {
+                "artifact": payload["artifact"], "schema_version": 2,
+                "release_channel": payload["release_channel"],
+                "release_tag": payload["release_tag"],
+                "release_contract": payload["release_contract"],
+                "source": {"repository": source["repository"], "release_tag": source["release_tag"]},
+                "producer": payload["producer"],
+                "assets": {name: details["sha256"] for name, details in sorted(payload["assets"].items())},
+            }
+            payload["release_fingerprint"] = BUNDLE.hashlib.sha256(
+                BUNDLE.canonical_json(fingerprint_payload).encode()
+            ).hexdigest()
+            self.assertEqual(BUNDLE.validate_manifest_contract(payload), [])
+
+    def test_streamlined_candidate_has_ten_payloads_and_one_bundle_manifest(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             self.create_bundle_files(root)
@@ -136,7 +213,7 @@ class V2BundleTests(unittest.TestCase):
                 release_channel="candidate",
                 release_tag="tcia-metadata-v2-streamlined-candidate",
             )
-            self.assertEqual(payload["asset_count"], 9)
+            self.assertEqual(payload["asset_count"], 10)
             self.assertEqual(payload["release_channel"], "candidate")
             self.assertEqual(set(payload["components"]), set(BUNDLE.STREAMLINED_COMPONENTS))
             self.assertNotIn("nifti_metadata.sqlite.gz", payload["assets"])
@@ -150,7 +227,7 @@ class V2BundleTests(unittest.TestCase):
             self.assertEqual(BUNDLE.validate_manifest_contract(payload), [])
             candidate = root / "candidate"
             materialized = BUNDLE.materialize_bundle(root, manifest, candidate)
-            self.assertEqual(materialized["asset_count"], 10)
+            self.assertEqual(materialized["asset_count"], 11)
             self.assertEqual(
                 sorted(path.name for path in candidate.iterdir()),
                 sorted([*payload["assets"], BUNDLE.BUNDLE_MANIFEST_ASSET]),
@@ -166,7 +243,7 @@ class V2BundleTests(unittest.TestCase):
                 release_channel="stable",
                 release_tag="tcia-metadata-v2-latest",
             )
-            self.assertEqual(payload["asset_count"], 9)
+            self.assertEqual(payload["asset_count"], 10)
             self.assertEqual(payload["release_contract"], "streamlined")
             self.assertEqual(payload["release_channel"], "stable")
             self.assertEqual(set(payload["components"]), set(BUNDLE.STREAMLINED_COMPONENTS))
@@ -406,9 +483,32 @@ class V2BundleTests(unittest.TestCase):
         detail = BUNDLE.assets_for_profile("research_detail")
         self.assertIn("public_non_dicom_metadata.sqlite.gz", detail)
         self.assertIn("participant_inventory.sqlite.gz", detail)
+        self.assertNotIn("tcia_correction_registry.sqlite.gz", detail)
         audit = BUNDLE.assets_for_profile("audit_support", include_dependencies=False)
         self.assertIn("public_non_dicom_audit.sqlite.gz", audit)
         self.assertIn("participant_inventory_audit.sqlite.gz", audit)
+        self.assertIn("tcia_correction_registry.sqlite.gz", audit)
+
+    def test_synthetic_research_detail_and_audit_support_installs(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            assets, payload = self.create_installable_bundle(root)
+            detail_profile = self.install_from_assets(
+                assets, payload, root / "detail-profile-install", profile="research_detail"
+            )
+            self.assertEqual(detail_profile["profile"], "research_detail")
+            self.assertNotIn(
+                "tcia_correction_registry.sqlite.gz", detail_profile["downloaded_assets"]
+            )
+            with mock.patch.object(BUNDLE, "fetch_bytes", return_value=json.dumps(payload).encode()), \
+                 mock.patch.object(BUNDLE, "download_to_path", side_effect=lambda url, destination, details, asset, **kwargs: destination.write_bytes((assets / url.rsplit('/', 1)[-1]).read_bytes())):
+                audit = BUNDLE.install_bundle(
+                    install_dir=root / "audit-install", profile="audit_support"
+                )
+            self.assertEqual(audit["profile"], "audit_support")
+            self.assertTrue(
+                (root / "audit-install" / "tcia_correction_registry.sqlite").is_file()
+            )
 
     def test_source_release_copy_is_digest_verified(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -434,7 +534,7 @@ class V2BundleTests(unittest.TestCase):
             result = BUNDLE.validate_source_release(root, release_path)
             self.assertTrue(result["ok"], result["errors"])
             self.assertEqual(result["release_id"], 42)
-            self.assertEqual(len(result["assets"]), 7)
+            self.assertEqual(len(result["assets"]), 9)
 
     def test_validate_source_cli_returns_nonzero_with_structured_errors(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -521,7 +621,7 @@ class V2BundleTests(unittest.TestCase):
             release_path.write_text(json.dumps({"tag_name": BUNDLE.DEFAULT_RELEASE_TAG, "assets": assets}))
             result = BUNDLE.validate_published_release(manifest_path, release_path)
             self.assertTrue(result["ok"], result["errors"])
-            self.assertEqual(result["asset_count"], 24)
+            self.assertEqual(result["asset_count"], 26)
 
     def test_changed_assets_excludes_unchanged_large_sidecars(self):
         with tempfile.TemporaryDirectory() as temporary:

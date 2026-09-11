@@ -77,9 +77,12 @@ jobs:
           for asset in \
             tcia_snapshot.sqlite.gz \
             controlled_access_metadata.sqlite.gz \
-            clinical_metadata.sqlite.gz; do
+            clinical_metadata.sqlite.gz \
+            tcia_correction_registry.sqlite.gz; do
             gzip -dc "dist/$asset" > "cache/${asset%.gz}"
           done
+          python scripts/tcia_correction_registry.py validate \
+            --db cache/tcia_correction_registry.sqlite
 
       - name: Download and verify the canonical non-DICOM geometry seed
         env:
@@ -110,7 +113,8 @@ jobs:
           for asset in \
             tcia_metadata_v2_bundle_manifest.json \
             public_non_dicom_metadata.sqlite.gz \
-            public_non_dicom_audit.sqlite.gz; do
+            public_non_dicom_audit.sqlite.gz \
+            participant_inventory.sqlite.gz; do
             gh release download "$baseline_tag" --pattern "$asset" --dir dist --clobber
           done
           python scripts/tcia_v2_bundle.py validate-selection \
@@ -118,11 +122,14 @@ jobs:
             --manifest dist/tcia_metadata_v2_bundle_manifest.json \
             --source-release-json cache/baseline_release.json \
             --asset public_non_dicom_metadata.sqlite.gz \
-            --asset public_non_dicom_audit.sqlite.gz
+            --asset public_non_dicom_audit.sqlite.gz \
+            --asset participant_inventory.sqlite.gz
           gzip -dc dist/public_non_dicom_metadata.sqlite.gz \
             > cache/public_non_dicom_baseline.sqlite
           gzip -dc dist/public_non_dicom_audit.sqlite.gz \
             > cache/public_non_dicom_audit_baseline.sqlite
+          gzip -dc dist/participant_inventory.sqlite.gz \
+            > cache/participant_inventory_baseline.sqlite
           jq '.components.public_non_dicom' \
             dist/tcia_metadata_v2_bundle_manifest.json \
             > cache/public_non_dicom_baseline_manifest.json
@@ -311,6 +318,27 @@ jobs:
             --artifact participant_inventory \
             --db cache/participant_inventory_audit.sqlite
 
+      - name: Enforce exact semantic change explanations
+        run: |
+          python scripts/tcia_metadata_change_report.py \
+            --public-new cache/public_non_dicom_metadata.sqlite \
+            --public-old cache/public_non_dicom_baseline.sqlite \
+            --participant-new cache/participant_inventory.sqlite \
+            --participant-old cache/participant_inventory_baseline.sqlite \
+            --explanations-db cache/tcia_correction_registry.sqlite \
+            --fail-on-unexplained-high \
+            --github-actions \
+            --markdown-out cache/reports/metadata_change_report_final.md \
+            --json-out cache/reports/metadata_change_report_final.json
+          python scripts/tcia_correction_registry.py consume-explanations \
+            --db cache/tcia_correction_registry.sqlite \
+            --report cache/reports/metadata_change_report_final.json
+          python scripts/tcia_correction_registry.py package \
+            --db cache/tcia_correction_registry.sqlite \
+            --gzip-out dist/tcia_correction_registry.sqlite.gz \
+            --manifest-out dist/tcia_correction_registry_manifest.json
+          cat cache/reports/metadata_change_report_final.md >> "$GITHUB_STEP_SUMMARY"
+
       - name: Run V2 contract tests
         run: |
           python -m unittest \
@@ -333,6 +361,10 @@ jobs:
             cache/idc_participant_projection_manifest.json
             cache/reports/tcia_v2_compact_audit_metrics.json
             cache/reports/tcia_v2_compact_audit_reconstruction.json
+            cache/reports/metadata_change_report_final.md
+            cache/reports/metadata_change_report_final.json
+            dist/metadata_change_report.md
+            dist/metadata_change_report.json
           if-no-files-found: ignore
           retention-days: 30
 

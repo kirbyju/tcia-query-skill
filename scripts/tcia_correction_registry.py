@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import csv
 import datetime as dt
+import gzip
 import hashlib
 import importlib.util
 import json
@@ -30,6 +31,7 @@ DEFAULT_CURATION = ROOT / "references/public-non-dicom-crosswalk-curation-v1.jso
 DEFAULT_SOURCE_LINKS = ROOT / "references/reviewed_analysis_result_source_collections_v1.csv"
 DEFAULT_CLINICAL_MODULE = ROOT / "scripts/tcia_clinical_metadata.py"
 DEFAULT_ASSERTIONS = ROOT / "references/correction-assertions-v1.json"
+DEFAULT_SEMANTIC_EXPLANATIONS = ROOT / "references/correction-semantic-explanations-v1.json"
 LEGACY_POLICY_REVIEWED_AT = "2026-09-02T00:00:00Z"
 
 DECISION_STATUSES = {
@@ -922,6 +924,99 @@ def mark_revision_stale(
     return validate_database(path)
 
 
+def migrate_semantic_explanations(conn: sqlite3.Connection, path: Path) -> int:
+    if not path.exists():
+        return 0
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if payload.get("schema_version") != 1 or not isinstance(payload.get("explanations"), list):
+        raise ValueError("semantic explanation input must use schema_version 1")
+    count = 0
+    for item in payload["explanations"]:
+        required = {
+            "artifact", "entity_table", "primary_key", "change_kind",
+            "before_sha256", "after_sha256", "reviewer", "approved_at", "rationale",
+        }
+        if not isinstance(item, dict) or not required.issubset(item):
+            raise ValueError("semantic explanation is missing required fields")
+        primary_key = item["primary_key"]
+        if (
+            not isinstance(primary_key, list) or not primary_key
+            or any(not isinstance(pair, list) or len(pair) != 2 or not all(isinstance(v, str) for v in pair) for pair in primary_key)
+        ):
+            raise ValueError("semantic explanation primary_key must be an ordered [name,value] list")
+        kind = str(item["change_kind"])
+        before = str(item["before_sha256"])
+        after = str(item["after_sha256"])
+        if kind not in {"added", "removed", "modified"}:
+            raise ValueError("semantic explanation change_kind is invalid")
+        for value in (before, after):
+            if value and (len(value) != 64 or any(c not in "0123456789abcdef" for c in value.lower())):
+                raise ValueError("semantic explanation has an invalid SHA-256")
+        if (kind == "added" and (before or not after)) or (kind == "removed" and (not before or after)) or (kind == "modified" and (not before or not after or before == after)):
+            raise ValueError("semantic explanation before/after SHA-256 values disagree with change_kind")
+        target = canonical_json({
+            "artifact": item["artifact"], "table": item["entity_table"],
+            "primary_key": primary_key, "change_kind": kind,
+        })
+        revision_id = make_reviewed_decision(
+            conn, source_kind="semantic_change_explanation",
+            dataset_type="release", short_title=str(item["artifact"]),
+            decision_type="semantic_change", target=target, status="approved",
+            reviewer=str(item["reviewer"]), reviewed_at=str(item["approved_at"]),
+            rationale=str(item["rationale"]),
+            resolution={"approved_change": target},
+            expected_effects=[{
+                "artifact": str(item["artifact"]),
+                "entity_table": str(item["entity_table"]),
+                "entity_id": canonical_json(primary_key),
+                "effect_kind": kind,
+                "after": {"sha256": after},
+            }],
+            evidence=[{
+                "source_record_id": str(item.get("evidence_id") or target),
+                "excerpt": str(item.get("evidence") or item["rationale"]),
+            }],
+            policy_version="semantic-explanations-v1",
+        )
+        effect = conn.execute(
+            "SELECT effect_id FROM correction_effects WHERE revision_id=?", (revision_id,)
+        ).fetchone()
+        conn.execute(
+            """UPDATE correction_effects SET artifact=?,entity_table=?,entity_id=?,
+                      effect_kind=?,before_sha256=?,after_sha256=?,effect_status='approved'
+               WHERE effect_id=? AND effect_status!='consumed'""",
+            (str(item["artifact"]), str(item["entity_table"]), canonical_json(primary_key),
+             kind, before, after, str(effect[0])),
+        )
+        count += 1
+    return count
+
+
+def consume_semantic_explanations(path: Path, report_path: Path) -> dict[str, Any]:
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    explanations = report.get("semantic_explanations") or {}
+    if report.get("unexplained_high_severity") or any(
+        explanations.get(key) for key in ("duplicate_matches", "malformed_effects", "unused_effect_ids")
+    ):
+        raise ValueError("cannot consume explanations from a failing semantic report")
+    report_sha = str(report.get("report_sha256") or "")
+    effect_ids = list(explanations.get("consumed_effect_ids") or [])
+    if len(report_sha) != 64 or len(effect_ids) != len(set(effect_ids)):
+        raise ValueError("semantic report identity or consumed effect IDs are invalid")
+    with closing(sqlite3.connect(path)) as conn:
+        for effect_id in effect_ids:
+            cursor = conn.execute(
+                """UPDATE correction_effects
+                   SET effect_status='consumed',build_fingerprint=?
+                   WHERE effect_id=? AND effect_status='approved'""",
+                (report_sha, str(effect_id)),
+            )
+            if cursor.rowcount != 1:
+                raise ValueError(f"semantic explanation was not uniquely consumable: {effect_id}")
+        conn.commit()
+    return {"consumed": len(effect_ids), "report_sha256": report_sha, **validate_database(path)}
+
+
 def link_release(
     path: Path, *, release_fingerprint: str, release_tag: str,
     source_health: str, observed_at: str, change_report_sha256: str = "",
@@ -930,7 +1025,8 @@ def link_release(
         raise ValueError("invalid source_health")
     with closing(sqlite3.connect(path)) as conn:
         active = [str(row[0]) for row in conn.execute(
-            "SELECT revision_id FROM agent_active_corrections ORDER BY revision_id"
+            """SELECT revision_id FROM agent_active_corrections
+               WHERE source_kind!='semantic_change_explanation' ORDER BY revision_id"""
         )]
         decision_sha = digest(active)
         expected_header = (release_tag, decision_sha, source_health, change_report_sha256)
@@ -974,8 +1070,12 @@ def add_waiver(
     scope: dict[str, Any], created_at: str, expires_at: str,
     case_id: str | None = None,
 ) -> dict[str, Any]:
-    if not owner or not reason or not expires_at:
-        raise ValueError("waiver owner, reason, and expiry are required")
+    if not rule_id or not owner or not reason or not created_at or not expires_at:
+        raise ValueError("waiver rule, owner, reason, creation, and expiry are required")
+    if not isinstance(scope, dict) or not scope:
+        raise ValueError("waiver scope must be a non-empty object")
+    if parse_utc(expires_at) <= parse_utc(created_at):
+        raise ValueError("waiver expiry must be after creation")
     waiver_id = stable_id(
         "waiver", rule_id, owner, reason, scope, created_at, expires_at, case_id
     )
@@ -1257,7 +1357,8 @@ def migrate_assertions(conn: sqlite3.Connection, path: Path) -> int:
 
 def decision_set_digest(conn: sqlite3.Connection) -> str:
     rows = [str(row[0]) for row in conn.execute(
-        "SELECT revision_id FROM agent_active_corrections ORDER BY revision_id"
+        """SELECT revision_id FROM agent_active_corrections
+           WHERE source_kind!='semantic_change_explanation' ORDER BY revision_id"""
     )]
     return digest(rows)
 
@@ -1406,13 +1507,179 @@ def validate_database(path: Path) -> dict[str, Any]:
             "counts": counts, "active_decision_set_sha256": active_digest}
 
 
+def file_sha256(path: Path) -> str:
+    value = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            value.update(chunk)
+    return value.hexdigest()
+
+
+def parse_utc(value: str) -> dt.datetime:
+    parsed = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        raise ValueError("timestamp must include a timezone")
+    return parsed.astimezone(dt.timezone.utc)
+
+
+def validate_promotion_waivers(path: Path, *, at: str) -> dict[str, Any]:
+    """Require exact, expiring, single-use waivers for failed release validations."""
+    errors: list[str] = []
+    used: list[str] = []
+    instant = parse_utc(at)
+    with closing(sqlite3.connect(f"file:{path}?mode=ro", uri=True)) as conn:
+        conn.row_factory = sqlite3.Row
+        failures = {
+            str(row["validation_id"]): row
+            for row in conn.execute(
+                """SELECT v.*,d.case_id FROM correction_validations v
+                   LEFT JOIN correction_decisions d USING(revision_id)
+                   WHERE v.status!='passed' AND v.severity IN ('high','critical')
+                     AND (
+                       (v.revision_id IS NOT NULL AND EXISTS (
+                          SELECT 1 FROM agent_active_corrections a
+                          WHERE a.revision_id=v.revision_id
+                       ))
+                       OR
+                       (v.revision_id IS NULL AND v.executed_at=(
+                          SELECT MAX(v2.executed_at) FROM correction_validations v2
+                          WHERE v2.revision_id IS NULL AND v2.rule_id=v.rule_id
+                       ))
+                     )"""
+            )
+        }
+        matched: dict[str, list[str]] = {}
+        for row in conn.execute(
+            "SELECT * FROM correction_waivers WHERE status='active' ORDER BY waiver_id"
+        ):
+            waiver_id = str(row["waiver_id"])
+            try:
+                scope = json.loads(str(row["scope_json"]))
+                if not isinstance(scope, dict) or set(scope) != {"validation_id", "evidence_sha256"}:
+                    raise ValueError("scope must contain exactly validation_id and evidence_sha256")
+                expires = parse_utc(str(row["expires_at"]))
+                created = parse_utc(str(row["created_at"]))
+                if expires <= created:
+                    raise ValueError("expiry must be after creation")
+                if expires <= instant:
+                    raise ValueError("waiver is expired")
+            except (ValueError, TypeError, json.JSONDecodeError) as exc:
+                errors.append(f"{waiver_id}: malformed active waiver: {exc}")
+                continue
+            validation_id = str(scope["validation_id"])
+            failure = failures.get(validation_id)
+            if (
+                failure is None
+                or str(row["rule_id"]) != str(failure["rule_id"])
+                or str(scope["evidence_sha256"]) != str(failure["evidence_sha256"])
+                or (row["case_id"] is not None and str(row["case_id"]) != str(failure["case_id"]))
+            ):
+                errors.append(f"{waiver_id}: active waiver is unused")
+                continue
+            matched.setdefault(validation_id, []).append(waiver_id)
+        for validation_id, waiver_ids in matched.items():
+            if len(waiver_ids) != 1:
+                errors.append(f"{validation_id}: duplicate waiver consumption")
+            else:
+                used.extend(waiver_ids)
+        for validation_id in sorted(set(failures) - set(matched)):
+            errors.append(f"{validation_id}: failed validation has no active exact waiver")
+    return {"ok": not errors, "errors": errors, "used_waiver_ids": sorted(used)}
+
+
+def package_registry(
+    path: Path, *, gzip_out: Path, manifest_out: Path, gzip_level: int = 6,
+) -> dict[str, Any]:
+    """Write deterministic, hash-bound release artifacts for a valid registry."""
+    result = validate_database(path)
+    if not result["ok"]:
+        raise RuntimeError("Invalid correction registry: " + "; ".join(result["errors"]))
+    with closing(sqlite3.connect(f"file:{path}?mode=ro", uri=True)) as conn:
+        meta = dict(conn.execute("SELECT key,value FROM registry_meta"))
+        active = int(conn.execute(
+            "SELECT COUNT(*) FROM agent_active_corrections WHERE source_kind!='semantic_change_explanation'"
+        ).fetchone()[0])
+        cases = int(conn.execute("SELECT COUNT(*) FROM correction_cases").fetchone()[0])
+        pending = int(conn.execute(
+            "SELECT COUNT(*) FROM correction_cases WHERE status IN ('review','needs_review','proposed')"
+        ).fetchone()[0])
+        failed = int(conn.execute(
+            "SELECT COUNT(*) FROM correction_validations WHERE status != 'passed'"
+        ).fetchone()[0])
+    waiver_health = validate_promotion_waivers(
+        path, at=meta.get("generated_at_utc") or utc_now()
+    )
+    if not waiver_health["ok"]:
+        raise RuntimeError(
+            "Correction registry is not eligible for stable promotion: "
+            + "; ".join(waiver_health["errors"])
+        )
+    source_health = json.loads(meta.get("source_health_json") or "{}")
+    source_status = source_health.get("sources") or {"registry": "validated_component"}
+    gzip_out.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("rb") as source, gzip_out.open("wb") as raw:
+        with gzip.GzipFile(
+            filename="", mode="wb", fileobj=raw, compresslevel=gzip_level, mtime=0
+        ) as target:
+            for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                target.write(chunk)
+    sqlite_sha = file_sha256(path)
+    gzip_sha = file_sha256(gzip_out)
+    decision_sha = str(result["active_decision_set_sha256"])
+    manifest = {
+        "artifact": "tcia_correction_registry",
+        "schema_version": SCHEMA_VERSION,
+        "generated_at_utc": meta.get("generated_at_utc", ""),
+        "sqlite_sha256": sqlite_sha,
+        "gzip_sha256": gzip_sha,
+        "sqlite_bytes": path.stat().st_size,
+        "gzip_bytes": gzip_out.stat().st_size,
+        "release_fingerprint": hashlib.sha256(
+            canonical_json({
+                "artifact": "tcia_correction_registry",
+                "schema_version": SCHEMA_VERSION,
+                "sqlite_sha256": sqlite_sha,
+                "decision_set_sha256": decision_sha,
+            }).encode("utf-8")
+        ).hexdigest(),
+        "decision_set_summary": {
+            "sha256": decision_sha,
+            "status": str(source_health.get("status") or "unverified"),
+            "counts": {
+                "active_revisions": active,
+                "cases": cases,
+                "failed_validations": failed,
+                "pending_cases": pending,
+                "used_waivers": len(waiver_health["used_waiver_ids"]),
+            },
+        },
+        "source_status": source_status,
+        "provenance": {
+            "snapshot_sha256": meta.get("snapshot_sha256", ""),
+            "snapshot_manifest_sha256": source_health.get("manifest_sha256", ""),
+            "prior_release_links": "immutable releases recorded before this build only",
+        },
+        "storage_contract": {
+            "database": gzip_out.name,
+            "compression": "gzip-mtime-0",
+            "profile": "audit_support",
+        },
+    }
+    manifest_out.parent.mkdir(parents=True, exist_ok=True)
+    manifest_out.write_text(canonical_json(manifest) + "\n", encoding="utf-8")
+    return manifest
+
+
 def build_registry(
     out: Path, *, snapshot: Path | None = None, curation: Path = DEFAULT_CURATION,
     source_links: Path = DEFAULT_SOURCE_LINKS,
     clinical_module: Path = DEFAULT_CLINICAL_MODULE,
     assertions: Path = DEFAULT_ASSERTIONS,
+    semantic_explanations: Path = DEFAULT_SEMANTIC_EXPLANATIONS,
     snapshot_manifest: Path | None = None,
     observed_at: str | None = None, replace: bool = False,
+    gzip_out: Path | None = None, manifest_out: Path | None = None,
+    gzip_level: int = 6,
 ) -> dict[str, Any]:
     generated = observed_at or utc_now()
     if out.exists() and not replace:
@@ -1427,6 +1694,9 @@ def build_registry(
             source_link_count = migrate_source_links(conn, source_links)
             clinical_counts = migrate_clinical_decisions(conn, clinical_module)
             assertion_count = migrate_assertions(conn, assertions)
+            semantic_explanation_count = migrate_semantic_explanations(
+                conn, semantic_explanations
+            )
             clue_counts = ingest_wordpress_observations(conn, snapshot, observed_at=generated) if snapshot else {}
             source_health = snapshot_source_health(snapshot_manifest)
             meta = {
@@ -1436,6 +1706,7 @@ def build_registry(
             "source_links_sha256": digest(source_links.read_bytes()) if source_links.exists() else "",
             "clinical_policy_sha256": digest(clinical_module.read_bytes()),
             "assertions_sha256": digest(assertions.read_bytes()) if assertions.exists() else "",
+            "semantic_explanations_sha256": digest(semantic_explanations.read_bytes()) if semantic_explanations.exists() else "",
             "snapshot_sha256": digest(snapshot.read_bytes()) if snapshot else "",
             "source_health": str(source_health["status"]),
             "source_health_json": canonical_json(source_health),
@@ -1444,6 +1715,7 @@ def build_registry(
                 "analysis_result_source_links": source_link_count,
                 "clinical_decisions": clinical_counts,
                 "declarative_assertions": assertion_count,
+                "semantic_explanations": semantic_explanation_count,
                 "wordpress_clues": clue_counts,
             }),
             "clinical_policy_inventory": canonical_json({
@@ -1475,6 +1747,12 @@ def build_registry(
             raise RuntimeError("Invalid correction registry: " + "; ".join(result["errors"]))
         os.replace(staged, out)
     result["path"] = str(out)
+    if bool(gzip_out) != bool(manifest_out):
+        raise ValueError("--gzip-out and --manifest-out must be provided together")
+    if gzip_out and manifest_out:
+        result["manifest"] = package_registry(
+            out, gzip_out=gzip_out, manifest_out=manifest_out, gzip_level=gzip_level
+        )
     return result
 
 
@@ -1489,10 +1767,24 @@ def parser() -> argparse.ArgumentParser:
     build.add_argument("--source-links", type=Path, default=DEFAULT_SOURCE_LINKS)
     build.add_argument("--clinical-module", type=Path, default=DEFAULT_CLINICAL_MODULE)
     build.add_argument("--assertions", type=Path, default=DEFAULT_ASSERTIONS)
+    build.add_argument(
+        "--semantic-explanations", type=Path, default=DEFAULT_SEMANTIC_EXPLANATIONS
+    )
     build.add_argument("--observed-at")
+    build.add_argument("--gzip-out", type=Path)
+    build.add_argument("--manifest-out", type=Path)
+    build.add_argument("--gzip-level", type=int, default=6)
     build.add_argument("--replace", action="store_true")
     validate = sub.add_parser("validate")
     validate.add_argument("--db", type=Path, required=True)
+    package = sub.add_parser("package")
+    package.add_argument("--db", type=Path, required=True)
+    package.add_argument("--gzip-out", type=Path, required=True)
+    package.add_argument("--manifest-out", type=Path, required=True)
+    package.add_argument("--gzip-level", type=int, default=6)
+    consume = sub.add_parser("consume-explanations")
+    consume.add_argument("--db", type=Path, required=True)
+    consume.add_argument("--report", type=Path, required=True)
     stale = sub.add_parser("mark-stale")
     stale.add_argument("--db", type=Path, required=True)
     stale.add_argument("--revision-id", required=True)
@@ -1533,11 +1825,24 @@ def main() -> int:
                 args.out, snapshot=args.snapshot, curation=args.curation,
                 source_links=args.source_links, clinical_module=args.clinical_module,
                 assertions=args.assertions,
+                semantic_explanations=args.semantic_explanations,
                 snapshot_manifest=args.snapshot_manifest,
                 observed_at=args.observed_at, replace=args.replace,
+                gzip_out=args.gzip_out, manifest_out=args.manifest_out,
+                gzip_level=args.gzip_level,
             )
         elif args.command == "validate":
             result = validate_database(args.db)
+        elif args.command == "package":
+            result = {
+                "ok": True,
+                "manifest": package_registry(
+                    args.db, gzip_out=args.gzip_out,
+                    manifest_out=args.manifest_out, gzip_level=args.gzip_level,
+                ),
+            }
+        elif args.command == "consume-explanations":
+            result = consume_semantic_explanations(args.db, args.report)
         elif args.command == "mark-stale":
             result = mark_revision_stale(
                 args.db, args.revision_id, stale_status=args.stale_status,

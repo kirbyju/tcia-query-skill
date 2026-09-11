@@ -117,7 +117,7 @@ From the skill repository root:
 ```bash
 python3 -m venv .venv
 .venv/bin/python -m pip install --upgrade pip
-.venv/bin/python -m pip install -r mcp_server/requirements.txt
+.venv/bin/python -m pip install --require-hashes -r requirements-server.lock
 ```
 
 For production, create the virtual environment, pip cache, logs, and SQLite
@@ -211,6 +211,7 @@ Commit reusable source, templates, and docs:
 - `mcp_server/tcia_query_mcp/`
 - `mcp_server/__main__.py`
 - `mcp_server/requirements.txt`
+- `requirements-server.lock`
 - `mcp_server/tests/`
 - `mcp_server/README.md`
 - `mcp_server/DEPLOYMENT.md`

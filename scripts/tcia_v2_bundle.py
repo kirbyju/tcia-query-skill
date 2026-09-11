@@ -94,6 +94,12 @@ COMPONENTS = {
         "category": "audit_support",
         "default_download": False,
     },
+    "correction_registry": {
+        "database": "tcia_correction_registry.sqlite.gz",
+        "manifest": "tcia_correction_registry_manifest.json",
+        "category": "audit_support",
+        "default_download": False,
+    },
 }
 
 EXTRA_ASSETS = {
@@ -115,7 +121,7 @@ LEGACY_INSTALLED_ASSETS = {
     "pathology_metadata_manifest.json",
 }
 
-SOURCE_COMPONENTS = ("snapshot", "controlled_access", "clinical")
+SOURCE_COMPONENTS = ("snapshot", "controlled_access", "clinical", "correction_registry")
 STREAMLINED_COMPONENTS = (
     "snapshot",
     "controlled_access",
@@ -124,6 +130,7 @@ STREAMLINED_COMPONENTS = (
     "participant_inventory",
     "public_non_dicom_audit",
     "participant_inventory_audit",
+    "correction_registry",
 )
 STREAMLINED_WEB_EXPORTS = {
     "agent_datasets.jsonl.gz",
@@ -1071,6 +1078,38 @@ def expected_payload_assets(release_contract: str = FULL_RELEASE_CONTRACT) -> li
     return sorted(assets)
 
 
+def expected_payload_assets_for_schema(
+    schema_version: int, release_contract: str,
+) -> list[str]:
+    assets = expected_payload_assets(release_contract)
+    if schema_version == 2:
+        legacy = COMPONENTS["correction_registry"]
+        assets = [
+            name for name in assets
+            if name not in {legacy["database"], legacy["manifest"]}
+        ]
+    return assets
+
+
+def component_names_for_schema(
+    schema_version: int, release_contract: str,
+) -> tuple[str, ...]:
+    names = component_names_for_contract(release_contract)
+    if schema_version == 2:
+        names = tuple(name for name in names if name != "correction_registry")
+    return names
+
+
+def assets_for_profile_schema(
+    profile: str, schema_version: int, release_contract: str,
+) -> list[str]:
+    allowed = set(expected_payload_assets_for_schema(schema_version, release_contract))
+    return [
+        name for name in assets_for_profile(profile, release_contract=release_contract)
+        if name in allowed
+    ]
+
+
 def source_copy_assets() -> list[str]:
     assets = set(EXTRA_ASSETS)
     for name in SOURCE_COMPONENTS:
@@ -1166,13 +1205,30 @@ def validate_component_assets(
             errors.append(f"{manifest_path.name} has no gzip_sha256")
         elif expected_gzip_sha256 != actual_gzip_sha256:
             errors.append(f"{database_path.name} does not match {manifest_path.name} gzip_sha256")
+        expected_sqlite_sha256 = str(manifest.get("sqlite_sha256") or "")
+        if not expected_sqlite_sha256:
+            errors.append(f"{manifest_path.name} has no sqlite_sha256")
+        else:
+            try:
+                with tempfile.TemporaryDirectory(prefix=f".{name}-verify-", dir=asset_dir) as temporary:
+                    sqlite_path = Path(temporary) / database_path.name.removesuffix(".gz")
+                    with gzip.open(database_path, "rb") as source, sqlite_path.open("wb") as target:
+                        shutil.copyfileobj(source, target)
+                    if file_sha256(sqlite_path) != expected_sqlite_sha256:
+                        errors.append(
+                            f"{database_path.name} does not match {manifest_path.name} sqlite_sha256"
+                        )
+                    else:
+                        _sqlite_integrity(sqlite_path, database_path.name)
+            except (OSError, EOFError, gzip.BadGzipFile, RuntimeError) as exc:
+                errors.append(f"invalid component SQLite {database_path.name}: {exc}")
         components[name] = {
             "database_asset": database_path.name,
             "manifest_asset": manifest_path.name,
             "profile": asset_profile(database_path.name),
             "schema_version": manifest.get("schema_version"),
             "release_fingerprint": manifest.get("release_fingerprint"),
-            "sqlite_sha256": manifest.get("sqlite_sha256"),
+            "sqlite_sha256": expected_sqlite_sha256,
             "gzip_sha256": actual_gzip_sha256,
             "provenance": manifest.get("provenance"),
             "storage_contract": manifest.get("storage_contract"),
@@ -1429,9 +1485,11 @@ def validate_bundle(asset_dir: Path, manifest_path: Path) -> dict[str, Any]:
         errors.append("unexpected artifact identifier")
     if manifest.get("schema_version") not in SUPPORTED_BUNDLE_SCHEMA_VERSIONS:
         errors.append("unexpected bundle schema version")
+    schema_version = manifest.get("schema_version")
+    schema_version = schema_version if isinstance(schema_version, int) else 0
     release_contract = str(manifest.get("release_contract") or FULL_RELEASE_CONTRACT)
     try:
-        expected_names = expected_payload_assets(release_contract)
+        expected_names = expected_payload_assets_for_schema(schema_version, release_contract)
     except ValueError as exc:
         errors.append(str(exc))
         expected_names = []
@@ -1439,7 +1497,7 @@ def validate_bundle(asset_dir: Path, manifest_path: Path) -> dict[str, Any]:
     if sorted(manifest_assets) != expected_names:
         errors.append("bundle manifest asset names do not match the contract")
     try:
-        expected_components = set(component_names_for_contract(release_contract))
+        expected_components = set(component_names_for_schema(schema_version, release_contract))
     except ValueError:
         expected_components = set()
     if set(manifest.get("components") or {}) != expected_components:
@@ -1449,8 +1507,8 @@ def validate_bundle(asset_dir: Path, manifest_path: Path) -> dict[str, Any]:
         errors.append("bundle manifest profiles do not match the contract")
     else:
         for profile in PROFILE_ORDER:
-            if (profiles.get(profile) or {}).get("assets") != assets_for_profile(
-                profile, release_contract=release_contract
+            if (profiles.get(profile) or {}).get("assets") != assets_for_profile_schema(
+                profile, schema_version, release_contract
             ):
                 errors.append(f"bundle profile {profile} asset names do not match the contract")
     for name in expected_names:
@@ -1576,9 +1634,11 @@ def validate_manifest_contract(manifest: dict[str, Any]) -> list[str]:
         errors.append("unexpected artifact identifier")
     if manifest.get("schema_version") not in SUPPORTED_BUNDLE_SCHEMA_VERSIONS:
         errors.append("unexpected bundle schema version")
+    schema_version = manifest.get("schema_version")
+    schema_version = schema_version if isinstance(schema_version, int) else 0
     release_contract = str(manifest.get("release_contract") or FULL_RELEASE_CONTRACT)
     try:
-        expected_names = expected_payload_assets(release_contract)
+        expected_names = expected_payload_assets_for_schema(schema_version, release_contract)
     except ValueError as exc:
         errors.append(str(exc))
         expected_names = []
@@ -1586,7 +1646,7 @@ def validate_manifest_contract(manifest: dict[str, Any]) -> list[str]:
     if sorted(manifest_assets) != expected_names:
         errors.append("bundle manifest asset names do not match the contract")
     try:
-        expected_components = set(component_names_for_contract(release_contract))
+        expected_components = set(component_names_for_schema(schema_version, release_contract))
     except ValueError:
         expected_components = set()
     if set(manifest.get("components") or {}) != expected_components:
@@ -1597,8 +1657,8 @@ def validate_manifest_contract(manifest: dict[str, Any]) -> list[str]:
     else:
         for profile in PROFILE_ORDER:
             details = profiles.get(profile) or {}
-            if details.get("assets") != assets_for_profile(
-                profile, release_contract=release_contract
+            if details.get("assets") != assets_for_profile_schema(
+                profile, schema_version, release_contract
             ):
                 errors.append(f"bundle profile {profile} asset names do not match the contract")
             if details.get("depends_on") != list(PROFILE_DEPENDENCIES[profile]):

@@ -36,8 +36,8 @@ Keep the virtual environment and pip cache under the runtime root:
 python3 -m venv "$TCIA_MCP_ROOT/.venv"
 export PIP_CACHE_DIR="$TCIA_MCP_ROOT/pip-cache"
 "$TCIA_MCP_ROOT/.venv/bin/python" -m pip install --upgrade pip
-"$TCIA_MCP_ROOT/.venv/bin/python" -m pip install \
-  -r "$TCIA_MCP_ROOT/tcia-query-skill/mcp_server/requirements.txt"
+"$TCIA_MCP_ROOT/.venv/bin/python" -m pip install --require-hashes \
+  -r "$TCIA_MCP_ROOT/tcia-query-skill/requirements-server.lock"
 ```
 
 ## 4. Install the V2 Release Contract
@@ -84,6 +84,11 @@ artifact; the streamlined release does not publish standalone NIfTI or pathology
 SQLite files. Do not export `TCIA_NIFTI_METADATA_DB` or
 `TCIA_PATHOLOGY_METADATA_DB` for this V2 installation.
 
+Install `audit_support` only when the host needs verbose audit databases or the
+full correction registry. That profile includes `research_detail`; the compact
+correction decision-set digest, counts, and source-health status remain visible
+in the top bundle manifest without installing the registry SQLite.
+
 The MCP server advertises the 20 supported V2 tools. Do not configure standalone
 NIfTI or pathology databases for the streamlined public service; those domains
 are provided by the unified public non-DICOM detail artifact.
@@ -109,7 +114,8 @@ cd "$TCIA_MCP_ROOT/tcia-query-skill"
 Check REST health and the installed bundle contract:
 
 ```bash
-curl -fsS http://127.0.0.1:8766/v2/health
+curl -fsS http://127.0.0.1:8766/v2/live
+curl -fsS http://127.0.0.1:8766/v2/ready
 curl -fsS http://127.0.0.1:8766/v2/bundle
 ```
 
@@ -180,13 +186,18 @@ sudo systemctl restart tcia-query-rest
 
 Existing MCP/REST operators do **not** need an extra migration command or new
 path configuration. Keep the normal sequence: pull the reviewed code, install
-or update dependencies, run the same `tcia_v2_bundle.py install --profile ...`
+or update dependencies from `requirements-server.lock` with `--require-hashes`,
+run the same `tcia_v2_bundle.py install --profile ...`
 command, restart the services, then reconnect clients that cache MCP sessions.
 The installer performs the one-time flat-layout migration automatically.
 Operators should additionally confirm `/v2/bundle` reports the intended
 fingerprint and source-health summary after restart. Rollback is optional and
 uses the command above; restart and reconnect after selecting the prior
 generation.
+
+Compatibility aliases are restored for installer-managed paths recorded by a
+valid receipt. This is not a promise to preserve arbitrary operator-created
+files or symlinks in the install directory.
 
 Set the repository Actions variable `TCIA_V2_DEPLOYED_INFO_URL` to the deployed
 snapshot/bundle-info JSON endpoint if release jobs should compare the published

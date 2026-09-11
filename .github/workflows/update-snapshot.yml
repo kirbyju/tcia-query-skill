@@ -156,6 +156,69 @@ jobs:
             --db dist/clinical_metadata.sqlite \
             --out dist/clinical_qc_manual_review.csv
 
+      - name: Import only a verified prior correction registry
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="tcia-metadata-v2-latest"
+          mkdir -p previous
+          if gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" \
+            > previous/release.json 2>/dev/null; then
+            gh release download "$tag" \
+              --pattern tcia_metadata_v2_bundle_manifest.json \
+              --dir previous --clobber
+            if jq -e '.assets["tcia_correction_registry.sqlite.gz"]' \
+              previous/tcia_metadata_v2_bundle_manifest.json >/dev/null; then
+              gh release download "$tag" \
+                --pattern tcia_correction_registry.sqlite.gz \
+                --dir previous --clobber
+              python scripts/tcia_v2_bundle.py validate-selection \
+                --asset-dir previous \
+                --manifest previous/tcia_metadata_v2_bundle_manifest.json \
+                --source-release-json previous/release.json \
+                --asset tcia_correction_registry.sqlite.gz
+              gzip -dc previous/tcia_correction_registry.sqlite.gz \
+                > previous/tcia_correction_registry.sqlite
+              python scripts/tcia_correction_registry.py validate \
+                --db previous/tcia_correction_registry.sqlite
+              prior_fingerprint="$(jq -r '.release_fingerprint' previous/tcia_metadata_v2_bundle_manifest.json)"
+              prior_date="$(jq -r '.generated_at_utc[:10] | gsub("-"; ".")' previous/tcia_metadata_v2_bundle_manifest.json)"
+              immutable_tag="tcia-metadata-v2-${prior_date}-${prior_fingerprint:0:12}"
+              gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${immutable_tag}" \
+                > previous/immutable-release.json
+              python scripts/tcia_v2_bundle.py validate-published \
+                --manifest previous/tcia_metadata_v2_bundle_manifest.json \
+                --release-json previous/immutable-release.json
+              prior_health="$(jq -r '.decision_sets.correction_registry.status' previous/tcia_metadata_v2_bundle_manifest.json)"
+              python scripts/tcia_correction_registry.py link-release \
+                --db previous/tcia_correction_registry.sqlite \
+                --release-fingerprint "$prior_fingerprint" \
+                --release-tag "$immutable_tag" \
+                --source-health "$prior_health" \
+                --observed-at "$(jq -r '.generated_at_utc' previous/tcia_metadata_v2_bundle_manifest.json)"
+              cp previous/tcia_correction_registry.sqlite \
+                dist/tcia_correction_registry.sqlite
+            else
+              echo "Prior contract predates the correction component; establishing its baseline."
+            fi
+          else
+            echo "No prior V2 release exists; establishing the correction baseline."
+          fi
+
+      - name: Build and package the correction registry
+        run: |
+          set -euo pipefail
+          observed_at="$(jq -r '.generated_at_utc' dist/tcia_snapshot_manifest.json)"
+          python scripts/tcia_correction_registry.py build \
+            --snapshot dist/tcia_snapshot.sqlite \
+            --snapshot-manifest dist/tcia_snapshot_manifest.json \
+            --observed-at "$observed_at" \
+            --out dist/tcia_correction_registry.sqlite \
+            --replace
+          python scripts/tcia_correction_registry.py validate \
+            --db dist/tcia_correction_registry.sqlite
+
       - name: Prepare previous sidecars for change reporting
         env:
           GH_TOKEN: ${{ github.token }}
@@ -183,6 +246,8 @@ jobs:
             --snapshot-new dist/tcia_snapshot.sqlite
             --controlled-new dist/controlled_access_metadata.sqlite
             --clinical-new dist/clinical_metadata.sqlite
+            --correction-new dist/tcia_correction_registry.sqlite
+            --explanations-db dist/tcia_correction_registry.sqlite
           )
           if [ -s previous/tcia_snapshot.sqlite ]; then
             report_args+=(--snapshot-old previous/tcia_snapshot.sqlite)
@@ -195,10 +260,22 @@ jobs:
           if [ -s previous/clinical_metadata.sqlite ]; then
             report_args+=(--clinical-old previous/clinical_metadata.sqlite)
           fi
+          if [ -s previous/tcia_correction_registry.sqlite ]; then
+            report_args+=(--correction-old previous/tcia_correction_registry.sqlite)
+          fi
           python scripts/tcia_metadata_change_report.py \
             "${report_args[@]}" \
             --github-actions \
-            --markdown-out dist/metadata_change_report.md
+            --fail-on-unexplained-high \
+            --markdown-out dist/metadata_change_report.md \
+            --json-out dist/metadata_change_report.json
+          python scripts/tcia_correction_registry.py consume-explanations \
+            --db dist/tcia_correction_registry.sqlite \
+            --report dist/metadata_change_report.json
+          python scripts/tcia_correction_registry.py package \
+            --db dist/tcia_correction_registry.sqlite \
+            --gzip-out dist/tcia_correction_registry.sqlite.gz \
+            --manifest-out dist/tcia_correction_registry_manifest.json
           cat dist/metadata_change_report.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload validated V2 source inputs
@@ -213,5 +290,9 @@ jobs:
             dist/clinical_metadata.sqlite.gz
             dist/clinical_metadata_manifest.json
             dist/clinical_qc_manual_review.csv
+            dist/tcia_correction_registry.sqlite.gz
+            dist/tcia_correction_registry_manifest.json
+            dist/metadata_change_report.md
+            dist/metadata_change_report.json
           compression-level: 0
           retention-days: 3

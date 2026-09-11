@@ -5,9 +5,28 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github" / "workflows" / "build-metadata-v2-preview.yml"
+SOURCE_WORKFLOW = ROOT / ".github" / "workflows" / "update-snapshot.yml"
 
 
 class ReleaseWorkflowContractTests(unittest.TestCase):
+    def test_correction_registry_is_verified_built_and_strictly_consumed(self) -> None:
+        source = SOURCE_WORKFLOW.read_text(encoding="utf-8")
+        downstream = WORKFLOW.read_text(encoding="utf-8")
+        for marker in (
+            "validate-selection",
+            "previous/immutable-release.json",
+            "tcia_correction_registry.py link-release",
+            "--snapshot dist/tcia_snapshot.sqlite",
+            "--snapshot-manifest dist/tcia_snapshot_manifest.json",
+            "--gzip-out dist/tcia_correction_registry.sqlite.gz",
+            "--manifest-out dist/tcia_correction_registry_manifest.json",
+            "--explanations-db dist/tcia_correction_registry.sqlite",
+            "--fail-on-unexplained-high",
+        ):
+            self.assertIn(marker, source)
+        self.assertIn("--explanations-db cache/tcia_correction_registry.sqlite", downstream)
+        self.assertIn("--fail-on-unexplained-high", downstream)
+
     def test_ci_and_operator_runtime_use_same_exact_hash_locked_versions(self) -> None:
         runtime = (ROOT / "mcp_server" / "requirements.txt").read_text(encoding="utf-8")
         requirements = [

@@ -22,9 +22,13 @@ python3 scripts/tcia_freshness.py check
 python3 scripts/tcia_v2_bundle.py install --profile research_core
 ```
 
-The bundle manifest is the release contract. The installer stages changes and verifies hashes and SQLite integrity before replacement. Install `research_detail` only for file-grain clinical, controlled-access, and public non-DICOM work; install `audit_support` only for verbose provenance/QC.
+The bundle manifest is the release contract. The installer stages a complete generation and verifies gzip/SQLite hashes, SQLite integrity, and foreign keys before atomically switching it into service. Valid legacy flat installs migrate automatically. Install `research_detail` only for file-grain clinical, controlled-access, and public non-DICOM work; install `audit_support` only for verbose provenance/QC and the full correction registry. The compact correction digest, counts, and source-health status remain in the top manifest.
 
 If code is out of date, ask the user to update it. If remote freshness verification fails, label results offline/unverified and report the installed release fingerprint and timestamp. Do not silently switch to live WordPress discovery. Web-only agents should follow `references/mcp-and-web-llms.md`.
+
+Publishing a validated release does not update a deployed MCP/REST process.
+Operators still run the normal bundle install command and restart the services;
+rollback selects a retained verified generation and also requires a restart.
 
 ## Query Workflow
 

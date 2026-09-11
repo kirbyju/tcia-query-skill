@@ -16,6 +16,7 @@ installation audience differ. Compose them through the Participant Inventory.
 | Controlled-access metadata | Public metadata describing GC/CTDC controlled DICOM and non-DICOM holdings | Optional detail artifact |
 | Clinical metadata | Raw, normalized, harmonized, inferred, and resolved participant facts | Optional enrichment |
 | Participant Inventory | Compact dataset-scoped participant availability across the above sources | Participant Explorer integration artifact |
+| Correction registry | Full reviewed correction provenance, semantic effects, validations, waivers, and prior immutable-release links | Optional `audit_support` artifact; compact digest/count/health summary is inline in every top manifest |
 
 Do not divide public non-DICOM data by delivery system. PathDB, Aspera,
 WordPress attachments, and AWS Open Data are locations or metadata systems for

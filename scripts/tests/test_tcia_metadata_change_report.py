@@ -31,6 +31,23 @@ REGISTRY_SPEC.loader.exec_module(registry)
 
 
 class MetadataChangeReportTest(unittest.TestCase):
+    def test_high_severity_key_must_equal_ordered_sqlite_primary_key(self) -> None:
+        with sqlite3.connect(":memory:") as conn:
+            conn.execute(
+                "CREATE TABLE keyed (a TEXT,b TEXT,value TEXT,PRIMARY KEY (a,b))"
+            )
+            change_report.validate_declared_key(
+                conn, change_report.TableSpec("keyed", ("a", "b"), "high")
+            )
+            with self.assertRaisesRegex(RuntimeError, "differs from SQLite primary key"):
+                change_report.validate_declared_key(
+                    conn, change_report.TableSpec("keyed", ("a",), "high")
+                )
+            with self.assertRaisesRegex(RuntimeError, "differs from SQLite primary key"):
+                change_report.validate_declared_key(
+                    conn, change_report.TableSpec("keyed", ("b", "a"), "high")
+                )
+
     def test_independent_registry_build_times_are_nonsemantic_but_validation_results_are_semantic(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -109,7 +126,7 @@ class MetadataChangeReportTest(unittest.TestCase):
                     )
                     self.assertEqual(validation["modified"], 1)
                     self.assertTrue(any(
-                        item.startswith("correction.correction_validations:")
+                        item.startswith("correction_registry.correction_validations:")
                         for item in payload["unexplained_high_severity"]
                     ))
 
@@ -215,6 +232,73 @@ class MetadataChangeReportTest(unittest.TestCase):
             self.assertEqual(len(payload["report_sha256"]), 64)
             self.assertTrue(payload["unexplained_high_severity"])
 
+    def test_strict_gate_requires_exact_single_use_pk_kind_and_digests(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            old = root / "old.sqlite"
+            new = root / "new.sqlite"
+            explanations = root / "corrections.sqlite"
+            report = root / "report.json"
+            self._public(old, [("a", "A", "raw-a")])
+            self._public(new, [("a", "A2", "raw-a")])
+            registry.build_registry(explanations, observed_at="2026-09-11T00:00:00Z")
+            spec = change_report.PROFILES["public"][0]
+            with sqlite3.connect(old) as old_conn, sqlite3.connect(new) as new_conn:
+                old_digest = next(change_report.keyed_row_digests(old_conn, spec))[1]
+                new_digest = next(change_report.keyed_row_digests(new_conn, spec))[1]
+            with sqlite3.connect(explanations) as conn:
+                effect_id, revision_id = conn.execute(
+                    """SELECT e.effect_id,e.revision_id FROM correction_effects e
+                       JOIN correction_decisions d USING(revision_id)
+                       JOIN correction_cases c ON c.current_revision_id=d.revision_id
+                       WHERE d.status='approved' LIMIT 1"""
+                ).fetchone()
+                conn.execute(
+                    """UPDATE correction_effects
+                       SET artifact='public_non_dicom',entity_table='public_non_dicom_assets',
+                           entity_id=?,effect_kind='modified',before_sha256=?,
+                           after_sha256=?,effect_status='approved'
+                       WHERE effect_id=?""",
+                    (json.dumps([["asset_id", "a"]]), old_digest, new_digest, effect_id),
+                )
+                conn.commit()
+
+            command = [
+                sys.executable, str(SCRIPT), "--public-new", str(new),
+                "--public-old", str(old), "--explanations-db", str(explanations),
+                "--json-out", str(report), "--fail-on-unexplained-high",
+            ]
+            exact = subprocess.run(command, text=True, capture_output=True)
+            self.assertEqual(exact.returncode, 0, exact.stdout + exact.stderr)
+            payload = json.loads(report.read_text())
+            self.assertEqual(payload["semantic_explanations"]["consumed_effect_ids"], [effect_id])
+
+            with sqlite3.connect(explanations) as conn:
+                conn.execute(
+                    "UPDATE correction_effects SET entity_id=? WHERE effect_id=?",
+                    (json.dumps([["wrong_key", "a"]]), effect_id),
+                )
+                conn.commit()
+            partial = subprocess.run(command, text=True, capture_output=True)
+            self.assertEqual(partial.returncode, 2)
+
+            with sqlite3.connect(explanations) as conn:
+                conn.execute(
+                    "UPDATE correction_effects SET entity_id=? WHERE effect_id=?",
+                    (json.dumps([["asset_id", "a"]]), effect_id),
+                )
+                values = conn.execute(
+                    "SELECT * FROM correction_effects WHERE effect_id=?", (effect_id,)
+                ).fetchone()
+                conn.execute(
+                    "INSERT INTO correction_effects VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    ("duplicate-effect", *values[1:]),
+                )
+                conn.commit()
+            duplicate = subprocess.run(command, text=True, capture_output=True)
+            self.assertEqual(duplicate.returncode, 2)
+            self.assertTrue(json.loads(report.read_text())["semantic_explanations"]["duplicate_matches"])
+
     def test_correction_meta_ignores_build_time_but_gates_source_health(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -236,7 +320,7 @@ class MetadataChangeReportTest(unittest.TestCase):
                 text=True, capture_output=True,
             )
             self.assertEqual(degraded.returncode, 2)
-            self.assertIn("correction.registry_meta", degraded.stdout)
+            self.assertIn("correction_registry.registry_meta", degraded.stdout)
 
     @staticmethod
     def _public(path: Path, rows: list[tuple[str, str, str]]) -> None:
@@ -301,8 +385,8 @@ class MetadataChangeReportTest(unittest.TestCase):
             );
             CREATE TABLE clinical_imaging_subjects (subject_key TEXT);
             CREATE TABLE clinical_rows (source_row_id TEXT);
-            CREATE TABLE clinical_facts (fact_id TEXT);
-            CREATE TABLE clinical_subjects (subject_key TEXT);
+            CREATE TABLE clinical_facts (fact_id TEXT PRIMARY KEY);
+            CREATE TABLE clinical_subjects (subject_key TEXT PRIMARY KEY);
             CREATE TABLE clinical_dataset_inferences (
                 short_title TEXT,
                 concept TEXT,
