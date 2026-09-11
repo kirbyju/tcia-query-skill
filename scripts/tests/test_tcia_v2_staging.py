@@ -56,17 +56,26 @@ class V2StagingTests(unittest.TestCase):
         foreign_parent_table: str = "public_non_dicom_assets",
         short_title_mismatch: bool = False,
         parent_has_primary_key: bool = True,
+        child_declared_type: str = "TEXT",
+        parent_declared_type: str = "TEXT",
+        omit_cross_component_fk: bool = False,
+        satisfied_additional_fk: bool = False,
     ) -> Path:
         research, research_manifest = components["public_non_dicom_baseline"]
         research.unlink()
+        asset_id: str | int = (
+            1 if parent_declared_type.upper() == "INTEGER" else "asset-1"
+        )
         with closing(sqlite3.connect(research)) as conn:
             conn.execute(
                 "CREATE TABLE public_non_dicom_assets "
-                f"(asset_id TEXT {'PRIMARY KEY' if parent_has_primary_key else ''}, "
+                f"(asset_id {parent_declared_type} "
+                f"{'PRIMARY KEY' if parent_has_primary_key else ''}, "
                 "short_title TEXT NOT NULL, value TEXT)"
             )
             conn.execute(
-                "INSERT INTO public_non_dicom_assets VALUES ('asset-1', 'TEST', 'ok')"
+                "INSERT INTO public_non_dicom_assets VALUES (?, 'TEST', 'ok')",
+                (asset_id,),
             )
             conn.execute("CREATE TABLE artifact_meta (key TEXT PRIMARY KEY, value TEXT)")
             conn.executemany(
@@ -100,15 +109,19 @@ class V2StagingTests(unittest.TestCase):
             conn.execute("PRAGMA foreign_keys=OFF")
             conn.execute(
                 "CREATE TABLE public_non_dicom_crosswalk_evidence ("
-                "crosswalk_id TEXT PRIMARY KEY, asset_id TEXT NOT NULL, "
-                "short_title TEXT NOT NULL, "
-                f"FOREIGN KEY(asset_id) REFERENCES {foreign_parent_table}(asset_id))"
+                f"crosswalk_id TEXT PRIMARY KEY, asset_id {child_declared_type} NOT NULL, "
+                "short_title TEXT NOT NULL"
+                + (
+                    ")"
+                    if omit_cross_component_fk
+                    else f", FOREIGN KEY(asset_id) REFERENCES {foreign_parent_table}(asset_id))"
+                )
             )
             conn.execute(
                 "INSERT INTO public_non_dicom_crosswalk_evidence VALUES (?, ?, ?)",
                 (
                     "crosswalk-1",
-                    orphan_asset_id or "asset-1",
+                    orphan_asset_id or asset_id,
                     "OTHER" if short_title_mismatch else "TEST",
                 ),
             )
@@ -133,6 +146,14 @@ class V2StagingTests(unittest.TestCase):
                     "(parent_id INTEGER REFERENCES local_parents(id))"
                 )
                 conn.execute("INSERT INTO local_children VALUES (42)")
+            if satisfied_additional_fk:
+                conn.execute("CREATE TABLE extra_parents (id INTEGER PRIMARY KEY)")
+                conn.execute(
+                    "CREATE TABLE extra_children "
+                    "(parent_id INTEGER NOT NULL REFERENCES extra_parents(id))"
+                )
+                conn.execute("INSERT INTO extra_parents VALUES (1)")
+                conn.execute("INSERT INTO extra_children VALUES (1)")
             conn.commit()
         audit_payload = json.loads(audit_manifest.read_text())
         audit_payload.update({
@@ -348,7 +369,7 @@ class V2StagingTests(unittest.TestCase):
                 components, unrelated_orphan=True
             )
             with self.assertRaisesRegex(
-                RuntimeError, "unrecognized foreign_key_check violations"
+                RuntimeError, "foreign-key declaration inventory mismatch"
             ):
                 staging.build_staging_database(
                     root / "staging.sqlite",
@@ -388,7 +409,75 @@ class V2StagingTests(unittest.TestCase):
                 components, foreign_parent_table="redirected_assets"
             )
             with self.assertRaisesRegex(
-                RuntimeError, "cross-component foreign-key declaration mismatch"
+                RuntimeError, "foreign-key declaration inventory mismatch"
+            ):
+                staging.build_staging_database(
+                    root / "staging.sqlite",
+                    components=components,
+                    baseline_bundle_manifest_path=bundle_manifest,
+                    replace=True,
+                )
+
+    def test_build_rejects_missing_required_cross_component_declaration(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            components = {
+                component: self.create_component(root, component)
+                for component in staging.COMPONENT_ORDER
+            }
+            bundle_manifest = self.create_legacy_public_cross_component_pair(
+                components, omit_cross_component_fk=True
+            )
+            with self.assertRaisesRegex(
+                RuntimeError, "foreign-key declaration inventory mismatch"
+            ):
+                staging.build_staging_database(
+                    root / "staging.sqlite",
+                    components=components,
+                    baseline_bundle_manifest_path=bundle_manifest,
+                    replace=True,
+                )
+
+    def test_build_rejects_cross_component_declared_type_mutations(self):
+        for child_type, parent_type in (
+            ("INTEGER", "TEXT"),
+            ("TEXT", "INTEGER"),
+            ("INTEGER", "INTEGER"),
+        ):
+            with self.subTest(child_type=child_type, parent_type=parent_type):
+                with tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    components = {
+                        component: self.create_component(root, component)
+                        for component in staging.COMPONENT_ORDER
+                    }
+                    bundle_manifest = self.create_legacy_public_cross_component_pair(
+                        components,
+                        child_declared_type=child_type,
+                        parent_declared_type=parent_type,
+                    )
+                    with self.assertRaisesRegex(
+                        RuntimeError, "declared key type mismatch"
+                    ):
+                        staging.build_staging_database(
+                            root / "staging.sqlite",
+                            components=components,
+                            baseline_bundle_manifest_path=bundle_manifest,
+                            replace=True,
+                        )
+
+    def test_build_rejects_satisfied_additional_foreign_key_declaration(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            components = {
+                component: self.create_component(root, component)
+                for component in staging.COMPONENT_ORDER
+            }
+            bundle_manifest = self.create_legacy_public_cross_component_pair(
+                components, satisfied_additional_fk=True
+            )
+            with self.assertRaisesRegex(
+                RuntimeError, "foreign-key declaration inventory mismatch"
             ):
                 staging.build_staging_database(
                     root / "staging.sqlite",

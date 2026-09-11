@@ -31,6 +31,7 @@ CROSS_COMPONENT_FOREIGN_KEYS = {
             "child_database_asset": "public_non_dicom_audit.sqlite.gz",
             "child_profile": "audit_support",
             "child_schema_version": 3,
+            "child_declared_type": "TEXT",
             "parent_component": "public_non_dicom_baseline",
             "parent_table": "public_non_dicom_assets",
             "parent_column": "asset_id",
@@ -38,6 +39,7 @@ CROSS_COMPONENT_FOREIGN_KEYS = {
             "parent_database_asset": "public_non_dicom_metadata.sqlite.gz",
             "parent_profile": "research_detail",
             "parent_schema_version": 8,
+            "parent_declared_type": "TEXT",
             "coherence_column": "short_title",
         },
     ),
@@ -102,6 +104,36 @@ def foreign_key_violations(conn: sqlite3.Connection, limit: int = 20) -> list[li
     return [list(row) for row in conn.execute("PRAGMA foreign_key_check").fetchmany(limit)]
 
 
+def foreign_key_declarations(conn: sqlite3.Connection) -> list[tuple[Any, ...]]:
+    """Return every declared FK shape in the main database, deterministically."""
+    declarations: list[tuple[Any, ...]] = []
+    tables = [
+        str(row[0])
+        for row in conn.execute(
+            "SELECT name FROM main.sqlite_master "
+            "WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+        )
+    ]
+    for child_table in tables:
+        for row in conn.execute(
+            f"PRAGMA main.foreign_key_list({quote_identifier(child_table)})"
+        ):
+            declarations.append(
+                (
+                    child_table,
+                    int(row[0]),
+                    int(row[1]),
+                    str(row[2]),
+                    str(row[3]),
+                    str(row[4]),
+                    str(row[5]),
+                    str(row[6]),
+                    str(row[7]),
+                )
+            )
+    return sorted(declarations)
+
+
 def validate_component_foreign_keys(
     component: str,
     conn: sqlite3.Connection,
@@ -112,7 +144,11 @@ def validate_component_foreign_keys(
 ) -> list[dict[str, Any]]:
     """Validate standalone FKs plus explicitly declared cross-component FKs."""
     violations = foreign_key_violations(conn, limit=limit)
-    contracts = CROSS_COMPONENT_FOREIGN_KEYS.get(component, ())
+    contracts = (
+        CROSS_COMPONENT_FOREIGN_KEYS.get(component, ())
+        if baseline_bundle_manifest_path is not None
+        else ()
+    )
     if not contracts:
         if not violations:
             return []
@@ -123,6 +159,27 @@ def validate_component_foreign_keys(
 
     verified: list[dict[str, Any]] = []
     accepted_violation_keys: set[tuple[str, str, int]] = set()
+    expected_declarations = sorted(
+        (
+            str(contract["child_table"]),
+            0,
+            0,
+            str(contract["parent_table"]),
+            str(contract["child_column"]),
+            str(contract["parent_column"]),
+            "NO ACTION",
+            "NO ACTION",
+            "NONE",
+        )
+        for contract in contracts
+    )
+    actual_declarations = foreign_key_declarations(conn)
+    if actual_declarations != expected_declarations:
+        raise RuntimeError(
+            f"{component} foreign-key declaration inventory mismatch: "
+            f"expected={canonical_json(expected_declarations)}; "
+            f"actual={canonical_json(actual_declarations)}"
+        )
     for contract in contracts:
         child_table = str(contract["child_table"])
         child_column = str(contract["child_column"])
@@ -135,8 +192,6 @@ def validate_component_foreign_keys(
         declarations = list(
             conn.execute(f"PRAGMA foreign_key_list({quote_identifier(child_table)})")
         )
-        if not declarations:
-            continue
         matches = [
             row
             for row in declarations
@@ -264,10 +319,16 @@ def validate_component_foreign_keys(
                 )
             parent_type = str(parent_columns[parent_column][2]).upper()
             child_type = str(child_columns[child_column][2]).upper()
-            if not parent_type or parent_type != child_type:
+            expected_child_type = str(contract["child_declared_type"]).upper()
+            expected_parent_type = str(contract["parent_declared_type"]).upper()
+            if (
+                child_type != expected_child_type
+                or parent_type != expected_parent_type
+            ):
                 raise RuntimeError(
-                    f"{component} cross-component key type mismatch: "
-                    f"child={child_type or 'untyped'}, parent={parent_type or 'untyped'}"
+                    f"{component} cross-component declared key type mismatch: "
+                    f"child={child_type or 'untyped'} expected={expected_child_type}; "
+                    f"parent={parent_type or 'untyped'} expected={expected_parent_type}"
                 )
             for table, columns, column in (
                 (child_table, child_columns, coherence_column),
@@ -420,6 +481,11 @@ def validate_component_foreign_keys(
         raise RuntimeError(
             f"{component} unrecognized foreign_key_check violations (first {limit}): "
             + canonical_json(unexpected)
+        )
+    if len(verified) != len(contracts):
+        raise RuntimeError(
+            f"{component} required cross-component foreign-key validation missing: "
+            f"expected={len(contracts)}, verified={len(verified)}"
         )
     return verified
 
