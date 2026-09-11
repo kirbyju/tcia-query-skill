@@ -1306,7 +1306,14 @@ def validate_selected_bundle_assets(
     legacy_omissions = legacy_schema_two_component_manifest_omissions(
         manifest, selected_assets=set(asset_names)
     )
-    errors = [error for error in errors if error not in legacy_omissions]
+    if is_legacy_schema_two_streamlined_manifest(manifest):
+        expected_omissions = legacy_schema_two_expected_omission_errors()
+        if legacy_omissions == expected_omissions:
+            errors = [error for error in errors if error not in legacy_omissions]
+        else:
+            errors.append(
+                "legacy schema-2 streamlined component manifest shape is not exact"
+            )
     manifest_assets = manifest.get("assets") or {}
     release_assets: dict[str, dict[str, Any]] = {}
     release_tag = ""
@@ -1367,11 +1374,9 @@ def legacy_schema_two_component_manifest_omissions(
     the authoritative manifest validator remains strict for every release built
     by current code.
     """
-    if manifest.get("schema_version") != 2:
+    if not is_legacy_schema_two_streamlined_manifest(manifest):
         return set()
-    release_contract = str(manifest.get("release_contract") or FULL_RELEASE_CONTRACT)
-    if release_contract != STREAMLINED_RELEASE_CONTRACT:
-        return set()
+    release_contract = STREAMLINED_RELEASE_CONTRACT
     manifest_assets = manifest.get("assets") or {}
     try:
         expected_assets = expected_payload_assets_for_schema(2, release_contract)
@@ -1382,20 +1387,73 @@ def legacy_schema_two_component_manifest_omissions(
     if sorted(manifest_assets) != expected_assets or set(components) != expected_components:
         return set()
 
-    allowed: set[str] = set()
+    expected_errors = legacy_schema_two_expected_omission_errors()
     for component in sorted(expected_components):
-        pointer = str((components.get(component) or {}).get("manifest_asset") or "")
+        details = components.get(component)
+        if not isinstance(details, dict):
+            return set()
+        if set(details) != {
+            "database_asset",
+            "gzip_sha256",
+            "manifest_asset",
+            "profile",
+            "provenance",
+            "release_fingerprint",
+            "schema_version",
+            "sqlite_sha256",
+            "storage_contract",
+        }:
+            return set()
+        pointer = details.get("manifest_asset")
         canonical = str(COMPONENTS[component]["manifest"])
-        if (
+        database = str(COMPONENTS[component]["database"])
+        database_details = manifest_assets.get(database)
+        if not (
             pointer == canonical
-            and pointer not in manifest_assets
-            and pointer not in selected_assets
-            and pointer not in expected_assets
-        ):
-            allowed.add(
-                f"component {component} manifest_asset is not a published asset: {pointer}"
+            and canonical not in manifest_assets
+            and canonical not in selected_assets
+            and canonical not in expected_assets
+            and details.get("database_asset") == database
+            and isinstance(database_details, dict)
+            and details.get("gzip_sha256") == database_details.get("sha256")
+            and _is_sha256(details.get("gzip_sha256"))
+            and _is_sha256(details.get("sqlite_sha256"))
+            and _is_sha256(details.get("release_fingerprint"))
+            and isinstance(details.get("schema_version"), int)
+            and not isinstance(details.get("schema_version"), bool)
+            and details.get("profile") == asset_profile(database)
+            and (details.get("provenance") is None or isinstance(details.get("provenance"), dict))
+            and (
+                details.get("storage_contract") is None
+                or isinstance(details.get("storage_contract"), dict)
             )
-    return allowed
+        ):
+            return set()
+    return expected_errors
+
+
+def is_legacy_schema_two_streamlined_manifest(manifest: dict[str, Any]) -> bool:
+    return (
+        manifest.get("schema_version") == 2
+        and str(manifest.get("release_contract") or FULL_RELEASE_CONTRACT)
+        == STREAMLINED_RELEASE_CONTRACT
+    )
+
+
+def legacy_schema_two_expected_omission_errors() -> set[str]:
+    return {
+        f"component {component} manifest_asset is not a published asset: "
+        f"{COMPONENTS[component]['manifest']}"
+        for component in component_names_for_schema(2, STREAMLINED_RELEASE_CONTRACT)
+    }
+
+
+def _is_sha256(value: Any) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+    )
 
 
 def build_bundle_manifest(

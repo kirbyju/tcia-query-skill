@@ -613,6 +613,9 @@ class V2BundleTests(unittest.TestCase):
             for component_name, component in payload["components"].items():
                 component.pop("source_manifest", None)
                 component["manifest_asset"] = BUNDLE.COMPONENTS[component_name]["manifest"]
+                component["release_fingerprint"] = BUNDLE.hashlib.sha256(
+                    component_name.encode()
+                ).hexdigest()
             payload["asset_count"] = len(payload["assets"])
             for profile in BUNDLE.PROFILE_ORDER:
                 payload["profiles"][profile]["assets"] = BUNDLE.assets_for_profile_schema(
@@ -670,12 +673,48 @@ class V2BundleTests(unittest.TestCase):
             schema_three = json.loads(json.dumps(payload))
             schema_three["schema_version"] = 3
             cases.append(("schema three", schema_three))
-            noncanonical = json.loads(json.dumps(payload))
-            noncanonical["components"]["clinical"]["manifest_asset"] = "arbitrary.json"
-            cases.append(("noncanonical pointer", noncanonical))
             missing_selected = json.loads(json.dumps(payload))
             missing_selected["assets"].pop(names[0])
             cases.append(("missing selected asset", missing_selected))
+            published_redirect = next(iter(payload["assets"]))
+            pointer_mutations = {
+                "deleted": lambda component: component.pop("manifest_asset"),
+                "arbitrary unpublished": lambda component: component.__setitem__(
+                    "manifest_asset", "arbitrary.json"
+                ),
+                "redirected published": lambda component: component.__setitem__(
+                    "manifest_asset", published_redirect
+                ),
+                "selected pointer": lambda component: component.__setitem__(
+                    "manifest_asset", names[0]
+                ),
+            }
+            component_names = sorted(payload["components"])
+            for mutation_name, mutate in pointer_mutations.items():
+                for component_name in component_names:
+                    invalid = json.loads(json.dumps(payload))
+                    mutate(invalid["components"][component_name])
+                    cases.append((f"{component_name} pointer {mutation_name}", invalid))
+                invalid = json.loads(json.dumps(payload))
+                for component_name in component_names:
+                    mutate(invalid["components"][component_name])
+                cases.append((f"all pointers {mutation_name}", invalid))
+            for component_name in component_names:
+                wrong_database = json.loads(json.dumps(payload))
+                canonical_database = BUNDLE.COMPONENTS[component_name]["database"]
+                wrong_database["components"][component_name]["database_asset"] = next(
+                    name for name in payload["assets"] if name != canonical_database
+                )
+                cases.append((f"{component_name} noncanonical database", wrong_database))
+                wrong_gzip = json.loads(json.dumps(payload))
+                wrong_gzip["components"][component_name]["gzip_sha256"] = "0" * 64
+                cases.append((f"{component_name} mismatched gzip", wrong_gzip))
+            wrong_type = json.loads(json.dumps(payload))
+            wrong_type["components"][component_names[0]]["schema_version"] = "3"
+            cases.append(("component schema type", wrong_type))
+            extra_field = json.loads(json.dumps(payload))
+            extra_field["components"][component_names[0]]["unexpected"] = True
+            cases.append(("component unexpected field", extra_field))
             for label, invalid in cases:
                 with self.subTest(label=label):
                     manifest_path.write_text(json.dumps(invalid))
@@ -683,6 +722,11 @@ class V2BundleTests(unittest.TestCase):
                         root, manifest_path, names, release_json_path=release_path
                     )
                     self.assertFalse(rejected["ok"], rejected)
+                    if invalid.get("schema_version") == 2:
+                        self.assertIn(
+                            "legacy schema-2 streamlined component manifest shape is not exact",
+                            rejected["errors"],
+                        )
 
             manifest_path.write_text(json.dumps(payload))
             release = json.loads(release_path.read_text())

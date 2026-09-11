@@ -100,7 +100,7 @@
     "scripts/tcia_skill_version.py": "72bc6c7d9acde8a21ee4b5356cd10bbb8f513f2f2e90c20571221679049fa347",
     "scripts/tcia_snapshot.py": "7e9cc04cb023d2e00fcd1ef9285da0a98b27f7e2302ef6f0d0cbf515ace7bddc",
     "scripts/tcia_v2_audit.py": "58dcc6648a6493e84717dc0097999fc33ec86e1c96be41b363a55e7319d3c569",
-    "scripts/tcia_v2_bundle.py": "eff0ff912832d23e4ed574ba5e6aaa8b195b5b6dce3079d4335b3c448ce06fc9",
+    "scripts/tcia_v2_bundle.py": "ce02114a1584b202b3ba59b19ba22e1982aa62b7361e3e3bf1190ec9be7e7abd",
     "scripts/tcia_v2_checkpoint.py": "a25c2e0b7c88aa44d227fe11523bf16a822f8ac52259703fd4483b1efa375bda",
     "scripts/tcia_v2_parity.py": "0a651d86c0bce64ee82c0bb8da3e4fe848bf7738f6a305c4f65da37cbe9f7e69",
     "scripts/tcia_v2_staging.py": "5064f291fca0bdf268d16adf14e3c4b5b1872109c3be19801bc1eee8c4f4becd",
@@ -121,12 +121,12 @@
     "scripts/tests/test_tcia_skill_version.py": "41aef2c238b596307d9cf98aea1e4971368febb02b5ae8bdb5fed04af00b6d6f",
     "scripts/tests/test_tcia_snapshot.py": "2ee4511bca2551b6d666e8e378facb42df53485b1f935939c00d6b959c209e84",
     "scripts/tests/test_tcia_v2_audit.py": "7dfd8690e050f27d15e3a843ecd83855b06d020eacea3553a5d2ca5ee7679cdc",
-    "scripts/tests/test_tcia_v2_bundle.py": "f9e6b50c66be5e35133b6ff3e62669e0cff0d3bcd5f4d3b7c6fe0f55f4a62d62",
+    "scripts/tests/test_tcia_v2_bundle.py": "41d627011d4e93bfa9f12d2c146df4f52fa3fdb1f70147f0dde515a8462034c9",
     "scripts/tests/test_tcia_v2_checkpoint.py": "4553d2bb4688966bdc8af5cc05aac654a4687a79d8e1f2c1a9e5c64748fc7d28",
     "scripts/tests/test_tcia_v2_parity.py": "27f51ddd8bbc200eb85327cd716db37f2f7d12393bb25445ba4f5d6b6f8301ae",
     "scripts/tests/test_tcia_v2_staging.py": "bdf1ad362ba8615e6e224c4c3efbe3e3c0157899cde3db27a0fd43db46c2aa49"
   },
   "schema_version": 1,
-  "skill_version": "2026.09.11.10",
-  "updated_at_utc": "2026-09-11T17:47:40.158547+00:00"
+  "skill_version": "2026.09.11.11",
+  "updated_at_utc": "2026-09-11T17:59:43.448203+00:00"
 }
