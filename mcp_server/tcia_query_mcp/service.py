@@ -10,6 +10,8 @@ import json
 import os
 import re
 import sqlite3
+from base64 import urlsafe_b64decode, urlsafe_b64encode
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
@@ -50,8 +52,34 @@ V2_RELEASE_TAG = "tcia-metadata-v2-latest"
 class TciaServiceError(RuntimeError):
     """Base exception for expected TCIA MCP service failures."""
 
+    code = "tcia_service_error"
+    status_code = 422
+    retryable = False
 
-class SnapshotNotFoundError(TciaServiceError):
+
+class InvalidRequestError(TciaServiceError):
+    """Raised when caller input violates the public query contract."""
+
+    code = "invalid_request"
+    status_code = 422
+
+
+class NotFoundError(TciaServiceError):
+    """Raised when a requested public entity is absent."""
+
+    code = "not_found"
+    status_code = 404
+
+
+class ServiceUnavailableError(TciaServiceError):
+    """Raised when required local snapshot artifacts are unavailable."""
+
+    code = "service_unavailable"
+    status_code = 503
+    retryable = True
+
+
+class SnapshotNotFoundError(ServiceUnavailableError):
     """Raised when a configured SQLite snapshot path is unavailable."""
 
 
@@ -70,13 +98,75 @@ def default_skill_root() -> Path:
 
 
 def coerce_limit(value: Any, default: int = DEFAULT_LIMIT, maximum: int = MAX_LIMIT) -> int:
+    """Validate a public row limit without silently changing caller intent."""
+    if value is None:
+        return default
     try:
         limit = int(value)
     except (TypeError, ValueError):
-        return default
-    if limit < 1:
-        return default
-    return min(limit, maximum)
+        raise InvalidRequestError(f"limit must be an integer from 1 to {maximum}") from None
+    if isinstance(value, float) and not value.is_integer():
+        raise InvalidRequestError(f"limit must be an integer from 1 to {maximum}")
+    if limit < 1 or limit > maximum:
+        raise InvalidRequestError(f"limit must be between 1 and {maximum}")
+    return limit
+
+
+def _cursor_fingerprint(filters: dict[str, Any]) -> str:
+    payload = json.dumps(filters, sort_keys=True, separators=(",", ":"), default=str)
+    return sha256(payload.encode("utf-8")).hexdigest()[:16]
+
+
+def decode_cursor(cursor: Any, filters: dict[str, Any]) -> int:
+    """Decode an opaque offset cursor bound to the current immutable query."""
+    if cursor in (None, ""):
+        return 0
+    try:
+        padded = str(cursor) + "=" * (-len(str(cursor)) % 4)
+        payload = json.loads(urlsafe_b64decode(padded.encode("ascii")).decode("utf-8"))
+    except (ValueError, TypeError, UnicodeError, json.JSONDecodeError):
+        raise InvalidRequestError("cursor is invalid; restart the query without cursor") from None
+    if payload.get("v") != 1 or payload.get("q") != _cursor_fingerprint(filters):
+        raise InvalidRequestError("cursor does not match this query; restart without cursor")
+    offset = payload.get("o")
+    if not isinstance(offset, int) or isinstance(offset, bool) or offset < 0:
+        raise InvalidRequestError("cursor is invalid; restart the query without cursor")
+    return offset
+
+
+def encode_cursor(offset: int, filters: dict[str, Any]) -> str:
+    payload = {"v": 1, "o": offset, "q": _cursor_fingerprint(filters)}
+    raw = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def page_envelope(
+    item_key: str,
+    rows: list[Any],
+    *,
+    limit: int,
+    offset: int,
+    cursor_filters: dict[str, Any],
+) -> dict[str, Any]:
+    has_more = len(rows) > limit
+    page = rows[:limit]
+    return {
+        item_key: page,
+        "count": len(page),
+        "limit": limit,
+        "has_more": has_more,
+        "truncated": has_more,
+        "next_cursor": encode_cursor(offset + limit, cursor_filters) if has_more else None,
+    }
+
+
+def pagination_filters(filters: dict[str, Any]) -> dict[str, Any]:
+    """Return canonical filters that define cursor identity."""
+    return {
+        key: value
+        for key, value in filters.items()
+        if key not in {"cursor", "limit"} and value not in (None, "", [], ())
+    }
 
 
 def is_truthy(value: Any) -> bool:
@@ -182,34 +272,47 @@ def compact_dataset(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
         "tcia_page": data.get("link"),
         "date_updated": data.get("date_updated"),
         "current_version_number": data.get("current_version_number"),
-        "hidden": data.get("hidden"),
         "license_status": data.get("license_status"),
-        "licenses": data.get("licenses"),
-        "access_level": data.get("access_level"),
         "resolved_access_level": data.get("resolved_access_level", data.get("access_level")),
-        "controlled_access": data.get("controlled_access"),
-        "noncommercial_license": data.get("noncommercial_license"),
-        "controlled_download_count": data.get("controlled_download_count"),
-        "noncontrolled_download_count": data.get("noncontrolled_download_count"),
         "current_download_count": data.get("current_download_count"),
         "subjects": data.get("subjects"),
-        "data_types": data.get("data_types"),
-        "download_types": data.get("download_types"),
         "download_data_types": data.get("download_data_types"),
         "download_file_types": data.get("download_file_types"),
-        "external_resources": data.get("external_resources"),
         "external_resource_labels": data.get("external_resource_labels"),
-        "has_tcia_clinical_download": data.get("has_tcia_clinical_download"),
-        "has_external_clinical_resource": data.get("has_external_clinical_resource"),
         "cancer_types": data.get("cancer_types"),
         "cancer_locations": data.get("cancer_locations"),
         "species": data.get("species"),
-        "program": data.get("program"),
         "source_collections": data.get("source_collections"),
-        "summary": data.get("summary"),
-        "controlled_access_policy_url": data.get("resolved_controlled_access_policy_url")
-        or data.get("controlled_access_policy_url"),
     }
+
+
+def full_dataset(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
+    """Return the complete dataset summary for detail operations."""
+    data = normalize_row(row)
+    compact = compact_dataset(data)
+    compact.update(
+        {
+            "hidden": data.get("hidden"),
+            "licenses": data.get("licenses"),
+            "access_level": data.get("access_level"),
+            "controlled_access": data.get("controlled_access"),
+            "noncommercial_license": data.get("noncommercial_license"),
+            "controlled_download_count": data.get("controlled_download_count"),
+            "noncontrolled_download_count": data.get("noncontrolled_download_count"),
+            "data_types": data.get("data_types"),
+            "download_types": data.get("download_types"),
+            "external_resources": data.get("external_resources"),
+            "has_tcia_clinical_download": data.get("has_tcia_clinical_download"),
+            "has_external_clinical_resource": data.get("has_external_clinical_resource"),
+            "program": data.get("program"),
+            "summary": data.get("summary"),
+            "abstract": data.get("abstract"),
+            "detailed_description": data.get("detailed_description"),
+            "controlled_access_policy_url": data.get("resolved_controlled_access_policy_url")
+            or data.get("controlled_access_policy_url"),
+        }
+    )
+    return compact
 
 
 def compact_dataset_version(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
@@ -711,9 +814,7 @@ class TciaQueryService:
                 f"TCIA snapshot not found at {self.snapshot_db}. "
                 "Run `python scripts/tcia_v2_bundle.py install --profile research_core` from the skill root."
             )
-        conn = sqlite3.connect(self.snapshot_db, factory=ClosingConnection)
-        conn.row_factory = sqlite3.Row
-        return conn
+        return self._connect_read_only(self.snapshot_db)
 
     def _connect_controlled(self) -> sqlite3.Connection:
         if not self.controlled_db.exists():
@@ -721,9 +822,7 @@ class TciaQueryService:
                 f"Controlled-access metadata snapshot not found at {self.controlled_db}. "
                 "Run `python scripts/tcia_v2_bundle.py install --profile research_detail` from the skill root."
             )
-        conn = sqlite3.connect(self.controlled_db, factory=ClosingConnection)
-        conn.row_factory = sqlite3.Row
-        return conn
+        return self._connect_read_only(self.controlled_db)
 
     def _connect_nifti(self) -> sqlite3.Connection:
         if not self.nifti_db.exists():
@@ -731,9 +830,7 @@ class TciaQueryService:
                 f"NIfTI metadata snapshot not found at {self.nifti_db}. "
                 "The standalone NIfTI artifact is retired; use the unified public non-DICOM V2 tools."
             )
-        conn = sqlite3.connect(self.nifti_db, factory=ClosingConnection)
-        conn.row_factory = sqlite3.Row
-        return conn
+        return self._connect_read_only(self.nifti_db)
 
     def _connect_pathology(self) -> sqlite3.Connection:
         if not self.pathology_db.exists():
@@ -741,9 +838,7 @@ class TciaQueryService:
                 f"Pathology metadata snapshot not found at {self.pathology_db}. "
                 "The standalone pathology artifact is retired; use the unified public non-DICOM V2 tools."
             )
-        conn = sqlite3.connect(self.pathology_db, factory=ClosingConnection)
-        conn.row_factory = sqlite3.Row
-        return conn
+        return self._connect_read_only(self.pathology_db)
 
     def _connect_clinical(self) -> sqlite3.Connection:
         if not self.clinical_db.exists():
@@ -751,9 +846,7 @@ class TciaQueryService:
                 f"Clinical metadata snapshot not found at {self.clinical_db}. "
                 "Run `python scripts/tcia_v2_bundle.py install --profile research_detail` from the skill root."
             )
-        conn = sqlite3.connect(self.clinical_db, factory=ClosingConnection)
-        conn.row_factory = sqlite3.Row
-        return conn
+        return self._connect_read_only(self.clinical_db)
 
     def _connect_participants(self) -> sqlite3.Connection:
         if not self.participant_db.exists():
@@ -761,9 +854,7 @@ class TciaQueryService:
                 f"Participant Inventory not found at {self.participant_db}. "
                 "Run `python scripts/tcia_v2_bundle.py install --profile research_core` from the skill root."
             )
-        conn = sqlite3.connect(self.participant_db, factory=ClosingConnection)
-        conn.row_factory = sqlite3.Row
-        return conn
+        return self._connect_read_only(self.participant_db)
 
     def _connect_public_non_dicom(self) -> sqlite3.Connection:
         if not self.public_non_dicom_db.exists():
@@ -771,8 +862,20 @@ class TciaQueryService:
                 f"Public non-DICOM metadata not found at {self.public_non_dicom_db}. "
                 "Run `python scripts/tcia_v2_bundle.py install --profile research_detail` from the skill root."
             )
-        conn = sqlite3.connect(self.public_non_dicom_db, factory=ClosingConnection)
+        return self._connect_read_only(self.public_non_dicom_db)
+
+    def _connect_read_only(self, path: Path) -> sqlite3.Connection:
+        """Open SQLite without write capability and bound lock waits."""
+        uri = f"{path.resolve().as_uri()}?mode=ro"
+        conn = sqlite3.connect(
+            uri,
+            uri=True,
+            timeout=2.0,
+            factory=ClosingConnection,
+        )
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA busy_timeout = 2000")
+        conn.execute("PRAGMA query_only = ON")
         return conn
 
     def _object_exists(self, conn: sqlite3.Connection, name: str) -> bool:
@@ -812,9 +915,7 @@ class TciaQueryService:
     def bundle_info(self) -> dict[str, Any]:
         """Return the installed V2 contract without scanning SQLite payloads."""
         info: dict[str, Any] = {
-            "v2_bundle_manifest": str(self.bundle_manifest),
             "v2_bundle_manifest_exists": self.bundle_manifest.exists(),
-            "v2_install_state": str(self.v2_install_state),
             "v2_install_state_exists": self.v2_install_state.exists(),
             "count_policy": "Build-time metadata only; request-time SQLite recounts are intentionally omitted.",
         }
@@ -868,25 +969,54 @@ class TciaQueryService:
         }
         return info
 
+    def readiness_info(self) -> dict[str, Any]:
+        """Perform cheap artifact-aware readiness checks without counting rows."""
+        missing: list[str] = []
+        if not self.bundle_manifest.is_file():
+            missing.append("bundle_manifest")
+        if not self.snapshot_db.is_file():
+            missing.append("base_snapshot")
+        if not self.participant_db.is_file():
+            missing.append("participant_inventory")
+        if missing:
+            raise ServiceUnavailableError(
+                "Required V2 artifacts are unavailable: " + ", ".join(missing)
+            )
+        try:
+            with self._connect_snapshot() as conn:
+                if not self._object_exists(conn, "agent_dataset_access_summary"):
+                    missing.append("agent_dataset_access_summary")
+            with self._connect_participants() as conn:
+                if not (
+                    self._object_exists(conn, "participants")
+                    or self._object_exists(conn, "agent_participant_search")
+                ):
+                    missing.append("participant_search")
+        except sqlite3.Error as exc:
+            raise ServiceUnavailableError(f"A required SQLite artifact is not queryable: {exc}") from None
+        if missing:
+            raise ServiceUnavailableError(
+                "Required V2 query surfaces are unavailable: " + ", ".join(missing)
+            )
+        bundle = self.bundle_info()
+        manifest = bundle.get("v2_bundle") or {}
+        return {
+            "status": "ready",
+            "release_fingerprint": manifest.get("release_fingerprint"),
+            "release_tag": manifest.get("release_tag"),
+            "capabilities": bundle.get("v2_capabilities", {}),
+        }
+
     def snapshot_info(self) -> dict[str, Any]:
         info: dict[str, Any] = {
-            "snapshot_db": str(self.snapshot_db),
             "snapshot_exists": self.snapshot_db.exists(),
-            "controlled_access_db": str(self.controlled_db),
             "controlled_access_db_exists": self.controlled_db.exists(),
-            "nifti_metadata_db": str(self.nifti_db),
             "nifti_metadata_db_exists": self.nifti_db.exists(),
-            "pathology_metadata_db": str(self.pathology_db),
             "pathology_metadata_db_exists": self.pathology_db.exists(),
-            "clinical_metadata_db": str(self.clinical_db),
             "clinical_metadata_db_exists": self.clinical_db.exists(),
-            "participant_inventory_db": str(self.participant_db),
             "participant_inventory_db_exists": self.participant_db.exists(),
-            "public_non_dicom_metadata_db": str(self.public_non_dicom_db),
             "public_non_dicom_metadata_db_exists": self.public_non_dicom_db.exists(),
-            "v2_bundle_manifest": str(self.bundle_manifest),
             "v2_bundle_manifest_exists": self.bundle_manifest.exists(),
-            "v2_install_state": str(self.v2_install_state),
             "v2_install_state_exists": self.v2_install_state.exists(),
             "controlled_access_policy_url": CONTROLLED_ACCESS_POLICY_URL,
         }
@@ -1053,8 +1183,9 @@ class TciaQueryService:
         return info
 
     def search_datasets(self, **filters: Any) -> dict[str, Any]:
-        include_hidden = is_truthy(filters.get("include_hidden"))
         limit = coerce_limit(filters.get("limit"))
+        cursor_filters = pagination_filters(filters)
+        offset = decode_cursor(filters.get("cursor"), cursor_filters)
         query = str(filters.get("query") or "").strip()
         dataset_type = str(filters.get("dataset_type") or "both").strip().lower()
         short_titles = [item.lower() for item in as_list(filters.get("short_titles"))]
@@ -1071,10 +1202,8 @@ class TciaQueryService:
         has_external_clinical_resource = filters.get("has_external_clinical_resource")
         doi = str(filters.get("doi") or "").strip().lower()
 
-        sql = "SELECT * FROM agent_dataset_access_summary WHERE 1 = 1"
+        sql = "SELECT * FROM agent_dataset_access_summary WHERE hidden = 0"
         params: list[Any] = []
-        if not include_hidden:
-            sql += " AND hidden = 0"
         if dataset_type in {"collection", "collections"}:
             sql += " AND source = 'collections'"
         elif dataset_type in {"analysis-result", "analysis-results", "analysis_result"}:
@@ -1129,39 +1258,36 @@ class TciaQueryService:
                 sql += " AND COALESCE(has_external_clinical_resource, 0) = ?"
                 params.append(1 if is_truthy(has_external_clinical_resource) else 0)
 
-            sql += " ORDER BY hidden, lower(short_title), source LIMIT ?"
-            params.append(limit)
+            sql += " ORDER BY lower(short_title), source LIMIT ? OFFSET ?"
+            params.extend([limit + 1, offset])
             rows = [compact_dataset(row) for row in conn.execute(sql, params).fetchall()]
-        return {
-            "datasets": rows,
-            "count": len(rows),
-            "limit": limit,
-            "include_hidden": include_hidden,
-            "note": "Hidden/staged/retired WordPress records are excluded unless include_hidden is true.",
-        }
+        result = page_envelope(
+            "datasets", rows, limit=limit, offset=offset, cursor_filters=cursor_filters
+        )
+        result["note"] = "Only visible TCIA WordPress records are returned."
+        return result
 
-    def get_dataset(self, short_title: str, include_hidden: bool = False) -> dict[str, Any]:
+    def get_dataset(self, short_title: str) -> dict[str, Any]:
         title = short_title.strip().lower()
         if not title:
-            raise TciaServiceError("short_title is required")
-        hidden_clause = "" if include_hidden else " AND hidden = 0"
+            raise InvalidRequestError("short_title is required")
         with self._connect_snapshot() as conn:
             rows = conn.execute(
                 f"""
                 SELECT *
                 FROM agent_dataset_access_summary
-                WHERE lower(short_title) = ?{hidden_clause}
+                WHERE lower(short_title) = ? AND hidden = 0
                 ORDER BY source
                 """,
                 (title,),
             ).fetchall()
             if not rows:
-                raise TciaServiceError(f"No visible TCIA dataset found for short_title={short_title!r}")
+                raise NotFoundError(f"No visible TCIA dataset found for short_title={short_title!r}")
             downloads = conn.execute(
                 f"""
                 SELECT *
                 FROM agent_current_downloads
-                WHERE lower(short_title) = ?{hidden_clause}
+                WHERE lower(short_title) = ? AND hidden = 0
                 ORDER BY download_id, download_title
                 """,
                 (title,),
@@ -1179,7 +1305,7 @@ class TciaQueryService:
                 (f"%{title}%",),
             ).fetchall()
         return {
-            "datasets": [compact_dataset(row) for row in rows],
+            "datasets": [full_dataset(row) for row in rows],
             "current_downloads": [compact_download(row) for row in downloads],
             "related_analysis_results": [compact_dataset(row) for row in related],
             "caveats": [
@@ -1191,12 +1317,11 @@ class TciaQueryService:
     def get_dataset_versions(
         self,
         short_title: str,
-        include_hidden: bool = False,
         limit: int = 100,
     ) -> dict[str, Any]:
         title = short_title.strip().lower()
         if not title:
-            raise TciaServiceError("short_title is required")
+            raise InvalidRequestError("short_title is required")
         row_limit = coerce_limit(limit, default=100, maximum=500)
         with self._connect_snapshot() as conn:
             if not self._object_exists(conn, "agent_dataset_versions"):
@@ -1210,12 +1335,11 @@ class TciaQueryService:
                         "Refresh with `python scripts/tcia_v2_bundle.py install --profile research_core`."
                     ),
                 }
-            hidden_clause = "" if include_hidden else " AND hidden = 0"
             rows = conn.execute(
                 f"""
                 SELECT *
                 FROM agent_dataset_versions
-                WHERE lower(short_title) = ?{hidden_clause}
+                WHERE lower(short_title) = ? AND hidden = 0
                 ORDER BY
                   CASE WHEN trim(COALESCE(version_number, '')) = '' THEN 1 ELSE 0 END,
                   CAST(NULLIF(version_number, '') AS INTEGER),
@@ -1238,7 +1362,6 @@ class TciaQueryService:
         }
 
     def get_dataset_v1_releases(self, **filters: Any) -> dict[str, Any]:
-        include_hidden = is_truthy(filters.get("include_hidden"))
         limit = coerce_limit(filters.get("limit"), default=50, maximum=500)
         short_titles = [item.lower() for item in as_list(filters.get("short_titles"))]
         dataset_type = str(filters.get("dataset_type") or "both").strip().lower()
@@ -1257,8 +1380,7 @@ class TciaQueryService:
                 }
             sql = "SELECT * FROM agent_dataset_v1_releases WHERE 1 = 1"
             params: list[Any] = []
-            if not include_hidden:
-                sql += " AND hidden = 0"
+            sql += " AND hidden = 0"
             if short_titles:
                 sql += f" AND lower(short_title) IN ({','.join('?' for _ in short_titles)})"
                 params.extend(short_titles)
@@ -1289,9 +1411,10 @@ class TciaQueryService:
     def get_current_downloads(self, short_title: str, **filters: Any) -> dict[str, Any]:
         title = short_title.strip().lower()
         if not title:
-            raise TciaServiceError("short_title is required")
-        include_hidden = is_truthy(filters.get("include_hidden"))
+            raise InvalidRequestError("short_title is required")
         limit = coerce_limit(filters.get("limit"))
+        cursor_filters = {"short_title": title, **pagination_filters(filters)}
+        offset = decode_cursor(filters.get("cursor"), cursor_filters)
         access_levels = [item.lower() for item in as_list(filters.get("access_levels"))]
         modalities = as_list(filters.get("modalities"))
         data_types = as_list(filters.get("data_types"))
@@ -1299,10 +1422,8 @@ class TciaQueryService:
         file_types = as_list(filters.get("file_types"))
         requires_annotations = is_truthy(filters.get("requires_annotations"))
 
-        sql = "SELECT * FROM agent_current_downloads WHERE lower(short_title) = ?"
+        sql = "SELECT * FROM agent_current_downloads WHERE lower(short_title) = ? AND hidden = 0"
         params: list[Any] = [title]
-        if not include_hidden:
-            sql += " AND hidden = 0"
         if access_levels:
             sql += f" AND lower(COALESCE(access_level, '')) IN ({','.join('?' for _ in access_levels)})"
             params.extend(access_levels)
@@ -1314,21 +1435,28 @@ class TciaQueryService:
             for value in requested:
                 sql += f" AND lower(COALESCE({column}, '')) LIKE ?"
                 params.append(f"%{value.lower()}%")
-        sql += " ORDER BY download_id, download_title LIMIT ?"
-        params.append(limit)
+        if requires_annotations:
+            labels = sorted(ANNOTATION_LABELS)
+            clauses: list[str] = []
+            for _label in labels:
+                clauses.append(
+                    "lower(COALESCE(download_types, '') || ' ' || COALESCE(data_types, '') || ' ' || "
+                    "COALESCE(file_types, '') || ' ' || COALESCE(download_title, '')) LIKE ?"
+                )
+            sql += " AND (" + " OR ".join(clauses) + ")"
+            params.extend(f"%{label}%" for label in labels)
+        sql += " ORDER BY download_id, download_title LIMIT ? OFFSET ?"
+        params.extend([limit + 1, offset])
         with self._connect_snapshot() as conn:
             rows = [compact_download(row) for row in conn.execute(sql, params).fetchall()]
-        if requires_annotations:
-            rows = [row for row in rows if self._download_has_annotation(row)]
-        return {
-            "short_title": short_title,
-            "downloads": rows,
-            "count": len(rows),
-            "limit": limit,
-        }
+        result = page_envelope(
+            "downloads", rows, limit=limit, offset=offset, cursor_filters=cursor_filters
+        )
+        result["short_title"] = short_title
+        return result
 
-    def summarize_access(self, short_title: str, include_hidden: bool = False) -> dict[str, Any]:
-        dataset_payload = self.get_dataset(short_title, include_hidden=include_hidden)
+    def summarize_access(self, short_title: str) -> dict[str, Any]:
+        dataset_payload = self.get_dataset(short_title)
         dataset = dataset_payload["datasets"][0]
         downloads = dataset_payload["current_downloads"]
         groups: dict[str, list[dict[str, Any]]] = {}
@@ -1462,17 +1590,14 @@ class TciaQueryService:
         }
 
     def find_dicom_annotations(self, **filters: Any) -> dict[str, Any]:
-        include_hidden = is_truthy(filters.get("include_hidden"))
         limit = coerce_limit(filters.get("limit"))
         query = str(filters.get("query") or "").strip().lower()
         modalities = as_list(filters.get("modalities"))
         access_levels = [item.lower() for item in as_list(filters.get("access_levels"))]
         short_titles = [item.lower() for item in as_list(filters.get("short_titles"))]
 
-        sql = "SELECT * FROM agent_current_downloads WHERE lower(COALESCE(file_types, '')) LIKE '%dicom%'"
+        sql = "SELECT * FROM agent_current_downloads WHERE hidden = 0 AND lower(COALESCE(file_types, '')) LIKE '%dicom%'"
         params: list[Any] = []
-        if not include_hidden:
-            sql += " AND hidden = 0"
         if short_titles:
             sql += f" AND lower(short_title) IN ({','.join('?' for _ in short_titles)})"
             params.extend(short_titles)
@@ -2142,6 +2267,8 @@ class TciaQueryService:
     def search_participants(self, **filters: Any) -> dict[str, Any]:
         """Search canonical dataset-scoped participants from the V2 research core."""
         limit = coerce_limit(filters.get("limit"), default=25, maximum=500)
+        cursor_filters = pagination_filters(filters)
+        offset = decode_cursor(filters.get("cursor"), cursor_filters)
         query = str(filters.get("query") or "").strip().lower()
         short_titles = [item.lower() for item in as_list(filters.get("short_titles"))]
         dataset_type = str(filters.get("dataset_type") or "both").strip().lower()
@@ -2169,19 +2296,22 @@ class TciaQueryService:
                     file_formats=file_formats,
                     geometry_statuses=geometry_statuses,
                     access_levels=access_levels,
-                    limit=limit,
+                    limit=limit + 1,
+                    offset=offset,
                 )
                 rows = [
                     normalize_v2_row(row)
                     for row in self._participant_summary_rows(conn, keys)
                 ]
-                return {
-                    "participants": rows,
-                    "count": len(rows),
-                    "limit": limit,
+                result = page_envelope(
+                    "participants", rows, limit=limit, offset=offset,
+                    cursor_filters=cursor_filters,
+                )
+                result.update({
                     "identity_scope": "Dataset-scoped; Collections and Analysis Results remain distinct.",
                     "public_dicom_detail_route": "IDC/idc-index",
-                }
+                })
+                return result
             sql = "SELECT * FROM agent_participant_search WHERE 1 = 1"
             params: list[Any] = []
             if query:
@@ -2226,16 +2356,17 @@ class TciaQueryService:
                         "',' || replace(replace(?, ';', ','), ' ', '') || ',') > 0"
                     )
                     params.append(value)
-            sql += " ORDER BY lower(short_title), lower(display_participant_id) LIMIT ?"
-            params.append(limit)
+            sql += " ORDER BY lower(short_title), lower(display_participant_id) LIMIT ? OFFSET ?"
+            params.extend([limit + 1, offset])
             rows = [normalize_v2_row(row) for row in conn.execute(sql, params).fetchall()]
-        return {
-            "participants": rows,
-            "count": len(rows),
-            "limit": limit,
+        result = page_envelope(
+            "participants", rows, limit=limit, offset=offset, cursor_filters=cursor_filters
+        )
+        result.update({
             "identity_scope": "Dataset-scoped; Collections and Analysis Results remain distinct.",
             "public_dicom_detail_route": "IDC/idc-index",
-        }
+        })
+        return result
 
     def _find_participant_keys(
         self,
@@ -2251,9 +2382,13 @@ class TciaQueryService:
         geometry_statuses: list[str],
         access_levels: list[str],
         limit: int,
+        offset: int,
     ) -> list[str]:
         """Find participant keys without expanding the aggregate search view."""
-        def select_keys(match_sql: str, match_params: list[Any]) -> list[str]:
+        def select_keys(
+            match_sql: str, match_params: list[Any], *, page_offset: int = offset,
+            page_limit: int = limit,
+        ) -> list[str]:
             params = list(match_params)
             sql = f"SELECT p.participant_key FROM participants p {match_sql} WHERE 1 = 1"
             if short_titles:
@@ -2302,9 +2437,9 @@ class TciaQueryService:
                 sql += " AND " + "".join(asset_sql)
             sql += (
                 " ORDER BY p.short_title COLLATE NOCASE, "
-                "p.display_participant_id COLLATE NOCASE LIMIT ?"
+                "p.display_participant_id COLLATE NOCASE LIMIT ? OFFSET ?"
             )
-            params.append(limit)
+            params.extend([page_limit, page_offset])
             return [str(row[0]) for row in conn.execute(sql, params)]
 
         if not query:
@@ -2323,9 +2458,9 @@ class TciaQueryService:
                    OR normalized_identifier = ? COLLATE NOCASE
             ) matches USING(participant_key)
         """
-        exact_keys = select_keys(exact_match_sql, [query, query, query, query])
-        if exact_keys:
-            return exact_keys
+        exact_params = [query, query, query, query]
+        if select_keys(exact_match_sql, exact_params, page_offset=0, page_limit=1):
+            return select_keys(exact_match_sql, exact_params)
 
         pattern = f"%{query}%"
         substring_match_sql = """
@@ -2488,7 +2623,7 @@ class TciaQueryService:
                     )
                 row = rows[0] if rows else None
             if row is None:
-                return {"participant": None, "identifiers": [], "count": 0}
+                raise NotFoundError("No participant matched the supplied dataset-scoped identity")
             key = str(row["participant_key"])
             identifiers = [
                 normalize_v2_row(item)
@@ -2508,8 +2643,10 @@ class TciaQueryService:
     def get_participant_assets(self, participant_key: str, **filters: Any) -> dict[str, Any]:
         key = participant_key.strip()
         if not key:
-            raise TciaServiceError("participant_key is required")
+            raise InvalidRequestError("participant_key is required")
         limit = coerce_limit(filters.get("limit"), default=100, maximum=500)
+        cursor_filters = {"participant_key": key, **pagination_filters(filters)}
+        offset = decode_cursor(filters.get("cursor"), cursor_filters)
         access_levels = [item.lower() for item in as_list(filters.get("access_levels"))]
         data_domains = [item.lower() for item in as_list(filters.get("data_domains"))]
         data_categories = [item.lower() for item in as_list(filters.get("data_categories"))]
@@ -2542,16 +2679,17 @@ class TciaQueryService:
                     )
                     params.append(value)
             order_column = "data_category" if "data_category" in asset_columns else "data_domain"
-            sql += f" ORDER BY {order_column}, managed_system, participant_asset_id LIMIT ?"
-            params.append(limit)
+            sql += f" ORDER BY {order_column}, managed_system, participant_asset_id LIMIT ? OFFSET ?"
+            params.extend([limit + 1, offset])
             rows = [normalize_v2_row(row) for row in conn.execute(sql, params).fetchall()]
-        return {
+        result = page_envelope(
+            "assets", rows, limit=limit, offset=offset, cursor_filters=cursor_filters
+        )
+        result.update({
             "participant_key": key,
-            "assets": rows,
-            "count": len(rows),
-            "limit": limit,
             "public_dicom_detail_route": "IDC/idc-index",
-        }
+        })
+        return result
 
     def get_dataset_participant_coverage(
         self, short_title: str, dataset_type: str | None = None
@@ -2628,6 +2766,8 @@ class TciaQueryService:
     def find_public_non_dicom_assets(self, **filters: Any) -> dict[str, Any]:
         """Query V2 public non-DICOM detail; public DICOM remains an IDC concern."""
         limit = coerce_limit(filters.get("limit"), default=50, maximum=500)
+        cursor_filters = pagination_filters(filters)
+        offset = decode_cursor(filters.get("cursor"), cursor_filters)
         short_titles = [item.lower() for item in as_list(filters.get("short_titles"))]
         participant_id = str(filters.get("participant_id") or "").strip().lower()
         file_formats = [item.lower() for item in as_list(filters.get("file_formats"))]
@@ -2670,13 +2810,13 @@ class TciaQueryService:
                     f"({','.join('?' for _ in annotation_roles)})"
                 )
                 params.extend(annotation_roles)
-            sql += " ORDER BY lower(a.short_title), a.asset_id LIMIT ?"
-            params.append(limit)
+            sql += " ORDER BY lower(a.short_title), a.asset_id LIMIT ? OFFSET ?"
+            params.extend([limit + 1, offset])
             rows = [normalize_v2_row(row) for row in conn.execute(sql, params).fetchall()]
-        return {
-            "assets": rows,
-            "count": len(rows),
-            "limit": limit,
+        result = page_envelope(
+            "assets", rows, limit=limit, offset=offset, cursor_filters=cursor_filters
+        )
+        result.update({
             "scope": "Public non-DICOM and narrowly reviewed IDC-missing DICOM exceptions.",
             "public_dicom_detail_route": "IDC/idc-index",
             "annotation_roles": sorted(NON_DICOM_ANNOTATION_ROLES),
@@ -2684,7 +2824,8 @@ class TciaQueryService:
                 "Annotation and segmentation assets are discoverable by object_role. This endpoint "
                 "does not infer or expose source-to-annotation relationships."
             ),
-        }
+        })
+        return result
 
     def _download_has_annotation(self, row: dict[str, Any]) -> bool:
         labels = json_text_values(row, ["download_types", "data_types", "file_types"])

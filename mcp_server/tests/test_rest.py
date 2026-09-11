@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import unittest
 
+from fastapi.testclient import TestClient
+
 from mcp_server.tcia_query_mcp.rest import create_app
+from mcp_server.tcia_query_mcp.service import NotFoundError
 
 
 class RestV2ContractTests(unittest.TestCase):
@@ -29,8 +32,15 @@ class RestV2ContractTests(unittest.TestCase):
         self.assertIn("/v2/clinical/{short_title}/conflicts", paths)
         self.assertNotIn("/v2/nifti/datasets", paths)
         self.assertNotIn("/v2/pathology/datasets", paths)
-        self.assertIn("/v1/datasets/search", paths)
-        self.assertIn("/v1/snapshot", paths)
+        self.assertNotIn("/v1/datasets/search", paths)
+        self.assertNotIn("/v1/snapshot", paths)
+        route_paths = {route.path for route in app.routes}
+        self.assertIn("/v1/datasets/search", route_paths)
+        self.assertIn("/v1/snapshot", route_paths)
+        self.assertEqual(TestClient(app).get("/v1/health").status_code, 200)
+        self.assertIn("/v2/live", paths)
+        self.assertIn("/v2/ready", paths)
+        self.assertNotIn("/v2/health", paths)
 
     def test_v2_bundle_uses_lightweight_manifest_info(self) -> None:
         class Service:
@@ -76,6 +86,34 @@ class RestV2ContractTests(unittest.TestCase):
             ]
         }
         self.assertTrue({"modalities", "geometry_statuses"} <= public_parameters)
+
+    def test_openapi_has_shared_response_and_problem_schemas(self) -> None:
+        schema = create_app().openapi()
+        operation = schema["paths"]["/v2/datasets/search"]["post"]
+        self.assertEqual(
+            operation["responses"]["200"]["content"]["application/json"]["schema"]["$ref"],
+            "#/components/schemas/DatasetSearchResponse",
+        )
+        self.assertIn("ProblemDetail", schema["components"]["schemas"])
+        self.assertIn(
+            "application/problem+json",
+            operation["responses"]["422"]["content"],
+        )
+        self.assertNotIn(
+            "include_hidden",
+            schema["components"]["schemas"]["SearchDatasetsRequest"]["properties"],
+        )
+
+    def test_service_errors_use_problem_json(self) -> None:
+        class Service:
+            def get_dataset(self, short_title):
+                raise NotFoundError(f"missing {short_title}")
+
+        response = TestClient(create_app(Service())).get("/v2/datasets/NOPE")
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.headers["content-type"], "application/problem+json")
+        self.assertEqual(response.json()["code"], "not_found")
+        self.assertFalse(response.json()["retryable"])
 
 
 if __name__ == "__main__":

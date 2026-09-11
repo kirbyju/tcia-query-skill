@@ -18,43 +18,31 @@ from typing import Any
 from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.exceptions import ToolError
 from mcp.server.transport_security import TransportSecuritySettings
+from mcp.types import ToolAnnotations
 from starlette.routing import Route
 
 from . import __version__
+from .models import (
+    AssetsResponse,
+    DatasetDetailResponse,
+    DatasetSearchResponse,
+    DownloadsResponse,
+    ParticipantsResponse,
+    PublicResponse,
+)
 from .service import CONTROLLED_ACCESS_POLICY_URL, TciaQueryService, TciaServiceError
 
 
 SERVER_NAME = "tcia-query-mcp"
 SERVER_TITLE = "TCIA Query MCP"
 
-INSTRUCTIONS = """\
-This server exposes read-only TCIA-published dataset metadata backed by the
-TCIA query skill SQLite release snapshots. Use WordPress Collection and
-Analysis Result records as the TCIA provenance authority. Hidden, staged, and
-retired records are excluded unless a TCIA staff workflow explicitly asks for
-them.
-
-Work this way:
-1. Start with get_snapshot_info to confirm the V2 bundle fingerprint, research
-   core, and optional detail artifacts.
-2. Use search_datasets and get_dataset for TCIA provenance, license/access
-   status, current download labels, external-resource labels, and related
-   Analysis Results.
-3. Use search_participants for participant discovery and availability. Use
-   get_participant_assets for participant drill-down and
-   get_dataset_participant_coverage before making completeness claims.
-4. Use download-level tools for modality, file type, route, and controlled
-   access decisions. Split mixed-access datasets into open and controlled
-   downloads.
-5. Use the optional detail tools only after confirming TCIA provenance in the
-   base snapshot: patient-level clinical metadata, controlled-access files,
-   and unified public non-DICOM metadata, including NIfTI and pathology. Public
-   DICOM detail remains an IDC/idc-index responsibility.
-6. This MCP server is a read-only metadata service and does not transfer payloads.
-   Return policy and manifest/DRS guidance. A capable client agent may invoke the
-   official TCIA Data Retriever after the user supplies their authorized JSON-key
-   path, following the skill's controlled-access guidance.
-"""
+INSTRUCTIONS = """Read-only, snapshot-local TCIA metadata. Start with
+get_snapshot_info. Use search tools for compact discovery and follow with detail
+tools. Only visible WordPress Collections and Analysis Results are returned.
+Check download-level access and format labels before routing: public DICOM detail
+belongs to IDC/idc-index; controlled metadata never grants access. Preserve
+dataset-scoped participant identity and check coverage before completeness claims.
+This server never transfers payload data."""
 
 GUIDE = f"""\
 # Querying TCIA With This MCP Server
@@ -163,6 +151,13 @@ mcp = FastMCP(
 )
 mcp._mcp_server.version = __version__
 
+QUERY_ANNOTATIONS = ToolAnnotations(
+    readOnlyHint=True,
+    destructiveHint=False,
+    idempotentHint=True,
+    openWorldHint=False,
+)
+
 _service: TciaQueryService | None = None
 
 
@@ -210,20 +205,25 @@ def guard(fn: Callable[..., Any]) -> Callable[..., Any]:
         try:
             return fn(*args, **kwargs)
         except TciaServiceError as exc:
-            raise ToolError(str(exc)) from None
+            action = (
+                "retry after installing/checking the required V2 artifact"
+                if exc.retryable
+                else "correct the input and retry"
+            )
+            raise ToolError(f"{exc.code}: {exc}. Action: {action}.") from None
 
     return wrapper
 
 
-@mcp.tool()
+@mcp.tool(annotations=QUERY_ANNOTATIONS, meta={"snapshot_local": True}, structured_output=True)
 @guard
-def get_snapshot_info() -> dict:
+def get_snapshot_info() -> PublicResponse:
     """Return the installed V2 manifest, profile, component schemas, and capabilities."""
 
     return service().bundle_info()
 
 
-@mcp.tool()
+@mcp.tool(annotations=QUERY_ANNOTATIONS, meta={"snapshot_local": True}, structured_output=True)
 @guard
 def search_participants(
     query: str | None = None,
@@ -235,8 +235,9 @@ def search_participants(
     file_formats: list[str] | None = None,
     geometry_statuses: list[str] | None = None,
     modalities: list[str] | None = None,
+    cursor: str | None = None,
     limit: int = 25,
-) -> dict:
+) -> ParticipantsResponse:
     """Search participants by access, Data Category, Data Type, File Format, or geometry."""
     return service().search_participants(
         query=query,
@@ -248,18 +249,19 @@ def search_participants(
         file_formats=file_formats,
         geometry_statuses=geometry_statuses,
         modalities=modalities,
+        cursor=cursor,
         limit=limit,
     )
 
 
-@mcp.tool()
+@mcp.tool(annotations=QUERY_ANNOTATIONS, meta={"snapshot_local": True}, structured_output=True)
 @guard
 def get_participant(
     participant_key: str | None = None,
     short_title: str | None = None,
     participant_id: str | None = None,
     dataset_type: str | None = None,
-) -> dict:
+) -> PublicResponse:
     """Return one canonical participant and every retained source identifier spelling."""
     return service().get_participant(
         participant_key=participant_key,
@@ -269,7 +271,7 @@ def get_participant(
     )
 
 
-@mcp.tool()
+@mcp.tool(annotations=QUERY_ANNOTATIONS, meta={"snapshot_local": True}, structured_output=True)
 @guard
 def get_participant_assets(
     participant_key: str,
@@ -279,8 +281,9 @@ def get_participant_assets(
     file_formats: list[str] | None = None,
     geometry_statuses: list[str] | None = None,
     data_domains: list[str] | None = None,
+    cursor: str | None = None,
     limit: int = 100,
-) -> dict:
+) -> AssetsResponse:
     """Return participant holdings with public facets and geometry assessment summaries."""
     return service().get_participant_assets(
         participant_key,
@@ -290,33 +293,34 @@ def get_participant_assets(
         file_formats=file_formats,
         geometry_statuses=geometry_statuses,
         data_domains=data_domains,
+        cursor=cursor,
         limit=limit,
     )
 
 
-@mcp.tool()
+@mcp.tool(annotations=QUERY_ANNOTATIONS, meta={"snapshot_local": True}, structured_output=True)
 @guard
 def get_dataset_participant_coverage(
     short_title: str, dataset_type: str | None = None
-) -> dict:
+) -> PublicResponse:
     """Report participant counts, unlinked assets, source coverage, and link issues."""
     return service().get_dataset_participant_coverage(short_title, dataset_type=dataset_type)
 
 
-@mcp.tool()
+@mcp.tool(annotations=QUERY_ANNOTATIONS, meta={"snapshot_local": True}, structured_output=True)
 @guard
 def find_participant_link_issues(
     short_titles: list[str] | None = None,
     statuses: list[str] | None = None,
     limit: int = 50,
-) -> dict:
+) -> dict[str, Any]:
     """Find explicit V2 participant linkage and crosswalk review states."""
     return service().find_participant_link_issues(
         short_titles=short_titles, statuses=statuses, limit=limit
     )
 
 
-@mcp.tool()
+@mcp.tool(annotations=QUERY_ANNOTATIONS, meta={"snapshot_local": True}, structured_output=True)
 @guard
 def find_public_non_dicom_assets(
     short_titles: list[str] | None = None,
@@ -327,8 +331,9 @@ def find_public_non_dicom_assets(
     media_kinds: list[str] | None = None,
     object_roles: list[str] | None = None,
     requires_annotations: bool = False,
+    cursor: str | None = None,
     limit: int = 50,
-) -> dict:
+) -> AssetsResponse:
     """Query V2 public non-DICOM files by format, modality, geometry, or technical role."""
     return service().find_public_non_dicom_assets(
         short_titles=short_titles,
@@ -339,11 +344,12 @@ def find_public_non_dicom_assets(
         media_kinds=media_kinds,
         object_roles=object_roles,
         requires_annotations=requires_annotations,
+        cursor=cursor,
         limit=limit,
     )
 
 
-@mcp.tool()
+@mcp.tool(annotations=QUERY_ANNOTATIONS, meta={"snapshot_local": True}, structured_output=True)
 @guard
 def search_datasets(
     query: str | None = None,
@@ -361,9 +367,9 @@ def search_datasets(
     external_resources: list[str] | None = None,
     has_external_clinical_resource: bool | None = None,
     doi: str | None = None,
-    include_hidden: bool = False,
+    cursor: str | None = None,
     limit: int = 25,
-) -> dict:
+) -> DatasetSearchResponse:
     """Search visible TCIA WordPress Collections and Analysis Results.
 
     Use this for TCIA provenance and discovery. Filter by download-level modality/file labels
@@ -387,41 +393,39 @@ def search_datasets(
         external_resources=external_resources,
         has_external_clinical_resource=has_external_clinical_resource,
         doi=doi,
-        include_hidden=include_hidden,
+        cursor=cursor,
         limit=limit,
     )
 
 
-@mcp.tool()
+@mcp.tool(annotations=QUERY_ANNOTATIONS, meta={"snapshot_local": True}, structured_output=True)
 @guard
-def get_dataset(short_title: str, include_hidden: bool = False) -> dict:
+def get_dataset(short_title: str) -> DatasetDetailResponse:
     """Return one TCIA dataset by short title, including access, current downloads, and related results."""
 
-    return service().get_dataset(short_title=short_title, include_hidden=include_hidden)
+    return service().get_dataset(short_title=short_title)
 
 
-@mcp.tool()
+@mcp.tool(annotations=QUERY_ANNOTATIONS, meta={"snapshot_local": True}, structured_output=True)
 @guard
-def get_dataset_versions(short_title: str, include_hidden: bool = False, limit: int = 100) -> dict:
+def get_dataset_versions(short_title: str, limit: int = 100) -> dict[str, Any]:
     """Return WordPress version-history rows matched to one TCIA dataset short title."""
 
     return service().get_dataset_versions(
         short_title=short_title,
-        include_hidden=include_hidden,
         limit=limit,
     )
 
 
-@mcp.tool()
+@mcp.tool(annotations=QUERY_ANNOTATIONS, meta={"snapshot_local": True}, structured_output=True)
 @guard
 def get_dataset_v1_releases(
     short_titles: list[str] | None = None,
     dataset_type: str = "both",
     released_since: str | None = None,
     released_before: str | None = None,
-    include_hidden: bool = False,
     limit: int = 50,
-) -> dict:
+) -> PublicResponse:
     """Return best-available first-release dates from agent_dataset_v1_releases."""
 
     return service().get_dataset_v1_releases(
@@ -429,12 +433,11 @@ def get_dataset_v1_releases(
         dataset_type=dataset_type,
         released_since=released_since,
         released_before=released_before,
-        include_hidden=include_hidden,
         limit=limit,
     )
 
 
-@mcp.tool()
+@mcp.tool(annotations=QUERY_ANNOTATIONS, meta={"snapshot_local": True}, structured_output=True)
 @guard
 def get_current_downloads(
     short_title: str,
@@ -444,9 +447,9 @@ def get_current_downloads(
     download_types: list[str] | None = None,
     file_types: list[str] | None = None,
     requires_annotations: bool = False,
-    include_hidden: bool = False,
+    cursor: str | None = None,
     limit: int = 25,
-) -> dict:
+) -> DownloadsResponse:
     """Return current WordPress download rows for one dataset.
 
     Use this before download advice because TCIA modality, file type, and access labels live at
@@ -461,20 +464,20 @@ def get_current_downloads(
         download_types=download_types,
         file_types=file_types,
         requires_annotations=requires_annotations,
-        include_hidden=include_hidden,
+        cursor=cursor,
         limit=limit,
     )
 
 
-@mcp.tool()
+@mcp.tool(annotations=QUERY_ANNOTATIONS, meta={"snapshot_local": True}, structured_output=True)
 @guard
-def summarize_access(short_title: str, include_hidden: bool = False) -> dict:
+def summarize_access(short_title: str) -> dict[str, Any]:
     """Summarize dataset/download access and split open, noncommercial, controlled, and mixed routes."""
 
-    return service().summarize_access(short_title=short_title, include_hidden=include_hidden)
+    return service().summarize_access(short_title=short_title)
 
 
-@mcp.tool()
+@mcp.tool(annotations=QUERY_ANNOTATIONS, meta={"snapshot_local": True}, structured_output=True)
 @guard
 def find_controlled_access_datasets(
     modalities: list[str] | None = None,
@@ -482,7 +485,7 @@ def find_controlled_access_datasets(
     requires_annotations: bool = False,
     include_mixed: bool = True,
     limit: int = 25,
-) -> dict:
+) -> dict[str, Any]:
     """Find controlled or mixed-access TCIA datasets from the base WordPress snapshot."""
 
     return service().find_controlled_access_datasets(
@@ -494,7 +497,7 @@ def find_controlled_access_datasets(
     )
 
 
-@mcp.tool()
+@mcp.tool(annotations=QUERY_ANNOTATIONS, meta={"snapshot_local": True}, structured_output=True)
 @guard
 def get_controlled_access_files(
     short_title: str,
@@ -506,7 +509,7 @@ def get_controlled_access_files(
     patient_id: str | None = None,
     has_drs_uri: bool | None = None,
     limit: int = 50,
-) -> dict:
+) -> dict[str, Any]:
     """Query public file-grain metadata for controlled-access downloads.
 
     This returns metadata only. It does not grant authorization and must not be used to directly
@@ -526,16 +529,15 @@ def get_controlled_access_files(
     )
 
 
-@mcp.tool()
+@mcp.tool(annotations=QUERY_ANNOTATIONS, meta={"snapshot_local": True}, structured_output=True)
 @guard
 def find_dicom_annotations(
     query: str | None = None,
     short_titles: list[str] | None = None,
     modalities: list[str] | None = None,
     access_levels: list[str] | None = None,
-    include_hidden: bool = False,
     limit: int = 25,
-) -> dict:
+) -> dict[str, Any]:
     """Find TCIA DICOM annotation download signals; use IDC for series relationships."""
 
     return service().find_dicom_annotations(
@@ -543,7 +545,6 @@ def find_dicom_annotations(
         short_titles=short_titles,
         modalities=modalities,
         access_levels=access_levels,
-        include_hidden=include_hidden,
         limit=limit,
     )
 
@@ -554,7 +555,7 @@ def find_nifti_datasets(
     modalities: list[str] | None = None,
     requires_derived_objects: bool = False,
     limit: int = 25,
-) -> dict:
+) -> dict[str, Any]:
     """Summarize datasets represented in the optional public NIfTI SQLite sidecar."""
 
     return service().find_nifti_datasets(
@@ -574,7 +575,7 @@ def get_nifti_files(
     derived_only: bool = False,
     has_source_uids: bool | None = None,
     limit: int = 50,
-) -> dict:
+) -> dict[str, Any]:
     """Return public NIfTI radiology file/series rows from the optional NIfTI sidecar."""
 
     return service().get_nifti_files(
@@ -595,7 +596,7 @@ def get_nifti_derived_objects(
     file_name_contains: str | None = None,
     confidence: str | None = None,
     limit: int = 50,
-) -> dict:
+) -> dict[str, Any]:
     """Return probable NIfTI segmentation/derived objects and source-image references."""
 
     return service().get_nifti_derived_objects(
@@ -617,7 +618,7 @@ def get_nifti_characteristics(
     file_name_contains: str | None = None,
     has_source_reference: bool | None = None,
     limit: int = 50,
-) -> dict:
+) -> dict[str, Any]:
     """Return reviewed NIfTI object roles, imaging context, and source relationships."""
 
     return service().get_nifti_characteristics(
@@ -638,7 +639,7 @@ def find_nifti_review_issues(
     statuses: list[str] | None = None,
     severities: list[str] | None = None,
     limit: int = 50,
-) -> dict:
+) -> dict[str, Any]:
     """Find dataset-level NIfTI QC questions; defaults to open manual-review items."""
 
     return service().find_nifti_review_issues(
@@ -656,7 +657,7 @@ def get_nifti_package_files(
     file_name_contains: str | None = None,
     metadata_candidates: bool | None = None,
     limit: int = 50,
-) -> dict:
+) -> dict[str, Any]:
     """Return NIfTI Aspera package file inventory rows from the optional NIfTI sidecar."""
 
     return service().get_nifti_package_files(
@@ -675,7 +676,7 @@ def find_pathology_datasets(
     with_package_inventory: bool | None = None,
     has_pathdb: bool | None = None,
     limit: int = 25,
-) -> dict:
+) -> dict[str, Any]:
     """Summarize datasets in the optional pathology/Aspera SQLite sidecar."""
 
     return service().find_pathology_datasets(
@@ -688,7 +689,7 @@ def find_pathology_datasets(
 
 
 @guard
-def get_pathology_downloads(short_titles: list[str] | None = None, limit: int = 25) -> dict:
+def get_pathology_downloads(short_titles: list[str] | None = None, limit: int = 25) -> dict[str, Any]:
     """Return pathology Aspera download scope rows from the optional pathology sidecar."""
 
     return service().get_pathology_downloads(short_titles=short_titles, limit=limit)
@@ -702,7 +703,7 @@ def get_pathology_package_files(
     download_id: str | None = None,
     file_name_contains: str | None = None,
     limit: int = 50,
-) -> dict:
+) -> dict[str, Any]:
     """Return pathology Aspera package inventory rows for one TCIA dataset."""
 
     return service().get_pathology_package_files(
@@ -722,7 +723,7 @@ def get_pathology_file_objects(
     file_roles: list[str] | None = None,
     file_name_contains: str | None = None,
     limit: int = 50,
-) -> dict:
+) -> dict[str, Any]:
     """Return normalized pathology file objects from PathDB/package-derived metadata."""
 
     return service().get_pathology_file_objects(
@@ -739,7 +740,7 @@ def get_pathology_disparities(
     short_titles: list[str] | None = None,
     disparity_types: list[str] | None = None,
     limit: int = 25,
-) -> dict:
+) -> dict[str, Any]:
     """Return PathDB/package/download scope disparity rows from the optional pathology sidecar."""
 
     return service().get_pathology_disparities(
@@ -749,7 +750,7 @@ def get_pathology_disparities(
     )
 
 
-@mcp.tool()
+@mcp.tool(annotations=QUERY_ANNOTATIONS, meta={"snapshot_local": True}, structured_output=True)
 @guard
 def find_clinical_datasets(
     short_titles: list[str] | None = None,
@@ -758,7 +759,7 @@ def find_clinical_datasets(
     has_conflicts: bool | None = None,
     has_clinical_only_subjects: bool | None = None,
     limit: int = 25,
-) -> dict:
+) -> dict[str, Any]:
     """Summarize dataset coverage in the optional patient-level clinical SQLite sidecar."""
 
     return service().find_clinical_datasets(
@@ -771,7 +772,7 @@ def find_clinical_datasets(
     )
 
 
-@mcp.tool()
+@mcp.tool(annotations=QUERY_ANNOTATIONS, meta={"snapshot_local": True}, structured_output=True)
 @guard
 def get_clinical_subjects(
     short_title: str,
@@ -780,7 +781,7 @@ def get_clinical_subjects(
     has_conflicts: bool | None = None,
     include_inferred: bool = True,
     limit: int = 50,
-) -> dict:
+) -> dict[str, Any]:
     """Return resolved patient-level clinical rows for one TCIA dataset.
 
     By default, only image-linked subjects are returned. Dataset-scope inferred diagnosis/site
@@ -797,7 +798,7 @@ def get_clinical_subjects(
     )
 
 
-@mcp.tool()
+@mcp.tool(annotations=QUERY_ANNOTATIONS, meta={"snapshot_local": True}, structured_output=True)
 @guard
 def get_clinical_facts(
     short_title: str,
@@ -806,7 +807,7 @@ def get_clinical_facts(
     source_kinds: list[str] | None = None,
     inferred: bool | None = None,
     limit: int = 100,
-) -> dict:
+) -> dict[str, Any]:
     """Return long-form clinical facts with source priority, provenance, and inference flags."""
 
     return service().get_clinical_facts(
@@ -819,14 +820,14 @@ def get_clinical_facts(
     )
 
 
-@mcp.tool()
+@mcp.tool(annotations=QUERY_ANNOTATIONS, meta={"snapshot_local": True}, structured_output=True)
 @guard
 def get_clinical_conflicts(
     short_title: str,
     subject_id: str | None = None,
     concepts: list[str] | None = None,
     limit: int = 100,
-) -> dict:
+) -> dict[str, Any]:
     """Return patient/concept disagreements retained by the clinical sidecar."""
 
     return service().get_clinical_conflicts(

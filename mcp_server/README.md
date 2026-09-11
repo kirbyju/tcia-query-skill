@@ -75,6 +75,28 @@ metadata, clinical detail, and TCIA DICOM annotation-download signals. Public
 DICOM series relationships remain an IDC/idc-index concern; legacy specialized
 NIfTI and pathology routes remain compatibility-only under `/v1/`.
 
+## Public Contract
+
+- All public queries exclude hidden, staged, and retired WordPress records;
+  there is no public `include_hidden` input.
+- `search_datasets` is intentionally compact. Use `get_dataset` for narrative
+  and complete download/access detail.
+- High-volume dataset, participant, download, participant-asset, and public
+  non-DICOM searches return `has_more`, `truncated`, and an opaque
+  `next_cursor`. Reuse the same filters and limit with that cursor.
+- Invalid limits/cursors are errors; limits are never silently clamped.
+- MCP tools advertise structured output and read-only, non-destructive,
+  idempotent, snapshot-local metadata.
+- REST errors use RFC 9457-style `application/problem+json` documents with
+  stable `code` and `retryable` fields.
+- `/v2/live` reports process liveness. `/v2/ready` performs cheap artifact and
+  required-query-surface checks. `/v2/health` remains an undocumented alias.
+- The V2 OpenAPI document omits every V1 route, although explicit V1 URLs
+  remain functional.
+
+See [API upgrade notes](../references/api-upgrade-notes.md) for intentional
+client-visible changes in server 0.3.0.
+
 MCP resources:
 
 - `tcia://guide`

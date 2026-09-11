@@ -49,6 +49,12 @@ WordPress scraping, credentials, or controlled-data downloads. Availability
 and capacity are not guaranteed. V2 is the supported and documented REST
 interface for new clients.
 
+Server 0.3.0 adds compact discovery responses, opaque cursor pagination,
+typed problem responses, and separate liveness/readiness checks. It removes
+the hidden-record switch from public contracts while retaining explicit V1
+URLs as undocumented compatibility routes. See
+[API upgrade notes](./references/api-upgrade-notes.md).
+
 See [mcp_server/README.md](./mcp_server/README.md) for the tool surface and
 instructions for running your own MCP/REST server.
 
@@ -188,31 +194,10 @@ for release assets, sidecar behavior, schema/version details, and maintainer
 workflows.
 
 The default release contract is the moving `tcia-metadata-v2-latest` tag, with
-immutable versioned V2 releases retained for reproducibility. It contains
-hash-pinned research-core, research-detail, audit-support, and
-compatibility-export profiles. The default research core contains the base
-snapshot and compact Participant Inventory; file-grain metadata and verbose
+immutable releases retained for reproducibility. Research-core contains the
+base snapshot and compact Participant Inventory; file-grain detail and verbose
 audit evidence are optional. See
 [references/artifact-model-v2.md](./references/artifact-model-v2.md).
-
-Install the default V2 core or add research detail:
-
-```bash
-python3 scripts/tcia_v2_bundle.py install --profile research_core
-python3 scripts/tcia_v2_bundle.py install --profile research_detail
-```
-
-Participant Explorer integrations should query `agent_participant_search` for
-one row per canonical dataset-scoped, case-equivalent participant identifier,
-then download detail components only for drill-down. Every original identifier
-spelling remains available through `participant_identifiers`, and Collections
-remain distinct from Analysis Results. Public-DICOM participant presence for
-both dataset types is projected directly from IDC at build time while series
-and file detail stays in IDC. Accepted clinical facts are no longer copied
-into Participant Inventory by default; use the clinical detail artifact for
-those values. Root source, access, linkage, inference, and coverage states stay
-in the research artifacts, while verbose JSON evidence is joinable from the
-optional `*_audit.sqlite.gz` companions by stable entity ID.
 
 ## Documentation Map
 
@@ -228,6 +213,8 @@ optional `*_audit.sqlite.gz` companions by stable entity ID.
 - [references/publications.md](./references/publications.md): verified publication searches
 - [references/visualization.md](./references/visualization.md): viewer routing
 - [mcp_server/README.md](./mcp_server/README.md): local MCP/REST service
+- [references/api-upgrade-notes.md](./references/api-upgrade-notes.md): client-visible API changes
+- [references/maintainer-operations.md](./references/maintainer-operations.md): build and raw-source operations
 
 ## Scope And Safety
 

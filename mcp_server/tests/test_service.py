@@ -10,7 +10,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
-from mcp_server.tcia_query_mcp.service import TciaQueryService
+from mcp_server.tcia_query_mcp.service import InvalidRequestError, TciaQueryService
 
 
 def q(value):
@@ -792,11 +792,55 @@ class TciaQueryServiceTests(unittest.TestCase):
         self.assertEqual(result["count"], 1)
         self.assertEqual(result["datasets"][0]["short_title"], "TCGA-BRCA")
         self.assertEqual(result["datasets"][0]["external_resource_labels"], ["Clinical", "Genomics"])
+        self.assertNotIn("summary", result["datasets"][0])
+        self.assertNotIn("program", result["datasets"][0])
 
     def test_get_dataset_includes_downloads_and_related_fields(self) -> None:
         result = self.service.get_dataset("TCGA-BRCA")
         self.assertEqual(result["datasets"][0]["current_version_number"], "2")
         self.assertEqual(result["current_downloads"][0]["data_types"], ["MR", "SEG"])
+        self.assertEqual(result["datasets"][0]["summary"], "Breast MRI and CT data")
+
+    def test_search_cursor_is_stable_and_bound_to_filters(self) -> None:
+        with connect(self.snapshot) as conn:
+            conn.execute(
+                "INSERT INTO agent_dataset_access_summary "
+                "SELECT * FROM agent_dataset_access_summary WHERE short_title='TCGA-BRCA'"
+            )
+            conn.execute(
+                "UPDATE agent_dataset_access_summary SET short_title='ZZZ-TEST', title='Second' "
+                "WHERE rowid=(SELECT max(rowid) FROM agent_dataset_access_summary)"
+            )
+        first = self.service.search_datasets(limit=1)
+        self.assertTrue(first["has_more"])
+        self.assertTrue(first["truncated"])
+        second = self.service.search_datasets(limit=1, cursor=first["next_cursor"])
+        self.assertEqual(second["datasets"][0]["short_title"], "ZZZ-TEST")
+        self.assertFalse(second["has_more"])
+        with self.assertRaises(InvalidRequestError):
+            self.service.search_datasets(query="different", limit=1, cursor=first["next_cursor"])
+
+    def test_limit_validation_does_not_silently_clamp(self) -> None:
+        for invalid in (0, 201, "many"):
+            with self.subTest(invalid=invalid), self.assertRaises(InvalidRequestError):
+                self.service.search_datasets(limit=invalid)
+
+    def test_connections_are_intrinsically_read_only(self) -> None:
+        with self.service._connect_snapshot() as conn:
+            self.assertEqual(conn.execute("PRAGMA query_only").fetchone()[0], 1)
+            self.assertEqual(conn.execute("PRAGMA busy_timeout").fetchone()[0], 2000)
+            with self.assertRaises(sqlite3.OperationalError):
+                conn.execute("CREATE TABLE forbidden_write (id INTEGER)")
+
+    def test_public_snapshot_dtos_do_not_expose_host_paths(self) -> None:
+        for payload in (self.service.bundle_info(), self.service.snapshot_info()):
+            serialized = json.dumps(payload)
+            self.assertNotIn(str(Path(self.tmp.name)), serialized)
+
+    def test_readiness_is_cheap_and_artifact_aware(self) -> None:
+        readiness = self.service.readiness_info()
+        self.assertEqual(readiness["status"], "ready")
+        self.assertEqual(readiness["release_fingerprint"], "test-fingerprint")
 
     def test_release_history_tools(self) -> None:
         versions = self.service.get_dataset_versions("TCGA-BRCA")
@@ -1039,6 +1083,24 @@ class TciaQueryServiceTests(unittest.TestCase):
             result["public_dicom_annotation_detail"]["SEG"],
             "IDC idc-index seg_index",
         )
+
+    def test_current_download_annotation_filter_precedes_limit(self) -> None:
+        with connect(self.snapshot) as conn:
+            conn.execute(
+                "INSERT INTO agent_current_downloads "
+                "SELECT * FROM agent_current_downloads WHERE short_title='TCGA-BRCA'"
+            )
+            conn.execute(
+                "UPDATE agent_current_downloads SET download_row_id='before', "
+                "download_id='000', download_title='Plain images', description='Plain images', "
+                "download_types='[\"Radiology Images\"]', data_types='[\"MR\"]' "
+                "WHERE rowid=(SELECT max(rowid) FROM agent_current_downloads)"
+            )
+        result = self.service.get_current_downloads(
+            "TCGA-BRCA", requires_annotations=True, limit=1
+        )
+        self.assertEqual(result["count"], 1)
+        self.assertEqual(result["downloads"][0]["download_id"], "download-1")
 
 
 if __name__ == "__main__":

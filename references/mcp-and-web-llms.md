@@ -60,7 +60,7 @@ JSONL usage pattern:
 2. Confirm the host can decompress gzip. Otherwise use MCP.
 3. Parse one JSON object per line.
 4. Treat `short_title` as the join key between dataset and current-download rows.
-5. Exclude rows where `hidden` is true unless the user explicitly asks for TCIA staff hidden/staged/retired records.
+5. Exclude rows where `hidden` is true. Raw hidden-state inspection is a local maintainer workflow, not a public MCP/REST capability.
 6. Filter dataset rows by `access_level` or `resolved_access_level`, and filter download rows by `download_types`, `data_types`, and `file_types`.
 7. For mixed-access datasets, split controlled and noncontrolled downloads in the answer.
 
@@ -72,14 +72,15 @@ The public tool list should expose only supported V2 operations. Route NIfTI,
 pathology, and other public non-DICOM questions through
 `find_public_non_dicom_assets`.
 
-Recommended tools:
+Recommended tools (all public tools are read-only, non-destructive,
+idempotent, and snapshot-local):
 
 - `search_participants(filters)`: search canonical dataset-scoped participants and compact availability from the V2 research core. Prefer `data_categories`, `data_types`, and `file_formats`; keep access independent and use `geometry_statuses` only for explicit assessment-state filtering.
 - `get_participant(participant_key)`: return one participant plus every retained source identifier spelling.
 - `get_participant_assets(participant_key, filters)`: return compact holdings and drill-down pointers, including Data Category, Data Type, File Format, and geometry status/count fields. `data_domains` remains a technical compatibility filter.
 - `get_dataset_participant_coverage(short_title)`: return unlinked dataset assets, source coverage, and linkage-review states.
 - `find_public_non_dicom_assets(filters)`: query optional V2 non-DICOM file-grain detail. Filter by `file_formats`, `modalities`, and `geometry_statuses`; use `requires_annotations=true` for `segmentation`, `annotation`, and `annotation_snapshot` roles. Treat `media_kinds` and `object_roles` as technical detail filters, do not infer source relationships, and keep public DICOM in IDC.
-- `search_datasets(filters)`: query visible TCIA Collections and Analysis Results by cancer type, body site, modality, access level, DOI, program, and free text.
+- `search_datasets(filters)`: return compact visible TCIA Collection and Analysis Result matches by cancer type, body site, modality, access level, DOI, program, and free text. Follow with `get_dataset` for narrative/download detail.
 - `get_dataset(short_title)`: return one dataset with access/license, DOI, page link, counts, summary, and current downloads.
 - `get_current_downloads(short_title, filters)`: return current download records filtered by modality, download type, file type, access level, or annotation labels.
 - `get_dataset_versions(short_title)`: return matched `/api/v2/versions` records, including version number, version date, related short title, and match method.
@@ -92,7 +93,18 @@ Recommended tools:
 - `get_clinical_conflicts(short_title, filters)`: return retained patient/concept disagreements for review before analysis.
 - `summarize_access(short_title)`: split open, open-noncommercial, controlled, and mixed downloads and include the TCIA controlled-access policy link when needed.
 - `find_dicom_annotations(filters)`: return TCIA WordPress download-level DICOM annotation signals, with provenance and access caveats; use IDC specialized indexes for series relationships.
-- `idc_series_summary(short_title_or_series_uids)`: optional IDC/idc-index-backed lookup for public DICOM only after TCIA provenance and license checks.
+
+The five high-volume discovery surfaces (`search_datasets`,
+`search_participants`, `get_current_downloads`, `get_participant_assets`, and
+`find_public_non_dicom_assets`) use the same page envelope: `count`, `limit`,
+`has_more`, `truncated`, and `next_cursor`. A client must treat the cursor as
+opaque and send it with unchanged filters and limit. The cursor is stable for
+the installed immutable snapshot and rejected when used with another query.
+
+REST clients should use `/v2/live` for liveness and `/v2/ready` for readiness.
+REST errors are `application/problem+json` with 404, 422, 503, or 500 status;
+MCP errors carry equivalent stable codes and corrective guidance. See
+`api-upgrade-notes.md`.
 
 For example, a web model asked to "summarize all controlled access datasets that include CT, PET, and annotation data" should call a typed tool such as:
 

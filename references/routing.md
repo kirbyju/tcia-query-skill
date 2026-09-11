@@ -7,7 +7,7 @@ Use TCIA WordPress as the authoritative allowlist. For normal agent work, query 
 - `https://cancerimagingarchive.net/api/v2/collections`
 - `https://cancerimagingarchive.net/api/v2/analysis-results`
 
-Exclude records where `hide_from_browse_table = "1"` unless the user explicitly says they are a TCIA staff member and asks to include hidden, staged, retired, or internal-review datasets. Hidden records may be pre-release staging pages for submitter review or retired/outdated datasets that TCIA does not want users to accidentally select.
+Exclude records where `hide_from_browse_table = "1"` from public queries and answers. Hidden records may be pre-release staging pages for submitter review or retired/outdated datasets that TCIA does not want users to accidentally select. Raw hidden-state investigation is a local maintainer workflow described in `maintainer-operations.md`; it is not part of the public service contract.
 
 Use WordPress license metadata to decide open versus controlled access. Do not use `collection_page_accessibility` or `result_page_accessibility`; those fields are being phased out. Creative Commons licenses mean open access. Creative Commons NonCommercial licenses are open access with a noncommercial-use restriction. If license text indicates NIH Controlled Data Access, TCIA Restricted, or another controlled/restricted license, alert users that the dataset is not open access and link to the TCIA NIH Controlled Data Access Policy before giving access, API-key, or TCIA Data Retriever instructions: `https://www.cancerimagingarchive.net/nih-controlled-data-access-policy/`.
 
