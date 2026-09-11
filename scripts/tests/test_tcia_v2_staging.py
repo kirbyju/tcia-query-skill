@@ -113,6 +113,29 @@ class V2StagingTests(unittest.TestCase):
                 ).fetchone()[0]
                 self.assertEqual(len(fingerprint), hashlib.sha256().digest_size * 2)
 
+    def test_build_rejects_declared_foreign_key_violations(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            components = {
+                component: self.create_component(root, component)
+                for component in staging.COMPONENT_ORDER
+            }
+            database, manifest = components["snapshot"]
+            with closing(sqlite3.connect(database)) as conn:
+                conn.execute("CREATE TABLE parents (id INTEGER PRIMARY KEY)")
+                conn.execute(
+                    "CREATE TABLE children (parent_id INTEGER REFERENCES parents(id))"
+                )
+                conn.execute("INSERT INTO children VALUES (42)")
+                conn.commit()
+            payload = json.loads(manifest.read_text())
+            payload["sqlite_sha256"] = staging.file_sha256(database)
+            manifest.write_text(json.dumps(payload))
+            with self.assertRaisesRegex(RuntimeError, "foreign_key_check"):
+                staging.build_staging_database(
+                    root / "staging.sqlite", components=components, replace=True
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

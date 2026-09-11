@@ -3,6 +3,9 @@ import gzip
 import io
 import json
 import sqlite3
+import shutil
+import subprocess
+import sys
 import tempfile
 import unittest
 from contextlib import closing
@@ -40,6 +43,46 @@ class V2BundleTests(unittest.TestCase):
         for name in BUNDLE.EXTRA_ASSETS:
             (root / name).write_text("review\n")
 
+    def create_installable_bundle(self, root: Path) -> tuple[Path, dict]:
+        assets = root / "assets"
+        assets.mkdir()
+        self.create_bundle_files(assets)
+        for component in ("snapshot", "participant_inventory"):
+            details = BUNDLE.COMPONENTS[component]
+            sqlite_path = root / f"{component}.sqlite"
+            with closing(sqlite3.connect(sqlite_path)) as conn:
+                conn.execute("CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT)")
+                conn.execute("INSERT INTO metadata VALUES ('component', ?)", (component,))
+                conn.commit()
+            raw = sqlite_path.read_bytes()
+            compressed = gzip.compress(raw)
+            (assets / details["database"]).write_bytes(compressed)
+            manifest_path = assets / details["manifest"]
+            manifest = json.loads(manifest_path.read_text())
+            manifest["sqlite_sha256"] = BUNDLE.hashlib.sha256(raw).hexdigest()
+            manifest["gzip_sha256"] = BUNDLE.hashlib.sha256(compressed).hexdigest()
+            manifest_path.write_text(json.dumps(manifest))
+        return assets, BUNDLE.build_bundle_manifest(assets)
+
+    def install_from_assets(self, assets: Path, payload: dict, install_dir: Path) -> dict:
+        bundle_body = json.dumps(payload).encode()
+
+        def fake_fetch(url: str, **_kwargs) -> bytes:
+            name = url.rsplit("/", 1)[-1]
+            return bundle_body if name == BUNDLE.BUNDLE_MANIFEST_ASSET else (assets / name).read_bytes()
+
+        def fake_download(
+            url: str, destination: Path, details: dict, asset: str, **_kwargs
+        ) -> None:
+            destination.write_bytes((assets / url.rsplit("/", 1)[-1]).read_bytes())
+            self.assertEqual(destination.stat().st_size, details["bytes"])
+            self.assertEqual(BUNDLE.file_sha256(destination), details["sha256"])
+
+        with mock.patch.object(BUNDLE, "fetch_bytes", side_effect=fake_fetch), mock.patch.object(
+            BUNDLE, "download_to_path", side_effect=fake_download
+        ):
+            return BUNDLE.install_bundle(install_dir=install_dir)
+
     def test_complete_bundle_manifest_is_stable_and_valid(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -54,6 +97,34 @@ class V2BundleTests(unittest.TestCase):
             self.assertTrue(result["ok"], result["errors"])
             self.assertEqual(first["release_channel"], "stable")
             self.assertEqual(first["release_tag"], "tcia-metadata-v2-latest")
+
+    def test_schema_two_manifest_remains_install_contract_compatible(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.create_bundle_files(root)
+            payload = BUNDLE.build_bundle_manifest(root)
+            payload["schema_version"] = 2
+            payload.pop("source_health")
+            fingerprint_payload = {
+                "artifact": payload["artifact"],
+                "schema_version": 2,
+                "release_channel": payload["release_channel"],
+                "release_tag": payload["release_tag"],
+                "release_contract": payload["release_contract"],
+                "source": {
+                    "repository": payload["source"]["repository"],
+                    "release_tag": payload["source"]["release_tag"],
+                },
+                "producer": payload["producer"],
+                "assets": {
+                    name: details["sha256"]
+                    for name, details in sorted(payload["assets"].items())
+                },
+            }
+            payload["release_fingerprint"] = BUNDLE.hashlib.sha256(
+                BUNDLE.canonical_json(fingerprint_payload).encode()
+            ).hexdigest()
+            self.assertEqual(BUNDLE.validate_manifest_contract(payload), [])
 
     def test_streamlined_candidate_has_nine_payloads_and_one_bundle_manifest(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -99,9 +170,190 @@ class V2BundleTests(unittest.TestCase):
             self.assertEqual(payload["release_contract"], "streamlined")
             self.assertEqual(payload["release_channel"], "stable")
             self.assertEqual(set(payload["components"]), set(BUNDLE.STREAMLINED_COMPONENTS))
+            self.assertTrue(
+                all("manifest_asset" not in item for item in payload["components"].values())
+            )
+            self.assertTrue(
+                all("source_manifest" in item for item in payload["components"].values())
+            )
             manifest = root / BUNDLE.BUNDLE_MANIFEST_ASSET
             manifest.write_text(json.dumps(payload))
             self.assertTrue(BUNDLE.validate_bundle(root, manifest)["ok"])
+
+    def test_stable_bundle_rejects_degraded_source_without_scoped_waiver(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.create_bundle_files(root)
+            snapshot_manifest_path = root / BUNDLE.COMPONENTS["snapshot"]["manifest"]
+            snapshot_manifest = json.loads(snapshot_manifest_path.read_text())
+            snapshot_manifest["source_status"] = {"wordpress_collections": "fallback_snapshot"}
+            snapshot_manifest["warnings"] = [
+                {"source": "wordpress_collections", "message": "reused prior rows"}
+            ]
+            snapshot_manifest_path.write_text(json.dumps(snapshot_manifest))
+            with self.assertRaisesRegex(RuntimeError, "degraded or unknown authoritative sources"):
+                BUNDLE.build_bundle_manifest(root)
+
+    def test_stable_bundle_fails_closed_for_every_unknown_source_mode(self):
+        for mode in ("disabled", "pending", "misspelled-live"):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                self.create_bundle_files(root)
+                clinical_path = root / BUNDLE.COMPONENTS["clinical"]["manifest"]
+                clinical = json.loads(clinical_path.read_text())
+                clinical["source_status"] = {"idc_clinical": mode}
+                clinical_path.write_text(json.dumps(clinical))
+                with self.assertRaisesRegex(RuntimeError, "unknown authoritative sources"):
+                    BUNDLE.build_bundle_manifest(root)
+
+    def test_warning_without_source_mode_fails_stable_promotion(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.create_bundle_files(root)
+            clinical_path = root / BUNDLE.COMPONENTS["clinical"]["manifest"]
+            clinical = json.loads(clinical_path.read_text())
+            clinical["warnings"] = [{"source": "new_source", "message": "not classified"}]
+            clinical_path.write_text(json.dumps(clinical))
+            with self.assertRaisesRegex(RuntimeError, "degraded or unknown authoritative sources"):
+                BUNDLE.build_bundle_manifest(root)
+
+    def test_unknown_source_summary_is_explicit_and_structurally_validated(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.create_bundle_files(root)
+            clinical_path = root / BUNDLE.COMPONENTS["clinical"]["manifest"]
+            clinical = json.loads(clinical_path.read_text())
+            clinical["source_status"] = {"idc_clinical": "pending"}
+            clinical_path.write_text(json.dumps(clinical))
+            waiver_path = root / "waiver.json"
+            waiver_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "waivers": [
+                            {
+                                "source": "clinical.idc_clinical",
+                                "reason": "bounded upstream transition",
+                                "approved_by": "release-manager",
+                                "expires_at_utc": "2099-01-01T00:00:00Z",
+                            }
+                        ],
+                    }
+                )
+            )
+            payload = BUNDLE.build_bundle_manifest(root, source_health_waiver=waiver_path)
+            health = payload["source_health"]
+            self.assertEqual(health["status"], "unknown")
+            self.assertEqual(health["unknown_sources"], ["clinical.idc_clinical"])
+            self.assertEqual(health["unwaived_unknown_sources"], [])
+            self.assertEqual(BUNDLE.validate_manifest_contract(payload), [])
+            health["unknown_sources"] = []
+            self.assertTrue(
+                any("unknown_sources" in error for error in BUNDLE.validate_manifest_contract(payload))
+            )
+
+    def test_scoped_unexpired_waiver_is_recorded_in_top_manifest(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.create_bundle_files(root)
+            snapshot_manifest_path = root / BUNDLE.COMPONENTS["snapshot"]["manifest"]
+            snapshot_manifest = json.loads(snapshot_manifest_path.read_text())
+            snapshot_manifest["source_status"] = {"wordpress_collections": "fallback_snapshot"}
+            snapshot_manifest_path.write_text(json.dumps(snapshot_manifest))
+            waiver_path = root / "waiver.json"
+            waiver_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "waivers": [
+                            {
+                                "source": "snapshot.wordpress_collections",
+                                "reason": "upstream maintenance window",
+                                "approved_by": "release-manager",
+                                "expires_at_utc": "2099-01-01T00:00:00Z",
+                            }
+                        ],
+                    }
+                )
+            )
+            payload = BUNDLE.build_bundle_manifest(
+                root, source_health_waiver=waiver_path
+            )
+            self.assertEqual(payload["source_health"]["status"], "degraded")
+            self.assertEqual(payload["source_health"]["unwaived_degraded_sources"], [])
+            self.assertEqual(
+                payload["source_health"]["waivers"][0]["source"],
+                "snapshot.wordpress_collections",
+            )
+
+    def test_expired_waiver_rejects_stable_promotion(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.create_bundle_files(root)
+            snapshot_manifest_path = root / BUNDLE.COMPONENTS["snapshot"]["manifest"]
+            snapshot_manifest = json.loads(snapshot_manifest_path.read_text())
+            snapshot_manifest["source_status"] = {
+                "wordpress_collections": "fallback_snapshot"
+            }
+            snapshot_manifest_path.write_text(json.dumps(snapshot_manifest))
+            waiver_path = root / "waiver.json"
+            waiver_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "waivers": [
+                            {
+                                "source": "snapshot.wordpress_collections",
+                                "reason": "expired maintenance window",
+                                "approved_by": "release-manager",
+                                "expires_at_utc": "2020-01-01T00:00:00Z",
+                            }
+                        ],
+                    }
+                )
+            )
+            with self.assertRaisesRegex(RuntimeError, "Expired source-health waiver"):
+                BUNDLE.build_bundle_manifest(root, source_health_waiver=waiver_path)
+
+    def test_compact_decision_set_summary_is_exposed_and_fingerprinted(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.create_bundle_files(root)
+            snapshot_manifest_path = root / BUNDLE.COMPONENTS["snapshot"]["manifest"]
+            snapshot_manifest = json.loads(snapshot_manifest_path.read_text())
+            snapshot_manifest["decision_set_summary"] = {
+                "sha256": "a" * 64,
+                "status": "ready",
+                "counts": {"accepted": 7, "rejected": 2},
+            }
+            snapshot_manifest_path.write_text(json.dumps(snapshot_manifest))
+            payload = BUNDLE.build_bundle_manifest(root)
+            self.assertEqual(
+                payload["decision_sets"]["snapshot"],
+                snapshot_manifest["decision_set_summary"],
+            )
+            self.assertEqual(
+                payload["source_health"]["components"]["snapshot"]["status"],
+                "healthy",
+            )
+            self.assertEqual(BUNDLE.validate_manifest_contract(payload), [])
+            payload["decision_sets"]["snapshot"]["counts"]["accepted"] += 1
+            self.assertTrue(
+                any(
+                    "fingerprint mismatch" in error
+                    for error in BUNDLE.validate_manifest_contract(payload)
+                )
+            )
+
+    def test_manifest_contract_rejects_dangling_asset_pointer(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.create_bundle_files(root)
+            payload = BUNDLE.build_bundle_manifest(root)
+            payload["components"]["snapshot"]["manifest_asset"] = "missing.json"
+            self.assertTrue(
+                any("not a published asset" in error for error in BUNDLE.validate_manifest_contract(payload))
+            )
 
     def test_producer_version_changes_bundle_fingerprint(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -110,6 +362,19 @@ class V2BundleTests(unittest.TestCase):
             first = BUNDLE.build_bundle_manifest(root, producer_commit="abc", producer_skill_version="1")
             second = BUNDLE.build_bundle_manifest(root, producer_commit="def", producer_skill_version="2")
             self.assertNotEqual(first["release_fingerprint"], second["release_fingerprint"])
+
+    def test_immutable_release_tag_is_derived_from_date_and_fingerprint(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.create_bundle_files(root)
+            payload = BUNDLE.build_bundle_manifest(root)
+            self.assertEqual(
+                BUNDLE.immutable_release_tag(payload),
+                "tcia-metadata-v2-"
+                + payload["generated_at_utc"][:10].replace("-", ".")
+                + "-"
+                + payload["release_fingerprint"][:12],
+            )
 
     def test_changed_asset_fails_validation(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -167,8 +432,33 @@ class V2BundleTests(unittest.TestCase):
             release_path = root / "source_release.json"
             release_path.write_text(json.dumps(release))
             result = BUNDLE.validate_source_release(root, release_path)
+            self.assertTrue(result["ok"], result["errors"])
             self.assertEqual(result["release_id"], 42)
             self.assertEqual(len(result["assets"]), 7)
+
+    def test_validate_source_cli_returns_nonzero_with_structured_errors(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.create_bundle_files(root)
+            release = root / "release.json"
+            release.write_text(json.dumps({"assets": []}))
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "validate-source",
+                    "--asset-dir",
+                    str(root),
+                    "--source-release-json",
+                    str(release),
+                ],
+                text=True,
+                capture_output=True,
+            )
+            self.assertEqual(result.returncode, 1)
+            payload = json.loads(result.stdout)
+            self.assertFalse(payload["ok"])
+            self.assertTrue(payload["errors"])
 
     def test_selected_v2_baseline_assets_are_manifest_and_release_pinned(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -296,38 +586,131 @@ class V2BundleTests(unittest.TestCase):
             destination = Path(temporary) / "asset.gz"
             with self.assertRaisesRegex(RuntimeError, "SHA-256 mismatch"):
                 BUNDLE.download_to_path(
-                    "https://example.invalid/asset.gz", destination, details, "asset.gz"
+                    "https://example.invalid/asset.gz",
+                    destination,
+                    details,
+                    "asset.gz",
+                    retries=0,
                 )
             self.assertFalse(destination.exists())
+
+    def test_download_retries_complete_transfer_after_midstream_failure(self):
+        class FailingResponse(io.BytesIO):
+            def __init__(self, body: bytes):
+                super().__init__(body)
+                self.calls = 0
+
+            def read(self, size: int = -1) -> bytes:
+                self.calls += 1
+                if self.calls == 2:
+                    raise BUNDLE.urllib.error.URLError("connection reset")
+                return super().read(min(size, 4))
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                self.close()
+
+        body = b"complete-transfer"
+        details = {"bytes": len(body), "sha256": BUNDLE.hashlib.sha256(body).hexdigest()}
+        with tempfile.TemporaryDirectory() as temporary, mock.patch.object(
+            BUNDLE.urllib.request,
+            "urlopen",
+            side_effect=[FailingResponse(body), io.BytesIO(body)],
+        ) as urlopen, mock.patch.object(BUNDLE.time, "sleep"):
+            destination = Path(temporary) / "asset.gz"
+            BUNDLE.download_to_path(
+                "https://example.invalid/asset.gz",
+                destination,
+                details,
+                "asset.gz",
+                retries=1,
+            )
+            self.assertEqual(destination.read_bytes(), body)
+            self.assertEqual(urlopen.call_count, 2)
+
+    def test_fetch_retries_truncated_content_length_and_rate_limits(self):
+        class Response(io.BytesIO):
+            def __init__(self, body: bytes, content_length: int | None = None):
+                super().__init__(body)
+                self.headers = (
+                    {"Content-Length": str(content_length)}
+                    if content_length is not None
+                    else {}
+                )
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                self.close()
+
+        body = b"manifest"
+        rate_limit_headers = {"Retry-After": "0"}
+        rate_limited = BUNDLE.urllib.error.HTTPError(
+            "https://example.invalid", 429, "rate limited", rate_limit_headers, None
+        )
+        forbidden_headers = {"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "0"}
+        forbidden = BUNDLE.urllib.error.HTTPError(
+            "https://example.invalid", 403, "rate limited", forbidden_headers, None
+        )
+        with mock.patch.object(
+            BUNDLE.urllib.request,
+            "urlopen",
+            side_effect=[Response(b"short", len(body)), rate_limited, forbidden, Response(body)],
+        ) as urlopen, mock.patch.object(BUNDLE.time, "sleep"):
+            self.assertEqual(
+                BUNDLE.fetch_bytes("https://example.invalid", retries=3), body
+            )
+            self.assertEqual(urlopen.call_count, 4)
+
+    def test_download_retries_checksum_failure_from_zero(self):
+        body = b"correct"
+        details = {"bytes": len(body), "sha256": BUNDLE.hashlib.sha256(body).hexdigest()}
+        with tempfile.TemporaryDirectory() as temporary, mock.patch.object(
+            BUNDLE.urllib.request,
+            "urlopen",
+            side_effect=[io.BytesIO(b"badbad"), io.BytesIO(body)],
+        ) as urlopen, mock.patch.object(BUNDLE.time, "sleep"):
+            destination = Path(temporary) / "asset.gz"
+            BUNDLE.download_to_path(
+                "https://example.invalid/asset.gz",
+                destination,
+                details,
+                "asset.gz",
+                retries=1,
+            )
+            self.assertEqual(destination.read_bytes(), body)
+            self.assertEqual(urlopen.call_count, 2)
 
     def test_prune_is_receipt_aware_and_preserves_unmanaged_files(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             install_dir = root / "installed"
+            assets = root / "assets"
             install_dir.mkdir()
-            fingerprint = "release-fingerprint"
-            (install_dir / BUNDLE.BUNDLE_MANIFEST_ASSET).write_text(
-                json.dumps(
-                    {
-                        "artifact": BUNDLE.BUNDLE_ARTIFACT,
-                        "release_fingerprint": fingerprint,
-                    }
-                )
-            )
+            assets.mkdir()
+            self.create_bundle_files(assets)
+            manifest = BUNDLE.build_bundle_manifest(assets)
+            selected = manifest["profiles"]["research_detail"]["assets"]
+            (install_dir / BUNDLE.BUNDLE_MANIFEST_ASSET).write_text(json.dumps(manifest))
             (install_dir / BUNDLE.INSTALL_STATE_ASSET).write_text(
                 json.dumps(
                     {
                         "artifact": "tcia_metadata_v2_install",
-                        "release_fingerprint": fingerprint,
+                        "release_fingerprint": manifest["release_fingerprint"],
                         "installed_profile": "research_detail",
-                        "installed_assets": ["tcia_snapshot.sqlite.gz"],
+                        "installed_assets": selected,
                     }
                 )
             )
             (install_dir / "tcia_snapshot.sqlite").write_bytes(b"active")
             (install_dir / "pathology_metadata.sqlite").write_bytes(b"legacy")
             (install_dir / "operator-notes.txt").write_text("preserve me")
-            abandoned = root / ".tcia-v2-stage-abandoned"
+            generation_root = install_dir / BUNDLE.GENERATIONS_DIRNAME
+            generation_root.mkdir()
+            abandoned = generation_root / ".tcia-v2-stage-abandoned"
             abandoned.mkdir()
             (abandoned / "partial.sqlite.gz").write_bytes(b"partial")
 
@@ -374,14 +757,14 @@ class V2BundleTests(unittest.TestCase):
             payload = BUNDLE.build_bundle_manifest(assets)
             bundle_body = json.dumps(payload).encode()
 
-            def fake_fetch(url: str) -> bytes:
+            def fake_fetch(url: str, **_kwargs) -> bytes:
                 name = url.rsplit("/", 1)[-1]
                 if name == BUNDLE.BUNDLE_MANIFEST_ASSET:
                     return bundle_body
                 return (assets / name).read_bytes()
 
             def fake_download(
-                url: str, destination: Path, details: dict, asset: str
+                url: str, destination: Path, details: dict, asset: str, **_kwargs
             ) -> None:
                 destination.write_bytes((assets / url.rsplit("/", 1)[-1]).read_bytes())
                 self.assertEqual(destination.stat().st_size, details["bytes"])
@@ -429,14 +812,14 @@ class V2BundleTests(unittest.TestCase):
             )
             bundle_body = json.dumps(payload).encode()
 
-            def fake_fetch(url: str) -> bytes:
+            def fake_fetch(url: str, **_kwargs) -> bytes:
                 name = url.rsplit("/", 1)[-1]
                 if name == BUNDLE.BUNDLE_MANIFEST_ASSET:
                     return bundle_body
                 return (assets / name).read_bytes()
 
             def fake_download(
-                url: str, destination: Path, details: dict, asset: str
+                url: str, destination: Path, details: dict, asset: str, **_kwargs
             ) -> None:
                 destination.write_bytes((assets / url.rsplit("/", 1)[-1]).read_bytes())
                 self.assertEqual(destination.stat().st_size, details["bytes"])
@@ -455,6 +838,184 @@ class V2BundleTests(unittest.TestCase):
             self.assertTrue((install_dir / "tcia_snapshot.sqlite").is_file())
             self.assertTrue((install_dir / "participant_inventory.sqlite").is_file())
             self.assertFalse((install_dir / "tcia_snapshot_manifest.json").exists())
+
+    def test_install_automatically_migrates_flat_layout_to_atomic_generation(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            assets = root / "assets"
+            install_dir = root / "installed"
+            assets.mkdir()
+            install_dir.mkdir()
+            self.create_bundle_files(assets)
+            for component in ("snapshot", "participant_inventory"):
+                details = BUNDLE.COMPONENTS[component]
+                sqlite_path = root / f"{component}.sqlite"
+                with closing(sqlite3.connect(sqlite_path)) as conn:
+                    conn.execute("CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT)")
+                    conn.execute("INSERT INTO metadata VALUES ('component', ?)", (component,))
+                raw = sqlite_path.read_bytes()
+                compressed = gzip.compress(raw)
+                (assets / details["database"]).write_bytes(compressed)
+                component_manifest = json.loads((assets / details["manifest"]).read_text())
+                component_manifest["sqlite_sha256"] = BUNDLE.hashlib.sha256(raw).hexdigest()
+                component_manifest["gzip_sha256"] = BUNDLE.hashlib.sha256(compressed).hexdigest()
+                (assets / details["manifest"]).write_text(json.dumps(component_manifest))
+            payload = BUNDLE.build_bundle_manifest(assets)
+            selected = payload["profiles"]["research_core"]["assets"]
+            for asset in selected:
+                destination = install_dir / BUNDLE.installed_asset_name(asset)
+                if asset.endswith(".sqlite.gz"):
+                    destination.write_bytes(gzip.decompress((assets / asset).read_bytes()))
+                else:
+                    destination.write_bytes((assets / asset).read_bytes())
+            (install_dir / BUNDLE.BUNDLE_MANIFEST_ASSET).write_text(json.dumps(payload))
+            (install_dir / BUNDLE.INSTALL_STATE_ASSET).write_text(
+                json.dumps(
+                    {
+                        "artifact": "tcia_metadata_v2_install",
+                        "release_tag": BUNDLE.DEFAULT_RELEASE_TAG,
+                        "release_fingerprint": payload["release_fingerprint"],
+                        "installed_profile": "research_core",
+                        "installed_assets": selected,
+                        "installed_at_utc": "2026-09-01T00:00:00+00:00",
+                    }
+                )
+            )
+
+            with mock.patch.object(
+                BUNDLE, "fetch_bytes", return_value=json.dumps(payload).encode()
+            ):
+                result = BUNDLE.install_bundle(install_dir=install_dir)
+            self.assertTrue(result["migrated_legacy_install"])
+            self.assertTrue((install_dir / BUNDLE.CURRENT_POINTER).is_symlink())
+            self.assertTrue((install_dir / "tcia_snapshot.sqlite").is_symlink())
+            self.assertTrue((install_dir / "tcia_snapshot.sqlite").is_file())
+            generations = [
+                path
+                for path in (install_dir / BUNDLE.GENERATIONS_DIRNAME).iterdir()
+                if path.is_dir()
+            ]
+            self.assertEqual(len(generations), 1)
+            self.assertEqual(
+                BUNDLE.active_generation_dir(install_dir).resolve(),
+                generations[0].resolve(),
+            )
+            prior = install_dir / BUNDLE.GENERATIONS_DIRNAME / "prior-generation"
+            shutil.copytree(generations[0], prior)
+            rollback = BUNDLE.rollback_install(install_dir)
+            self.assertEqual(rollback["status"], "rolled_back")
+            self.assertEqual(BUNDLE.active_generation_dir(install_dir).resolve(), prior.resolve())
+
+    def test_receipt_and_compatibility_names_cannot_escape_install_root(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            assets, payload = self.create_installable_bundle(root)
+            install_dir = root / "installed"
+            self.install_from_assets(assets, payload, install_dir)
+            generation = BUNDLE.active_generation_dir(install_dir)
+            receipt_path = generation / BUNDLE.INSTALL_STATE_ASSET
+            original = receipt_path.read_text()
+            victim = root / "victim"
+            victim.write_text("preserve")
+            for bad_name in ("../victim", str(victim), "nested/victim", "nested\\victim"):
+                with self.subTest(name=bad_name):
+                    receipt = json.loads(original)
+                    receipt["installed_assets"] = [bad_name]
+                    receipt_path.write_text(json.dumps(receipt))
+                    with self.assertRaisesRegex(RuntimeError, "receipt assets disagree|Unsafe"):
+                        BUNDLE._verify_generation(generation)
+                    self.assertEqual(victim.read_text(), "preserve")
+            receipt_path.write_text(original)
+            with self.assertRaisesRegex(RuntimeError, "managed asset allowlist"):
+                BUNDLE._ensure_compatibility_links(install_dir, {"../victim"})
+            self.assertEqual(victim.read_text(), "preserve")
+
+    def test_symlinked_install_topology_is_rejected_without_touching_target(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            outside = root / "outside"
+            outside.mkdir()
+            marker = outside / "marker"
+            marker.write_text("preserve")
+
+            install_with_generation_link = root / "generation-link-install"
+            install_with_generation_link.mkdir()
+            (install_with_generation_link / BUNDLE.GENERATIONS_DIRNAME).symlink_to(
+                outside, target_is_directory=True
+            )
+            with self.assertRaisesRegex(RuntimeError, "must not be a symlink"):
+                BUNDLE._generation_root(install_with_generation_link)
+
+            install_with_escaping_current = root / "escaping-current-install"
+            install_with_escaping_current.mkdir()
+            (install_with_escaping_current / BUNDLE.CURRENT_POINTER).symlink_to("../outside")
+            with self.assertRaisesRegex(RuntimeError, "escapes generations"):
+                BUNDLE.active_generation_dir(install_with_escaping_current)
+
+            install_with_child_link = root / "child-link-install"
+            install_with_child_link.mkdir()
+            generation_root = install_with_child_link / BUNDLE.GENERATIONS_DIRNAME
+            generation_root.mkdir()
+            (generation_root / "linked-generation").symlink_to(outside, target_is_directory=True)
+            (install_with_child_link / BUNDLE.CURRENT_POINTER).symlink_to(
+                f"{BUNDLE.GENERATIONS_DIRNAME}/linked-generation"
+            )
+            with self.assertRaisesRegex(RuntimeError, "not a real directory"):
+                BUNDLE.active_generation_dir(install_with_child_link)
+            self.assertEqual(marker.read_text(), "preserve")
+
+    def test_generation_rejects_symlinked_managed_file(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            assets, payload = self.create_installable_bundle(root)
+            install_dir = root / "installed"
+            self.install_from_assets(assets, payload, install_dir)
+            generation = BUNDLE.active_generation_dir(install_dir)
+            managed = generation / "tcia_snapshot.sqlite"
+            victim = root / "victim.sqlite"
+            victim.write_bytes(managed.read_bytes())
+            managed.unlink()
+            managed.symlink_to(victim)
+            with self.assertRaisesRegex(RuntimeError, "regular file|file set"):
+                BUNDLE._verify_generation(generation)
+            self.assertTrue(victim.is_file())
+
+    def test_first_install_recovers_if_current_switch_is_interrupted(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            assets, payload = self.create_installable_bundle(root)
+            install_dir = root / "installed"
+            original_atomic_symlink = BUNDLE._atomic_symlink
+
+            def interrupt_current(target: str, link: Path) -> None:
+                if link.name == BUNDLE.CURRENT_POINTER:
+                    raise RuntimeError("injected current switch interruption")
+                original_atomic_symlink(target, link)
+
+            bundle_body = json.dumps(payload).encode()
+
+            def fake_fetch(url: str, **_kwargs) -> bytes:
+                name = url.rsplit("/", 1)[-1]
+                return bundle_body if name == BUNDLE.BUNDLE_MANIFEST_ASSET else (assets / name).read_bytes()
+
+            def fake_download(
+                url: str, destination: Path, _details: dict, _asset: str, **_kwargs
+            ) -> None:
+                destination.write_bytes((assets / url.rsplit("/", 1)[-1]).read_bytes())
+
+            with mock.patch.object(BUNDLE, "fetch_bytes", side_effect=fake_fetch), mock.patch.object(
+                BUNDLE, "download_to_path", side_effect=fake_download
+            ), mock.patch.object(BUNDLE, "_atomic_symlink", side_effect=interrupt_current):
+                with self.assertRaisesRegex(RuntimeError, "injected current switch"):
+                    BUNDLE.install_bundle(install_dir=install_dir)
+
+            self.assertFalse((install_dir / BUNDLE.CURRENT_POINTER).exists())
+            self.assertTrue((install_dir / "tcia_snapshot.sqlite").is_symlink())
+            self.assertFalse((install_dir / "tcia_snapshot.sqlite").exists())
+            recovered = self.install_from_assets(assets, payload, install_dir)
+            self.assertEqual(recovered["status"], "unchanged")
+            self.assertTrue((install_dir / BUNDLE.CURRENT_POINTER).is_symlink())
+            self.assertTrue((install_dir / "tcia_snapshot.sqlite").is_file())
 
 
 if __name__ == "__main__":

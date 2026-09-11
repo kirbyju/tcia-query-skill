@@ -7,7 +7,9 @@ on:
 
 permissions:
   actions: read
+  attestations: write
   contents: write
+  id-token: write
 
 concurrency:
   group: tcia-metadata-v2
@@ -17,14 +19,21 @@ jobs:
   build:
     if: github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
+    env:
+      PRODUCER_SHA: ${{ github.event.workflow_run.head_sha }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
 
+      - name: Verify triggering producer identity
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$PRODUCER_SHA"
+
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
 
@@ -49,11 +58,11 @@ jobs:
             echo "- Include PathDB files: $include_pathdb_files"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Install IDC projection dependency
-        run: python -m pip install --upgrade "idc-index>=0.12.3"
+      - name: Install pinned producer dependencies
+        run: python -m pip install --require-hashes --requirement requirements-build.lock
 
       - name: Download validated V2 source inputs from the triggering run
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: tcia-metadata-v2-source
           path: dist
@@ -315,7 +324,7 @@ jobs:
 
       - name: Retain staging diagnostics for maintainers
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: tcia-metadata-v2-staging-diagnostics
           path: |
@@ -332,14 +341,19 @@ jobs:
           release_channel="stable"
           release_tag="tcia-metadata-v2-latest"
           release_contract="${{ steps.release_config.outputs.release_contract }}"
+          waiver_args=()
+          if [ -s .github/tcia-v2-source-health-waiver.json ]; then
+            waiver_args+=(--source-health-waiver .github/tcia-v2-source-health-waiver.json)
+          fi
           python scripts/tcia_v2_bundle.py build \
             --asset-dir dist \
             --source-tag "workflow-artifact:update-tcia-metadata-v2-source-inputs" \
             --release-channel "$release_channel" \
             --release-tag "$release_tag" \
-            --producer-commit "$GITHUB_SHA" \
+            --producer-commit "$PRODUCER_SHA" \
             --producer-skill-version "$(python -c 'import json; print(json.load(open("skill_version.json"))["skill_version"])')" \
             --release-contract "$release_contract" \
+            "${waiver_args[@]}" \
             --out dist/tcia_metadata_v2_bundle_manifest.json
           python scripts/tcia_v2_bundle.py validate \
             --asset-dir dist \
@@ -371,15 +385,58 @@ jobs:
           else
             reason="complete V2 bundle fingerprint unchanged"
           fi
+          release_date="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["generated_at_utc"][:10].replace("-", "."))' "$manifest_path")"
+          immutable_tag="tcia-metadata-v2-${release_date}-${new_fingerprint:0:12}"
           echo "publish=$publish" >> "$GITHUB_OUTPUT"
           echo "channel=$channel" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "reason=$reason" >> "$GITHUB_OUTPUT"
+          echo "immutable_tag=$immutable_tag" >> "$GITHUB_OUTPUT"
           echo "### V2 release decision" >> "$GITHUB_STEP_SUMMARY"
           echo "- Publish: $publish" >> "$GITHUB_STEP_SUMMARY"
           echo "- Reason: $reason" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Immutable tag: $immutable_tag" >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Publish validated V2 release
+      - name: Attest validated V2 bundle provenance
+        if: steps.release.outputs.publish == 'true'
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
+        with:
+          subject-path: release-dist/*
+
+      - name: Publish immutable validated V2 release
+        if: steps.release.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="${{ steps.release.outputs.immutable_tag }}"
+          publish_dir="release-dist"
+          notes="Immutable TCIA Metadata Artifact Model V2 generation. Promote or roll back by its manifest fingerprint; tcia-metadata-v2-latest remains the moving compatibility alias."
+          resolve_tag_sha() {
+            local ref_json object_type object_sha
+            ref_json="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/$1")"
+            object_type="$(jq -r '.object.type' <<<"$ref_json")"
+            object_sha="$(jq -r '.object.sha' <<<"$ref_json")"
+            if [ "$object_type" = "tag" ]; then
+              object_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/tags/${object_sha}" --jq '.object.sha')"
+            fi
+            printf '%s\n' "$object_sha"
+          }
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Immutable release already exists; validating without overwriting."
+          else
+            gh release create "$tag" "$publish_dir"/* \
+              --target "$PRODUCER_SHA" \
+              --title "TCIA metadata V2 ${tag#tcia-metadata-v2-}" \
+              --notes "$notes"
+          fi
+          test "$(resolve_tag_sha "$tag")" = "$PRODUCER_SHA"
+          gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" > immutable-release.json
+          python scripts/tcia_v2_bundle.py validate-published \
+            --manifest "$publish_dir/tcia_metadata_v2_bundle_manifest.json" \
+            --release-json immutable-release.json
+
+      - name: Update moving latest alias after immutable publication
         if: steps.release.outputs.publish == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -391,11 +448,75 @@ jobs:
           publish_dir="release-dist"
           notes="TCIA Metadata Artifact Model V2 bundle. The manifest defines research-core, research-detail, audit-support, and compatibility-export profiles. Participant Inventory is compact by default; unified public non-DICOM file-grain metadata and verbose audit evidence are optional hash-pinned companions. Public DICOM detail remains authoritative in IDC. Historical specialized NIfTI and pathology evidence is retained in the public audit companion; standalone detail artifacts are retired from production."
           title="TCIA metadata V2 latest"
-          if ! gh release view "$tag" >/dev/null 2>&1; then
+          backup_dir="previous-v2-alias"
+          alias_existed="false"
+          old_tag_sha=""
+          resolve_tag_sha() {
+            local ref_json object_type object_sha
+            ref_json="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/$1")"
+            object_type="$(jq -r '.object.type' <<<"$ref_json")"
+            object_sha="$(jq -r '.object.sha' <<<"$ref_json")"
+            if [ "$object_type" = "tag" ]; then
+              object_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/tags/${object_sha}" --jq '.object.sha')"
+            fi
+            printf '%s\n' "$object_sha"
+          }
+          restore_alias() {
+            set +e
+            trap - ERR
+            echo "::warning title=V2 alias restoration::Moving alias update failed; restoring the prior release."
+            if [ "$alias_existed" = "true" ]; then
+              while read -r asset; do
+                [ -z "$asset" ] || gh release delete-asset "$tag" "$asset" --yes || return 1
+              done < <(gh release view "$tag" --json assets --jq '.assets[].name')
+              mapfile -t backup_assets < <(find "$backup_dir/assets" -maxdepth 1 -type f -print)
+              if [ "${#backup_assets[@]}" -gt 0 ]; then
+                gh release upload "$tag" "${backup_assets[@]}" --clobber || return 1
+              fi
+              gh release edit "$tag" \
+                --title "$(jq -r '.name' "$backup_dir/release-metadata.json")" \
+                --notes-file "$backup_dir/release-notes.txt" || return 1
+              gh api --method PATCH \
+                "repos/${GITHUB_REPOSITORY}/git/refs/tags/${tag}" \
+                -f sha="$old_tag_sha" -F force=true >/dev/null || return 1
+              gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" \
+                > "$backup_dir/restored-release.json" || return 1
+              python scripts/tcia_v2_bundle.py validate-published \
+                --manifest "$backup_dir/assets/tcia_metadata_v2_bundle_manifest.json" \
+                --release-json "$backup_dir/restored-release.json" || return 1
+              test "$(resolve_tag_sha "$tag")" = "$old_tag_sha" || return 1
+            else
+              gh release delete "$tag" --yes --cleanup-tag || return 1
+            fi
+          }
+          on_alias_error() {
+            local status=$?
+            if ! restore_alias; then
+              echo "::error title=V2 alias restoration failed::Manual restoration from the immutable release is required."
+            fi
+            exit "$status"
+          }
+          if gh release view "$tag" >/dev/null 2>&1; then
+            alias_existed="true"
+            mkdir -p "$backup_dir/assets"
+            gh release view "$tag" --json name,body > "$backup_dir/release-metadata.json"
+            jq -r '.body' "$backup_dir/release-metadata.json" > "$backup_dir/release-notes.txt"
+            gh release download "$tag" --dir "$backup_dir/assets"
+            old_tag_sha="$(resolve_tag_sha "$tag")"
+            gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" \
+              > "$backup_dir/release.json"
+            python scripts/tcia_v2_bundle.py validate-published \
+              --manifest "$backup_dir/assets/tcia_metadata_v2_bundle_manifest.json" \
+              --release-json "$backup_dir/release.json"
+          fi
+          trap on_alias_error ERR
+          if [ "$alias_existed" = "false" ]; then
             gh release create "$tag" \
+              --target "$PRODUCER_SHA" \
               --title "$title" \
               --notes "$notes"
-          else
+          fi
+          if [ "$alias_existed" = "true" ]; then
             gh release edit "$tag" \
               --title "$title" \
               --notes "$notes"
@@ -446,13 +567,43 @@ jobs:
           done
           gh api --method PATCH \
             "repos/${GITHUB_REPOSITORY}/git/refs/tags/${tag}" \
-            -f sha="$GITHUB_SHA" \
+            -f sha="$PRODUCER_SHA" \
             -F force=true >/dev/null
-          published_tag_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}" --jq '.object.sha')"
-          test "$published_tag_sha" = "$GITHUB_SHA"
+          test "$(resolve_tag_sha "$tag")" = "$PRODUCER_SHA"
+          trap - ERR
 
-      - name: Confirm single-release publication
+      - name: Confirm release publication boundaries
         run: |
-          echo "This workflow publishes only to tcia-metadata-v2-latest."
+          echo "This workflow publishes immutable fingerprint/date generations first."
+          echo "It updates tcia-metadata-v2-latest only after immutable validation."
           echo "Validated source components arrive through a short-lived workflow artifact."
           echo "It does not deploy or reconfigure the MCP/REST service."
+
+      - name: Report published versus deployed fingerprint lag
+        if: always()
+        env:
+          DEPLOYED_INFO_URL: ${{ vars.TCIA_V2_DEPLOYED_INFO_URL }}
+        run: |
+          set -euo pipefail
+          published="$(python -c 'import json; print(json.load(open("release-dist/tcia_metadata_v2_bundle_manifest.json"))["release_fingerprint"])')"
+          if [ -z "$DEPLOYED_INFO_URL" ]; then
+            echo "- Deployment lag check: not configured (set repository variable TCIA_V2_DEPLOYED_INFO_URL)." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if ! curl --fail --silent --show-error --location \
+            --max-time 15 --retry 2 --retry-all-errors \
+            "$DEPLOYED_INFO_URL" > deployed-info.json; then
+            echo "::warning title=V2 deployment monitor unavailable::Could not query $DEPLOYED_INFO_URL"
+            echo "- Deployment lag check: endpoint unavailable." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          deployed="$(jq -r '.v2_bundle.release_fingerprint // .release_fingerprint // empty' deployed-info.json)"
+          if [ -z "$deployed" ]; then
+            echo "::warning title=V2 deployment fingerprint unavailable::Endpoint response contains no release fingerprint."
+            echo "- Deployment lag check: response has no fingerprint." >> "$GITHUB_STEP_SUMMARY"
+          elif [ "$deployed" = "$published" ]; then
+            echo "- Deployment lag check: current ($deployed)." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::warning title=V2 deployment lag::Published $published but deployed $deployed"
+            echo "- Deployment lag check: lagging; published $published, deployed $deployed." >> "$GITHUB_STEP_SUMMARY"
+          fi

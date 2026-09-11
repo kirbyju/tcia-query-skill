@@ -98,9 +98,15 @@ python3 scripts/tcia_wordpress_search.py --short-title TCGA-BRCA --json
 ```
 
 The `cache/` directory is intentionally excluded from Git. The installer
-stages changed assets, checks bundle and component hashes, verifies decompressed
-SQLite hashes and integrity, and only then replaces installed files under
-`cache/tcia-metadata-v2-latest/`. A successful install also removes obsolete
+stages a fingerprinted generation, checks bundle and component hashes, verifies
+decompressed SQLite hashes, integrity, and declared foreign keys, and only then
+atomically switches `cache/tcia-metadata-v2-latest/current`. Compatibility
+symlinks preserve the existing flat paths and valid older installs migrate
+automatically. If a first install is interrupted after compatibility links are
+prepared, rerunning the same install command completes or repairs the
+generation without manual cleanup. Downloads use bounded retries for transient
+HTTP, rate-limit, truncation, and checksum failures and restart a fresh staging
+file on each attempt. A successful install also removes obsolete
 installer-managed files that are not selected by the new receipt. It does not
 remove arbitrary files or maintainer build directories.
 
@@ -110,6 +116,7 @@ then explicitly apply the reported cleanup if needed:
 ```bash
 python3 scripts/tcia_v2_bundle.py prune
 python3 scripts/tcia_v2_bundle.py prune --apply
+python3 scripts/tcia_v2_bundle.py rollback
 ```
 
 Large `outputs/`, top-level `dist/`, and non-release directories under `cache/`

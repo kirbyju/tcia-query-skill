@@ -1,0 +1,7 @@
+# Reviewed direct versions for scheduled metadata producer workflows.
+# Transitive dependencies are resolver-selected; this file is not a hash lock.
+pandas==2.2.3
+openpyxl==3.1.5
+xlrd==2.0.2
+idc-index==0.12.3
+cdapython==2.1.0

@@ -62,7 +62,21 @@ cd "$TCIA_MCP_ROOT/tcia-query-skill"
   --profile research_detail --install-dir "$TCIA_V2_INSTALL_DIR"
 ```
 
-The installer keeps the previous files live until all changed payloads validate.
+The installer builds a fingerprinted generation, validates all selected
+payloads, and atomically switches the `current` pointer. Compatibility symlinks
+keep every path shown above working. The current generation and at least one
+verified prior generation are retained; inspect them with `prune` and roll back
+without downloading with:
+
+```bash
+"$TCIA_MCP_ROOT/.venv/bin/python" scripts/tcia_v2_bundle.py rollback \
+  --install-dir "$TCIA_V2_INSTALL_DIR"
+```
+
+The first install after this feature automatically migrates a valid legacy
+flat directory. It does not change `TCIA_V2_INSTALL_DIR` or any individual
+database environment variable.
+
 `research_detail` includes its required `research_core` dependency. It adds the
 unified public non-DICOM, controlled-access, and clinical detail artifacts.
 NIfTI and pathology discovery are provided by the unified public non-DICOM
@@ -161,6 +175,23 @@ cd "$TCIA_MCP_ROOT/tcia-query-skill"
 sudo systemctl restart tcia-query-mcp
 sudo systemctl restart tcia-query-rest
 ```
+
+### Existing operator upgrade answer
+
+Existing MCP/REST operators do **not** need an extra migration command or new
+path configuration. Keep the normal sequence: pull the reviewed code, install
+or update dependencies, run the same `tcia_v2_bundle.py install --profile ...`
+command, restart the services, then reconnect clients that cache MCP sessions.
+The installer performs the one-time flat-layout migration automatically.
+Operators should additionally confirm `/v2/bundle` reports the intended
+fingerprint and source-health summary after restart. Rollback is optional and
+uses the command above; restart and reconnect after selecting the prior
+generation.
+
+Set the repository Actions variable `TCIA_V2_DEPLOYED_INFO_URL` to the deployed
+snapshot/bundle-info JSON endpoint if release jobs should compare the published
+fingerprint with the deployed fingerprint. This check reports lag but does not
+perform deployment.
 
 Use a systemd timer, cron, or your configuration-management system for scheduled
 refreshes. Avoid committing snapshots or copying stale local caches between

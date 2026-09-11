@@ -77,6 +77,11 @@ def canonical_json(value: Any) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
 
+def foreign_key_violations(conn: sqlite3.Connection, limit: int = 20) -> list[list[Any]]:
+    """Return a bounded, JSON-serializable foreign-key violation sample."""
+    return [list(row) for row in conn.execute("PRAGMA foreign_key_check").fetchmany(limit)]
+
+
 def quote_identifier(value: str) -> str:
     return '"' + value.replace('"', '""') + '"'
 
@@ -161,6 +166,12 @@ def build_staging_database(
             integrity = str(source.execute("PRAGMA integrity_check").fetchone()[0])
             if integrity != "ok":
                 raise RuntimeError(f"{component} integrity_check={integrity}")
+            violations = foreign_key_violations(source)
+            if violations:
+                raise RuntimeError(
+                    f"{component} foreign_key_check violations (first 20): "
+                    + canonical_json(violations)
+                )
             for object_name, object_type, sql_digest, row_count in inventory_objects(source):
                 object_rows.append(
                     (component, object_name, object_type, sql_digest, row_count)
@@ -240,6 +251,12 @@ def validate_staging_database(path: Path, *, verify_sources: bool = False) -> di
         integrity = str(conn.execute("PRAGMA integrity_check").fetchone()[0])
         if integrity != "ok":
             errors.append(f"integrity_check={integrity}")
+        violations = foreign_key_violations(conn)
+        if violations:
+            errors.append(
+                "foreign_key_check violations (first 20): "
+                + canonical_json(violations)
+            )
         objects = {row[0] for row in conn.execute("SELECT name FROM sqlite_master")}
         for required in (
             "staging_meta",
@@ -284,6 +301,7 @@ def validate_staging_database(path: Path, *, verify_sources: bool = False) -> di
         "ok": not errors,
         "errors": errors,
         "integrity_check": integrity,
+        "foreign_key_violations": len(violations),
         "counts": counts,
     }
 

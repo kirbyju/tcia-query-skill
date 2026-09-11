@@ -6952,6 +6952,14 @@ def validate_database(path: Path) -> dict[str, Any]:
         integrity = conn.execute("PRAGMA integrity_check").fetchone()[0]
         if integrity != "ok":
             errors.append(f"integrity_check={integrity}")
+        foreign_key_rows = [
+            list(row) for row in conn.execute("PRAGMA foreign_key_check").fetchmany(20)
+        ]
+        if foreign_key_rows:
+            errors.append(
+                "foreign_key_check violations (first 20): "
+                + json_dumps(foreign_key_rows)
+            )
         objects = {row[0] for row in conn.execute("SELECT name FROM sqlite_master")}
         artifact_meta = (
             dict(conn.execute("SELECT key, value FROM artifact_meta"))
@@ -7377,7 +7385,13 @@ def validate_database(path: Path) -> dict[str, Any]:
                         "TCGA-LGG-Mask coverage regression: "
                         f"{name}={tcga_lgg_mask_counts[name]} != {expected}"
                     )
-    return {"ok": not errors, "errors": errors, "integrity_check": integrity, "counts": counts}
+    return {
+        "ok": not errors,
+        "errors": errors,
+        "integrity_check": integrity,
+        "foreign_key_violations": foreign_key_rows,
+        "counts": counts,
+    }
 
 
 def gzip_database(source: Path, target: Path) -> None:

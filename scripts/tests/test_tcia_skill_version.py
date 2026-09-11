@@ -63,7 +63,7 @@ class SkillVersionManifestTests(unittest.TestCase):
                 mock.patch.object(FRESHNESS, "SKILL_ROOT", root),
                 mock.patch.object(FRESHNESS, "remote_skill_manifest", return_value=manifest),
             ):
-                result = FRESHNESS.check_skill("owner/repo", "main")
+                result = FRESHNESS.check_skill("owner/repo", "main", use_cache=False)
             self.assertTrue(result["current"])
             self.assertEqual(result["status"], "current")
 
@@ -74,7 +74,7 @@ class SkillVersionManifestTests(unittest.TestCase):
                 mock.patch.object(FRESHNESS, "SKILL_ROOT", root),
                 mock.patch.object(FRESHNESS, "remote_skill_manifest", return_value=remote),
             ):
-                result = FRESHNESS.check_skill("owner/repo", "main")
+                result = FRESHNESS.check_skill("owner/repo", "main", use_cache=False)
             self.assertFalse(result["current"])
             self.assertEqual(result["status"], "update_required")
 

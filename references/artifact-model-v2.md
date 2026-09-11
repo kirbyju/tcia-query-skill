@@ -523,7 +523,9 @@ presence or used to create Analysis Result memberships.
 
 ## V2 Release Channels
 
-Use `tcia-metadata-v2-latest` as the single supported moving release contract.
+Use `tcia-metadata-v2-latest` as the supported moving compatibility alias.
+Each changed stable bundle is first published and validated under an immutable
+date/fingerprint tag; only then is the moving alias updated.
 Validated source components pass between workflows as short-lived GitHub
 Actions artifacts, not as a second public release. The stable channel uses the
 streamlined contract with these asset groups:
@@ -539,7 +541,11 @@ streamlined contract with these asset groups:
 - Compatibility exports: the two compressed current JSONL exports.
 - Bundle contract: `tcia_metadata_v2_bundle_manifest.json`, which pins the
   SHA-256, size, profile, category, source, and default-download status of every
-  payload and records each component schema and release fingerprint.
+  payload and records each component schema and release fingerprint. It also
+  carries per-source live/fallback/degraded health, bounded warning summaries,
+  and any scoped waiver used for stable promotion. Fields named `*_asset` must
+  resolve to a payload in the same manifest; unpublished component manifests
+  are labeled as source manifests rather than release assets.
 
 The compact Participant Inventory preserves participant identity, availability,
 access, clinical-presence, and explicit linkage/coverage states. It does not
@@ -571,9 +577,11 @@ Install the stable research core with the bundle-level installer:
 python3 scripts/tcia_v2_bundle.py install --profile research_core
 ```
 
-The installer reads the top-level manifest first, stages every changed asset,
-verifies compressed and decompressed hashes plus SQLite integrity, and only
-then replaces installed components. Add `research_detail` for drill-down or
+The installer reads the top-level manifest first, stages a complete
+fingerprinted generation, verifies compressed and decompressed hashes plus
+SQLite integrity and declared foreign keys, and only then atomically switches
+the `current` pointer. Compatibility symlinks preserve historical flat paths,
+and a valid flat install is migrated automatically. Add `research_detail` for drill-down or
 `audit_support` for verbose provenance and QC. Installed files default to
 `cache/tcia-metadata-v2-latest/`. After committing the new receipt, it removes
 only obsolete installer-managed files and abandoned staging directories older
@@ -583,6 +591,7 @@ workspaces. Audit cleanup before applying it explicitly with:
 ```bash
 python3 scripts/tcia_v2_bundle.py prune
 python3 scripts/tcia_v2_bundle.py prune --apply
+python3 scripts/tcia_v2_bundle.py rollback
 ```
 
 The first command is a dry run that reports active and stale bytes. Top-level
@@ -591,16 +600,41 @@ workspaces rather than installed release content and remain outside this
 receipt-aware cleanup contract.
 
 The V2 build runs after each successful scheduled base-snapshot workflow. It
-captures the source release record, verifies every copied source asset against the
-captured GitHub digest, regenerates all web exports from that exact bundled
-snapshot, validates every component, and publishes only when the complete
-bundle fingerprint changes. The top-level manifest is uploaded last so
-consumers never accept an update without a complete hash contract. Stale assets
-are removed only from the selected V2 moving tag, and that tag is advanced to
-the producer commit only after the published bundle passes remote digest
-validation. A manually supplied immutable stable tag is created only if it
-does not already exist. The workflow does not deploy, restart, or reconfigure
-MCP/REST.
+checks out and records the triggering workflow's exact `head_sha`, downloads
+the run-scoped Actions artifact, and verifies the component manifests and
+their declared file hashes before building. GitHub Actions artifacts do not
+provide the same published asset-digest contract as GitHub Releases, so the
+workflow does not claim that an upstream Release digest was captured. It
+regenerates web exports from the verified inputs, validates every component,
+and publishes only when the complete bundle fingerprint changes. The
+top-level manifest is uploaded last so consumers never accept an update
+without a complete hash contract. Each changed bundle is first published and
+validated at an immutable date/fingerprint tag. Updating the moving alias
+backs up its prior assets, metadata, notes, and tag target and restores them if
+the replacement fails. The moving tag is advanced to the triggering producer
+commit only after remote digest validation. Stable promotion fails closed for
+degraded or unknown authoritative source health unless a reviewed
+`.github/tcia-v2-source-health-waiver.json` supplies an exact source name,
+reason, approver, and future expiry; expired waivers are rejected. The
+workflow does not deploy, restart, or reconfigure MCP/REST.
+
+Waivers are exceptional, committed release inputs and must use this shape:
+
+```json
+{
+  "schema_version": 1,
+  "waivers": [
+    {
+      "source": "snapshot.wordpress_collections",
+      "reason": "bounded upstream maintenance window",
+      "approved_by": "release-manager",
+      "expires_at_utc": "2026-09-12T12:00:00Z"
+    }
+  ]
+}
+```
+
+The build rejects expired, duplicate, incomplete, or unused waiver scopes.
 
 ### Build-time staging and legacy-detail retirement
 

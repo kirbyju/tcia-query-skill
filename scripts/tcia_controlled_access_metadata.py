@@ -2100,9 +2100,17 @@ def validate_db(path: Path) -> dict[str, Any]:
     }
     missing = sorted(set(REQUIRED_TABLES + REQUIRED_VIEWS) - existing)
     integrity = conn.execute("PRAGMA integrity_check").fetchone()[0]
+    foreign_key_rows = [
+        list(row) for row in conn.execute("PRAGMA foreign_key_check").fetchmany(20)
+    ]
     counts = table_counts(conn) if not missing else {}
     conn.close()
-    return {"integrity_check": integrity, "missing_tables": missing, "table_counts": counts}
+    return {
+        "integrity_check": integrity,
+        "foreign_key_violations": foreign_key_rows,
+        "missing_tables": missing,
+        "table_counts": counts,
+    }
 
 
 def gzip_sqlite(sqlite_path: Path, gzip_path: Path) -> None:
@@ -2125,7 +2133,21 @@ def build_manifest_from_db(
     conn = sqlite3.connect(sqlite_path)
     conn.row_factory = sqlite3.Row
     integrity = conn.execute("PRAGMA integrity_check").fetchone()[0]
+    foreign_key_rows = [
+        list(row) for row in conn.execute("PRAGMA foreign_key_check").fetchmany(20)
+    ]
+    if foreign_key_rows:
+        conn.close()
+        raise RuntimeError(
+            "Cannot manifest controlled-access database with foreign-key violations "
+            f"(first 20): {json.dumps(foreign_key_rows, sort_keys=True)}"
+        )
     counts = table_counts(conn)
+    artifact_error_count = int(
+        conn.execute(
+            "SELECT COUNT(*) FROM download_artifacts WHERE trim(COALESCE(error, '')) <> ''"
+        ).fetchone()[0]
+    )
     signatures = {
         "controlled_download_signature": table_signature(
             conn, "controlled_downloads", "download_row_id"
@@ -2156,10 +2178,16 @@ def build_manifest_from_db(
         "gzip_sha256": file_sha256(gzip_path) if gzip_path and gzip_path.exists() else "",
         "gzip_bytes": gzip_path.stat().st_size if gzip_path and gzip_path.exists() else 0,
         "integrity_check": integrity,
+        "foreign_key_violations": foreign_key_rows,
         "controlled_meta": meta,
         "table_counts": counts,
         "no_network": bool(no_network),
         "include_legacy": bool(include_legacy),
+        "source_status": {
+            "public_metadata_artifacts": "failed" if artifact_error_count else "live",
+            "network": "reused_offline" if no_network else "live",
+        },
+        "warning_summary": {"artifact_errors": artifact_error_count},
         **signatures,
     }
     payload["release_fingerprint"] = release_fingerprint(payload)
@@ -2484,6 +2512,16 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
         "table_counts": counts,
         "no_network": bool(args.no_network),
         "include_legacy": bool(args.include_legacy),
+        "source_status": {
+            "public_metadata_artifacts": (
+                "failed" if artifact_counts.get("artifact_errors") else "live"
+            ),
+            "network": "reused_offline" if args.no_network else "live",
+        },
+        "warning_summary": {
+            "artifact_errors": int(artifact_counts.get("artifact_errors") or 0),
+            "metadata_exceptions": int(exceptions),
+        },
         **signatures,
     }
     manifest_payload["release_fingerprint"] = release_fingerprint(manifest_payload)
@@ -2589,7 +2627,11 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print(f"integrity_check: {payload['integrity_check']}")
             print(f"missing_tables: {', '.join(payload['missing_tables']) or 'none'}")
-        return 0 if payload["integrity_check"] == "ok" and not payload["missing_tables"] else 1
+        return 0 if (
+            payload["integrity_check"] == "ok"
+            and not payload["foreign_key_violations"]
+            and not payload["missing_tables"]
+        ) else 1
     if args.command == "datasets":
         return command_datasets(args)
     if args.command == "downloads":

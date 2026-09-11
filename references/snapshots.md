@@ -6,11 +6,11 @@ source components into a build-time staging contract, builds the compact V2
 research databases and audit companions, and publishes the streamlined
 profile-based bundle only when its fingerprint changes. The stable bundle has
 nine payload assets plus one authoritative manifest; only the current dataset
-and download JSONL exports remain, both gzip-compressed. The single supported
-release tag is `tcia-metadata-v2-latest`. Build stages exchange validated inputs
-through short-lived GitHub Actions artifacts rather than publishing separate
-source, preview, or dated releases. The release workflow does not itself deploy
-or restart MCP/REST.
+and download JSONL exports remain, both gzip-compressed. The supported moving
+alias is `tcia-metadata-v2-latest`; each changed stable bundle is first
+validated under an immutable date/fingerprint release. Build stages exchange
+validated inputs through short-lived GitHub Actions artifacts. The release
+workflow does not itself deploy or restart MCP/REST.
 
 The skill uses a local SQLite snapshot for routine TCIA discovery instead of querying public APIs during end-user tasks. The snapshot contains:
 
@@ -54,7 +54,7 @@ official public patient tables only when their audited counts are exactly
 492 and 215 subjects, 80 overlapping, and 627 in the union. This identifies
 the TCIA cohort but does not grant controlled-image access.
 
-The workflow validates that the SQLite file contains the documented `agent_*` views, writes web-friendly exports from those views, and compares a release fingerprint built from the source-content hash, schema version, SQLite hash, and export hashes. It skips release uploads only when the release fingerprint is unchanged.
+The workflow validates that the SQLite file contains the documented `agent_*` views, writes web-friendly exports from those views, and compares a release fingerprint built from the source-content hash, schema version, SQLite hash, and export hashes. It skips release uploads only when the release fingerprint is unchanged. Raw WordPress builder tables retain hidden/staged rows for internal producer needs, but public dataset/download/version views and exports exclude them. The authoritative bundle manifest also reports per-source live/fallback/degraded health and bounded warning summaries.
 
 Each scheduled or manual run also compares the newly built base,
 controlled-access, and clinical SQLite files with their previously published
@@ -76,7 +76,8 @@ GitHub scheduled workflows can start late. If a user asks about a dataset that a
 
 ## Local Cache
 
-The V2 installer stores validated artifacts together under one release directory:
+The V2 installer stores validated artifacts in fingerprinted generations and
+keeps the historical paths through an atomic `current` pointer:
 
 ```text
 cache/tcia-metadata-v2-latest/tcia_metadata_v2_bundle_manifest.json
@@ -85,7 +86,16 @@ cache/tcia-metadata-v2-latest/participant_inventory.sqlite
 cache/tcia-metadata-v2-latest/public_non_dicom_metadata.sqlite
 cache/tcia-metadata-v2-latest/controlled_access_metadata.sqlite
 cache/tcia-metadata-v2-latest/clinical_metadata.sqlite
+cache/tcia-metadata-v2-latest/current -> generations/<fingerprint>-<profile>
 ```
+
+`python scripts/tcia_freshness.py check` always verifies the local skill-file
+manifest. Successful remote checks are cached for six hours by default; the
+TTL, timeout, retry count, and receipt path are configurable with
+`TCIA_FRESHNESS_TTL_SECONDS`, `TCIA_FRESHNESS_TIMEOUT_SECONDS`,
+`TCIA_FRESHNESS_RETRIES`, and `TCIA_FRESHNESS_CACHE_FILE`. Expired receipts use
+ETag conditional requests, and receipt/remote-manifest hashes are checked before
+cached results are trusted.
 
 Set the shared install directory for MCP/REST or other consumers:
 

@@ -1,0 +1,3 @@
+# Exercise the exact same top-level server versions operators install.
+--require-hashes
+-r requirements-server.lock

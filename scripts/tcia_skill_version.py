@@ -14,7 +14,14 @@ from typing import Any, Iterable
 SCHEMA_VERSION = 1
 SKILL_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_MANIFEST = SKILL_ROOT / "skill_version.json"
-INCLUDED_TOP_LEVEL_FILES = ("README.md", "SKILL.md")
+INCLUDED_TOP_LEVEL_FILES = (
+    "README.md",
+    "SKILL.md",
+    "requirements-build.txt",
+    "requirements-build.lock",
+    "requirements-ci.txt",
+    "requirements-server.lock",
+)
 INCLUDED_SUFFIXES = {".csv", ".json", ".md", ".py", ".txt", ".yaml", ".yml"}
 INCLUDED_DIRECTORIES = ("agents", "mcp_server", "references", "scripts")
 EXCLUDED_NAMES = {"__pycache__", ".DS_Store"}

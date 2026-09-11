@@ -7655,7 +7655,25 @@ def write_artifacts(
         row[0]: json.loads(row[1])
         for row in conn.execute("SELECT key, value FROM clinical_meta")
     }
+    download_status_counts = {
+        str(row[0]): int(row[1])
+        for row in conn.execute(
+            "SELECT ingest_status, COUNT(*) FROM clinical_downloads GROUP BY ingest_status"
+        )
+    }
+    build_warning_count = int(
+        conn.execute("SELECT COUNT(*) FROM clinical_build_warnings").fetchone()[0]
+    )
     integrity = conn.execute("PRAGMA integrity_check").fetchone()[0]
+    foreign_key_rows = [
+        list(row) for row in conn.execute("PRAGMA foreign_key_check").fetchmany(20)
+    ]
+    if foreign_key_rows:
+        conn.close()
+        raise RuntimeError(
+            "Cannot manifest clinical database with foreign-key violations "
+            f"(first 20): {json.dumps(foreign_key_rows, sort_keys=True)}"
+        )
     conn.close()
     manifest: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
@@ -7664,8 +7682,24 @@ def write_artifacts(
         "sqlite_bytes": db_path.stat().st_size,
         "sqlite_sha256": file_sha256(db_path),
         "integrity_check": integrity,
+        "foreign_key_violations": foreign_key_rows,
         "table_counts": counts,
         "clinical_meta": meta,
+        "source_status": {
+            "official_clinical_downloads": (
+                "failed" if download_status_counts.get("failed", 0) else "live"
+            ),
+            "idc_clinical": (meta.get("idc_clinical_result") or {}).get(
+                "status", "unknown"
+            ),
+            "cda_clinical": (meta.get("cda_clinical_result") or {}).get(
+                "status", "unknown"
+            ),
+        },
+        "warning_summary": {
+            "clinical_build_warnings": build_warning_count,
+            "download_status_counts": download_status_counts,
+        },
     }
     if gzip_path:
         gzip_path.parent.mkdir(parents=True, exist_ok=True)
@@ -8074,6 +8108,9 @@ def validate(db_path: Path) -> dict[str, Any]:
     missing_tables = [name for name in REQUIRED_TABLES if (name, "table") not in objects]
     missing_views = [name for name in REQUIRED_VIEWS if (name, "view") not in objects]
     integrity = conn.execute("PRAGMA integrity_check").fetchone()[0]
+    foreign_key_rows = [
+        list(row) for row in conn.execute("PRAGMA foreign_key_check").fetchmany(20)
+    ]
     counts = table_counts(conn) if not missing_tables else {}
     precedence = conn.execute(
         """SELECT source_kind, MIN(source_priority), MAX(source_priority)
@@ -8204,10 +8241,12 @@ def validate(db_path: Path) -> dict[str, Any]:
             not missing_tables
             and not missing_views
             and integrity == "ok"
+            and not foreign_key_rows
             and semantic_errors == 0
             and relationship_errors == 0
         ),
         "integrity_check": integrity,
+        "foreign_key_violations": foreign_key_rows,
         "missing_tables": missing_tables,
         "missing_views": missing_views,
         "table_counts": counts,

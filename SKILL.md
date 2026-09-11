@@ -19,7 +19,7 @@ When a downstream record is derived from a TCIA DOI but is not itself listed in 
 
 ## Quick Workflow
 
-0. Verify skill and V2 artifact freshness before discovery. From the skill root, run `python scripts/tcia_freshness.py check` to detect a code update without replacing installed skill files, then run `python scripts/tcia_v2_bundle.py install --profile research_core`. Treat the V2 bundle manifest as the release contract: the installer stages changed payloads, verifies bundle/component hashes, decompressed SQLite hashes, and SQLite integrity before replacement. Install `research_detail` only for file-grain drill-down and `audit_support` only for verbose provenance/QC. If the skill check reports `update_required`, stop and tell the user to update the installed skill. If network verification fails, do not claim current results: ask whether to continue with the unverified local bundle and report its release fingerprint and `generated_at_utc`. Web-only environments must follow `references/mcp-and-web-llms.md` and fetch the current GitHub skill manifest plus V2 bundle manifest before using remote JSON/JSONL assets.
+0. Verify skill and V2 artifact freshness before discovery. From the skill root, run `python scripts/tcia_freshness.py check` to detect a code update without replacing installed skill files, then run `python scripts/tcia_v2_bundle.py install --profile research_core`. The freshness command always validates local skill hashes and caches successful remote validation for a configurable TTL (six hours by default), using a hashed receipt and ETag revalidation after expiry. Treat the V2 bundle manifest as the release contract: the installer stages a fingerprinted generation, verifies bundle/component hashes, decompressed SQLite hashes, SQLite integrity, and declared foreign keys, then atomically switches the current generation while retaining a verified prior generation for rollback. Install `research_detail` only for file-grain drill-down and `audit_support` only for verbose provenance/QC. If the skill check reports `update_required`, stop and tell the user to update the installed skill. If network verification fails, do not claim current results: ask whether to continue with the unverified local bundle and report its release fingerprint and `generated_at_utc`. Web-only environments must follow `references/mcp-and-web-llms.md` and fetch the current GitHub skill manifest plus V2 bundle manifest before using remote JSON/JSONL assets.
 1. Use the V2 research-core base SQLite for routine discovery, release-history, and access/license metadata, and use its Participant Inventory for participant availability. Prefer the snapshot views in `references/schema.md`: `agent_datasets`, `agent_current_downloads`, `agent_dataset_access_summary`, `agent_dataset_versions`, `agent_dataset_v1_releases`, `agent_pathdb_slides`, and `agent_datacite_dois`; prefer `agent_participant_search` for one canonical row per dataset-scoped participant. Load `references/snapshots.md` for refresh behavior and `references/schema.md` for SQL details. If the environment cannot execute scripts or query SQLite, use the web-friendly release exports described in `references/mcp-and-web-llms.md`; do not switch to live WordPress API discovery.
 2. Choose the starting source.
    - For peer-reviewed publications or manuscripts about TCIA data, use TCIA's EndNote XML export, not DataCite. Prefer `scripts/tcia_publications.py`, and load `references/publications.md`.
@@ -157,7 +157,7 @@ Run scripts from the skill root.
 | --- | --- |
 | `scripts/tcia_wordpress_search.py` | Search local SQLite TCIA WordPress Collection and Analysis Result snapshot metadata, with text or JSON output. |
 | `scripts/tcia_snapshot.py` | Build, inspect, validate, or download the local SQLite metadata snapshot, and export web-friendly release files. |
-| `scripts/tcia_freshness.py` | Verify installed skill files against GitHub, then refresh the base snapshot and current clinical/controlled-access sidecars. |
+| `scripts/tcia_freshness.py` | Verify installed skill files against GitHub. It does not refresh data; install the V2 bundle separately with `scripts/tcia_v2_bundle.py`. |
 | `scripts/tcia_skill_version.py` | Generate or validate the committed version/hash manifest for operational skill files. |
 | `scripts/tcia_nifti_metadata.py` | Migration-only builder/validator for the retired standalone NIfTI source; end-user queries use unified V2 detail. |
 | `scripts/tcia_public_non_dicom_metadata.py` | Build, validate, summarize, and query the V2 public non-DICOM logical-asset, geometry-assessment, and managed-location artifact. |
@@ -220,6 +220,12 @@ run and use `prune --apply` only after reviewing its JSON report. This cleanup
 is receipt-aware and does not remove arbitrary files, `outputs/`, `dist/`, or
 other maintainer build workspaces. Use `du` to diagnose those separately and
 do not present them as required runtime content.
+
+The first install after generation support automatically migrates a valid flat
+install without changing the normal `install --profile ...` command or the
+configured install directory. Use `python scripts/tcia_v2_bundle.py rollback`
+to atomically select the newest verified prior generation, then restart any
+long-running MCP/REST process so it reopens the selected SQLite files.
 
 ## General Commons
 

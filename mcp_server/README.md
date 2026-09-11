@@ -107,6 +107,13 @@ python3 scripts/tcia_v2_bundle.py install --profile research_detail
 `research_detail` already includes `research_core`; production hosts that need
 detail can run only the second command.
 
+Installs use fingerprinted generations behind an atomic `current` pointer.
+The traditional paths below remain compatibility symlinks, so existing server
+configuration does not change. A valid pre-generation flat install is migrated
+automatically. At least one verified prior generation is retained and can be
+selected with `python3 scripts/tcia_v2_bundle.py rollback` before restarting
+MCP/REST.
+
 By default the V2 service prefers validated files under
 `cache/tcia-metadata-v2-latest/`. Production deployments can set
 `TCIA_V2_INSTALL_DIR`, or

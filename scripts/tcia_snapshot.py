@@ -1084,7 +1084,8 @@ def create_schema(conn: sqlite3.Connection) -> None:
             raw_json
         FROM wordpress_records
         WHERE source IN ('collections', 'analysis-results')
-          AND normalized_json IS NOT NULL;
+          AND normalized_json IS NOT NULL
+          AND hidden = 0;
 
         CREATE VIEW agent_current_downloads AS
         SELECT
@@ -1139,6 +1140,7 @@ def create_schema(conn: sqlite3.Connection) -> None:
             d.raw_json
         FROM wordpress_downloads d
         WHERE d.is_current_version = 1
+          AND d.parent_hidden = 0
           AND d.parent_source IN ('collections', 'analysis-results');
 
         CREATE VIEW agent_dataset_access_summary AS
@@ -1156,6 +1158,7 @@ def create_schema(conn: sqlite3.Connection) -> None:
                 group_concat(CASE WHEN controlled_access THEN NULLIF(download_url, '') END, '; ') AS controlled_download_urls
             FROM wordpress_downloads
             WHERE is_current_version = 1
+              AND parent_hidden = 0
               AND parent_source IN ('collections', 'analysis-results')
             GROUP BY parent_source, parent_short_title
         ),
@@ -2026,6 +2029,32 @@ def validate_snapshot_schema(conn: sqlite3.Connection) -> dict[str, Any]:
         raise RuntimeError(f"Snapshot is missing required agent views: {', '.join(missing_views)}")
     for view in REQUIRED_AGENT_VIEWS:
         conn.execute(f"SELECT * FROM {quote_identifier(view)} LIMIT 1").fetchall()
+    hidden_public_rows = {
+        view: int(
+            conn.execute(
+                f"SELECT COUNT(*) FROM {quote_identifier(view)} WHERE hidden <> 0"
+            ).fetchone()[0]
+        )
+        for view in (
+            "agent_datasets",
+            "agent_current_downloads",
+            "agent_dataset_access_summary",
+            "agent_dataset_versions",
+            "agent_dataset_v1_releases",
+        )
+    }
+    leaking_views = [view for view, count in hidden_public_rows.items() if count]
+    if leaking_views:
+        raise RuntimeError(
+            "Snapshot public views expose hidden WordPress records: "
+            + ", ".join(leaking_views)
+        )
+    foreign_key_violations = conn.execute("PRAGMA foreign_key_check").fetchmany(20)
+    if foreign_key_violations:
+        raise RuntimeError(
+            "Snapshot foreign-key violations (first 20): "
+            + json_dumps([list(row) for row in foreign_key_violations])
+        )
     meta_rows = conn.execute("SELECT key, value FROM snapshot_meta").fetchall()
     meta = {}
     for key, value in meta_rows:
@@ -2040,6 +2069,8 @@ def validate_snapshot_schema(conn: sqlite3.Connection) -> dict[str, Any]:
     return {
         "schema_version": meta.get("schema_version"),
         "views": REQUIRED_AGENT_VIEWS,
+        "hidden_public_rows": hidden_public_rows,
+        "foreign_key_violations": 0,
     }
 
 
