@@ -63,6 +63,14 @@ when every non-key value is byte-identical, but pairing is explanatory only: it
 does not remove either event from the semantic gate. Each exact effect must
 still match and be consumed once.
 
+This release intentionally changes 105 previously published
+`clinical_facts.fact_id` values. Those hashes are derived, opaque row identities,
+not a stable public identifier contract. The complete evidence-bound old-to-new
+mapping is published only in the `audit_support` correction registry decision;
+`research_detail` remains unchanged and does not include it. Consumers that
+persisted these fact IDs must install `audit_support` for this release and apply
+that exact mapping. MCP and REST do not promise an alias lookup for fact IDs.
+
 ## Raw Hidden-State Investigation
 
 The public MCP, REST, and `TciaQueryService` surfaces deliberately exclude hidden, staged, and retired WordPress records. A maintainer who must investigate raw source state may use the local snapshot/search builder CLI's explicit `--include-hidden` option in a controlled workflow:

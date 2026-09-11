@@ -1000,7 +1000,7 @@ def migrate_semantic_explanations(conn: sqlite3.Connection, path: Path) -> int:
             "migration_id", "artifact", "entity_table", "primary_key_column",
             "reviewer", "approved_at", "rationale", "evidence", "aliases",
             "alias_count", "effect_count", "set_fingerprints", "source_identity",
-            "negative_scope",
+            "negative_scope", "evidence_sha256",
         }
         if not isinstance(batch, dict) or not required.issubset(batch):
             raise ValueError("semantic migration batch is missing required fields")
@@ -1047,6 +1047,9 @@ def migrate_semantic_explanations(conn: sqlite3.Connection, path: Path) -> int:
                 or not re.fullmatch(r"[0-9a-f]{64}", str(item.get("artifact_sha256") or ""))
             ):
                 raise ValueError("semantic migration evidence identity is invalid")
+        evidence_sha = digest(evidence)
+        if evidence_sha != batch["evidence_sha256"]:
+            raise ValueError("semantic migration evidence digest mismatch")
         required_alias = {
             "old_fact_id", "new_fact_id", "old_row_digest", "new_row_digest",
             "source_row_id", "row_sha256", "subject_id", "value_text", "qc_status",
@@ -1117,6 +1120,7 @@ def migrate_semantic_explanations(conn: sqlite3.Connection, path: Path) -> int:
                 "migration_id": batch["migration_id"],
                 "alias_count": len(aliases),
                 "aliases_sha256": digest(aliases),
+                "evidence_sha256": evidence_sha,
                 "aliases": aliases,
                 "set_fingerprints": fingerprints,
             },
@@ -1124,6 +1128,7 @@ def migrate_semantic_explanations(conn: sqlite3.Connection, path: Path) -> int:
                 "affected_artifact": "clinical",
                 "entity_table": "clinical_facts",
                 "effect_count": len(expected_effects),
+                "evidence_sha256": evidence_sha,
             },
             negative_scope={
                 "must_not": list(batch["negative_scope"]),

@@ -45,6 +45,13 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
+      - name: Initialize diagnostics-only status
+        run: |
+          python3 scripts/tcia_diagnostic_status.py init \
+            --out dist/metadata_diagnostic_status.json \
+            --run-id "${{ github.run_id }}" \
+            --run-attempt "${{ github.run_attempt }}"
+
       - name: Set up Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
@@ -163,13 +170,16 @@ jobs:
           set -euo pipefail
           tag="tcia-metadata-v2-latest"
           mkdir -p previous
-          if gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" \
-            > previous/release.json 2>/dev/null; then
-            gh release download "$tag" \
-              --pattern tcia_metadata_v2_bundle_manifest.json \
-              --dir previous --clobber
-            if jq -e '.assets["tcia_correction_registry.sqlite.gz"]' \
-              previous/tcia_metadata_v2_bundle_manifest.json >/dev/null; then
+          if ! gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" \
+            > previous/release.json; then
+            echo "::error title=Prior V2 release retrieval failed::Cannot establish whether the correction component exists."
+            exit 1
+          fi
+          gh release download "$tag" \
+            --pattern tcia_metadata_v2_bundle_manifest.json \
+            --dir previous --clobber
+          if jq -e '.assets["tcia_correction_registry.sqlite.gz"]' \
+            previous/tcia_metadata_v2_bundle_manifest.json >/dev/null; then
               gh release download "$tag" \
                 --pattern tcia_correction_registry.sqlite.gz \
                 --dir previous --clobber
@@ -199,11 +209,8 @@ jobs:
                 --observed-at "$(jq -r '.generated_at_utc' previous/tcia_metadata_v2_bundle_manifest.json)"
               cp previous/tcia_correction_registry.sqlite \
                 dist/tcia_correction_registry.sqlite
-            else
-              echo "Prior contract predates the correction component; establishing its baseline."
-            fi
           else
-            echo "No prior V2 release exists; establishing the correction baseline."
+            echo "Verified prior contract lacks the correction component; establishing its exact baseline."
           fi
 
       - name: Build and package the correction registry
@@ -255,6 +262,13 @@ jobs:
       - name: Report SQLite additions and clinical review flags
         run: |
           set -euo pipefail
+          status_file=dist/metadata_diagnostic_status.json
+          report_json=dist/metadata_change_report.json
+          report_markdown=dist/metadata_change_report.md
+          python scripts/tcia_diagnostic_status.py update \
+            --status "$status_file" \
+            --stage semantic_report_started \
+            --disposition pending
           report_args=(
             --snapshot-new dist/tcia_snapshot.sqlite
             --controlled-new dist/controlled_access_metadata.sqlite
@@ -276,26 +290,74 @@ jobs:
           if [ -s previous/tcia_correction_registry.sqlite ]; then
             report_args+=(--correction-old previous/tcia_correction_registry.sqlite)
           fi
+          set +e
           python scripts/tcia_metadata_change_report.py \
             "${report_args[@]}" \
             --github-actions \
             --fail-on-unexplained-high \
-            --markdown-out dist/metadata_change_report.md \
-            --json-out dist/metadata_change_report.json
-          python scripts/tcia_correction_registry.py consume-explanations \
+            --markdown-out "$report_markdown" \
+            --json-out "$report_json"
+          report_exit=$?
+          set -e
+          if [ "$report_exit" -eq 2 ]; then
+            report_disposition=unexplained_high_rejected
+          elif [ "$report_exit" -eq 0 ]; then
+            report_disposition=semantic_report_passed
+          else
+            report_disposition=failed_before_report_serialization
+          fi
+          python scripts/tcia_diagnostic_status.py update \
+            --status "$status_file" \
+            --stage semantic_report_completed \
+            --disposition "$report_disposition" \
+            --exit-code "$report_exit" \
+            --report-json "$report_json" \
+            --report-markdown "$report_markdown"
+          if [ "$report_exit" -ne 0 ]; then
+            exit "$report_exit"
+          fi
+          if ! python scripts/tcia_correction_registry.py consume-explanations \
             --db dist/tcia_correction_registry.sqlite \
-            --report dist/metadata_change_report.json
-          python scripts/tcia_correction_registry.py package \
+            --report "$report_json"; then
+            python scripts/tcia_diagnostic_status.py update \
+              --status "$status_file" \
+              --stage semantic_explanation_consumption_failed \
+              --disposition failed \
+              --exit-code 1 \
+              --report-json "$report_json" \
+              --report-markdown "$report_markdown"
+            exit 1
+          fi
+          if ! python scripts/tcia_correction_registry.py package \
             --db dist/tcia_correction_registry.sqlite \
             --gzip-out dist/tcia_correction_registry.sqlite.gz \
-            --manifest-out dist/tcia_correction_registry_manifest.json
-          cat dist/metadata_change_report.md >> "$GITHUB_STEP_SUMMARY"
+            --manifest-out dist/tcia_correction_registry_manifest.json; then
+            python scripts/tcia_diagnostic_status.py update \
+              --status "$status_file" \
+              --stage correction_registry_packaging_failed \
+              --disposition failed \
+              --exit-code 1 \
+              --report-json "$report_json" \
+              --report-markdown "$report_markdown"
+            exit 1
+          fi
+          cat "$report_markdown" >> "$GITHUB_STEP_SUMMARY"
+          python scripts/tcia_diagnostic_status.py update \
+            --status "$status_file" \
+            --stage source_artifacts_validated \
+            --disposition success \
+            --exit-code 0 \
+            --report-json "$report_json" \
+            --report-markdown "$report_markdown"
 
-      - name: Verify semantic-gate diagnostic reports exist
+      - name: Finalize diagnostics-only status
         if: ${{ always() }}
         run: |
-          test -s dist/metadata_change_report.md
-          test -s dist/metadata_change_report.json
+          python3 scripts/tcia_diagnostic_status.py finalize \
+            --status dist/metadata_diagnostic_status.json \
+            --job-status "${{ job.status }}" \
+            --report-json dist/metadata_change_report.json \
+            --report-markdown dist/metadata_change_report.md
 
       - name: Upload non-release semantic-gate diagnostics
         if: ${{ always() }}
@@ -303,13 +365,11 @@ jobs:
         with:
           name: tcia-metadata-v2-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
+            dist/metadata_diagnostic_status.json
             dist/metadata_change_report.md
             dist/metadata_change_report.json
-            dist/*_manifest.json
             dist/tcia_correction_registry_bootstrap_evidence.json
             dist/tcia_correction_registry_validation.json
-            requirements-build.lock
-            requirements-server.lock
           if-no-files-found: error
           compression-level: 6
           retention-days: 30

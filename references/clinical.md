@@ -50,6 +50,15 @@ resolution, while `qc_excluded` and `qc_status` explain why a fact was withheld.
 severity, disposition, source row/fact identifiers, original and resolved
 values, and review status.
 
+`clinical_facts.fact_id` is an opaque, content-derived row identity rather than
+a stable external identifier. The first correction-registry release deliberately
+re-keys 105 HCC-TACE-Seg Pathology facts from legacy diagnosis-derived hashes to
+their reviewed grade-derived hashes. The exact old-to-new mapping and source
+evidence are available in the `audit_support` correction registry; the
+`research_detail` profile and public MCP/REST surfaces do not expose an alias
+service. Consumers that persisted those hashes must migrate them from that
+release-bound audit record.
+
 The reviewed QC rules:
 
 - convert the official `Crowds-Cure-2017` TCGA-style

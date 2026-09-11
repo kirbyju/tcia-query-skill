@@ -32,7 +32,8 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
         diagnostic_step = source.index("Upload non-release semantic-gate diagnostics")
         source_upload = source.index("Upload validated V2 source inputs")
         self.assertLess(diagnostic_step, source_upload)
-        self.assertIn("Verify semantic-gate diagnostic reports exist", source)
+        self.assertIn("Initialize diagnostics-only status", source)
+        self.assertIn("Finalize diagnostics-only status", source)
         self.assertIn("if: ${{ always() }}", source)
         self.assertIn(
             "tcia-metadata-v2-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}",
@@ -40,12 +41,27 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
         )
         self.assertIn("dist/metadata_change_report.json", source)
         self.assertIn("dist/metadata_change_report.md", source)
-        self.assertIn("dist/*_manifest.json", source)
-        self.assertIn("requirements-build.lock", source)
+        self.assertIn("dist/metadata_diagnostic_status.json", source)
         self.assertIn("if-no-files-found: error", source)
         self.assertIn("retention-days: 30", source)
+        diagnostic_block = source[diagnostic_step:source_upload]
+        self.assertNotIn("GH_TOKEN", diagnostic_block)
+        self.assertNotIn(".sqlite.gz", diagnostic_block)
+        self.assertNotIn("dist/*_manifest.json", diagnostic_block)
+        self.assertNotIn("requirements-build.lock", diagnostic_block)
+        self.assertNotIn("requirements-server.lock", diagnostic_block)
+        self.assertNotIn("tcia-metadata-v2-source", diagnostic_block)
         validated_block = source[source_upload:]
         self.assertNotIn("tcia-metadata-v2-diagnostics", validated_block)
+
+    def test_prior_release_api_failure_cannot_establish_correction_baseline(self) -> None:
+        source = SOURCE_WORKFLOW.read_text(encoding="utf-8")
+        marker = "Import only a verified prior correction registry"
+        block = source[source.index(marker):source.index("Build and package the correction registry")]
+        self.assertIn("if ! gh api", block)
+        self.assertIn("Prior V2 release retrieval failed", block)
+        self.assertIn("exit 1", block)
+        self.assertNotIn("No prior V2 release exists", block)
 
     def test_source_first_registry_bootstrap_is_explicit_and_narrow(self) -> None:
         source = SOURCE_WORKFLOW.read_text(encoding="utf-8")

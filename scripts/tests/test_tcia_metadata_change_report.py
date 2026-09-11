@@ -197,6 +197,8 @@ class MetadataChangeReportTest(unittest.TestCase):
             self.assertEqual(accepted.returncode, 0, accepted.stdout + accepted.stderr)
             baseline = json.loads(report.read_text())["baseline_modes"]
             self.assertEqual(baseline[0]["gating_disposition"], "baseline_established_not_compared")
+            self.assertEqual(baseline[0]["prior_release_fingerprint"], "a" * 64)
+            self.assertEqual(baseline[0]["evidence_sha256"], evidence_sha)
             old_public = root / "old-public.sqlite"
             new_public = root / "new-public.sqlite"
             self._public(old_public, [("old", "A", "same")])

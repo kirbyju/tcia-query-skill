@@ -7205,7 +7205,8 @@ def harmonize_low_risk_dataset_facts(conn: sqlite3.Connection) -> dict[str, int]
         """SELECT * FROM clinical_facts
            WHERE lower(replace(short_title, '-', '')) = 'hcctaceseg'
              AND lower(replace(original_column, '_', '')) = 'pathology'
-             AND concept IN ('primary_diagnosis', 'grade')"""
+             AND concept IN ('primary_diagnosis', 'grade')
+           ORDER BY fact_id"""
     ).fetchall()
     for fact in hcc_facts:
         raw_value = clean_value(fact["value_text"])
@@ -7217,6 +7218,13 @@ def harmonize_low_risk_dataset_facts(conn: sqlite3.Connection) -> dict[str, int]
             resolved_normalized,
             fact["original_column"],
         )
+        if canonical_fact_id != fact["fact_id"] and conn.execute(
+            "SELECT 1 FROM clinical_facts WHERE fact_id=?", (canonical_fact_id,)
+        ).fetchone():
+            raise RuntimeError(
+                "HCC-TACE-Seg fact identity migration collides with an existing fact: "
+                f"{fact['fact_id']} -> {canonical_fact_id}"
+            )
         # Early builds reclassified this field in place after deriving fact_id
         # from the generic `pathology -> primary_diagnosis` mapping. Re-key the
         # row from its resolved semantics so incremental reuse and a clean IDC
@@ -8186,6 +8194,8 @@ def validate(db_path: Path) -> dict[str, Any]:
            FROM clinical_sources GROUP BY source_kind"""
     ).fetchall() if not missing_tables else []
     qc_counts = {}
+    qc_fact_orphan_count = 0
+    qc_fact_orphan_examples: list[list[str]] = []
     semantic_errors = 0
     relationship_errors = 0
     bcbm_counts: dict[str, int] = {}
@@ -8200,6 +8210,20 @@ def validate(db_path: Path) -> dict[str, Any]:
                    FROM clinical_qc_findings GROUP BY disposition"""
             )
         }
+        qc_fact_orphan_count = conn.execute(
+            """SELECT COUNT(*) FROM clinical_qc_findings q
+               LEFT JOIN clinical_facts f ON f.fact_id=q.fact_id
+               WHERE q.fact_id IS NOT NULL AND f.fact_id IS NULL"""
+        ).fetchone()[0]
+        qc_fact_orphan_examples = [
+            [str(value or "") for value in row]
+            for row in conn.execute(
+                """SELECT q.finding_id,q.fact_id FROM clinical_qc_findings q
+                   LEFT JOIN clinical_facts f ON f.fact_id=q.fact_id
+                   WHERE q.fact_id IS NOT NULL AND f.fact_id IS NULL
+                   ORDER BY q.finding_id LIMIT 20"""
+            )
+        ]
         semantic_errors = conn.execute(
             """SELECT COUNT(*) FROM clinical_subjects
                WHERE CAST(age_at_diagnosis AS REAL) > 120
@@ -8313,6 +8337,7 @@ def validate(db_path: Path) -> dict[str, Any]:
             and not foreign_key_rows
             and semantic_errors == 0
             and relationship_errors == 0
+            and qc_fact_orphan_count == 0
         ),
         "integrity_check": integrity,
         "foreign_key_violations": foreign_key_rows,
@@ -8321,6 +8346,8 @@ def validate(db_path: Path) -> dict[str, Any]:
         "table_counts": counts,
         "source_priorities": precedence,
         "qc_finding_counts": qc_counts,
+        "qc_fact_orphan_count": qc_fact_orphan_count,
+        "qc_fact_orphan_examples": qc_fact_orphan_examples,
         "semantic_errors": semantic_errors,
         "relationship_errors": relationship_errors,
         "bcbm_counts": bcbm_counts,

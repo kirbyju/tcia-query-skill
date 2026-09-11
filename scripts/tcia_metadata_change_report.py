@@ -542,6 +542,7 @@ def correction_baseline_mode(path: Path) -> dict[str, object]:
             "component": "correction_registry",
             "prior_release_fingerprint": prior["release_fingerprint"],
             "prior_manifest_sha256": prior["manifest_sha256"],
+            "evidence_sha256": evidence_sha,
             **baseline,
         }
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import importlib.util
 import gzip
 import json
@@ -130,6 +131,7 @@ class CorrectionIdentityTests(unittest.TestCase):
         batch = payload["migration_batches"][0]
         self.assertEqual(batch["alias_count"], 105)
         self.assertEqual(batch["effect_count"], 210)
+        self.assertEqual(batch["evidence_sha256"], registry.digest(batch["evidence"]))
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             db = root / "registry.sqlite"
@@ -163,15 +165,55 @@ class CorrectionIdentityTests(unittest.TestCase):
                     ))
                 self.assertEqual(actual, expected)
 
-            tampered = root / "tampered.json"
-            payload["migration_batches"][0]["aliases"][0]["old_fact_id"] = "f" * 64
-            tampered.write_text(json.dumps(payload))
-            with self.assertRaisesRegex(ValueError, "set fingerprints mismatch"):
-                registry.build_registry(
-                    root / "tampered.sqlite",
-                    semantic_explanations=tampered,
-                    observed_at="2026-09-11T16:11:16Z",
-                )
+            mutations = (
+                (
+                    "old-pk",
+                    lambda value: value["migration_batches"][0]["aliases"][0].update(
+                        old_fact_id="f" * 64
+                    ),
+                    "set fingerprints mismatch",
+                ),
+                (
+                    "row-digest",
+                    lambda value: value["migration_batches"][0]["aliases"][0].update(
+                        old_row_digest="f" * 64
+                    ),
+                    "set fingerprints mismatch",
+                ),
+                (
+                    "evidence",
+                    lambda value: value["migration_batches"][0]["evidence"][0].update(
+                        artifact_sha256="f" * 64
+                    ),
+                    "evidence digest mismatch",
+                ),
+                (
+                    "source-scope",
+                    lambda value: value["migration_batches"][0]["source_identity"].update(
+                        short_title="OTHER"
+                    ),
+                    "source identity is not exact",
+                ),
+                (
+                    "negative-scope",
+                    lambda value: value["migration_batches"][0].update(
+                        negative_scope=["no unrelated clinical changes"]
+                    ),
+                    "negative scope is not exact",
+                ),
+            )
+            for name, mutate, message in mutations:
+                with self.subTest(name=name):
+                    changed = copy.deepcopy(payload)
+                    mutate(changed)
+                    tampered = root / f"tampered-{name}.json"
+                    tampered.write_text(json.dumps(changed))
+                    with self.assertRaisesRegex(ValueError, message):
+                        registry.build_registry(
+                            root / f"tampered-{name}.sqlite",
+                            semantic_explanations=tampered,
+                            observed_at="2026-09-11T16:11:16Z",
+                        )
 
     def test_initial_registry_bootstrap_is_exact_auditable_and_one_time(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

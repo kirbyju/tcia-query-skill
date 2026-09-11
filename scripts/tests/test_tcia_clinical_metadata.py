@@ -1278,6 +1278,11 @@ class ClinicalMetadataTest(unittest.TestCase):
                    FROM clinical_facts"""
             ).fetchone()
             self.assertEqual(tuple(second), tuple(first))
+            second_finding = conn.execute(
+                """SELECT finding_id,fact_id,concept FROM clinical_qc_findings
+                   WHERE rule_id='legacy_hcc_reference'"""
+            ).fetchone()
+            self.assertEqual(tuple(second_finding), tuple(migrated_finding))
             CLINICAL.apply_wordpress_dataset_inferences(conn, snapshot)
             CLINICAL.materialize_clinical_qc(conn)
             CLINICAL.materialize_subjects(conn)
@@ -1296,6 +1301,125 @@ class ClinicalMetadataTest(unittest.TestCase):
             ).fetchone()
             self.assertEqual(tuple(grade), ("Well differentiated", "Well differentiated"))
             conn.close()
+
+    def test_hcc_rekey_collision_fails_without_moving_legacy_qc_reference(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            conn = CLINICAL.init_db(Path(directory) / "clinical.sqlite", replace=True)
+            CLINICAL.insert_source(
+                conn, source_id="official:hcc", source_kind="tcia_clinical_download",
+                short_title="HCC-TACE-Seg", source_signature_value="test",
+            )
+            CLINICAL.insert_row_and_facts(
+                conn,
+                source_id="official:hcc", source_kind="tcia_clinical_download",
+                short_title="HCC-TACE-Seg", subject_id="HCC-1",
+                table_name="clinical.csv", row_number=1,
+                row={"PatientID": "HCC-1", "Pathology": "Well differentiated"},
+                facts=[("primary_diagnosis", "Well differentiated", "Pathology", None)],
+            )
+            legacy = conn.execute(
+                "SELECT fact_id,source_row_id FROM clinical_facts"
+            ).fetchone()
+            canonical = CLINICAL.stable_id(
+                legacy[1], "grade", "well differentiated", "Pathology"
+            )
+            conn.execute(
+                """INSERT INTO clinical_facts
+                   SELECT ?,source_row_id,source_id,source_kind,source_priority,
+                          short_title,subject_id,subject_key,'grade',value_text,
+                          value_resolved,value_normalized,value_number,unit,
+                          original_column,evidence_scope,is_inferred,qc_excluded,
+                          qc_status,provenance_json
+                   FROM clinical_facts WHERE fact_id=?""",
+                (canonical, legacy[0]),
+            )
+            CLINICAL.insert_qc_finding(
+                conn, rule_id="legacy", severity="info", disposition="auto_normalize",
+                short_title="HCC-TACE-Seg", fact_id=legacy[0],
+                source_row_id=legacy[1], original_value="Well differentiated",
+                message="legacy reference",
+            )
+            with self.assertRaisesRegex(RuntimeError, "collides with an existing fact"):
+                CLINICAL.harmonize_low_risk_dataset_facts(conn)
+            self.assertIsNotNone(
+                conn.execute("SELECT 1 FROM clinical_facts WHERE fact_id=?", (legacy[0],)).fetchone()
+            )
+            self.assertEqual(
+                conn.execute(
+                    "SELECT fact_id FROM clinical_qc_findings WHERE rule_id='legacy'"
+                ).fetchone()[0],
+                legacy[0],
+            )
+            conn.close()
+
+    def test_hcc_dependent_qc_identity_collision_rolls_back_fact_rekey(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            conn = CLINICAL.init_db(Path(directory) / "clinical.sqlite", replace=True)
+            CLINICAL.insert_source(
+                conn, source_id="official:hcc", source_kind="tcia_clinical_download",
+                short_title="HCC-TACE-Seg", source_signature_value="test",
+            )
+            CLINICAL.insert_row_and_facts(
+                conn,
+                source_id="official:hcc", source_kind="tcia_clinical_download",
+                short_title="HCC-TACE-Seg", subject_id="HCC-1",
+                table_name="clinical.csv", row_number=1,
+                row={"PatientID": "HCC-1", "Pathology": "Well differentiated"},
+                facts=[("primary_diagnosis", "Well differentiated", "Pathology", None)],
+            )
+            legacy = conn.execute(
+                "SELECT fact_id,source_row_id FROM clinical_facts"
+            ).fetchone()
+            canonical = CLINICAL.stable_id(
+                legacy[1], "grade", "well differentiated", "Pathology"
+            )
+            CLINICAL.insert_qc_finding(
+                conn, rule_id="legacy", severity="info", disposition="auto_normalize",
+                short_title="HCC-TACE-Seg", subject_id="HCC-1", fact_id=legacy[0],
+                source_row_id=legacy[1], original_value="Well differentiated",
+                message="legacy reference",
+            )
+            replacement_id = CLINICAL.stable_id(
+                "legacy", "HCC-TACE-Seg", "HCC-1", legacy[1], canonical,
+                "Well differentiated",
+            )
+            conn.execute(
+                """INSERT INTO clinical_qc_findings
+                   SELECT ?, 'collision', severity, disposition, review_status,
+                          short_title, subject_id, subject_key, source_id, source_row_id,
+                          NULL, concept, original_value, resolved_value, unit,
+                          'preexisting collision', provenance_json
+                   FROM clinical_qc_findings WHERE rule_id='legacy'""",
+                (replacement_id,),
+            )
+            with self.assertRaises(sqlite3.IntegrityError):
+                CLINICAL.harmonize_low_risk_dataset_facts(conn)
+            self.assertIsNotNone(
+                conn.execute("SELECT 1 FROM clinical_facts WHERE fact_id=?", (legacy[0],)).fetchone()
+            )
+            self.assertIsNone(
+                conn.execute("SELECT 1 FROM clinical_facts WHERE fact_id=?", (canonical,)).fetchone()
+            )
+            self.assertEqual(
+                conn.execute(
+                    "SELECT fact_id FROM clinical_qc_findings WHERE rule_id='legacy'"
+                ).fetchone()[0],
+                legacy[0],
+            )
+            conn.close()
+
+    def test_validation_rejects_qc_fact_reference_orphans(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            db = Path(directory) / "clinical.sqlite"
+            conn = CLINICAL.init_db(db, replace=True)
+            CLINICAL.insert_qc_finding(
+                conn, rule_id="orphan", severity="high", disposition="manual_review",
+                short_title="TEST", fact_id="missing-fact", message="orphan",
+            )
+            conn.commit()
+            conn.close()
+            with self.assertRaisesRegex(RuntimeError, '"qc_fact_orphan_count": 1'):
+                CLINICAL.validate(db)
 
     def test_wordpress_spelling_only_changes_exact_normalized_matches(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
