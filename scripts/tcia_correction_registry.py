@@ -1561,6 +1561,8 @@ def validate_promotion_waivers(path: Path, *, at: str) -> dict[str, Any]:
                 created = parse_utc(str(row["created_at"]))
                 if expires <= created:
                     raise ValueError("expiry must be after creation")
+                if created > instant:
+                    raise ValueError("waiver is not active yet")
                 if expires <= instant:
                     raise ValueError("waiver is expired")
             except (ValueError, TypeError, json.JSONDecodeError) as exc:

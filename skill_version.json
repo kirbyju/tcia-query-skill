@@ -79,7 +79,7 @@
     "scripts/tcia_aspera_gap_inventory.py": "534d0bceb774ecfe586c6ad0bcfdb83bd19e8fc574663febb1ef9c44cff3317c",
     "scripts/tcia_clinical_metadata.py": "8cb217e887e4539bf317c28fc0d832356dbb7b72d66b4bfd7908cc3727de6c40",
     "scripts/tcia_controlled_access_metadata.py": "4fc84ea9fde576542f1a9315734311684ea7b40c8c335d56ccf4b63c22c6af10",
-    "scripts/tcia_correction_registry.py": "7aeb7c601a912a936d7ec5848d753febe3d6f31547b64a677063f55c675be949",
+    "scripts/tcia_correction_registry.py": "a183b3878f8ea46bcd7fc5ed3f22359c1741bcf5df69dd8bd9cb4fb9919b5f33",
     "scripts/tcia_create_data_retriever_csv.py": "ff351223974fba146ab2e6434b12891c7019c78eefed0d602b0d600f97ebe426",
     "scripts/tcia_freshness.py": "0e66ca570d60b7a14c33bcce9ae776b280b5bd295ff816416b895302b5ca0bef",
     "scripts/tcia_geometry_batch.py": "975a8d9f580af133d1b88a352f6918024b1a51ca18550b6f81aed0bb1ace6b64",
@@ -106,7 +106,7 @@
     "scripts/tcia_wordpress_search.py": "b58dc8c3c4d68d19b9e46e943399fcb0051038587058ad7090a15b1390c88dbe",
     "scripts/tests/test_tcia_artifact_model.py": "df0a8944a2f8459cc1dbcddaa07859c1d91ca62266719d4247fd314c333ef153",
     "scripts/tests/test_tcia_clinical_metadata.py": "ae31b63806bed37046d197801d7ff5c8de9d2de78283f95b83aa4e19865dcf82",
-    "scripts/tests/test_tcia_correction_registry.py": "5bbe04cc60391fd3f07cd6338c7ebced0bd2f3d42f242e458c366ee2b1d21fc3",
+    "scripts/tests/test_tcia_correction_registry.py": "a13a10b9639475ee237afe6f8e27a0fc0efc40e8819b677f507e0d35551995d0",
     "scripts/tests/test_tcia_freshness.py": "fc2d6988581e5cacc2531e648258d352196803d6d7012bf79e6c8ddac4cfce9c",
     "scripts/tests/test_tcia_geometry_artifact_integration.py": "a98093efbb99169bb88e0f38de2328bfe9d4cd4c91cd3630896402fffa8bc885",
     "scripts/tests/test_tcia_geometry_batch.py": "80018e005db6479ae756aef63b44663e9d3191048357b22baa53e231d7aa57f2",
@@ -125,6 +125,6 @@
     "scripts/tests/test_tcia_v2_staging.py": "bdf1ad362ba8615e6e224c4c3efbe3e3c0157899cde3db27a0fd43db46c2aa49"
   },
   "schema_version": 1,
-  "skill_version": "2026.09.11.1",
-  "updated_at_utc": "2026-09-11T14:54:29.645553+00:00"
+  "skill_version": "2026.09.11.4",
+  "updated_at_utc": "2026-09-11T15:18:15.813584+00:00"
 }

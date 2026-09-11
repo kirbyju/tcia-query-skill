@@ -116,6 +116,121 @@ class CorrectionIdentityTests(unittest.TestCase):
             )
             self.assertFalse(unused["ok"])
 
+    def test_promotion_waiver_chronology_and_scope_matrix(self) -> None:
+        instant = "2026-09-11T12:00:00Z"
+        exact_scope = {
+            "validation_id": "release-validation",
+            "evidence_sha256": "a" * 64,
+        }
+
+        def evaluate(
+            *,
+            created_at: str = "2026-09-11T11:30:00Z",
+            expires_at: str = "2026-09-12T11:30:00Z",
+            status: str = "active",
+            scope: dict[str, str] | None = None,
+            duplicate: bool = False,
+        ) -> dict[str, object]:
+            with tempfile.TemporaryDirectory() as directory:
+                db = Path(directory) / "registry.sqlite"
+                registry.build_registry(db, observed_at=instant)
+                with sqlite3.connect(db) as conn:
+                    conn.execute(
+                        "INSERT INTO correction_validations VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                        (
+                            "release-validation", None, "row-change", "v1", "high",
+                            "failed", "{}", "{}", "a" * 64,
+                            "2026-09-11T11:00:00Z", "", "test",
+                        ),
+                    )
+                    conn.commit()
+                waiver = registry.add_waiver(
+                    db,
+                    rule_id="row-change",
+                    owner="release-owner",
+                    reason="reviewed",
+                    scope=exact_scope,
+                    created_at="2026-09-11T11:30:00Z",
+                    expires_at="2026-09-12T11:30:00Z",
+                )
+                with sqlite3.connect(db) as conn:
+                    conn.execute(
+                        """UPDATE correction_waivers
+                           SET created_at=?,expires_at=?,status=?,scope_json=?
+                           WHERE waiver_id=?""",
+                        (
+                            created_at,
+                            expires_at,
+                            status,
+                            json.dumps(exact_scope if scope is None else scope),
+                            waiver["waiver_id"],
+                        ),
+                    )
+                    conn.commit()
+                if duplicate:
+                    registry.add_waiver(
+                        db,
+                        rule_id="row-change",
+                        owner="second-release-owner",
+                        reason="independent duplicate",
+                        scope=exact_scope,
+                        created_at="2026-09-11T11:45:00Z",
+                        expires_at="2026-09-12T11:45:00Z",
+                    )
+                return registry.validate_promotion_waivers(db, at=instant)
+
+        valid_cases = {
+            "already active": {},
+            "created exactly at validation instant": {"created_at": instant},
+        }
+        for label, kwargs in valid_cases.items():
+            with self.subTest(label=label):
+                result = evaluate(**kwargs)
+                self.assertTrue(result["ok"], result["errors"])
+                self.assertEqual(len(result["used_waiver_ids"]), 1)
+
+        invalid_cases = {
+            "future created": {
+                "created_at": "2026-09-11T12:00:00.000001Z",
+                "expires_at": "2026-09-12T12:00:00Z",
+                "error": "not active yet",
+            },
+            "expiry equals instant": {"expires_at": instant, "error": "expired"},
+            "past expiry": {
+                "expires_at": "2026-09-11T11:59:59Z",
+                "error": "expired",
+            },
+            "reversed chronology": {
+                "created_at": "2026-09-11T11:30:00Z",
+                "expires_at": "2026-09-11T11:00:00Z",
+                "error": "expiry must be after creation",
+            },
+            "malformed creation": {"created_at": "not-a-time", "error": "malformed"},
+            "malformed expiry": {"expires_at": "not-a-time", "error": "malformed"},
+            "missing expiry": {"expires_at": "", "error": "malformed"},
+            "revoked": {"status": "revoked", "error": "no active exact waiver"},
+            "empty scope": {"scope": {}, "error": "malformed"},
+            "wrong validation scope": {
+                "scope": {"validation_id": "wrong", "evidence_sha256": "a" * 64},
+                "error": "unused",
+            },
+            "wrong evidence scope": {
+                "scope": {"validation_id": "release-validation", "evidence_sha256": "b" * 64},
+                "error": "unused",
+            },
+            "duplicate exact scope": {"duplicate": True, "error": "duplicate"},
+        }
+        for label, settings in invalid_cases.items():
+            with self.subTest(label=label):
+                kwargs = dict(settings)
+                expected_error = str(kwargs.pop("error"))
+                result = evaluate(**kwargs)
+                self.assertFalse(result["ok"])
+                self.assertTrue(
+                    any(expected_error in error for error in result["errors"]),
+                    result["errors"],
+                )
+
     def test_declarative_semantic_explanation_stays_consumed_across_refresh(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
