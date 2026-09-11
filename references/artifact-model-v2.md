@@ -475,6 +475,12 @@ Never overwrite the source value. Record the method, source artifact, source
 URL/row provenance, confidence, and review status alongside the standardized
 value.
 
+Reviewed derived-metadata corrections may also be projected into the additive
+correction lifecycle described in `references/correction-lifecycle.md`. That
+registry connects immutable source observations, proposal-only machine clues,
+reviewed decision revisions, effects, validations, releases, and waivers. It
+does not replace or rewrite the source-value contracts above.
+
 ## Participant Explorer presentation
 
 Query `agent_participant_search` in the Participant Inventory first; it is the

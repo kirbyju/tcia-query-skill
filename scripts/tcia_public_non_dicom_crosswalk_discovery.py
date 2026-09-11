@@ -110,7 +110,10 @@ def wordpress_evidence(text: str) -> str:
         re.IGNORECASE,
     )
     hits = [sentence for sentence in sentences if keywords.search(sentence)]
-    return clean_text(" ".join(hits[:3]))[:1200]
+    # Keep every bounded matching clause. The correction registry stores these
+    # as separate field-level observations; this compact legacy projection is
+    # retained for the crosswalk CSV and must not silently drop a fourth clue.
+    return clean_text(" ".join(hits))[:6000]
 
 
 def load_identifiers(public: sqlite3.Connection, clinical: sqlite3.Connection) -> tuple[dict[str, set[str]], dict[str, dict[str, set[str]]], dict[str, str]]:

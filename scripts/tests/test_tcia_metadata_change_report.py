@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import sqlite3
+import argparse
+import importlib.util
+import json
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -11,9 +15,117 @@ from pathlib import Path
 
 
 SCRIPT = Path(__file__).resolve().parents[1] / "tcia_metadata_change_report.py"
+SPEC = importlib.util.spec_from_file_location("tcia_metadata_change_report", SCRIPT)
+change_report = importlib.util.module_from_spec(SPEC)
+assert SPEC.loader is not None
+sys.modules[SPEC.name] = change_report
+SPEC.loader.exec_module(change_report)
+REGISTRY_SPEC = importlib.util.spec_from_file_location(
+    "tcia_correction_registry_for_change_report",
+    SCRIPT.parent / "tcia_correction_registry.py",
+)
+registry = importlib.util.module_from_spec(REGISTRY_SPEC)
+assert REGISTRY_SPEC.loader is not None
+sys.modules[REGISTRY_SPEC.name] = registry
+REGISTRY_SPEC.loader.exec_module(registry)
 
 
 class MetadataChangeReportTest(unittest.TestCase):
+    def test_independent_registry_build_times_are_nonsemantic_but_validation_results_are_semantic(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            old = root / "old.sqlite"
+            new = root / "new.sqlite"
+            report = root / "same.json"
+            registry.build_registry(old, observed_at="2026-09-11T00:00:00Z")
+            registry.build_registry(new, observed_at="2026-09-12T00:00:00Z")
+
+            same = subprocess.run(
+                [
+                    sys.executable, str(SCRIPT),
+                    "--correction-new", str(new),
+                    "--correction-old", str(old),
+                    "--json-out", str(report),
+                    "--fail-on-unexplained-high",
+                ],
+                text=True, capture_output=True,
+            )
+            self.assertEqual(same.returncode, 0, same.stdout + same.stderr)
+            baseline = json.loads(report.read_text())
+            correction_rows = [
+                row for row in baseline["comparisons"] if row["asset"] == "correction"
+            ]
+            self.assertTrue(correction_rows)
+            self.assertTrue(all(
+                row["added"] == row["removed"] == row["modified"] == 0
+                for row in correction_rows
+            ))
+            baseline_digest = baseline["report_sha256"]
+            repeated_report = root / "same-repeated.json"
+            repeated = subprocess.run(
+                [
+                    sys.executable, str(SCRIPT),
+                    "--correction-new", str(new),
+                    "--correction-old", str(old),
+                    "--json-out", str(repeated_report),
+                    "--fail-on-unexplained-high",
+                ],
+                text=True, capture_output=True,
+            )
+            self.assertEqual(repeated.returncode, 0, repeated.stdout + repeated.stderr)
+            self.assertEqual(
+                json.loads(repeated_report.read_text())["report_sha256"],
+                baseline_digest,
+            )
+
+            for column, value in (("status", "failed"), ("evidence_sha256", "f" * 64)):
+                with self.subTest(column=column):
+                    changed = root / f"changed-{column}.sqlite"
+                    changed_report = root / f"changed-{column}.json"
+                    shutil.copyfile(new, changed)
+                    with sqlite3.connect(changed) as conn:
+                        conn.execute(
+                            f"UPDATE correction_validations SET {column}=?",
+                            (value,),
+                        )
+                        conn.commit()
+                    result = subprocess.run(
+                        [
+                            sys.executable, str(SCRIPT),
+                            "--correction-new", str(changed),
+                            "--correction-old", str(old),
+                            "--json-out", str(changed_report),
+                            "--fail-on-unexplained-high",
+                        ],
+                        text=True, capture_output=True,
+                    )
+                    self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                    payload = json.loads(changed_report.read_text())
+                    self.assertNotEqual(payload["report_sha256"], baseline_digest)
+                    validation = next(
+                        row for row in payload["comparisons"]
+                        if row["asset"] == "correction"
+                        and row["table"] == "correction_validations"
+                    )
+                    self.assertEqual(validation["modified"], 1)
+                    self.assertTrue(any(
+                        item.startswith("correction.correction_validations:")
+                        for item in payload["unexplained_high_severity"]
+                    ))
+
+    def test_report_digest_is_semantic_across_repeated_runs(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "correction.sqlite"
+            self._correction_meta(path, "2026-09-10T00:00:00Z", "verified_current")
+            values = {f"{name}_{side}": None for name in change_report.PROFILES for side in ("new", "old")}
+            values.update(correction_new=str(path), correction_old=str(path), max_items=20)
+            first_args = argparse.Namespace(**values, generated_at_utc="2026-09-11T00:00:00+00:00")
+            second_args = argparse.Namespace(**values, generated_at_utc="2026-09-12T00:00:00+00:00")
+            first = change_report.build_report(first_args)[2]
+            second = change_report.build_report(second_args)[2]
+            self.assertNotEqual(first["generated_at_utc"], second["generated_at_utc"])
+            self.assertEqual(first["report_sha256"], second["report_sha256"])
+
     def test_reports_new_dataset_and_screening_review(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -70,6 +182,88 @@ class MetadataChangeReportTest(unittest.TestCase):
                 "clinical screening review resolved: ACRIN-6698",
                 result.stdout,
             )
+
+    def test_streaming_digest_detects_equal_count_substitution_and_modification(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            old_public = root / "old-public.sqlite"
+            new_public = root / "new-public.sqlite"
+            report_json = root / "report.json"
+            self._public(old_public, [("a", "A", "raw-a"), ("b", "B", "raw-b")])
+            self._public(new_public, [("a", "A2", "raw-a"), ("c", "C", "raw-c")])
+            result = subprocess.run(
+                [
+                    sys.executable, str(SCRIPT),
+                    "--public-new", str(new_public),
+                    "--public-old", str(old_public),
+                    "--json-out", str(report_json),
+                    "--fail-on-unexplained-high",
+                ],
+                text=True, capture_output=True,
+            )
+            self.assertEqual(result.returncode, 2)
+            payload = json.loads(report_json.read_text())
+            assets = next(
+                row for row in payload["comparisons"]
+                if row["table"] == "public_non_dicom_assets"
+            )
+            self.assertEqual(assets["new"], assets["old"])
+            self.assertEqual(
+                (assets["added"], assets["removed"], assets["modified"]),
+                (1, 1, 1),
+            )
+            self.assertEqual(len(payload["report_sha256"]), 64)
+            self.assertTrue(payload["unexplained_high_severity"])
+
+    def test_correction_meta_ignores_build_time_but_gates_source_health(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            old = root / "old.sqlite"
+            same = root / "same.sqlite"
+            changed = root / "changed.sqlite"
+            self._correction_meta(old, "2026-09-10T00:00:00Z", "verified_current")
+            self._correction_meta(same, "2026-09-11T00:00:00Z", "verified_current")
+            self._correction_meta(changed, "2026-09-11T00:00:00Z", "degraded")
+            unchanged = subprocess.run(
+                [sys.executable, str(SCRIPT), "--correction-new", str(same),
+                 "--correction-old", str(old), "--fail-on-unexplained-high"],
+                text=True, capture_output=True,
+            )
+            self.assertEqual(unchanged.returncode, 0, unchanged.stdout + unchanged.stderr)
+            degraded = subprocess.run(
+                [sys.executable, str(SCRIPT), "--correction-new", str(changed),
+                 "--correction-old", str(old), "--fail-on-unexplained-high"],
+                text=True, capture_output=True,
+            )
+            self.assertEqual(degraded.returncode, 2)
+            self.assertIn("correction.registry_meta", degraded.stdout)
+
+    @staticmethod
+    def _public(path: Path, rows: list[tuple[str, str, str]]) -> None:
+        conn = sqlite3.connect(path)
+        conn.execute(
+            "CREATE TABLE public_non_dicom_assets ("
+            "asset_id TEXT PRIMARY KEY, modality TEXT, raw_values_json TEXT)"
+        )
+        conn.executemany("INSERT INTO public_non_dicom_assets VALUES (?,?,?)", rows)
+        conn.commit()
+        conn.close()
+
+    @staticmethod
+    def _correction_meta(path: Path, generated_at: str, source_health: str) -> None:
+        conn = sqlite3.connect(path)
+        conn.execute("CREATE TABLE registry_meta (key TEXT PRIMARY KEY, value TEXT)")
+        conn.executemany(
+            "INSERT INTO registry_meta VALUES (?,?)",
+            [
+                ("generated_at_utc", generated_at),
+                ("source_health", source_health),
+                ("source_health_json", json.dumps({"status": source_health})),
+                ("active_decision_set_sha256", "same"),
+            ],
+        )
+        conn.commit()
+        conn.close()
 
     @staticmethod
     def _snapshot(path: Path, *, include_new: bool) -> None:

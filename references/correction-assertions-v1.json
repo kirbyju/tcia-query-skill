@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "policy_version": "correction-assertions-v1",
+  "assertions": {
+    "brats_crosswalk": {
+      "evidence": ["references/brats2021_tcia_crosswalk_v1.json"],
+      "expected": {
+        "brats_participants": 1470,
+        "brats_challenge_aliases": 1470,
+        "brats_source_collection_identifiers": 1066,
+        "brats_challenge_only_identifiers": 404,
+        "brats_reviewed_source_crosswalks": 1066
+      }
+    },
+    "reviewed_analysis_result_participants": {
+      "evidence": ["references/reviewed_analysis_result_participants_v1.json"],
+      "expected": {
+        "DICOM-Glioma-SEG": 167,
+        "ISBI-MR-Prostate-2013": 80,
+        "LIDC-annot-NLST501": 501,
+        "MRQy-Quality-Measures": 233,
+        "TCGA-KIRC-Radiogenomics": 103,
+        "TCGA-OV-Proteogenomics": 20,
+        "TCGA-OV-Radiogenomics": 93
+      }
+    },
+    "bcbm_radiogenomics": {
+      "evidence": ["references/public-non-dicom-crosswalk-curation-v1.json"],
+      "expected": {
+        "bcbm_participants": 165,
+        "bcbm_scan_identifiers": 268,
+        "bcbm_files": 3089,
+        "bcbm_source_images": 268,
+        "bcbm_segmentations": 2821,
+        "bcbm_radiomics_assets": 2821
+      }
+    },
+    "tcga_gbm_qi_radiogenomics": {
+      "evidence": ["references/tcga_gbm_qi_radiogenomics_aim_inventory_v1.json"],
+      "expected": {
+        "tcga_gbm_qi_aim_files": 321,
+        "tcga_gbm_qi_participants": 55,
+        "tcga_gbm_qi_series": 111,
+        "tcga_gbm_qi_sop_instances": 193
+      }
+    },
+    "remind_nrrd": {
+      "evidence": ["references/remind_nrrd_inventory_v1.json"],
+      "expected": {
+        "remind_nrrd_download_assets": 1,
+        "remind_nrrd_represented_files": 356,
+        "remind_nrrd_file_assets": 356,
+        "remind_nrrd_participants": 114,
+        "remind_nrrd_whole_tumor_participants": 113,
+        "remind_nrrd_participant_links": 356
+      }
+    },
+    "tcga_lgg_mask": {
+      "evidence": ["references/tcga_lgg_mask_inventory_v1.json"],
+      "expected": {
+        "tcga_lgg_mask_files": 406,
+        "tcga_lgg_mask_participants": 108,
+        "tcga_lgg_mask_source_series": 406,
+        "tcga_lgg_mask_vasari_assets": 1,
+        "tcga_lgg_mask_vasari_participants": 188,
+        "tcga_lgg_mask_vasari_complete_rows": 178,
+        "tcga_lgg_mask_feature_keys": 1,
+        "tcga_lgg_mask_union_participants": 188
+      }
+    }
+  }
+}

@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -15,6 +17,9 @@ from typing import Iterable
 class TableSpec:
     name: str
     keys: tuple[str, ...] = ()
+    severity: str = "review"
+    where: str = ""
+    nonsemantic_columns: tuple[str, ...] = ()
 
 
 PROFILES = {
@@ -43,8 +48,8 @@ PROFILES = {
         TableSpec("clinical_idc_tables", ("collection_id", "table_name")),
         TableSpec("clinical_imaging_subjects"),
         TableSpec("clinical_rows"),
-        TableSpec("clinical_facts"),
-        TableSpec("clinical_subjects"),
+        TableSpec("clinical_facts", ("fact_id",), "high"),
+        TableSpec("clinical_subjects", ("subject_key",), "high"),
         TableSpec(
             "clinical_dataset_inferences", ("short_title", "concept")
         ),
@@ -58,6 +63,49 @@ PROFILES = {
         TableSpec("pathology_file_objects"),
         TableSpec("pathdb_slide_crosswalk"),
         TableSpec("pathology_disparities"),
+    ),
+    "public": (
+        TableSpec("public_non_dicom_assets", ("asset_id",), "high"),
+        TableSpec("public_non_dicom_asset_participants", ("asset_participant_id",), "high"),
+        TableSpec("public_non_dicom_crosswalk_decisions", ("decision_id",), "high"),
+        TableSpec("public_non_dicom_crosswalk_evidence", ("crosswalk_id",), "high"),
+        TableSpec("public_non_dicom_review_issues", ("issue_id",)),
+        TableSpec("public_non_dicom_image_metadata", ("asset_id",), "high"),
+        TableSpec("public_non_dicom_dataset_metadata_notes", ("note_id",)),
+    ),
+    "participant": (
+        TableSpec("participants", ("participant_key",), "high"),
+        TableSpec("participant_identifiers", ("participant_identifier_id",), "high"),
+        TableSpec("participant_assets", ("participant_asset_id",), "high"),
+        TableSpec("dataset_assets_without_participant_crosswalk", ("dataset_asset_id",)),
+        TableSpec("participant_link_issues", ("issue_id",)),
+        TableSpec("participant_identity_evidence", ("identity_evidence_id",), "high"),
+        TableSpec("participant_source_links", ("participant_source_link_id",), "high"),
+    ),
+    "correction": (
+        TableSpec(
+            "registry_meta", ("key",), "high",
+            "key IN ('source_health','source_health_json','active_decision_set_sha256')",
+        ),
+        TableSpec("correction_observations", ("observation_id",)),
+        TableSpec("correction_cases", ("case_id",), "high"),
+        TableSpec("correction_proposals", ("proposal_id",)),
+        TableSpec("correction_decisions", ("revision_id",), "high"),
+        TableSpec("correction_effects", ("effect_id",), "high"),
+        TableSpec(
+            "correction_validations",
+            ("validation_id",),
+            "high",
+            nonsemantic_columns=("executed_at", "observed_at_utc"),
+        ),
+        TableSpec("correction_releases", ("release_fingerprint",), "high"),
+        TableSpec(
+            "correction_release_revisions",
+            ("release_fingerprint", "revision_id"),
+            "high",
+        ),
+        TableSpec("correction_waivers", ("waiver_id",), "high"),
+        TableSpec("agent_release_evidence_health", ("release_fingerprint",), "high"),
     ),
 }
 
@@ -78,12 +126,13 @@ def object_columns(conn: sqlite3.Connection, name: str) -> set[str]:
         return set()
 
 
-def row_count(conn: sqlite3.Connection, name: str) -> int | None:
-    if not object_columns(conn, name):
+def row_count(conn: sqlite3.Connection, spec: TableSpec) -> int | None:
+    if not object_columns(conn, spec.name):
         return None
+    where = f" WHERE {spec.where}" if spec.where else ""
     return int(
         conn.execute(
-            f"SELECT COUNT(*) FROM {quote_identifier(name)}"
+            f"SELECT COUNT(*) FROM {quote_identifier(spec.name)}{where}"
         ).fetchone()[0]
     )
 
@@ -99,9 +148,11 @@ def key_rows(
         return []
     selected = ", ".join(quote_identifier(key) for key in spec.keys)
     sql = (
-        f"SELECT DISTINCT {selected} FROM {quote_identifier(spec.name)} "
-        f"ORDER BY {selected}"
+        f"SELECT DISTINCT {selected} FROM {quote_identifier(spec.name)}"
     )
+    if spec.where:
+        sql += f" WHERE {spec.where}"
+    sql += f" ORDER BY {selected}"
     if limit is not None:
         sql += f" LIMIT {int(limit)}"
     return [
@@ -112,6 +163,70 @@ def key_rows(
 
 def format_key(row: Iterable[str]) -> str:
     return " / ".join(value or "(blank)" for value in row)
+
+
+def canonical_value(value: object) -> object:
+    if isinstance(value, bytes):
+        return {"bytes_sha256": hashlib.sha256(value).hexdigest(), "bytes": len(value)}
+    return value
+
+
+def keyed_row_digests(
+    conn: sqlite3.Connection, spec: TableSpec
+) -> Iterable[tuple[tuple[str, ...], str]]:
+    """Stream stable keys and complete row digests in key order."""
+    columns = [
+        str(row[1])
+        for row in conn.execute(f"PRAGMA table_info({quote_identifier(spec.name)})")
+        if str(row[1]) not in spec.nonsemantic_columns
+    ]
+    if not spec.keys or not set(spec.keys).issubset(columns):
+        return
+    selected = ", ".join(quote_identifier(name) for name in columns)
+    ordering = ", ".join(quote_identifier(name) for name in spec.keys)
+    sql = f"SELECT {selected} FROM {quote_identifier(spec.name)}"
+    if spec.where:
+        sql += f" WHERE {spec.where}"
+    sql += f" ORDER BY {ordering}"
+    for row in conn.execute(sql):
+        values = dict(zip(columns, row))
+        key = tuple("" if values[name] is None else str(values[name]) for name in spec.keys)
+        payload = json.dumps(
+            {name: canonical_value(values[name]) for name in columns},
+            ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+        ).encode("utf-8")
+        yield key, hashlib.sha256(payload).hexdigest()
+
+
+def compare_keyed_rows(
+    new: sqlite3.Connection, old: sqlite3.Connection, spec: TableSpec,
+    *, max_items: int,
+) -> tuple[int, int, int, list[tuple[str, tuple[str, ...]]]]:
+    new_rows = iter(keyed_row_digests(new, spec))
+    old_rows = iter(keyed_row_digests(old, spec))
+    new_item = next(new_rows, None)
+    old_item = next(old_rows, None)
+    added = removed = modified = 0
+    examples: list[tuple[str, tuple[str, ...]]] = []
+    while new_item is not None or old_item is not None:
+        if old_item is None or (new_item is not None and new_item[0] < old_item[0]):
+            added += 1
+            if len(examples) < max_items:
+                examples.append(("added", new_item[0]))
+            new_item = next(new_rows, None)
+        elif new_item is None or old_item[0] < new_item[0]:
+            removed += 1
+            if len(examples) < max_items:
+                examples.append(("removed", old_item[0]))
+            old_item = next(old_rows, None)
+        else:
+            if new_item[1] != old_item[1]:
+                modified += 1
+                if len(examples) < max_items:
+                    examples.append(("modified", new_item[0]))
+            new_item = next(new_rows, None)
+            old_item = next(old_rows, None)
+    return added, removed, modified, examples
 
 
 def screening_reviews(conn: sqlite3.Connection) -> dict[str, dict[str, str]]:
@@ -198,31 +313,31 @@ def compare_asset(
     old_path: Path | None,
     *,
     max_items: int,
-) -> tuple[list[dict[str, object]], list[str], list[str]]:
+) -> tuple[list[dict[str, object]], list[str], list[str], list[str]]:
     new = sqlite3.connect(new_path)
     old = sqlite3.connect(old_path) if old_path and old_path.exists() else None
     rows: list[dict[str, object]] = []
     details: list[str] = []
     warnings: list[str] = []
+    unexplained_high: list[str] = []
     for spec in PROFILES[name]:
-        new_count = row_count(new, spec.name)
+        new_count = row_count(new, spec)
         if new_count is None:
             continue
-        old_count = row_count(old, spec.name) if old else None
+        old_count = row_count(old, spec) if old else None
         old_display = 0 if old_count is None else old_count
         added = max(new_count - old_display, 0)
         removed = max(old_display - new_count, 0)
-        new_keys: list[tuple[str, ...]] = []
+        modified = 0
+        changed_keys: list[tuple[str, tuple[str, ...]]] = []
         if spec.keys:
             if old is None or old_count is None:
-                new_keys = key_rows(new, spec, limit=max_items)
+                changed_keys = [("added", item) for item in key_rows(new, spec, limit=max_items)]
                 added = new_count
-            elif new_count + old_count <= 250_000:
-                new_set = set(key_rows(new, spec))
-                old_set = set(key_rows(old, spec))
-                added = len(new_set - old_set)
-                removed = len(old_set - new_set)
-                new_keys = sorted(new_set - old_set)[:max_items]
+            else:
+                added, removed, modified, changed_keys = compare_keyed_rows(
+                    new, old, spec, max_items=max_items
+                )
         rows.append(
             {
                 "asset": name,
@@ -231,18 +346,32 @@ def compare_asset(
                 "new": new_count,
                 "added": added,
                 "removed": removed,
+                "modified": modified,
+                "severity": spec.severity,
             }
         )
-        if new_keys:
+        if changed_keys:
             details.append(
                 f"**{name} · {spec.name}**\n\n"
-                + "\n".join(f"- `{format_key(row)}`" for row in new_keys)
+                + "\n".join(
+                    f"- {kind}: `{format_key(row)}`" for kind, row in changed_keys
+                )
             )
-        if added:
-            warnings.append(
-                f"{name}: {spec.name} added {added:,} row"
-                f"{'s' if added != 1 else ''}"
-            )
+        if added or removed or modified:
+            if added and not removed and not modified:
+                warnings.append(
+                    f"{name}: {spec.name} added {added:,} row"
+                    f"{'s' if added != 1 else ''}"
+                )
+            else:
+                warnings.append(
+                    f"{name}: {spec.name} added {added:,}, removed {removed:,}, "
+                    f"modified {modified:,} rows"
+                )
+            if spec.severity == "high" and old is not None:
+                unexplained_high.append(
+                    f"{name}.{spec.name}: added={added}, removed={removed}, modified={modified}"
+                )
     if old is None:
         warnings.append(
             f"{name}: no previous SQLite was available; report uses a new baseline"
@@ -250,10 +379,10 @@ def compare_asset(
     new.close()
     if old:
         old.close()
-    return rows, details, warnings
+    return rows, details, warnings, unexplained_high
 
 
-def build_report(args: argparse.Namespace) -> tuple[str, list[str]]:
+def build_report(args: argparse.Namespace) -> tuple[str, list[str], dict[str, object]]:
     assets: list[tuple[str, Path, Path | None]] = []
     for name in PROFILES:
         new_value = getattr(args, f"{name}_new")
@@ -272,13 +401,15 @@ def build_report(args: argparse.Namespace) -> tuple[str, list[str]]:
     comparison_rows: list[dict[str, object]] = []
     detail_blocks: list[str] = []
     warnings: list[str] = []
+    unexplained_high: list[str] = []
     for name, new_path, old_path in assets:
-        rows, details, asset_warnings = compare_asset(
+        rows, details, asset_warnings, asset_high = compare_asset(
             name, new_path, old_path, max_items=args.max_items
         )
         comparison_rows.extend(rows)
         detail_blocks.extend(details)
         warnings.extend(asset_warnings)
+        unexplained_high.extend(asset_high)
 
     review_rows: list[tuple[str, dict[str, str], bool]] = []
     resolution_rows: list[tuple[str, dict[str, str], bool]] = []
@@ -322,14 +453,15 @@ def build_report(args: argparse.Namespace) -> tuple[str, list[str]]:
         + datetime.now(timezone.utc).replace(microsecond=0).isoformat()
         + ". Additions are compared with the previously published release.",
         "",
-        "| Asset | Table/view | Previous | New | Added | Removed |",
-        "| --- | --- | ---: | ---: | ---: | ---: |",
+        "| Asset | Table/view | Previous | New | Added | Removed | Modified | Severity |",
+        "| --- | --- | ---: | ---: | ---: | ---: | ---: | --- |",
     ]
     for row in comparison_rows:
         previous = "baseline" if row["old"] is None else f"{row['old']:,}"
         lines.append(
             f"| {row['asset']} | `{row['table']}` | {previous} | "
-            f"{row['new']:,} | {row['added']:,} | {row['removed']:,} |"
+            f"{row['new']:,} | {row['added']:,} | {row['removed']:,} | "
+            f"{row['modified']:,} | {row['severity']} |"
         )
     if review_rows:
         lines.extend(
@@ -374,7 +506,24 @@ def build_report(args: argparse.Namespace) -> tuple[str, list[str]]:
         lines.extend(block + "\n" for block in detail_blocks)
     if not warnings:
         lines.extend(["", "No monitored additions or new review flags."])
-    return "\n".join(lines).rstrip() + "\n", warnings
+    if unexplained_high:
+        lines.extend(["", "### Unexplained high-severity semantic changes", ""])
+        lines.extend(f"- `{item}`" for item in unexplained_high)
+    semantic_payload: dict[str, object] = {
+        "schema_version": 2,
+        "comparisons": comparison_rows,
+        "warnings": warnings,
+        "unexplained_high_severity": unexplained_high,
+    }
+    summary: dict[str, object] = {
+        **semantic_payload,
+        "generated_at_utc": getattr(args, "generated_at_utc", None)
+        or datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+    }
+    summary["report_sha256"] = hashlib.sha256(
+        json.dumps(semantic_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return "\n".join(lines).rstrip() + "\n", warnings, summary
 
 
 def parse_args() -> argparse.Namespace:
@@ -383,15 +532,17 @@ def parse_args() -> argparse.Namespace:
         parser.add_argument(f"--{name}-new")
         parser.add_argument(f"--{name}-old")
     parser.add_argument("--markdown-out")
+    parser.add_argument("--json-out")
     parser.add_argument("--max-items", type=int, default=20)
     parser.add_argument("--github-actions", action="store_true")
+    parser.add_argument("--fail-on-unexplained-high", action="store_true")
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
     try:
-        markdown, warnings = build_report(args)
+        markdown, warnings, summary = build_report(args)
     except (RuntimeError, OSError, sqlite3.Error) as exc:
         print(f"error: {exc}")
         return 1
@@ -400,12 +551,21 @@ def main() -> int:
         path = Path(args.markdown_out)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(markdown, encoding="utf-8")
+    if args.json_out:
+        path = Path(args.json_out)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     if args.github_actions:
         for warning_text in warnings:
             print(
                 "::warning title=TCIA metadata review::"
                 + github_escape(warning_text)
             )
+    if args.fail_on_unexplained_high and summary["unexplained_high_severity"]:
+        print("error: unexplained high-severity semantic changes are present")
+        return 2
+    eyeball = summary.get("report_sha256")
+    print(f"report_sha256={eyeball}")
     return 0
 
 

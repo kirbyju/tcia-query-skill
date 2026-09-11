@@ -28,6 +28,17 @@ discovery = load("tcia_public_non_dicom_crosswalk_discovery")
 
 
 class VocabularyTests(unittest.TestCase):
+    def test_correction_assertions_are_declarative_and_evidence_linked(self):
+        assertions = public.load_correction_assertions()
+        self.assertEqual(assertions["brats_crosswalk"]["expected"]["brats_participants"], 1470)
+        self.assertEqual(
+            assertions["reviewed_analysis_result_participants"]["expected"]["LIDC-annot-NLST501"],
+            501,
+        )
+        self.assertTrue(
+            all(item["evidence"] and item["expected"] for item in assertions.values())
+        )
+
     def test_participant_facets_separate_category_type_and_format(self):
         self.assertEqual(
             participants.derived_data_categories(
@@ -125,6 +136,13 @@ class VocabularyTests(unittest.TestCase):
             ("12", "delimiter_bounded_path_token"),
             discovery.match_path("patches/12/44009.png", index),
         )
+
+    def test_wordpress_evidence_retains_more_than_three_matching_clauses(self):
+        evidence = discovery.wordpress_evidence(
+            "Patient ID is in the folder. File name contains the case ID. "
+            "One file exists per subject. The directory uses the patient ID."
+        )
+        self.assertIn("The directory uses the patient ID", evidence)
 
     def test_managed_system_routing(self):
         self.assertEqual(

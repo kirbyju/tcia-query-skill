@@ -667,6 +667,7 @@ def verify_field_provenance_reconstruction(
     audit_database: Path,
     *,
     sample_size: int = 1000,
+    full_content: bool = False,
 ) -> dict[str, Any]:
     errors: list[str] = []
     with sqlite3.connect(source_database) as source, sqlite3.connect(
@@ -709,32 +710,54 @@ def verify_field_provenance_reconstruction(
             )
         total = expected_counts[0]
         step = max(1, total // max(1, sample_size))
-        sampled = list(
-            source.execute(
+        if full_content:
+            selected_rows = source.execute(
                 "SELECT asset_id, field_provenance_json "
                 "FROM public_non_dicom_image_metadata "
                 "WHERE field_provenance_json NOT IN ('', '{}', 'null') "
-                "AND rowid % ? = 0 ORDER BY rowid LIMIT ?",
-                (step, sample_size),
+                "ORDER BY asset_id"
             )
-        )
+        else:
+            selected_rows = list(
+                source.execute(
+                    "SELECT asset_id, field_provenance_json "
+                    "FROM public_non_dicom_image_metadata "
+                    "WHERE field_provenance_json NOT IN ('', '{}', 'null') "
+                    "AND rowid % ? = 0 ORDER BY rowid LIMIT ?",
+                    (step, sample_size),
+                )
+            )
         mismatches: list[str] = []
-        for entity_id, payload_json in sampled:
+        source_content = hashlib.sha256()
+        audit_content = hashlib.sha256()
+        checked_documents = 0
+        for entity_id, payload_json in selected_rows:
+            checked_documents += 1
             expected = json.loads(str(payload_json))
             actual = reconstruct_field_provenance(
                 audit_conn,
                 entity_table="public_non_dicom_image_metadata",
                 entity_id=str(entity_id),
             )
+            if full_content:
+                source_content.update(
+                    canonical_json([str(entity_id), expected]).encode("utf-8")
+                )
+                audit_content.update(
+                    canonical_json([str(entity_id), actual]).encode("utf-8")
+                )
             if actual != expected:
-                mismatches.append(str(entity_id))
-                if len(mismatches) >= 20:
+                if len(mismatches) < 20:
+                    mismatches.append(str(entity_id))
+                if not full_content and len(mismatches) >= 20:
                     break
         if mismatches:
             errors.append(
-                "sample reconstruction mismatches: " + ", ".join(mismatches)
+                ("full-content" if full_content else "sample")
+                + " reconstruction mismatches: "
+                + ", ".join(mismatches)
             )
-    return {
+    result = {
         "ok": not errors,
         "errors": errors,
         "source_counts": {
@@ -747,8 +770,16 @@ def verify_field_provenance_reconstruction(
             "field_decisions": audit_counts[1],
             "source_links": audit_counts[2],
         },
-        "sampled_documents": len(sampled),
+        "sampled_documents": checked_documents,
+        "validation_scope": "full_content" if full_content else "deterministic_sample",
     }
+    if full_content:
+        result["source_content_sha256"] = source_content.hexdigest()
+        result["audit_content_sha256"] = audit_content.hexdigest()
+        if result["source_content_sha256"] != result["audit_content_sha256"]:
+            result["ok"] = False
+            result["errors"].append("full reconstruction content digest mismatch")
+    return result
 
 
 def materialize_assembly_from_companions(
@@ -1679,6 +1710,7 @@ def parser() -> argparse.ArgumentParser:
     reconstruction.add_argument("--source-db", required=True)
     reconstruction.add_argument("--audit-db", required=True)
     reconstruction.add_argument("--sample-size", type=int, default=1000)
+    reconstruction.add_argument("--full-content", action="store_true")
     reconstruction.add_argument("--out")
     materialize = sub.add_parser(
         "materialize-assembly",
@@ -1703,6 +1735,7 @@ def main() -> int:
             Path(args.source_db),
             Path(args.audit_db),
             sample_size=args.sample_size,
+            full_content=args.full_content,
         )
         if args.out:
             output = Path(args.out)

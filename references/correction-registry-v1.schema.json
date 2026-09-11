@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/kirbyju/tcia-query-skill/references/correction-registry-v1.schema.json",
+  "title": "TCIA derived-metadata correction decision revision",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "decision_id",
+    "revision_id",
+    "case_id",
+    "status",
+    "reviewer",
+    "reviewed_at",
+    "rationale",
+    "resolution",
+    "scope",
+    "negative_scope",
+    "expected_effects",
+    "evidence_observation_ids",
+    "stale_status",
+    "source_kind",
+    "policy_version"
+  ],
+  "properties": {
+    "decision_id": {"type": "string", "pattern": "^decision_[0-9a-f]{24}$"},
+    "revision_id": {"type": "string", "pattern": "^revision_[0-9a-f]{24}$"},
+    "case_id": {"type": "string", "pattern": "^case_[0-9a-f]{24}$"},
+    "status": {
+      "enum": ["proposed", "needs_review", "approved", "rejected", "superseded", "withdrawn", "stale"]
+    },
+    "reviewer": {"type": "string", "minLength": 1},
+    "approver": {"type": "string"},
+    "reviewed_at": {"type": "string", "minLength": 1},
+    "approved_at": {"type": "string"},
+    "rationale": {"type": "string", "minLength": 1},
+    "resolution": {"type": "object"},
+    "scope": {
+      "type": "object",
+      "required": ["dataset_type", "short_title", "decision_type", "target"]
+    },
+    "negative_scope": {"type": "object", "minProperties": 1},
+    "expected_effects": {"type": "array", "items": {"type": "object"}, "minItems": 1},
+    "evidence_observation_ids": {
+      "type": "array",
+      "items": {"type": "string", "pattern": "^observation_[0-9a-f]{24}$"},
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "supersedes_revision_id": {
+      "type": ["string", "null"],
+      "pattern": "^revision_[0-9a-f]{24}$"
+    },
+    "stale_status": {"enum": ["current", "stale_source_changed", "evidence_unreachable"]},
+    "source_kind": {"type": "string", "minLength": 1},
+    "policy_version": {"type": "string", "minLength": 1}
+  }
+}

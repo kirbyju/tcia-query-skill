@@ -448,10 +448,15 @@ class V2AuditSplitTests(unittest.TestCase):
                     )
                 )
             reconstruction = audit.verify_field_provenance_reconstruction(
-                source, audit_database, sample_size=2
+                source, audit_database, sample_size=2, full_content=True
             )
             self.assertTrue(reconstruction["ok"], reconstruction["errors"])
             self.assertEqual(reconstruction["sampled_documents"], 2)
+            self.assertEqual(reconstruction["validation_scope"], "full_content")
+            self.assertEqual(
+                reconstruction["source_content_sha256"],
+                reconstruction["audit_content_sha256"],
+            )
             manifest = audit.build_audit_manifest(
                 audit_database, None, artifact="public_non_dicom"
             )

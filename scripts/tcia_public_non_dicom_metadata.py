@@ -78,6 +78,7 @@ DEFAULT_TCGA_GBM_QI_AIM_INVENTORY = SKILL_ROOT / "references" / "tcga_gbm_qi_rad
 DEFAULT_TCGA_GBM_QI_AIM_PROVENANCE = SKILL_ROOT / "references" / "tcga_gbm_qi_radiogenomics_aim_inventory_v1.json"
 DEFAULT_REVIEWED_PARTICIPANT_INVENTORY = SKILL_ROOT / "references" / "reviewed_analysis_result_participants_v1.csv"
 DEFAULT_REVIEWED_PARTICIPANT_PROVENANCE = SKILL_ROOT / "references" / "reviewed_analysis_result_participants_v1.json"
+DEFAULT_CORRECTION_ASSERTIONS = SKILL_ROOT / "references" / "correction-assertions-v1.json"
 DEFAULT_DB = SKILL_ROOT / "cache" / "public_non_dicom_metadata.sqlite"
 DEFAULT_MANIFEST = SKILL_ROOT / "cache" / "public_non_dicom_metadata_manifest.json"
 DEFAULT_RELEASE_TAG = "tcia-metadata-v2-latest"
@@ -85,6 +86,20 @@ DEFAULT_REPOSITORY = "kirbyju/tcia-query-skill"
 DB_ASSET = "public_non_dicom_metadata.sqlite.gz"
 MANIFEST_ASSET = "public_non_dicom_metadata_manifest.json"
 SCHEMA_VERSION = 8
+
+
+def load_correction_assertions(
+    path: Path = DEFAULT_CORRECTION_ASSERTIONS,
+) -> dict[str, dict[str, Any]]:
+    """Load evidence-linked regression expectations without changing source rows."""
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assertions = payload.get("assertions")
+    if payload.get("schema_version") != 1 or not isinstance(assertions, dict):
+        raise RuntimeError(f"Invalid correction assertion registry: {path}")
+    for name, assertion in assertions.items():
+        if not assertion.get("evidence") or not isinstance(assertion.get("expected"), dict):
+            raise RuntimeError(f"Correction assertion {name} lacks evidence or expectations")
+    return assertions
 
 GEOMETRY_CAPABLE_FORMATS = {"NIFTI", "MHA", "MHD", "NRRD"}
 GEOMETRY_STATUSES = {
@@ -7094,6 +7109,7 @@ def validate_database(path: Path) -> dict[str, Any]:
             ).fetchone()[0],
         }
         if counts["assets"] > 100000:
+            correction_assertions = load_correction_assertions()
             brats_counts = {
                 "brats_participants": conn.execute(
                     "SELECT COUNT(DISTINCT subject_id) FROM public_non_dicom_asset_participants WHERE short_title = ?",
@@ -7117,13 +7133,7 @@ def validate_database(path: Path) -> dict[str, Any]:
                 ).fetchone()[0],
             }
             counts.update(brats_counts)
-            expected_brats = {
-                "brats_participants": 1470,
-                "brats_challenge_aliases": 1470,
-                "brats_source_collection_identifiers": 1066,
-                "brats_challenge_only_identifiers": 404,
-                "brats_reviewed_source_crosswalks": 1066,
-            }
+            expected_brats = correction_assertions["brats_crosswalk"]["expected"]
             for name, expected in expected_brats.items():
                 if name == "brats_reviewed_source_crosswalks" and provenance_in_companion:
                     continue
@@ -7131,15 +7141,9 @@ def validate_database(path: Path) -> dict[str, Any]:
                     errors.append(
                         f"BraTS crosswalk coverage regression: {name}={brats_counts[name]} != {expected}"
                     )
-            for short_title, expected in {
-                "DICOM-Glioma-SEG": 167,
-                "ISBI-MR-Prostate-2013": 80,
-                "LIDC-annot-NLST501": 501,
-                "MRQy-Quality-Measures": 233,
-                "TCGA-KIRC-Radiogenomics": 103,
-                "TCGA-OV-Proteogenomics": 20,
-                "TCGA-OV-Radiogenomics": 93,
-            }.items():
+            for short_title, expected in correction_assertions[
+                "reviewed_analysis_result_participants"
+            ]["expected"].items():
                 actual = conn.execute(
                     "SELECT COUNT(DISTINCT subject_id) "
                     "FROM public_non_dicom_asset_participants WHERE short_title=?",
@@ -7181,14 +7185,7 @@ def validate_database(path: Path) -> dict[str, Any]:
                 ).fetchone()[0],
             }
             counts.update(bcbm_counts)
-            expected_bcbm = {
-                "bcbm_participants": 165,
-                "bcbm_scan_identifiers": 268,
-                "bcbm_files": 3089,
-                "bcbm_source_images": 268,
-                "bcbm_segmentations": 2821,
-                "bcbm_radiomics_assets": 2821,
-            }
+            expected_bcbm = correction_assertions["bcbm_radiogenomics"]["expected"]
             for name, expected in expected_bcbm.items():
                 if bcbm_counts[name] != expected:
                     errors.append(
@@ -7220,12 +7217,9 @@ def validate_database(path: Path) -> dict[str, Any]:
                 ).fetchone()[0],
             }
             counts.update(tcga_gbm_qi_counts)
-            for name, expected in {
-                "tcga_gbm_qi_aim_files": 321,
-                "tcga_gbm_qi_participants": 55,
-                "tcga_gbm_qi_series": 111,
-                "tcga_gbm_qi_sop_instances": 193,
-            }.items():
+            for name, expected in correction_assertions[
+                "tcga_gbm_qi_radiogenomics"
+            ]["expected"].items():
                 if provenance_in_companion and name in {
                     "tcga_gbm_qi_series",
                     "tcga_gbm_qi_sop_instances",
@@ -7317,14 +7311,7 @@ def validate_database(path: Path) -> dict[str, Any]:
                 ).fetchone()[0],
             }
             counts.update(remind_counts)
-            for name, expected in {
-                "remind_nrrd_download_assets": 1,
-                "remind_nrrd_represented_files": 356,
-                "remind_nrrd_file_assets": 356,
-                "remind_nrrd_participants": 114,
-                "remind_nrrd_whole_tumor_participants": 113,
-                "remind_nrrd_participant_links": 356,
-            }.items():
+            for name, expected in correction_assertions["remind_nrrd"]["expected"].items():
                 if remind_counts[name] != expected:
                     errors.append(
                         f"ReMIND NRRD coverage regression: {name}={remind_counts[name]} != {expected}"
@@ -7384,16 +7371,7 @@ def validate_database(path: Path) -> dict[str, Any]:
                 ).fetchone()[0],
             }
             counts.update(tcga_lgg_mask_counts)
-            for name, expected in {
-                "tcga_lgg_mask_files": 406,
-                "tcga_lgg_mask_participants": 108,
-                "tcga_lgg_mask_source_series": 406,
-                "tcga_lgg_mask_vasari_assets": 1,
-                "tcga_lgg_mask_vasari_participants": 188,
-                "tcga_lgg_mask_vasari_complete_rows": 178,
-                "tcga_lgg_mask_feature_keys": 1,
-                "tcga_lgg_mask_union_participants": 188,
-            }.items():
+            for name, expected in correction_assertions["tcga_lgg_mask"]["expected"].items():
                 if tcga_lgg_mask_counts[name] != expected:
                     errors.append(
                         "TCGA-LGG-Mask coverage regression: "
