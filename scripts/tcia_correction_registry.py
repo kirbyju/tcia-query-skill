@@ -844,13 +844,19 @@ def make_reviewed_decision(
             raise ValueError("superseded revision must exist and share decision_id")
     for index, effect in enumerate(record["expected_effects"]):
         effect_id = stable_id("effect", record["revision_id"], index, effect)
+        before_value = effect.get("before")
+        after_value = effect.get("after")
+        before_sha = str(effect.get("before_sha256") or "")
+        after_sha = str(effect.get("after_sha256") or "")
+        if "after_sha256" not in effect and "after" in effect:
+            after_sha = digest(after_value)
         conn.execute(
             "INSERT OR IGNORE INTO correction_effects VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (effect_id, record["revision_id"], effect.get("artifact", "derived_metadata"),
              effect.get("entity_table", ""), effect.get("entity_id", ""),
              effect.get("field_name", ""), effect.get("effect_kind", "resolve"),
-             "", digest(effect.get("after")), "null",
-             canonical_json(effect.get("after")), "expected", ""),
+             before_sha, after_sha, canonical_json(before_value),
+             canonical_json(after_value), effect.get("effect_status", "expected"), ""),
         )
     return record["revision_id"]
 
@@ -928,8 +934,8 @@ def migrate_semantic_explanations(conn: sqlite3.Connection, path: Path) -> int:
     if not path.exists():
         return 0
     payload = json.loads(path.read_text(encoding="utf-8"))
-    if payload.get("schema_version") != 1 or not isinstance(payload.get("explanations"), list):
-        raise ValueError("semantic explanation input must use schema_version 1")
+    if payload.get("schema_version") not in {1, 2} or not isinstance(payload.get("explanations"), list):
+        raise ValueError("semantic explanation input must use schema_version 1 or 2")
     count = 0
     for item in payload["explanations"]:
         required = {
@@ -989,6 +995,144 @@ def migrate_semantic_explanations(conn: sqlite3.Connection, path: Path) -> int:
              kind, before, after, str(effect[0])),
         )
         count += 1
+    for batch in payload.get("migration_batches") or []:
+        required = {
+            "migration_id", "artifact", "entity_table", "primary_key_column",
+            "reviewer", "approved_at", "rationale", "evidence", "aliases",
+            "alias_count", "effect_count", "set_fingerprints", "source_identity",
+            "negative_scope",
+        }
+        if not isinstance(batch, dict) or not required.issubset(batch):
+            raise ValueError("semantic migration batch is missing required fields")
+        if (
+            batch["migration_id"] != "hcc-tace-seg-pathology-grade-fact-id-v1"
+            or
+            batch["artifact"] != "clinical"
+            or batch["entity_table"] != "clinical_facts"
+            or batch["primary_key_column"] != "fact_id"
+        ):
+            raise ValueError("semantic migration batch target is not exact")
+        parse_utc(str(batch["approved_at"]))
+        aliases = batch["aliases"]
+        if (
+            not isinstance(aliases, list)
+            or len(aliases) != int(batch["alias_count"])
+            or int(batch["effect_count"]) != 2 * len(aliases)
+        ):
+            raise ValueError("semantic migration alias count mismatch")
+        source_identity = batch["source_identity"]
+        if source_identity != {
+            "short_title": "HCC-TACE-Seg",
+            "source_kind": "idc_clinical",
+            "source_id": "idc-clinical:hcctaceseg:hcc_tace_seg_clinical",
+            "idc_logical_version": "v24",
+            "prior_package_version": "24.2.2",
+            "triggering_package_version": "24.2.0",
+            "clinical_table_content_sha256": "60247e48abea22beaaab03b3d7a19c23a536c748d2a40190523ecdfe7941710a",
+        }:
+            raise ValueError("semantic migration source identity is not exact")
+        expected_negative_scope = [
+            "no raw clinical value changes", "no unrelated clinical changes",
+            "no volatile-field suppression", "no blanket first-registry approval",
+        ]
+        if batch["negative_scope"] != expected_negative_scope:
+            raise ValueError("semantic migration negative scope is not exact")
+        evidence = batch["evidence"]
+        if not isinstance(evidence, list) or len(evidence) < 4:
+            raise ValueError("semantic migration evidence is incomplete")
+        for item in evidence:
+            if (
+                not isinstance(item, dict)
+                or not str(item.get("source_url") or item.get("source_record_id") or "")
+                or not re.fullmatch(r"[0-9a-f]{64}", str(item.get("artifact_sha256") or ""))
+            ):
+                raise ValueError("semantic migration evidence identity is invalid")
+        required_alias = {
+            "old_fact_id", "new_fact_id", "old_row_digest", "new_row_digest",
+            "source_row_id", "row_sha256", "subject_id", "value_text", "qc_status",
+        }
+        for alias in aliases:
+            if not isinstance(alias, dict) or not required_alias.issubset(alias):
+                raise ValueError("semantic migration alias is incomplete")
+            for field in (
+                "old_fact_id", "new_fact_id", "old_row_digest", "new_row_digest",
+                "source_row_id", "row_sha256",
+            ):
+                if not re.fullmatch(r"[0-9a-f]{64}", str(alias[field])):
+                    raise ValueError(f"semantic migration alias has invalid {field}")
+            if alias["old_fact_id"] == alias["new_fact_id"]:
+                raise ValueError("semantic migration alias does not change identity")
+        for field in ("old_fact_id", "new_fact_id", "source_row_id"):
+            values = [str(alias[field]) for alias in aliases]
+            if len(values) != len(set(values)):
+                raise ValueError(f"semantic migration aliases duplicate {field}")
+        fingerprints = {
+            "removed_pk_set_sha256": hashlib.sha256(
+                "\n".join(sorted(str(a["old_fact_id"]) for a in aliases)).encode()
+            ).hexdigest(),
+            "added_pk_set_sha256": hashlib.sha256(
+                "\n".join(sorted(str(a["new_fact_id"]) for a in aliases)).encode()
+            ).hexdigest(),
+            "old_row_digest_set_sha256": hashlib.sha256(
+                "\n".join(sorted(str(a["old_row_digest"]) for a in aliases)).encode()
+            ).hexdigest(),
+            "new_row_digest_set_sha256": hashlib.sha256(
+                "\n".join(sorted(str(a["new_row_digest"]) for a in aliases)).encode()
+            ).hexdigest(),
+        }
+        if fingerprints != batch["set_fingerprints"]:
+            raise ValueError("semantic migration set fingerprints mismatch")
+        expected_effects: list[dict[str, Any]] = []
+        for alias in aliases:
+            expected_effects.extend((
+                {
+                    "artifact": "clinical", "entity_table": "clinical_facts",
+                    "entity_id": canonical_json([["fact_id", alias["old_fact_id"]]]),
+                    "effect_kind": "removed",
+                    "before_sha256": alias["old_row_digest"], "after_sha256": "",
+                    "before": {"fact_id": alias["old_fact_id"]}, "after": None,
+                    "effect_status": "approved",
+                },
+                {
+                    "artifact": "clinical", "entity_table": "clinical_facts",
+                    "entity_id": canonical_json([["fact_id", alias["new_fact_id"]]]),
+                    "effect_kind": "added",
+                    "before_sha256": "", "after_sha256": alias["new_row_digest"],
+                    "before": None, "after": {"fact_id": alias["new_fact_id"]},
+                    "effect_status": "approved",
+                },
+            ))
+        target = canonical_json({
+            "migration_id": batch["migration_id"],
+            "artifact": batch["artifact"],
+            "table": batch["entity_table"],
+        })
+        make_reviewed_decision(
+            conn, source_kind="semantic_change_explanation",
+            dataset_type="release", short_title="HCC-TACE-Seg",
+            decision_type="primary_key_migration", target=target, status="approved",
+            reviewer=str(batch["reviewer"]), reviewed_at=str(batch["approved_at"]),
+            rationale=str(batch["rationale"]),
+            resolution={
+                "migration_id": batch["migration_id"],
+                "alias_count": len(aliases),
+                "aliases_sha256": digest(aliases),
+                "aliases": aliases,
+                "set_fingerprints": fingerprints,
+            },
+            scope_extra={
+                "affected_artifact": "clinical",
+                "entity_table": "clinical_facts",
+                "effect_count": len(expected_effects),
+            },
+            negative_scope={
+                "must_not": list(batch["negative_scope"]),
+            },
+            expected_effects=expected_effects,
+            evidence=list(evidence),
+            policy_version="semantic-pk-migration-v1",
+        )
+        count += len(expected_effects)
     return count
 
 
@@ -1520,6 +1664,7 @@ def validate_database(path: Path) -> dict[str, Any]:
                     prior = evidence["prior_published_bundle"]
                     initial = evidence["initial_registry"]
                     scope = evidence["authorization_scope"]
+                    baseline = evidence["baseline_mode"]
                     if evidence.get("schema_version") != 1 or evidence.get("policy") != "initial-correction-registry-bootstrap-v1":
                         raise ValueError("unsupported bootstrap evidence contract")
                     parse_utc(str(evidence["observed_at"]))
@@ -1531,6 +1676,13 @@ def validate_database(path: Path) -> dict[str, Any]:
                         raise ValueError("bootstrap prior manifest digest is invalid")
                     if initial.get("decision_set_sha256") != active_digest:
                         raise ValueError("bootstrap decision-set digest mismatch")
+                    if initial.get("source_health") != "verified_current":
+                        raise ValueError("bootstrap registry source health is not verified_current")
+                    if baseline != {
+                        "reason": "component_absent_in_verified_prior_contract",
+                        "gating_disposition": "baseline_established_not_compared",
+                    }:
+                        raise ValueError("bootstrap baseline disposition is not exact")
                     if scope != {
                         "allows_initial_registry_baseline": True,
                         "allows_metadata_row_changes": False,
@@ -1658,6 +1810,8 @@ def record_initial_registry_bootstrap(
             raise ValueError("initial correction-registry bootstrap is already recorded")
         if conn.execute("SELECT COUNT(*) FROM correction_releases").fetchone()[0]:
             raise ValueError("initial bootstrap is forbidden after a release link exists")
+        if meta.get("source_health") != "verified_current":
+            raise ValueError("initial bootstrap requires verified_current registry source health")
         counts = {
             table: int(conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
             for table in (
@@ -1688,6 +1842,10 @@ def record_initial_registry_bootstrap(
                 "allows_initial_registry_baseline": True,
                 "allows_metadata_row_changes": False,
                 "allows_future_missing_or_corrupt_registry": False,
+            },
+            "baseline_mode": {
+                "reason": "component_absent_in_verified_prior_contract",
+                "gating_disposition": "baseline_established_not_compared",
             },
         }
         evidence_json = canonical_json(evidence)

@@ -143,6 +143,85 @@ class MetadataChangeReportTest(unittest.TestCase):
             self.assertNotEqual(first["generated_at_utc"], second["generated_at_utc"])
             self.assertEqual(first["report_sha256"], second["report_sha256"])
 
+    def test_correction_baseline_requires_exact_bootstrap_disposition(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            db = root / "correction.sqlite"
+            report = root / "report.json"
+            self._correction_meta(db, "2026-09-11T00:00:00Z", "verified_current")
+            evidence = {
+                "prior_published_bundle": {
+                    "schema_version": 2,
+                    "correction_component_absent": True,
+                    "release_fingerprint": "a" * 64,
+                    "manifest_sha256": "b" * 64,
+                },
+                "initial_registry": {
+                    "decision_set_sha256": "same",
+                    "source_health": "verified_current",
+                },
+                "authorization_scope": {
+                    "allows_initial_registry_baseline": True,
+                    "allows_metadata_row_changes": False,
+                    "allows_future_missing_or_corrupt_registry": False,
+                },
+                "baseline_mode": {
+                    "reason": "component_absent_in_verified_prior_contract",
+                    "gating_disposition": "baseline_established_not_compared",
+                },
+            }
+            evidence_json = json.dumps(evidence, sort_keys=True, separators=(",", ":"))
+            import hashlib
+            evidence_sha = hashlib.sha256(evidence_json.encode()).hexdigest()
+            with sqlite3.connect(db) as conn:
+                conn.executemany("INSERT INTO registry_meta VALUES (?,?)", [
+                    ("bootstrap_evidence_json", evidence_json),
+                    ("bootstrap_evidence_sha256", evidence_sha),
+                    ("bootstrap_prior_release_fingerprint", "a" * 64),
+                ])
+                conn.execute(
+                    """CREATE TABLE correction_validations (
+                       validation_id TEXT PRIMARY KEY,rule_id TEXT,status TEXT,
+                       evidence_sha256 TEXT,executed_at TEXT)"""
+                )
+                conn.execute(
+                    "INSERT INTO correction_validations VALUES ('v','initial_registry_bootstrap','passed',?,'now')",
+                    (evidence_sha,),
+                )
+                conn.commit()
+            accepted = subprocess.run(
+                [sys.executable, str(SCRIPT), "--correction-new", str(db),
+                 "--json-out", str(report), "--fail-on-unexplained-high"],
+                text=True, capture_output=True,
+            )
+            self.assertEqual(accepted.returncode, 0, accepted.stdout + accepted.stderr)
+            baseline = json.loads(report.read_text())["baseline_modes"]
+            self.assertEqual(baseline[0]["gating_disposition"], "baseline_established_not_compared")
+            old_public = root / "old-public.sqlite"
+            new_public = root / "new-public.sqlite"
+            self._public(old_public, [("old", "A", "same")])
+            self._public(new_public, [("new", "A", "same")])
+            unrelated = subprocess.run(
+                [
+                    sys.executable, str(SCRIPT), "--correction-new", str(db),
+                    "--public-old", str(old_public), "--public-new", str(new_public),
+                    "--json-out", str(report), "--fail-on-unexplained-high",
+                ],
+                text=True, capture_output=True,
+            )
+            self.assertEqual(unrelated.returncode, 2)
+            self.assertEqual(len(json.loads(report.read_text())["baseline_modes"]), 1)
+            self.assertIn("public_non_dicom.public_non_dicom_assets", unrelated.stdout)
+            with sqlite3.connect(db) as conn:
+                conn.execute("DELETE FROM registry_meta WHERE key='bootstrap_evidence_sha256'")
+                conn.commit()
+            rejected = subprocess.run(
+                [sys.executable, str(SCRIPT), "--correction-new", str(db),
+                 "--fail-on-unexplained-high"], text=True, capture_output=True,
+            )
+            self.assertEqual(rejected.returncode, 1)
+            self.assertIn("hash-valid bootstrap evidence", rejected.stdout)
+
     def test_reports_new_dataset_and_screening_review(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -231,6 +310,37 @@ class MetadataChangeReportTest(unittest.TestCase):
             )
             self.assertEqual(len(payload["report_sha256"]), 64)
             self.assertTrue(payload["unexplained_high_severity"])
+
+    def test_same_content_pk_substitution_reports_one_to_one_migration_but_stays_gated(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            old = root / "old.sqlite"
+            new = root / "new.sqlite"
+            report = root / "report.json"
+            for path, fact_id in ((old, "legacy-id"), (new, "canonical-id")):
+                with sqlite3.connect(path) as conn:
+                    conn.execute(
+                        "CREATE TABLE clinical_facts (fact_id TEXT PRIMARY KEY,payload TEXT)"
+                    )
+                    conn.execute(
+                        "INSERT INTO clinical_facts VALUES (?, 'unchanged')", (fact_id,)
+                    )
+            result = subprocess.run(
+                [
+                    sys.executable, str(SCRIPT), "--clinical-new", str(new),
+                    "--clinical-old", str(old), "--json-out", str(report),
+                    "--fail-on-unexplained-high",
+                ],
+                text=True, capture_output=True,
+            )
+            self.assertEqual(result.returncode, 2)
+            payload = json.loads(report.read_text())
+            self.assertEqual(len(payload["primary_key_migrations"]), 1)
+            migration = payload["primary_key_migrations"][0]
+            self.assertEqual(migration["old_primary_key"], [["fact_id", "legacy-id"]])
+            self.assertEqual(migration["new_primary_key"], [["fact_id", "canonical-id"]])
+            self.assertEqual(len(payload["semantic_changes"]), 2)
+            self.assertEqual(len(payload["unexplained_high_severity"]), 2)
 
     def test_strict_gate_requires_exact_single_use_pk_kind_and_digests(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

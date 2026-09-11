@@ -35,10 +35,12 @@ self-reference, but remain fully hash-pinned inside the published registry
 SQLite/gzip and therefore inside the top bundle fingerprint.
 
 When that gate fails, the source workflow uploads a non-release, run-specific
-`tcia-metadata-v2-diagnostics-<run-id>` Actions artifact under `always()`. It
-contains the complete hash-based JSON/Markdown change report and, when present,
-the initial-registry bootstrap evidence; it does not contain a releasable source
-bundle or raw clinical database. Access follows the repository's Actions
+`tcia-metadata-v2-diagnostics-<run-id>-<run-attempt>` Actions artifact under
+`always()`, retained for 30 days. It contains the complete hash-based
+JSON/Markdown change report, component manifests and source-health summaries,
+the registry validation summary, locked dependency inventories, and, when
+present, the initial-registry bootstrap evidence; it does not contain a
+releasable source bundle or raw clinical database. Access follows the repository's Actions
 artifact permissions; GitHub does not provide a separate private flag for an
 artifact in a public repository. The normal source artifact and downstream
 release remain blocked. Reviewers must use the JSON record's exact artifact,
@@ -53,6 +55,13 @@ the complete initial decision-set digest. Its authorization scope explicitly
 excludes metadata-row changes and all future missing/corrupt registry cases;
 once a release link or bootstrap record exists, the bootstrap command refuses
 to run again.
+
+The reviewed HCC-TACE-Seg identifier migration is represented as one decision
+containing 105 exact old-to-new aliases and 210 independently matched removal
+and addition effects. The change report may pair equal-count key substitutions
+when every non-key value is byte-identical, but pairing is explanatory only: it
+does not remove either event from the semantic gate. Each exact effect must
+still match and be consumed once.
 
 ## Raw Hidden-State Investigation
 

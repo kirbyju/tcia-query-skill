@@ -20,6 +20,18 @@ spec.loader.exec_module(registry)
 
 
 class CorrectionIdentityTests(unittest.TestCase):
+    @staticmethod
+    def mark_registry_source_verified(db: Path) -> None:
+        with sqlite3.connect(db) as conn:
+            conn.execute(
+                "UPDATE registry_meta SET value='verified_current' WHERE key='source_health'"
+            )
+            conn.execute(
+                "UPDATE registry_meta SET value=? WHERE key='source_health_json'",
+                (registry.canonical_json({"status": "verified_current"}),),
+            )
+            conn.commit()
+
     def write_legacy_release_contract(
         self,
         root: Path,
@@ -112,12 +124,62 @@ class CorrectionIdentityTests(unittest.TestCase):
             unpacked.write_bytes(gzip.decompress(first_gzip.read_bytes()))
             self.assertTrue(registry.validate_database(unpacked)["ok"])
 
+    def test_hcc_pk_migration_expands_to_exact_aliases_and_210_effects(self) -> None:
+        source = ROOT / "references/correction-semantic-explanations-v1.json"
+        payload = json.loads(source.read_text())
+        batch = payload["migration_batches"][0]
+        self.assertEqual(batch["alias_count"], 105)
+        self.assertEqual(batch["effect_count"], 210)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            db = root / "registry.sqlite"
+            registry.build_registry(db, observed_at="2026-09-11T16:11:16Z")
+            with sqlite3.connect(db) as conn:
+                revision = conn.execute(
+                    """SELECT revision_id,resolution_json FROM correction_decisions
+                       WHERE policy_version='semantic-pk-migration-v1'"""
+                ).fetchone()
+                self.assertIsNotNone(revision)
+                resolution = json.loads(revision[1])
+                self.assertEqual(resolution["alias_count"], 105)
+                self.assertEqual(len(resolution["aliases"]), 105)
+                effects = conn.execute(
+                    """SELECT entity_id,effect_kind,before_sha256,after_sha256,effect_status
+                       FROM correction_effects WHERE revision_id=?""",
+                    (revision[0],),
+                ).fetchall()
+                self.assertEqual(len(effects), 210)
+                self.assertTrue(all(row[4] == "approved" for row in effects))
+                actual = {(row[0], row[1], row[2], row[3]) for row in effects}
+                expected = set()
+                for alias in batch["aliases"]:
+                    expected.add((
+                        registry.canonical_json([["fact_id", alias["old_fact_id"]]]),
+                        "removed", alias["old_row_digest"], "",
+                    ))
+                    expected.add((
+                        registry.canonical_json([["fact_id", alias["new_fact_id"]]]),
+                        "added", "", alias["new_row_digest"],
+                    ))
+                self.assertEqual(actual, expected)
+
+            tampered = root / "tampered.json"
+            payload["migration_batches"][0]["aliases"][0]["old_fact_id"] = "f" * 64
+            tampered.write_text(json.dumps(payload))
+            with self.assertRaisesRegex(ValueError, "set fingerprints mismatch"):
+                registry.build_registry(
+                    root / "tampered.sqlite",
+                    semantic_explanations=tampered,
+                    observed_at="2026-09-11T16:11:16Z",
+                )
+
     def test_initial_registry_bootstrap_is_exact_auditable_and_one_time(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             db = root / "registry.sqlite"
             evidence = root / "bootstrap.json"
             registry.build_registry(db, observed_at="2026-09-11T12:00:00Z")
+            self.mark_registry_source_verified(db)
             manifest, release = self.write_legacy_release_contract(root)
             result = registry.record_initial_registry_bootstrap(
                 db,
@@ -136,6 +198,10 @@ class CorrectionIdentityTests(unittest.TestCase):
                 "allows_initial_registry_baseline": True,
                 "allows_metadata_row_changes": False,
                 "allows_future_missing_or_corrupt_registry": False,
+            })
+            self.assertEqual(payload["baseline_mode"], {
+                "reason": "component_absent_in_verified_prior_contract",
+                "gating_disposition": "baseline_established_not_compared",
             })
             self.assertTrue(registry.validate_database(db)["ok"])
             packaged = registry.package_registry(
@@ -176,6 +242,20 @@ class CorrectionIdentityTests(unittest.TestCase):
                         evidence_out=root / "bootstrap.json",
                         observed_at="2026-09-11T12:01:00Z",
                     )
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            db = root / "registry.sqlite"
+            registry.build_registry(db, observed_at="2026-09-11T12:00:00Z")
+            manifest, release = self.write_legacy_release_contract(root)
+            with self.assertRaisesRegex(ValueError, "requires verified_current"):
+                registry.record_initial_registry_bootstrap(
+                    db,
+                    prior_manifest_path=manifest,
+                    prior_release_json_path=release,
+                    evidence_out=root / "bootstrap.json",
+                    observed_at="2026-09-11T12:01:00Z",
+                )
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

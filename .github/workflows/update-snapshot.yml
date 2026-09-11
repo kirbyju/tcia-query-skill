@@ -228,6 +228,9 @@ jobs:
               --evidence-out dist/tcia_correction_registry_bootstrap_evidence.json \
               --observed-at "$observed_at"
           fi
+          python scripts/tcia_correction_registry.py validate \
+            --db dist/tcia_correction_registry.sqlite \
+            | tee dist/tcia_correction_registry_validation.json
 
       - name: Prepare previous sidecars for change reporting
         env:
@@ -288,18 +291,28 @@ jobs:
             --manifest-out dist/tcia_correction_registry_manifest.json
           cat dist/metadata_change_report.md >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Verify semantic-gate diagnostic reports exist
+        if: ${{ always() }}
+        run: |
+          test -s dist/metadata_change_report.md
+          test -s dist/metadata_change_report.json
+
       - name: Upload non-release semantic-gate diagnostics
-        if: ${{ always() && hashFiles('dist/metadata_change_report.json') != '' }}
+        if: ${{ always() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: tcia-metadata-v2-diagnostics-${{ github.run_id }}
+          name: tcia-metadata-v2-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             dist/metadata_change_report.md
             dist/metadata_change_report.json
+            dist/*_manifest.json
             dist/tcia_correction_registry_bootstrap_evidence.json
-          if-no-files-found: ignore
+            dist/tcia_correction_registry_validation.json
+            requirements-build.lock
+            requirements-server.lock
+          if-no-files-found: error
           compression-level: 6
-          retention-days: 14
+          retention-days: 30
 
       - name: Upload validated V2 source inputs
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7

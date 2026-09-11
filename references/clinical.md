@@ -546,7 +546,13 @@ The following reviewed source-specific repairs occur before WordPress fallback:
   diagnosis. Reclassify populated differentiation values as `grade`, exclude
   `NOT STATED` and `No biopsy` as grade placeholders, and allow the Collection's
   single `Hepatocellular carcinoma` diagnosis and `Liver` site to fill otherwise
-  missing participant fields.
+  missing participant fields. Evidence is the [TCIA Collection page](https://www.cancerimagingarchive.net/collection/hcc-tace-seg/)
+  (reviewed HTML SHA-256
+  `14e93dea4d5e0cdecbdee9904ac7524c839c1763bfa5837fdec5d99aab4914b2`)
+  and its linked [clinical workbook](https://www.cancerimagingarchive.net/wp-content/uploads/HCC-TACE-Seg_clinical_data-V2.xlsx)
+  (SHA-256
+  `e9d2683dc907819aa08e4027e085854f46464bec834a09e80fc83b19a89e092b`).
+  The workbook glossary explicitly describes Pathology as differentiation.
 - `NSCLC-Radiomics.histology` maps `large cell` to `Large Cell Carcinoma` and
   `nos` to `Non-small Cell Lung Cancer, NOS`.
 - reviewed FDG-PET-CT-Lesions diagnosis tokens map `lung_cancer`, `lymphoma`,
@@ -561,6 +567,12 @@ The following reviewed source-specific repairs occur before WordPress fallback:
 These mappings are restricted to the reviewed dataset and source column. They
 are not global synonym rules and do not collapse values that differ in
 specificity.
+
+IDC clinical provenance records the logical data release separately from the
+installed data-package version. Per-table source signatures use logical release,
+dictionary, and verified table-content digests; package version remains
+provenance and may conservatively trigger a reload, but cannot by itself change
+fact identity or be treated as a clinical semantic change.
 
 ### WordPress fallback validation baseline
 

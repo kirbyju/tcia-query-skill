@@ -1224,6 +1224,24 @@ class ClinicalMetadataTest(unittest.TestCase):
             stale_fact_id = conn.execute(
                 "SELECT fact_id FROM clinical_facts"
             ).fetchone()[0]
+            source_row_id = conn.execute(
+                "SELECT source_row_id FROM clinical_facts"
+            ).fetchone()[0]
+            CLINICAL.insert_qc_finding(
+                conn,
+                rule_id="legacy_hcc_reference",
+                severity="info",
+                disposition="auto_normalize",
+                short_title="HCC-TACE-Seg",
+                subject_id="HCC-1",
+                source_id="official:hcc",
+                source_row_id=source_row_id,
+                fact_id=stale_fact_id,
+                concept="primary_diagnosis",
+                original_value="Well differentiated",
+                resolved_value="Well differentiated",
+                message="Legacy dependent reference",
+            )
             CLINICAL.harmonize_low_risk_dataset_facts(conn)
             first = conn.execute(
                 """SELECT fact_id, source_row_id, concept, value_normalized,
@@ -1239,6 +1257,19 @@ class ClinicalMetadataTest(unittest.TestCase):
             self.assertEqual(
                 json.loads(first[4])["harmonization"]["original_concept"],
                 "primary_diagnosis",
+            )
+            migrated_finding = conn.execute(
+                """SELECT finding_id,fact_id,concept FROM clinical_qc_findings
+                   WHERE rule_id='legacy_hcc_reference'"""
+            ).fetchone()
+            self.assertEqual(migrated_finding[1], expected_fact_id)
+            self.assertEqual(migrated_finding[2], "grade")
+            self.assertEqual(
+                migrated_finding[0],
+                CLINICAL.stable_id(
+                    "legacy_hcc_reference", "HCC-TACE-Seg", "HCC-1",
+                    source_row_id, expected_fact_id, "Well differentiated",
+                ),
             )
             CLINICAL.harmonize_low_risk_dataset_facts(conn)
             second = conn.execute(
@@ -3646,6 +3677,63 @@ W22,file-2
                 1,
             )
             conn.close()
+
+    def test_idc_content_identity_is_stable_across_package_versions(self) -> None:
+        class FakeIDCClient:
+            def __init__(self, package: str) -> None:
+                self.indices_data_dir = f"/tmp/idc-index-data/{package}"
+                self.clinical_index = CLINICAL.SimpleFrame(
+                    ["collection_id", "short_table_name", "column", "column_label", "values"],
+                    [
+                        {"collection_id": "hcc_tace_seg", "short_table_name": "hcc_tace_seg_clinical", "column": "dicom_patient_id", "column_label": "idc_provenance_dicom_patient_id", "values": []},
+                        {"collection_id": "hcc_tace_seg", "short_table_name": "hcc_tace_seg_clinical", "column": "pathology", "column_label": "pathological grading (differentiation)", "values": []},
+                    ],
+                )
+                self.index = CLINICAL.SimpleFrame(
+                    ["collection_id", "PatientID"],
+                    [{"collection_id": "hcc_tace_seg", "PatientID": "HCC_001"}],
+                )
+
+            @staticmethod
+            def get_idc_version() -> str:
+                return "v24"
+
+            @staticmethod
+            def fetch_index(name: str) -> None:
+                if name != "clinical_index":
+                    raise AssertionError(name)
+
+            @staticmethod
+            def get_clinical_table(name: str):
+                return CLINICAL.SimpleFrame(
+                    ["dicom_patient_id", "pathology"],
+                    [{"dicom_patient_id": "HCC_001", "pathology": "Well differentiated"}],
+                )
+
+        observed = []
+        with tempfile.TemporaryDirectory() as directory:
+            for package in ("24.2.0", "24.2.2"):
+                conn = CLINICAL.init_db(
+                    Path(directory) / f"clinical-{package}.sqlite", replace=True
+                )
+                result = CLINICAL.ingest_idc_clinical(
+                    conn,
+                    allowed_short_titles={"HCC-TACE-Seg"},
+                    previous_db=None,
+                    refresh=False,
+                    no_fetch=False,
+                    client=FakeIDCClient(package),
+                )
+                source = conn.execute(
+                    """SELECT source_signature,artifact_sha256
+                       FROM clinical_sources WHERE source_kind='idc_clinical'"""
+                ).fetchone()
+                fact_id = conn.execute("SELECT fact_id FROM clinical_facts").fetchone()[0]
+                observed.append((tuple(source), fact_id))
+                self.assertEqual(result["idc_logical_version"], "v24")
+                self.assertEqual(result["idc_package_version"], package)
+                conn.close()
+        self.assertEqual(observed[0], observed[1])
 
     def test_idc_dictionary_lineage_and_image_linked_view(self) -> None:
         class FakeIDCClient:

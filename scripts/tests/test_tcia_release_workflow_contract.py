@@ -27,19 +27,23 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
         self.assertIn("--explanations-db cache/tcia_correction_registry.sqlite", downstream)
         self.assertIn("--fail-on-unexplained-high", downstream)
 
-    def test_source_failure_uploads_private_diagnostics_without_release_input(self) -> None:
+    def test_source_failure_uploads_nonrelease_diagnostics_without_release_input(self) -> None:
         source = SOURCE_WORKFLOW.read_text(encoding="utf-8")
         diagnostic_step = source.index("Upload non-release semantic-gate diagnostics")
         source_upload = source.index("Upload validated V2 source inputs")
         self.assertLess(diagnostic_step, source_upload)
+        self.assertIn("Verify semantic-gate diagnostic reports exist", source)
+        self.assertIn("if: ${{ always() }}", source)
         self.assertIn(
-            "if: ${{ always() && hashFiles('dist/metadata_change_report.json') != '' }}",
+            "tcia-metadata-v2-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}",
             source,
         )
-        self.assertIn("tcia-metadata-v2-diagnostics-${{ github.run_id }}", source)
         self.assertIn("dist/metadata_change_report.json", source)
         self.assertIn("dist/metadata_change_report.md", source)
-        self.assertIn("retention-days: 14", source)
+        self.assertIn("dist/*_manifest.json", source)
+        self.assertIn("requirements-build.lock", source)
+        self.assertIn("if-no-files-found: error", source)
+        self.assertIn("retention-days: 30", source)
         validated_block = source[source_upload:]
         self.assertNotIn("tcia-metadata-v2-diagnostics", validated_block)
 

@@ -250,32 +250,73 @@ def keyed_row_digests(
         yield key, hashlib.sha256(payload).hexdigest()
 
 
+def keyed_row_records(
+    conn: sqlite3.Connection, spec: TableSpec
+) -> Iterable[tuple[tuple[str, ...], str, str]]:
+    """Stream key, full-row digest, and key-independent content digest."""
+    columns = [
+        str(row[1])
+        for row in conn.execute(f"PRAGMA table_info({quote_identifier(spec.name)})")
+        if str(row[1]) not in spec.nonsemantic_columns
+    ]
+    if not spec.keys or not set(spec.keys).issubset(columns):
+        return
+    selected = ", ".join(quote_identifier(name) for name in columns)
+    ordering = ", ".join(quote_identifier(name) for name in spec.keys)
+    sql = f"SELECT {selected} FROM {quote_identifier(spec.name)}"
+    if spec.where:
+        sql += f" WHERE {spec.where}"
+    sql += f" ORDER BY {ordering}"
+    for row in conn.execute(sql):
+        values = dict(zip(columns, row))
+        key = tuple("" if values[name] is None else str(values[name]) for name in spec.keys)
+        full_payload = {
+            name: canonical_value(values[name]) for name in columns
+        }
+        content_payload = {
+            name: value for name, value in full_payload.items() if name not in spec.keys
+        }
+        yield (
+            key,
+            hashlib.sha256(json.dumps(
+                full_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+            ).encode("utf-8")).hexdigest(),
+            hashlib.sha256(json.dumps(
+                content_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+            ).encode("utf-8")).hexdigest(),
+        )
+
+
 def compare_keyed_rows(
     new: sqlite3.Connection, old: sqlite3.Connection, spec: TableSpec,
     *, max_items: int,
 ) -> tuple[
     int, int, int, list[tuple[str, tuple[str, ...]]],
-    list[tuple[str, tuple[str, ...], str, str]],
+    list[tuple[str, tuple[str, ...], str, str]], list[dict[str, object]],
 ]:
-    new_rows = iter(keyed_row_digests(new, spec))
-    old_rows = iter(keyed_row_digests(old, spec))
+    new_rows = iter(keyed_row_records(new, spec))
+    old_rows = iter(keyed_row_records(old, spec))
     new_item = next(new_rows, None)
     old_item = next(old_rows, None)
     added = removed = modified = 0
     examples: list[tuple[str, tuple[str, ...]]] = []
     changes: list[tuple[str, tuple[str, ...], str, str]] = []
+    added_by_content: dict[str, list[tuple[tuple[str, ...], str]]] = {}
+    removed_by_content: dict[str, list[tuple[tuple[str, ...], str]]] = {}
     while new_item is not None or old_item is not None:
         if old_item is None or (new_item is not None and new_item[0] < old_item[0]):
             added += 1
             if len(examples) < max_items:
                 examples.append(("added", new_item[0]))
             changes.append(("added", new_item[0], "", new_item[1]))
+            added_by_content.setdefault(new_item[2], []).append((new_item[0], new_item[1]))
             new_item = next(new_rows, None)
         elif new_item is None or old_item[0] < new_item[0]:
             removed += 1
             if len(examples) < max_items:
                 examples.append(("removed", old_item[0]))
             changes.append(("removed", old_item[0], old_item[1], ""))
+            removed_by_content.setdefault(old_item[2], []).append((old_item[0], old_item[1]))
             old_item = next(old_rows, None)
         else:
             if new_item[1] != old_item[1]:
@@ -285,7 +326,27 @@ def compare_keyed_rows(
                 changes.append(("modified", new_item[0], old_item[1], new_item[1]))
             new_item = next(new_rows, None)
             old_item = next(old_rows, None)
-    return added, removed, modified, examples, changes
+    migrations: list[dict[str, object]] = []
+    for content_sha in sorted(set(added_by_content).intersection(removed_by_content)):
+        added_rows = added_by_content[content_sha]
+        removed_rows = removed_by_content[content_sha]
+        # Ambiguous duplicate payloads are deliberately not paired.
+        if len(added_rows) != 1 or len(removed_rows) != 1:
+            continue
+        old_key, old_digest = removed_rows[0]
+        new_key, new_digest = added_rows[0]
+        migrations.append({
+            "old_primary_key": [
+                [column, value] for column, value in zip(spec.keys, old_key)
+            ],
+            "new_primary_key": [
+                [column, value] for column, value in zip(spec.keys, new_key)
+            ],
+            "old_row_sha256": old_digest,
+            "new_row_sha256": new_digest,
+            "non_primary_key_content_sha256": content_sha,
+        })
+    return added, removed, modified, examples, changes, migrations
 
 
 def load_explanations(
@@ -437,19 +498,71 @@ def github_escape(value: str) -> str:
     )
 
 
+def correction_baseline_mode(path: Path) -> dict[str, object]:
+    """Load the exact bootstrap disposition from a validated registry."""
+    with sqlite3.connect(path) as conn:
+        meta = dict(conn.execute("SELECT key,value FROM registry_meta"))
+        evidence_json = meta.get("bootstrap_evidence_json", "")
+        evidence_sha = meta.get("bootstrap_evidence_sha256", "")
+        if not evidence_json or hashlib.sha256(evidence_json.encode("utf-8")).hexdigest() != evidence_sha:
+            raise RuntimeError("correction baseline lacks hash-valid bootstrap evidence")
+        evidence = json.loads(evidence_json)
+        baseline = evidence.get("baseline_mode")
+        prior = evidence.get("prior_published_bundle") or {}
+        initial = evidence.get("initial_registry") or {}
+        scope = evidence.get("authorization_scope")
+        if baseline != {
+            "reason": "component_absent_in_verified_prior_contract",
+            "gating_disposition": "baseline_established_not_compared",
+        }:
+            raise RuntimeError("correction baseline disposition is not exact")
+        if scope != {
+            "allows_initial_registry_baseline": True,
+            "allows_metadata_row_changes": False,
+            "allows_future_missing_or_corrupt_registry": False,
+        }:
+            raise RuntimeError("correction baseline authorization scope is not exact")
+        if (
+            prior.get("schema_version") != 2
+            or prior.get("correction_component_absent") is not True
+            or prior.get("release_fingerprint")
+               != meta.get("bootstrap_prior_release_fingerprint")
+            or initial.get("decision_set_sha256")
+               != meta.get("active_decision_set_sha256")
+            or initial.get("source_health") != "verified_current"
+        ):
+            raise RuntimeError("correction baseline evidence is inconsistent")
+        validation = conn.execute(
+            """SELECT status,evidence_sha256 FROM correction_validations
+               WHERE rule_id='initial_registry_bootstrap'"""
+        ).fetchall()
+        if len(validation) != 1 or tuple(validation[0]) != ("passed", evidence_sha):
+            raise RuntimeError("correction baseline validation is missing or inconsistent")
+        return {
+            "component": "correction_registry",
+            "prior_release_fingerprint": prior["release_fingerprint"],
+            "prior_manifest_sha256": prior["manifest_sha256"],
+            **baseline,
+        }
+
+
 def compare_asset(
     name: str,
     new_path: Path,
     old_path: Path | None,
     *,
     max_items: int,
-) -> tuple[list[dict[str, object]], list[str], list[str], list[dict[str, object]]]:
+) -> tuple[
+    list[dict[str, object]], list[str], list[str],
+    list[dict[str, object]], list[dict[str, object]],
+]:
     new = sqlite3.connect(new_path)
     old = sqlite3.connect(old_path) if old_path and old_path.exists() else None
     rows: list[dict[str, object]] = []
     details: list[str] = []
     warnings: list[str] = []
     high_changes: list[dict[str, object]] = []
+    primary_key_migrations: list[dict[str, object]] = []
     for spec in PROFILES[name]:
         new_count = row_count(new, spec)
         if new_count is None:
@@ -470,9 +583,16 @@ def compare_asset(
                 changed_keys = [("added", item) for item in key_rows(new, spec, limit=max_items)]
                 added = new_count
             else:
-                added, removed, modified, changed_keys, semantic_changes = compare_keyed_rows(
-                    new, old, spec, max_items=max_items
-                )
+                (
+                    added, removed, modified, changed_keys, semantic_changes,
+                    table_migrations,
+                ) = compare_keyed_rows(new, old, spec, max_items=max_items)
+                for migration in table_migrations:
+                    primary_key_migrations.append({
+                        "artifact": ARTIFACT_IDS[name],
+                        "table": spec.name,
+                        **migration,
+                    })
         rows.append(
             {
                 "asset": name,
@@ -520,7 +640,7 @@ def compare_asset(
     new.close()
     if old:
         old.close()
-    return rows, details, warnings, high_changes
+    return rows, details, warnings, high_changes, primary_key_migrations
 
 
 def build_report(args: argparse.Namespace) -> tuple[str, list[str], dict[str, object]]:
@@ -543,14 +663,22 @@ def build_report(args: argparse.Namespace) -> tuple[str, list[str], dict[str, ob
     detail_blocks: list[str] = []
     warnings: list[str] = []
     high_changes: list[dict[str, object]] = []
+    primary_key_migrations: list[dict[str, object]] = []
+    baseline_modes: list[dict[str, object]] = []
     for name, new_path, old_path in assets:
-        rows, details, asset_warnings, asset_high = compare_asset(
+        rows, details, asset_warnings, asset_high, asset_migrations = compare_asset(
             name, new_path, old_path, max_items=args.max_items
         )
         comparison_rows.extend(rows)
         detail_blocks.extend(details)
         warnings.extend(asset_warnings)
         high_changes.extend(asset_high)
+        primary_key_migrations.extend(asset_migrations)
+        if name == "correction" and old_path is None:
+            try:
+                baseline_modes.append(correction_baseline_mode(new_path))
+            except (KeyError, TypeError, ValueError, json.JSONDecodeError, sqlite3.Error) as exc:
+                raise RuntimeError(f"invalid correction baseline: {exc}") from exc
 
     explanations, malformed_explanations = load_explanations(
         Path(args.explanations_db) if getattr(args, "explanations_db", None) else None,
@@ -673,6 +801,27 @@ def build_report(args: argparse.Namespace) -> tuple[str, list[str], dict[str, ob
     if detail_blocks:
         lines.extend(["", "### Newly added identifiers", ""])
         lines.extend(block + "\n" for block in detail_blocks)
+    if primary_key_migrations:
+        lines.extend([
+            "", "### One-to-one primary-key migrations", "",
+            "Rows are paired only when every non-primary-key value is identical; "
+            "these pairs remain gated semantic changes.", "",
+        ])
+        for migration in primary_key_migrations[:args.max_items]:
+            old_key = format_key(value for _, value in migration["old_primary_key"])
+            new_key = format_key(value for _, value in migration["new_primary_key"])
+            lines.append(
+                f"- `{migration['artifact']}.{migration['table']}`: "
+                f"`{old_key}` -> `{new_key}`"
+            )
+    if baseline_modes:
+        lines.extend(["", "### Component baseline modes", ""])
+        for baseline in baseline_modes:
+            lines.append(
+                f"- `{baseline['component']}`: `{baseline['reason']}`; "
+                f"`{baseline['gating_disposition']}`; prior "
+                f"`{baseline['prior_release_fingerprint']}`"
+            )
     if not warnings:
         lines.extend(["", "No monitored additions or new review flags."])
     if unexplained_high:
@@ -689,6 +838,8 @@ def build_report(args: argparse.Namespace) -> tuple[str, list[str], dict[str, ob
         "warnings": warnings,
         "unexplained_high_severity": unexplained_high,
         "semantic_changes": high_changes,
+        "primary_key_migrations": primary_key_migrations,
+        "baseline_modes": baseline_modes,
         "semantic_explanations": {
             "consumed_effect_ids": sorted(consumed),
             "duplicate_matches": sorted(duplicates),

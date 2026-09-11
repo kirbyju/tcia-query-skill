@@ -2813,6 +2813,12 @@ def get_idc_version(client: Any) -> str:
     return idc_version
 
 
+def split_idc_version(value: str) -> tuple[str, str]:
+    """Separate IDC's logical data release from its package distribution."""
+    logical, separator, package = str(value).partition("@")
+    return logical, package if separator else logical
+
+
 def parse_victre_location_archives(
     artifacts: dict[str, bytes],
 ) -> dict[str, dict[str, Any]]:
@@ -3194,6 +3200,8 @@ def ingest_idc_clinical(
 ) -> dict[str, Any]:
     result: dict[str, Any] = {
         "idc_version": "",
+        "idc_logical_version": "",
+        "idc_package_version": "",
         "tables": 0,
         "rows": 0,
         "subjects": 0,
@@ -3223,6 +3231,9 @@ def ingest_idc_clinical(
                 conn, previous_db, allowed_short_titles  # type: ignore[arg-type]
             )
             if reused:
+                previous_logical, previous_package = split_idc_version(
+                    str(previous_version)
+                )
                 previous_idc_result = previous_meta(
                     previous_db, "idc_clinical_result"  # type: ignore[arg-type]
                 )
@@ -3252,6 +3263,8 @@ def ingest_idc_clinical(
                 result.update(
                     {
                         "idc_version": previous_version,
+                        "idc_logical_version": previous_logical,
+                        "idc_package_version": previous_package,
                         "sources_reused": reused,
                         "tables": conn.execute(
                             "SELECT COUNT(*) FROM clinical_idc_tables"
@@ -3290,7 +3303,10 @@ def ingest_idc_clinical(
             ) from exc
         client = IDCClient()
     idc_version = get_idc_version(client)
+    idc_logical_version, idc_package_version = split_idc_version(idc_version)
     result["idc_version"] = idc_version
+    result["idc_logical_version"] = idc_logical_version
+    result["idc_package_version"] = idc_package_version
     if (
         previous_db
         and previous_db.exists()
@@ -3451,11 +3467,15 @@ def ingest_idc_clinical(
             source_kind="idc_clinical",
             source_lineage=lineage,
             short_title=short_title,
-            source_signature_value=stable_id(idc_version, column_signature),
+            # Finalized below from logical release + dictionary + content.
+            # Package directory versions remain provenance, not content identity.
+            source_signature_value=stable_id(idc_logical_version, column_signature),
             source_url="https://github.com/ImagingDataCommons/idc-index-data",
             source_date=idc_version,
             provenance={
                 "idc_version": idc_version,
+                "idc_logical_version": idc_logical_version,
+                "idc_package_version": idc_package_version,
                 "collection_id": collection_id,
                 "table_name": table_name,
                 "lineage_note": (
@@ -3562,12 +3582,14 @@ def ingest_idc_clinical(
                 source_id=source_id,
                 short_title=short_title,
             )
+        artifact_sha256 = artifact_digest.hexdigest() if row_count else ""
         conn.execute(
             """UPDATE clinical_sources
-               SET artifact_sha256 = ?, artifact_bytes = ?
+               SET source_signature = ?, artifact_sha256 = ?, artifact_bytes = ?
                WHERE source_id = ?""",
             (
-                artifact_digest.hexdigest() if row_count else "",
+                stable_id(idc_logical_version, column_signature, artifact_sha256),
+                artifact_sha256,
                 artifact_bytes,
                 source_id,
             ),
@@ -7199,13 +7221,15 @@ def harmonize_low_risk_dataset_facts(conn: sqlite3.Connection) -> dict[str, int]
         # from the generic `pathology -> primary_diagnosis` mapping. Re-key the
         # row from its resolved semantics so incremental reuse and a clean IDC
         # rebuild produce byte-identical fact identities.
-        original_concept = (
-            concept_for_column(fact["original_column"]) or fact["concept"]
-        )
         try:
             provenance = json.loads(fact["provenance_json"] or "{}")
         except json.JSONDecodeError:
             provenance = {}
+        prior_harmonization = provenance.get("harmonization") or {}
+        # Preserve an already-published provenance value across the key repair.
+        # A clean row enters with grade; a genuinely legacy row may retain the
+        # earlier primary_diagnosis derivation. Re-running must not rewrite it.
+        original_concept = prior_harmonization.get("original_concept") or fact["concept"]
         provenance["harmonization"] = {
             "method": "reviewed_source_column_concept_reclassification",
             "source_column": fact["original_column"],
@@ -7213,26 +7237,50 @@ def harmonize_low_risk_dataset_facts(conn: sqlite3.Connection) -> dict[str, int]
             "resolved_concept": "grade",
             "placeholder_excluded": missing,
         }
-        conn.execute(
-            """UPDATE clinical_facts
-               SET fact_id = ?, concept = 'grade', value_resolved = ?,
-                   value_normalized = ?, qc_excluded = ?, qc_status = ?,
-                   provenance_json = ?
-               WHERE fact_id = ?""",
-            (
-                canonical_fact_id,
-                raw_value,
-                resolved_normalized,
-                int(missing),
+        conn.execute("SAVEPOINT hcc_fact_identity")
+        try:
+            conn.execute(
+                """UPDATE clinical_facts
+                   SET fact_id = ?, concept = 'grade', value_resolved = ?,
+                       value_normalized = ?, qc_excluded = ?, qc_status = ?,
+                       provenance_json = ?
+                   WHERE fact_id = ?""",
                 (
-                    "excluded_dataset_placeholder"
-                    if missing
-                    else "normalized_dataset_concept"
+                    canonical_fact_id,
+                    raw_value,
+                    resolved_normalized,
+                    int(missing),
+                    (
+                        "excluded_dataset_placeholder"
+                        if missing
+                        else "normalized_dataset_concept"
+                    ),
+                    json_dumps(provenance),
+                    fact["fact_id"],
                 ),
-                json_dumps(provenance),
-                fact["fact_id"],
-            ),
-        )
+            )
+            if canonical_fact_id != fact["fact_id"]:
+                dependent_findings = conn.execute(
+                    "SELECT * FROM clinical_qc_findings WHERE fact_id=?",
+                    (fact["fact_id"],),
+                ).fetchall()
+                for finding in dependent_findings:
+                    replacement_id = stable_id(
+                        finding["rule_id"], finding["short_title"],
+                        finding["subject_id"] or "", finding["source_row_id"] or "",
+                        canonical_fact_id, finding["original_value"] or "",
+                    )
+                    conn.execute(
+                        """UPDATE clinical_qc_findings
+                           SET finding_id=?,fact_id=?,concept='grade'
+                           WHERE finding_id=?""",
+                        (replacement_id, canonical_fact_id, finding["finding_id"]),
+                    )
+            conn.execute("RELEASE hcc_fact_identity")
+        except Exception:
+            conn.execute("ROLLBACK TO hcc_fact_identity")
+            conn.execute("RELEASE hcc_fact_identity")
+            raise
         insert_qc_finding(
             conn,
             rule_id="hcc_tace_pathology_is_grade",
@@ -8059,6 +8107,12 @@ def build(args: argparse.Namespace) -> None:
         ],
     )
     insert_meta(conn, "idc_version", idc_result.get("idc_version", ""))
+    insert_meta(
+        conn, "idc_logical_version", idc_result.get("idc_logical_version", "")
+    )
+    insert_meta(
+        conn, "idc_package_version", idc_result.get("idc_package_version", "")
+    )
     insert_meta(conn, "idc_clinical_result", idc_result)
     insert_meta(conn, "wordpress_dataset_inference_result", inference_result)
     insert_meta(conn, "analysis_result_clinical_inheritance", inheritance_result)
