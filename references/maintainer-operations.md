@@ -36,11 +36,12 @@ SQLite/gzip and therefore inside the top bundle fingerprint.
 
 When that gate fails, the source workflow uploads a non-release, run-specific
 `tcia-metadata-v2-diagnostics-<run-id>-<run-attempt>` Actions artifact under
-`always()`, retained for 30 days. It contains the complete hash-based
-JSON/Markdown change report, component manifests and source-health summaries,
-the registry validation summary, locked dependency inventories, and, when
-present, the initial-registry bootstrap evidence; it does not contain a
-releasable source bundle or raw clinical database. Access follows the repository's Actions
+`always()`, retained for 30 days. It contains the diagnostics-only status
+sentinel, the complete hash-based JSON/Markdown change report when reporting was
+reached, the registry validation summary, and, when present, the
+initial-registry bootstrap evidence. It deliberately excludes raw SQLite/gzip
+payloads, component manifests, dependency lock inventories, credentials, and
+the validated source-artifact name. Access follows the repository's Actions
 artifact permissions; GitHub does not provide a separate private flag for an
 artifact in a public repository. The normal source artifact and downstream
 release remain blocked. Reviewers must use the JSON record's exact artifact,

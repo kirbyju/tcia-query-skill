@@ -35,7 +35,7 @@
     "references/general-commons-graphql.md": "470199aa40c5dbe4cf0ff08608af997ec876e9a7eb0d47975b3fdb15f2009747",
     "references/geometry-batch-slurm.md": "9d07d108da33ba0993d531b59f5978c8b141cfcfa049472263ec721f98662457",
     "references/idc-dicom-downloads.md": "92187b024481b5d403c49a1a84ef109d7d9c24af029e67f36b416ccb531924b5",
-    "references/maintainer-operations.md": "8a78f2960e8d4b5b164d113557eccfcaaf4f8d3a0b8ad1bee62e6d63d30226f5",
+    "references/maintainer-operations.md": "58b4cb3815fd1c7943dbc8e1b6401d50c6ff807724927aead5594ce1b4b3c126",
     "references/mcp-and-web-llms.md": "cb8d96401d0f8dc9a344b44a2b1041f6d27723652f701c80dd8f547c9a158fbf",
     "references/nifti.md": "3906629481c9d27cdae0ee9ab5a7c22f00ec41252e66739e3653a06e2dac8398",
     "references/pathdb.md": "8b3f5d27ff341c19261545609c27a3061cf39af020ab6992bda1cf307a84ede5",
@@ -127,6 +127,6 @@
     "scripts/tests/test_tcia_v2_staging.py": "bdf1ad362ba8615e6e224c4c3efbe3e3c0157899cde3db27a0fd43db46c2aa49"
   },
   "schema_version": 1,
-  "skill_version": "2026.09.11.8",
-  "updated_at_utc": "2026-09-11T17:01:55.024552+00:00"
+  "skill_version": "2026.09.11.9",
+  "updated_at_utc": "2026-09-11T17:04:26.302848+00:00"
 }
