@@ -20,6 +20,74 @@ spec.loader.exec_module(registry)
 
 
 class CorrectionIdentityTests(unittest.TestCase):
+    def write_legacy_release_contract(
+        self,
+        root: Path,
+        *,
+        schema_version: int = 2,
+        include_correction: bool = False,
+        corrupt_manifest_digest: bool = False,
+    ) -> tuple[Path, Path]:
+        assets = {
+            "tcia_snapshot.sqlite.gz": {"sha256": "a" * 64, "bytes": 123},
+        }
+        components: dict[str, object] = {}
+        if include_correction:
+            assets["tcia_correction_registry.sqlite.gz"] = {
+                "sha256": "b" * 64,
+                "bytes": 456,
+            }
+            components["correction_registry"] = {
+                "database_asset": "tcia_correction_registry.sqlite.gz"
+            }
+        manifest = {
+            "artifact": "tcia_metadata_v2_bundle",
+            "schema_version": schema_version,
+            "release_channel": "stable",
+            "release_tag": "tcia-metadata-v2-latest",
+            "source": {
+                "repository": "kirbyju/tcia-query-skill",
+                "release_tag": "tcia-metadata-v2-source-latest",
+            },
+            "producer": {"commit": "1" * 40, "skill_version": "test"},
+            "assets": assets,
+            "components": components,
+            "profiles": {"audit_support": {"assets": list(assets)}},
+        }
+        fingerprint_payload = {
+            key: manifest[key]
+            for key in (
+                "artifact", "schema_version", "release_channel", "release_tag",
+                "source", "producer", "assets",
+            )
+        }
+        fingerprint_payload["assets"] = {
+            name: details["sha256"] for name, details in sorted(assets.items())
+        }
+        manifest["release_fingerprint"] = registry.digest(fingerprint_payload)
+        manifest_path = root / "manifest.json"
+        manifest_path.write_text(registry.canonical_json(manifest) + "\n")
+        release_assets = [
+            {
+                "name": name,
+                "digest": f"sha256:{details['sha256']}",
+                "size": details["bytes"],
+            }
+            for name, details in assets.items()
+        ]
+        manifest_sha = registry.file_sha256(manifest_path)
+        release_assets.append({
+            "name": "tcia_metadata_v2_bundle_manifest.json",
+            "digest": "sha256:" + ("0" * 64 if corrupt_manifest_digest else manifest_sha),
+            "size": manifest_path.stat().st_size,
+        })
+        release_path = root / "release.json"
+        release_path.write_text(json.dumps({
+            "tag_name": "tcia-metadata-v2-latest",
+            "assets": release_assets,
+        }))
+        return manifest_path, release_path
+
     def test_release_package_is_deterministic_hash_pinned_and_queryable(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -43,6 +111,92 @@ class CorrectionIdentityTests(unittest.TestCase):
             unpacked = root / "unpacked.sqlite"
             unpacked.write_bytes(gzip.decompress(first_gzip.read_bytes()))
             self.assertTrue(registry.validate_database(unpacked)["ok"])
+
+    def test_initial_registry_bootstrap_is_exact_auditable_and_one_time(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            db = root / "registry.sqlite"
+            evidence = root / "bootstrap.json"
+            registry.build_registry(db, observed_at="2026-09-11T12:00:00Z")
+            manifest, release = self.write_legacy_release_contract(root)
+            result = registry.record_initial_registry_bootstrap(
+                db,
+                prior_manifest_path=manifest,
+                prior_release_json_path=release,
+                evidence_out=evidence,
+                observed_at="2026-09-11T12:01:00Z",
+            )
+            self.assertTrue(result["ok"])
+            payload = json.loads(evidence.read_text())
+            self.assertEqual(
+                payload["initial_registry"]["decision_set_sha256"],
+                result["decision_set_sha256"],
+            )
+            self.assertEqual(payload["authorization_scope"], {
+                "allows_initial_registry_baseline": True,
+                "allows_metadata_row_changes": False,
+                "allows_future_missing_or_corrupt_registry": False,
+            })
+            self.assertTrue(registry.validate_database(db)["ok"])
+            packaged = registry.package_registry(
+                db,
+                gzip_out=root / "registry.sqlite.gz",
+                manifest_out=root / "registry-manifest.json",
+            )
+            self.assertEqual(
+                packaged["provenance"]["initial_registry_bootstrap_evidence_sha256"],
+                result["evidence_sha256"],
+            )
+            with self.assertRaisesRegex(ValueError, "already recorded"):
+                registry.record_initial_registry_bootstrap(
+                    db,
+                    prior_manifest_path=manifest,
+                    prior_release_json_path=release,
+                    evidence_out=evidence,
+                    observed_at="2026-09-11T12:02:00Z",
+                )
+
+    def test_initial_registry_bootstrap_rejects_nonlegacy_or_unverified_state(self) -> None:
+        cases = (
+            ("schema3", {"schema_version": 3}, "schema-2"),
+            ("existing-component", {"include_correction": True}, "already publishes"),
+            ("bad-release-digest", {"corrupt_manifest_digest": True}, "digest mismatch"),
+        )
+        for label, options, expected in cases:
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                db = root / "registry.sqlite"
+                registry.build_registry(db, observed_at="2026-09-11T12:00:00Z")
+                manifest, release = self.write_legacy_release_contract(root, **options)
+                with self.assertRaisesRegex(ValueError, expected):
+                    registry.record_initial_registry_bootstrap(
+                        db,
+                        prior_manifest_path=manifest,
+                        prior_release_json_path=release,
+                        evidence_out=root / "bootstrap.json",
+                        observed_at="2026-09-11T12:01:00Z",
+                    )
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            db = root / "registry.sqlite"
+            registry.build_registry(db, observed_at="2026-09-11T12:00:00Z")
+            registry.link_release(
+                db,
+                release_fingerprint="f" * 64,
+                release_tag="immutable",
+                source_health="verified_current",
+                observed_at="2026-09-11T12:00:00Z",
+            )
+            manifest, release = self.write_legacy_release_contract(root)
+            with self.assertRaisesRegex(ValueError, "forbidden after a release link"):
+                registry.record_initial_registry_bootstrap(
+                    db,
+                    prior_manifest_path=manifest,
+                    prior_release_json_path=release,
+                    evidence_out=root / "bootstrap.json",
+                    observed_at="2026-09-11T12:01:00Z",
+                )
 
     def test_stable_promotion_waivers_are_exact_current_and_single_use(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

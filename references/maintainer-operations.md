@@ -34,6 +34,26 @@ approvals are excluded from the durable correction decision-set digest to avoid
 self-reference, but remain fully hash-pinned inside the published registry
 SQLite/gzip and therefore inside the top bundle fingerprint.
 
+When that gate fails, the source workflow uploads a non-release, run-specific
+`tcia-metadata-v2-diagnostics-<run-id>` Actions artifact under `always()`. It
+contains the complete hash-based JSON/Markdown change report and, when present,
+the initial-registry bootstrap evidence; it does not contain a releasable source
+bundle or raw clinical database. Access follows the repository's Actions
+artifact permissions; GitHub does not provide a separate private flag for an
+artifact in a public repository. The normal source artifact and downstream
+release remain blocked. Reviewers must use the JSON record's exact artifact,
+table, complete ordered primary key, change kind, and before/after digests.
+
+The one-time correction-registry migration is permitted only when the immediately
+prior published bundle is a digest-verified schema-2 release that has no
+correction asset, component, decision-set summary, or profile selection. The
+source workflow records a critical passed `initial_registry_bootstrap`
+validation plus hash-bound evidence containing the prior bundle fingerprint and
+the complete initial decision-set digest. Its authorization scope explicitly
+excludes metadata-row changes and all future missing/corrupt registry cases;
+once a release link or bootstrap record exists, the bootstrap command refuses
+to run again.
+
 ## Raw Hidden-State Investigation
 
 The public MCP, REST, and `TciaQueryService` surfaces deliberately exclude hidden, staged, and retired WordPress records. A maintainer who must investigate raw source state may use the local snapshot/search builder CLI's explicit `--include-hidden` option in a controlled workflow:

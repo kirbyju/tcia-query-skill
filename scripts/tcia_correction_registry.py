@@ -1503,6 +1503,50 @@ def validate_database(path: Path) -> dict[str, Any]:
                         f"{release_fingerprint}: release membership digest mismatch"
                     )
         active_digest = decision_set_digest(conn) if "agent_active_corrections" in objects else ""
+        if "registry_meta" in objects:
+            meta = dict(conn.execute("SELECT key,value FROM registry_meta"))
+            bootstrap_keys = {
+                "bootstrap_evidence_json",
+                "bootstrap_evidence_sha256",
+                "bootstrap_prior_release_fingerprint",
+            }
+            present_bootstrap_keys = bootstrap_keys.intersection(meta)
+            if present_bootstrap_keys and present_bootstrap_keys != bootstrap_keys:
+                errors.append("incomplete initial-registry bootstrap metadata")
+            elif present_bootstrap_keys:
+                try:
+                    evidence = json.loads(meta["bootstrap_evidence_json"])
+                    evidence_sha = digest(evidence)
+                    prior = evidence["prior_published_bundle"]
+                    initial = evidence["initial_registry"]
+                    scope = evidence["authorization_scope"]
+                    if evidence.get("schema_version") != 1 or evidence.get("policy") != "initial-correction-registry-bootstrap-v1":
+                        raise ValueError("unsupported bootstrap evidence contract")
+                    parse_utc(str(evidence["observed_at"]))
+                    if prior.get("schema_version") != 2 or prior.get("correction_component_absent") is not True:
+                        raise ValueError("bootstrap does not prove a legacy component absence")
+                    if prior.get("release_fingerprint") != meta["bootstrap_prior_release_fingerprint"]:
+                        raise ValueError("bootstrap prior fingerprint mismatch")
+                    if not re.fullmatch(r"[0-9a-f]{64}", str(prior.get("manifest_sha256") or "")):
+                        raise ValueError("bootstrap prior manifest digest is invalid")
+                    if initial.get("decision_set_sha256") != active_digest:
+                        raise ValueError("bootstrap decision-set digest mismatch")
+                    if scope != {
+                        "allows_initial_registry_baseline": True,
+                        "allows_metadata_row_changes": False,
+                        "allows_future_missing_or_corrupt_registry": False,
+                    }:
+                        raise ValueError("bootstrap authorization scope is not exact")
+                    if evidence_sha != meta["bootstrap_evidence_sha256"]:
+                        raise ValueError("bootstrap evidence digest mismatch")
+                    validation = conn.execute(
+                        """SELECT status,evidence_sha256 FROM correction_validations
+                           WHERE rule_id='initial_registry_bootstrap'"""
+                    ).fetchall()
+                    if len(validation) != 1 or tuple(validation[0]) != ("passed", evidence_sha):
+                        raise ValueError("bootstrap validation record is missing or inconsistent")
+                except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+                    errors.append(f"invalid initial-registry bootstrap evidence: {exc}")
     return {"ok": not errors, "errors": errors, "integrity_check": integrity,
             "counts": counts, "active_decision_set_sha256": active_digest}
 
@@ -1520,6 +1564,179 @@ def parse_utc(value: str) -> dt.datetime:
     if parsed.tzinfo is None:
         raise ValueError("timestamp must include a timezone")
     return parsed.astimezone(dt.timezone.utc)
+
+
+def record_initial_registry_bootstrap(
+    path: Path,
+    *,
+    prior_manifest_path: Path,
+    prior_release_json_path: Path,
+    evidence_out: Path,
+    observed_at: str,
+) -> dict[str, Any]:
+    """Record a one-time bootstrap from a verified schema-2 release.
+
+    This does not approve any row change. It proves that the immediately prior
+    published bundle predates the correction component, then binds the complete
+    initial decision-set digest into the registry's validation history.
+    """
+    parse_utc(observed_at)
+    manifest = json.loads(prior_manifest_path.read_text(encoding="utf-8"))
+    release = json.loads(prior_release_json_path.read_text(encoding="utf-8"))
+    errors: list[str] = []
+    correction_asset = "tcia_correction_registry.sqlite.gz"
+    if manifest.get("artifact") != "tcia_metadata_v2_bundle":
+        errors.append("prior manifest has an unexpected artifact identifier")
+    if manifest.get("schema_version") != 2:
+        errors.append("bootstrap requires the immediately prior schema-2 bundle")
+    prior_fingerprint = str(manifest.get("release_fingerprint") or "")
+    if not re.fullmatch(r"[0-9a-f]{64}", prior_fingerprint):
+        errors.append("prior manifest release fingerprint is invalid")
+    source = manifest.get("source") or {}
+    fingerprint_payload = {
+        "artifact": manifest.get("artifact"),
+        "schema_version": manifest.get("schema_version"),
+        "release_channel": manifest.get("release_channel"),
+        "release_tag": manifest.get("release_tag"),
+        "source": {
+            "repository": source.get("repository"),
+            "release_tag": source.get("release_tag"),
+        },
+        "producer": manifest.get("producer"),
+        "assets": {
+            name: (details or {}).get("sha256")
+            for name, details in sorted((manifest.get("assets") or {}).items())
+        },
+    }
+    if "release_contract" in manifest:
+        fingerprint_payload["release_contract"] = manifest.get("release_contract")
+    if digest(fingerprint_payload) != prior_fingerprint:
+        errors.append("prior manifest release fingerprint mismatch")
+    if correction_asset in (manifest.get("assets") or {}):
+        errors.append("prior manifest already publishes the correction asset")
+    if "correction_registry" in (manifest.get("components") or {}):
+        errors.append("prior manifest already declares the correction component")
+    if "correction_registry" in (manifest.get("decision_sets") or {}):
+        errors.append("prior manifest already declares a correction decision set")
+    for profile, details in (manifest.get("profiles") or {}).items():
+        if correction_asset in ((details or {}).get("assets") or []):
+            errors.append(f"prior manifest profile {profile} selects the correction asset")
+
+    remote_assets = {
+        str(item.get("name") or ""): item for item in release.get("assets") or []
+    }
+    expected_assets = sorted(
+        [*(manifest.get("assets") or {}), "tcia_metadata_v2_bundle_manifest.json"]
+    )
+    if sorted(remote_assets) != expected_assets:
+        errors.append("prior published release asset names do not match its manifest")
+    for name, details in (manifest.get("assets") or {}).items():
+        remote = remote_assets.get(str(name)) or {}
+        remote_digest = str(remote.get("digest") or "").removeprefix("sha256:")
+        if remote_digest != str((details or {}).get("sha256") or ""):
+            errors.append(f"prior published release digest mismatch: {name}")
+        if remote.get("size") != (details or {}).get("bytes"):
+            errors.append(f"prior published release size mismatch: {name}")
+    manifest_remote = remote_assets.get("tcia_metadata_v2_bundle_manifest.json") or {}
+    manifest_sha = file_sha256(prior_manifest_path)
+    if str(manifest_remote.get("digest") or "").removeprefix("sha256:") != manifest_sha:
+        errors.append("prior published bundle-manifest digest mismatch")
+    if str(release.get("tag_name") or "") != str(manifest.get("release_tag") or ""):
+        errors.append("prior release tag does not match its manifest")
+    if errors:
+        raise ValueError("Invalid initial correction-registry bootstrap: " + "; ".join(errors))
+
+    current = validate_database(path)
+    if not current["ok"]:
+        raise ValueError(
+            "Cannot bootstrap an invalid correction registry: "
+            + "; ".join(current["errors"])
+        )
+    with closing(sqlite3.connect(path)) as conn:
+        meta = dict(conn.execute("SELECT key,value FROM registry_meta"))
+        if any(key.startswith("bootstrap_") for key in meta):
+            raise ValueError("initial correction-registry bootstrap is already recorded")
+        if conn.execute("SELECT COUNT(*) FROM correction_releases").fetchone()[0]:
+            raise ValueError("initial bootstrap is forbidden after a release link exists")
+        counts = {
+            table: int(conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
+            for table in (
+                "correction_cases",
+                "correction_decisions",
+                "correction_effects",
+                "correction_validations",
+            )
+        }
+        evidence = {
+            "schema_version": 1,
+            "policy": "initial-correction-registry-bootstrap-v1",
+            "observed_at": observed_at,
+            "prior_published_bundle": {
+                "release_tag": manifest.get("release_tag"),
+                "release_fingerprint": prior_fingerprint,
+                "manifest_sha256": manifest_sha,
+                "producer_commit": (manifest.get("producer") or {}).get("commit", ""),
+                "schema_version": 2,
+                "correction_component_absent": True,
+            },
+            "initial_registry": {
+                "decision_set_sha256": current["active_decision_set_sha256"],
+                "counts_before_bootstrap_validation": counts,
+                "source_health": meta.get("source_health", "unverified"),
+            },
+            "authorization_scope": {
+                "allows_initial_registry_baseline": True,
+                "allows_metadata_row_changes": False,
+                "allows_future_missing_or_corrupt_registry": False,
+            },
+        }
+        evidence_json = canonical_json(evidence)
+        evidence_sha = digest(evidence)
+        validation_id = stable_id(
+            "validation", "initial_registry_bootstrap", prior_fingerprint,
+            current["active_decision_set_sha256"],
+        )
+        conn.executemany(
+            "INSERT INTO registry_meta VALUES (?,?)",
+            (
+                ("bootstrap_evidence_json", evidence_json),
+                ("bootstrap_evidence_sha256", evidence_sha),
+                ("bootstrap_prior_release_fingerprint", prior_fingerprint),
+            ),
+        )
+        conn.execute(
+            "INSERT INTO correction_validations VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                validation_id,
+                None,
+                "initial_registry_bootstrap",
+                "v1",
+                "critical",
+                "passed",
+                canonical_json({"correction_component_absent": True}),
+                canonical_json({
+                    "prior_release_fingerprint": prior_fingerprint,
+                    "decision_set_sha256": current["active_decision_set_sha256"],
+                }),
+                evidence_sha,
+                observed_at,
+                "",
+                "Verified one-time bootstrap from a published bundle without a correction component.",
+            ),
+        )
+        conn.commit()
+    evidence_out.parent.mkdir(parents=True, exist_ok=True)
+    evidence_out.write_text(evidence_json + "\n", encoding="utf-8")
+    final = validate_database(path)
+    if not final["ok"]:
+        raise ValueError("Recorded bootstrap evidence is invalid: " + "; ".join(final["errors"]))
+    return {
+        "ok": True,
+        "evidence_sha256": evidence_sha,
+        "prior_release_fingerprint": prior_fingerprint,
+        "decision_set_sha256": current["active_decision_set_sha256"],
+        "validation_id": validation_id,
+    }
 
 
 def validate_promotion_waivers(path: Path, *, at: str) -> dict[str, Any]:
@@ -1660,6 +1877,9 @@ def package_registry(
             "snapshot_sha256": meta.get("snapshot_sha256", ""),
             "snapshot_manifest_sha256": source_health.get("manifest_sha256", ""),
             "prior_release_links": "immutable releases recorded before this build only",
+            "initial_registry_bootstrap_evidence_sha256": meta.get(
+                "bootstrap_evidence_sha256", ""
+            ),
         },
         "storage_contract": {
             "database": gzip_out.name,
@@ -1787,6 +2007,12 @@ def parser() -> argparse.ArgumentParser:
     consume = sub.add_parser("consume-explanations")
     consume.add_argument("--db", type=Path, required=True)
     consume.add_argument("--report", type=Path, required=True)
+    bootstrap = sub.add_parser("record-initial-bootstrap")
+    bootstrap.add_argument("--db", type=Path, required=True)
+    bootstrap.add_argument("--prior-manifest", type=Path, required=True)
+    bootstrap.add_argument("--prior-release-json", type=Path, required=True)
+    bootstrap.add_argument("--evidence-out", type=Path, required=True)
+    bootstrap.add_argument("--observed-at", required=True)
     stale = sub.add_parser("mark-stale")
     stale.add_argument("--db", type=Path, required=True)
     stale.add_argument("--revision-id", required=True)
@@ -1845,6 +2071,14 @@ def main() -> int:
             }
         elif args.command == "consume-explanations":
             result = consume_semantic_explanations(args.db, args.report)
+        elif args.command == "record-initial-bootstrap":
+            result = record_initial_registry_bootstrap(
+                args.db,
+                prior_manifest_path=args.prior_manifest,
+                prior_release_json_path=args.prior_release_json,
+                evidence_out=args.evidence_out,
+                observed_at=args.observed_at,
+            )
         elif args.command == "mark-stale":
             result = mark_revision_stale(
                 args.db, args.revision_id, stale_status=args.stale_status,

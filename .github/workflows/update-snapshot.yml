@@ -218,6 +218,16 @@ jobs:
             --replace
           python scripts/tcia_correction_registry.py validate \
             --db dist/tcia_correction_registry.sqlite
+          if [ -s previous/tcia_metadata_v2_bundle_manifest.json ] && \
+             ! jq -e '.assets["tcia_correction_registry.sqlite.gz"]' \
+               previous/tcia_metadata_v2_bundle_manifest.json >/dev/null; then
+            python scripts/tcia_correction_registry.py record-initial-bootstrap \
+              --db dist/tcia_correction_registry.sqlite \
+              --prior-manifest previous/tcia_metadata_v2_bundle_manifest.json \
+              --prior-release-json previous/release.json \
+              --evidence-out dist/tcia_correction_registry_bootstrap_evidence.json \
+              --observed-at "$observed_at"
+          fi
 
       - name: Prepare previous sidecars for change reporting
         env:
@@ -277,6 +287,19 @@ jobs:
             --gzip-out dist/tcia_correction_registry.sqlite.gz \
             --manifest-out dist/tcia_correction_registry_manifest.json
           cat dist/metadata_change_report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload non-release semantic-gate diagnostics
+        if: ${{ always() && hashFiles('dist/metadata_change_report.json') != '' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: tcia-metadata-v2-diagnostics-${{ github.run_id }}
+          path: |
+            dist/metadata_change_report.md
+            dist/metadata_change_report.json
+            dist/tcia_correction_registry_bootstrap_evidence.json
+          if-no-files-found: ignore
+          compression-level: 6
+          retention-days: 14
 
       - name: Upload validated V2 source inputs
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7

@@ -27,6 +27,33 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
         self.assertIn("--explanations-db cache/tcia_correction_registry.sqlite", downstream)
         self.assertIn("--fail-on-unexplained-high", downstream)
 
+    def test_source_failure_uploads_private_diagnostics_without_release_input(self) -> None:
+        source = SOURCE_WORKFLOW.read_text(encoding="utf-8")
+        diagnostic_step = source.index("Upload non-release semantic-gate diagnostics")
+        source_upload = source.index("Upload validated V2 source inputs")
+        self.assertLess(diagnostic_step, source_upload)
+        self.assertIn(
+            "if: ${{ always() && hashFiles('dist/metadata_change_report.json') != '' }}",
+            source,
+        )
+        self.assertIn("tcia-metadata-v2-diagnostics-${{ github.run_id }}", source)
+        self.assertIn("dist/metadata_change_report.json", source)
+        self.assertIn("dist/metadata_change_report.md", source)
+        self.assertIn("retention-days: 14", source)
+        validated_block = source[source_upload:]
+        self.assertNotIn("tcia-metadata-v2-diagnostics", validated_block)
+
+    def test_source_first_registry_bootstrap_is_explicit_and_narrow(self) -> None:
+        source = SOURCE_WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn("record-initial-bootstrap", source)
+        self.assertIn("--prior-manifest previous/tcia_metadata_v2_bundle_manifest.json", source)
+        self.assertIn("--prior-release-json previous/release.json", source)
+        self.assertIn("tcia_correction_registry_bootstrap_evidence.json", source)
+        self.assertRegex(
+            source,
+            r"if \[ -s previous/tcia_metadata_v2_bundle_manifest\.json \] && \\\n+\s+! jq -e '.assets\[\"tcia_correction_registry\.sqlite\.gz\"\]'",
+        )
+
     def test_ci_and_operator_runtime_use_same_exact_hash_locked_versions(self) -> None:
         runtime = (ROOT / "mcp_server" / "requirements.txt").read_text(encoding="utf-8")
         requirements = [
