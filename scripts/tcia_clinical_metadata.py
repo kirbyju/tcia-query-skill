@@ -7188,6 +7188,20 @@ def harmonize_low_risk_dataset_facts(conn: sqlite3.Connection) -> dict[str, int]
     for fact in hcc_facts:
         raw_value = clean_value(fact["value_text"])
         missing = normalize_value(raw_value) in {"not stated", "no biopsy"}
+        resolved_normalized = normalize_concept_value("grade", raw_value)
+        canonical_fact_id = stable_id(
+            fact["source_row_id"],
+            "grade",
+            resolved_normalized,
+            fact["original_column"],
+        )
+        # Early builds reclassified this field in place after deriving fact_id
+        # from the generic `pathology -> primary_diagnosis` mapping. Re-key the
+        # row from its resolved semantics so incremental reuse and a clean IDC
+        # rebuild produce byte-identical fact identities.
+        original_concept = (
+            concept_for_column(fact["original_column"]) or fact["concept"]
+        )
         try:
             provenance = json.loads(fact["provenance_json"] or "{}")
         except json.JSONDecodeError:
@@ -7195,19 +7209,20 @@ def harmonize_low_risk_dataset_facts(conn: sqlite3.Connection) -> dict[str, int]
         provenance["harmonization"] = {
             "method": "reviewed_source_column_concept_reclassification",
             "source_column": fact["original_column"],
-            "original_concept": fact["concept"],
+            "original_concept": original_concept,
             "resolved_concept": "grade",
             "placeholder_excluded": missing,
         }
         conn.execute(
             """UPDATE clinical_facts
-               SET concept = 'grade', value_resolved = ?,
+               SET fact_id = ?, concept = 'grade', value_resolved = ?,
                    value_normalized = ?, qc_excluded = ?, qc_status = ?,
                    provenance_json = ?
                WHERE fact_id = ?""",
             (
+                canonical_fact_id,
                 raw_value,
-                normalize_concept_value("grade", raw_value),
+                resolved_normalized,
                 int(missing),
                 (
                     "excluded_dataset_placeholder"
@@ -7228,7 +7243,7 @@ def harmonize_low_risk_dataset_facts(conn: sqlite3.Connection) -> dict[str, int]
             subject_key=fact["subject_key"],
             source_id=fact["source_id"],
             source_row_id=fact["source_row_id"],
-            fact_id=fact["fact_id"],
+            fact_id=canonical_fact_id,
             concept="grade",
             original_value=raw_value,
             resolved_value="" if missing else raw_value,

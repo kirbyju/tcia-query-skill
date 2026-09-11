@@ -1221,7 +1221,32 @@ class ClinicalMetadataTest(unittest.TestCase):
                 has_imaging=True,
             )
 
+            stale_fact_id = conn.execute(
+                "SELECT fact_id FROM clinical_facts"
+            ).fetchone()[0]
             CLINICAL.harmonize_low_risk_dataset_facts(conn)
+            first = conn.execute(
+                """SELECT fact_id, source_row_id, concept, value_normalized,
+                          provenance_json
+                   FROM clinical_facts"""
+            ).fetchone()
+            expected_fact_id = CLINICAL.stable_id(
+                first[1], "grade", "well differentiated", "Pathology"
+            )
+            self.assertNotEqual(stale_fact_id, expected_fact_id)
+            self.assertEqual(first[0], expected_fact_id)
+            self.assertEqual(first[2:4], ("grade", "well differentiated"))
+            self.assertEqual(
+                json.loads(first[4])["harmonization"]["original_concept"],
+                "primary_diagnosis",
+            )
+            CLINICAL.harmonize_low_risk_dataset_facts(conn)
+            second = conn.execute(
+                """SELECT fact_id, source_row_id, concept, value_normalized,
+                          provenance_json
+                   FROM clinical_facts"""
+            ).fetchone()
+            self.assertEqual(tuple(second), tuple(first))
             CLINICAL.apply_wordpress_dataset_inferences(conn, snapshot)
             CLINICAL.materialize_clinical_qc(conn)
             CLINICAL.materialize_subjects(conn)
