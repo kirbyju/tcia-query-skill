@@ -99,7 +99,7 @@
     "scripts/tcia_publications.py": "fcd1aa1e5abd48d0f556165bbee85af7d30030ba4ece1af573c8a441b720659a",
     "scripts/tcia_skill_version.py": "72bc6c7d9acde8a21ee4b5356cd10bbb8f513f2f2e90c20571221679049fa347",
     "scripts/tcia_snapshot.py": "7e9cc04cb023d2e00fcd1ef9285da0a98b27f7e2302ef6f0d0cbf515ace7bddc",
-    "scripts/tcia_v2_audit.py": "58dcc6648a6493e84717dc0097999fc33ec86e1c96be41b363a55e7319d3c569",
+    "scripts/tcia_v2_audit.py": "b1a3420792ac8eab69e4ddb3348ddc5efb73cd3fb2393bcef9f24eca8fde2095",
     "scripts/tcia_v2_bundle.py": "ce02114a1584b202b3ba59b19ba22e1982aa62b7361e3e3bf1190ec9be7e7abd",
     "scripts/tcia_v2_checkpoint.py": "a25c2e0b7c88aa44d227fe11523bf16a822f8ac52259703fd4483b1efa375bda",
     "scripts/tcia_v2_parity.py": "0a651d86c0bce64ee82c0bb8da3e4fe848bf7738f6a305c4f65da37cbe9f7e69",
@@ -120,13 +120,13 @@
     "scripts/tests/test_tcia_release_workflow_contract.py": "a58c65a988e1ea1f496d738f5fb547c51fa99914b10a96ffde05fb4e3a5c6f9e",
     "scripts/tests/test_tcia_skill_version.py": "41aef2c238b596307d9cf98aea1e4971368febb02b5ae8bdb5fed04af00b6d6f",
     "scripts/tests/test_tcia_snapshot.py": "2ee4511bca2551b6d666e8e378facb42df53485b1f935939c00d6b959c209e84",
-    "scripts/tests/test_tcia_v2_audit.py": "7dfd8690e050f27d15e3a843ecd83855b06d020eacea3553a5d2ca5ee7679cdc",
+    "scripts/tests/test_tcia_v2_audit.py": "f4cc3869b364f0a46229d5494da2271b5ca0130ead80c778de4d484477532139",
     "scripts/tests/test_tcia_v2_bundle.py": "41d627011d4e93bfa9f12d2c146df4f52fa3fdb1f70147f0dde515a8462034c9",
     "scripts/tests/test_tcia_v2_checkpoint.py": "4553d2bb4688966bdc8af5cc05aac654a4687a79d8e1f2c1a9e5c64748fc7d28",
     "scripts/tests/test_tcia_v2_parity.py": "27f51ddd8bbc200eb85327cd716db37f2f7d12393bb25445ba4f5d6b6f8301ae",
     "scripts/tests/test_tcia_v2_staging.py": "9367c27acbad511d7f3261a1524dd683c6a3c3d07f7f497c5167a4cb3832e921"
   },
   "schema_version": 1,
-  "skill_version": "2026.09.14.3",
-  "updated_at_utc": "2026-09-14T20:52:25.394723+00:00"
+  "skill_version": "2026.09.14.4",
+  "updated_at_utc": "2026-09-14T22:44:28.988401+00:00"
 }

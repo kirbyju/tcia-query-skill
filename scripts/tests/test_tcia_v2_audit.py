@@ -178,6 +178,7 @@ class V2AuditSplitTests(unittest.TestCase):
             with sqlite3.connect(audit_database) as conn:
                 fields = set(conn.execute("SELECT field_name FROM agent_entity_payloads"))
                 self.assertIn(("provenance_json",), fields)
+                self.assertEqual(conn.execute("PRAGMA foreign_key_check").fetchall(), [])
                 self.assertEqual(
                     conn.execute("SELECT COUNT(*) FROM public_non_dicom_crosswalk_evidence").fetchone()[0],
                     1,

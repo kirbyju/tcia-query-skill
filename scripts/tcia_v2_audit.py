@@ -1077,21 +1077,19 @@ def build_compact_audit_database(
         for table in config["audit_tables"]:
             if not table_exists(conn, table, "source"):
                 continue
-            sql_row = conn.execute(
-                "SELECT sql FROM source.sqlite_master WHERE type='table' AND name=?",
-                (table,),
-            ).fetchone()
-            if sql_row and sql_row[0]:
-                conn.execute(str(sql_row[0]))
+            # These tables move to a standalone companion while their parent
+            # entity tables stay in the research database.  Copy their column
+            # surfaces without cross-database foreign-key constraints; the
+            # stable identifiers remain governed by the documented join contract.
+            conn.execute(
+                f"CREATE TABLE main.{quote_identifier(table)} AS "
+                f"SELECT * FROM source.{quote_identifier(table)}"
+            )
+            counts[table] = int(
                 conn.execute(
-                    f"INSERT INTO main.{quote_identifier(table)} "
-                    f"SELECT * FROM source.{quote_identifier(table)}"
-                )
-                counts[table] = int(
-                    conn.execute(
-                        f"SELECT COUNT(*) FROM main.{quote_identifier(table)}"
-                    ).fetchone()[0]
-                )
+                    f"SELECT COUNT(*) FROM main.{quote_identifier(table)}"
+                ).fetchone()[0]
+            )
         staging_fingerprint = ""
         if staging_database is not None:
             if not staging_database.is_file():
@@ -1436,6 +1434,14 @@ def validate_audit_database(path: Path, *, artifact: str | None = None) -> dict[
         integrity = conn.execute("PRAGMA integrity_check").fetchone()[0]
         if integrity != "ok":
             errors.append(f"integrity_check={integrity}")
+        foreign_key_violations = conn.execute(
+            "PRAGMA foreign_key_check"
+        ).fetchmany(20)
+        if foreign_key_violations:
+            errors.append(
+                "foreign_key_check="
+                + canonical_json([list(row) for row in foreign_key_violations])
+            )
         objects = {row[0] for row in conn.execute("SELECT name FROM sqlite_master")}
         for required in ("audit_meta", "payloads", "entity_payloads", "agent_entity_payloads"):
             if required not in objects:
