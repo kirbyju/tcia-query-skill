@@ -168,7 +168,10 @@ class CorrectionIdentityTests(unittest.TestCase):
     def test_rhuh_exact_change_batches_expand_and_are_digest_pinned(self) -> None:
         source = ROOT / "references/correction-semantic-explanations-v1.json"
         payload = json.loads(source.read_text())
-        batches = payload["explanation_batches"]
+        batches = [
+            batch for batch in payload["explanation_batches"]
+            if str(batch["batch_id"]).startswith("rhuh-gbm-")
+        ]
         changes = [change for batch in batches for change in batch["changes"]]
         self.assertEqual(sum(batch["change_count"] for batch in batches), 200)
         self.assertEqual(len(changes), 200)
@@ -191,7 +194,8 @@ class CorrectionIdentityTests(unittest.TestCase):
                        FROM correction_effects e
                        JOIN correction_decisions d ON d.revision_id=e.revision_id
                        WHERE d.policy_version='semantic-explanations-v1'
-                         AND e.effect_status='approved'"""
+                         AND e.effect_status='approved'
+                         AND e.artifact='clinical'"""
                 ).fetchall()
             self.assertEqual(len(effects), 200)
             self.assertEqual(

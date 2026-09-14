@@ -2648,6 +2648,31 @@
           "after_sha256": "edf61ed70c631d2440bdbb43fce1da2e386be08dc0ce06e463fbb69639223a8b"
         }
       ]
+    },
+    {
+      "batch_id": "cfb-gbm-wordpress-download-route-refresh-2026-09-14",
+      "reviewer": "focused release repair review",
+      "approved_at": "2026-09-14T16:30:00Z",
+      "rationale": "The current TCIA WordPress snapshot changed CFB-GBM download 53612 from Faspex package 1303 to package 1345. That exact route change also invalidates the inherited geometry summary for this changed scope, leaving it safely not_checked until the documented HPC refresh. Approval is limited to this one exact asset and row-digest transition.",
+      "evidence_id": "wordpress:collection:cfb-gbm:download:53612:package-1345",
+      "evidence": "The exact current WordPress snapshot row for CFB-GBM download 53612 exposes the Faspex package 1345 URL; the geometry scope comparison independently marks this download scope changed.",
+      "change_count": 1,
+      "changes_sha256": "9cf5ab3149ce5d0668ab27b1dd76b6de54033783fac6113f6bdded2a0b44a653",
+      "changes": [
+        {
+          "artifact": "public_non_dicom",
+          "entity_table": "public_non_dicom_assets",
+          "primary_key": [
+            [
+              "asset_id",
+              "asset_d7be6de3fa9c5cfe4ef748c6"
+            ]
+          ],
+          "change_kind": "modified",
+          "before_sha256": "c62b995ac0fabde536756d509ccda77e00bbb6f68154da9342e12afb939de009",
+          "after_sha256": "244e2f11e0c6aaec02e12f565b333b7ada7dd4304e02406b2e14c2f3e3214747"
+        }
+      ]
     }
   ],
   "migration_batches": [

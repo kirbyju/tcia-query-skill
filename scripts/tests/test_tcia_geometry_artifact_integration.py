@@ -12,6 +12,91 @@ import tcia_public_non_dicom_metadata as public_metadata
 
 
 class GeometryArtifactIntegrationTests(unittest.TestCase):
+    def test_import_preserves_source_for_identical_evidence_only(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            public_db = root / "public.sqlite"
+
+            def write_results(path: Path, analyzer_version: str, marker: str) -> None:
+                with sqlite3.connect(path) as conn:
+                    conn.execute(
+                        """
+                        CREATE TABLE geometry_assessments (
+                          assessment_id INTEGER PRIMARY KEY,
+                          short_title TEXT, download_id TEXT, asset_id TEXT,
+                          geometry_status TEXT, analyzer TEXT, analyzer_version TEXT,
+                          assessed_at_utc TEXT, checks_json TEXT, details_json TEXT,
+                          error TEXT, local_relative_path TEXT, file_format TEXT,
+                          assessment_scope TEXT, series_instance_uid TEXT,
+                          study_instance_uid TEXT, dimension INTEGER,
+                          shape_json TEXT, spacing_json TEXT, origin_json TEXT,
+                          direction_json TEXT
+                        )
+                        """
+                    )
+                    conn.execute(
+                        "INSERT INTO geometry_assessments VALUES "
+                        "(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                        (
+                            1, "Demo", "1", "asset-volume",
+                            "checked_grid_geometry", "test", analyzer_version,
+                            "2026-01-01T00:00:00Z", "{}", "{}", "",
+                            "case.nii.gz", "NIFTI", "file", "", "", 3,
+                            "[10,10,10]", "[1,1,1]", "[0,0,0]",
+                            "[1,0,0,0,1,0,0,0,1]",
+                        ),
+                    )
+                    conn.execute("CREATE TABLE source_marker (value TEXT)")
+                    conn.execute("INSERT INTO source_marker VALUES (?)", (marker,))
+
+            with sqlite3.connect(public_db) as conn:
+                conn.executescript(public_metadata.SCHEMA)
+                public_metadata.insert_vocab(conn)
+                conn.execute(
+                    """INSERT INTO public_non_dicom_assets (
+                    asset_id,dataset_type,short_title,download_id,
+                    participant_link_status,asset_granularity,file_format,
+                    media_kind,spatial_dimensionality,temporal_dimensionality,
+                    imaging_domain,object_role,representation_provenance_class,
+                    source_system,raw_values_json,provenance_json,quality_flag_json
+                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (
+                        "asset-volume", "Collection", "Demo", "1", "unavailable",
+                        "file", "NIFTI", "image_volume", "3d", "none",
+                        "radiology", "source_image", "submitted_original",
+                        "tcia_wordpress", "{}", "{}", "{}",
+                    ),
+                )
+
+            first = root / "first.sqlite"
+            second = root / "second.sqlite"
+            changed = root / "changed.sqlite"
+            write_results(first, "1", "first")
+            write_results(second, "1", "second")
+            write_results(changed, "2", "changed")
+
+            public_metadata.import_geometry_database(public_db, first)
+            with sqlite3.connect(public_db) as conn:
+                first_source = conn.execute(
+                    "SELECT geometry_assessment_source FROM public_non_dicom_assets"
+                ).fetchone()[0]
+            same = public_metadata.import_geometry_database(public_db, second)
+            with sqlite3.connect(public_db) as conn:
+                second_source = conn.execute(
+                    "SELECT geometry_assessment_source FROM public_non_dicom_assets"
+                ).fetchone()[0]
+            self.assertEqual(second_source, first_source)
+            self.assertEqual(
+                same["geometry_results"]["unchanged_sources_preserved"], 1
+            )
+
+            public_metadata.import_geometry_database(public_db, changed)
+            with sqlite3.connect(public_db) as conn:
+                changed_source = conn.execute(
+                    "SELECT geometry_assessment_source FROM public_non_dicom_assets"
+                ).fetchone()[0]
+            self.assertNotEqual(changed_source, first_source)
+
     def test_reset_geometry_surface_clears_evidence_and_resets_all_assets(self):
         with sqlite3.connect(":memory:") as conn:
             conn.row_factory = sqlite3.Row

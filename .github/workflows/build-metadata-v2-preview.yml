@@ -208,7 +208,6 @@ jobs:
             --crosswalk-curation references/public-non-dicom-crosswalk-curation-v1.json \
             --image-metadata-csv references/public_non_dicom_image_metadata_v1.csv \
             --out cache/public_non_dicom_metadata.sqlite \
-            --reset-geometry \
             --replace \
             "${pathdb_args[@]}"
           mkdir -p cache/reports
@@ -325,6 +324,7 @@ jobs:
             --participant-new cache/participant_inventory.sqlite \
             --participant-old cache/participant_inventory_baseline.sqlite \
             --explanations-db cache/tcia_correction_registry.sqlite \
+            --geometry-refresh-report cache/reports/public_non_dicom_geometry_refresh.json \
             --fail-on-unexplained-high \
             --github-actions \
             --markdown-out cache/reports/metadata_change_report_final.md \

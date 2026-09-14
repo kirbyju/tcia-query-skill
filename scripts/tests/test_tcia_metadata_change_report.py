@@ -31,6 +31,78 @@ REGISTRY_SPEC.loader.exec_module(registry)
 
 
 class MetadataChangeReportTest(unittest.TestCase):
+    def test_safe_geometry_invalidation_requires_exact_changed_scope(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            old = root / "old.sqlite"
+            new = root / "new.sqlite"
+            report = root / "geometry-refresh.json"
+            columns = (
+                "asset_id TEXT PRIMARY KEY,dataset_type TEXT,short_title TEXT,"
+                "download_id TEXT,source_url TEXT,geometry_status TEXT,"
+                "geometry_assessment_method TEXT,geometry_assessment_source TEXT,"
+                "geometry_assessed_at_utc TEXT,geometry_details_json TEXT"
+            )
+            with sqlite3.connect(old) as conn:
+                conn.execute(f"CREATE TABLE public_non_dicom_assets ({columns})")
+                conn.execute(
+                    "INSERT INTO public_non_dicom_assets VALUES (?,?,?,?,?,?,?,?,?,?)",
+                    (
+                        "asset-a", "Collection", "Demo", "1", "same",
+                        "checked_grid_geometry", "test@1", "seed:old",
+                        "2026-01-01T00:00:00Z",
+                        '{"assessment_count":1,"geometry_statuses":["checked_grid_geometry"]}',
+                    ),
+                )
+            with sqlite3.connect(new) as conn:
+                conn.execute(f"CREATE TABLE public_non_dicom_assets ({columns})")
+                conn.execute(
+                    "INSERT INTO public_non_dicom_assets VALUES (?,?,?,?,?,?,?,?,?,?)",
+                    (
+                        "asset-a", "Collection", "Demo", "1", "same",
+                        "not_checked", "not_assessed", "", None, "{}",
+                    ),
+                )
+            report.write_text(json.dumps({
+                "records": [{
+                    "status": "changed", "dataset_type": "Collection",
+                    "short_title": "Demo", "download_id": "1",
+                }]
+            }))
+            output = root / "report.json"
+            command = [
+                sys.executable, str(SCRIPT), "--public-new", str(new),
+                "--public-old", str(old), "--geometry-refresh-report", str(report),
+                "--json-out", str(output), "--fail-on-unexplained-high",
+            ]
+            accepted = subprocess.run(command, text=True, capture_output=True)
+            self.assertEqual(accepted.returncode, 0, accepted.stdout + accepted.stderr)
+            payload = json.loads(output.read_text())
+            self.assertEqual(len(payload["accepted_geometry_refreshes"]), 1)
+            self.assertFalse(payload["unexplained_high_severity"])
+
+            report.write_text(json.dumps({
+                "records": [{
+                    "status": "changed", "dataset_type": "Collection",
+                    "short_title": "Other", "download_id": "1",
+                }]
+            }))
+            wrong_scope = subprocess.run(command, text=True, capture_output=True)
+            self.assertEqual(wrong_scope.returncode, 2)
+
+            with sqlite3.connect(new) as conn:
+                conn.execute(
+                    "UPDATE public_non_dicom_assets SET source_url='also-changed'"
+                )
+            report.write_text(json.dumps({
+                "records": [{
+                    "status": "changed", "dataset_type": "Collection",
+                    "short_title": "Demo", "download_id": "1",
+                }]
+            }))
+            mixed_change = subprocess.run(command, text=True, capture_output=True)
+            self.assertEqual(mixed_change.returncode, 2)
+
     def test_high_severity_key_must_equal_ordered_sqlite_primary_key(self) -> None:
         with sqlite3.connect(":memory:") as conn:
             conn.execute(
@@ -404,10 +476,18 @@ class MetadataChangeReportTest(unittest.TestCase):
             old = root / "old.sqlite"
             new = root / "new.sqlite"
             explanations = root / "corrections.sqlite"
+            empty_explanations = root / "empty-explanations.json"
             report = root / "report.json"
             self._public(old, [("a", "A", "raw-a")])
             self._public(new, [("a", "A2", "raw-a")])
-            registry.build_registry(explanations, observed_at="2026-09-11T00:00:00Z")
+            empty_explanations.write_text(
+                json.dumps({"schema_version": 3, "explanations": []})
+            )
+            registry.build_registry(
+                explanations,
+                observed_at="2026-09-11T00:00:00Z",
+                semantic_explanations=empty_explanations,
+            )
             spec = change_report.PROFILES["public"][0]
             with sqlite3.connect(old) as old_conn, sqlite3.connect(new) as new_conn:
                 old_digest = next(change_report.keyed_row_digests(old_conn, spec))[1]

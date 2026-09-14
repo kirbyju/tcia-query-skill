@@ -1279,6 +1279,53 @@ def ingest_geometry_results(conn: sqlite3.Connection, path: Path | None) -> dict
     return counts
 
 
+def geometry_evidence_state(
+    conn: sqlite3.Connection,
+) -> dict[str, tuple[str, str]]:
+    """Return per-asset semantic summary digests and source provenance."""
+    state: dict[str, tuple[str, str]] = {}
+    for row in conn.execute(
+        """SELECT asset_id, geometry_status, geometry_assessment_method,
+                  geometry_assessment_source, geometry_assessed_at_utc,
+                  geometry_details_json
+             FROM public_non_dicom_assets
+            WHERE geometry_status LIKE 'checked_%' OR geometry_status='mixed'"""
+    ):
+        # The compact research projection intentionally removes verbose details;
+        # those remain traceable in the audit companion.  Preserve the research
+        # source label when its status, method, and assessment time are identical.
+        semantic_summary = [row[1], row[2], row[4]]
+        state[str(row[0])] = (
+            hashlib.sha256(
+                json_dumps(semantic_summary).encode("utf-8")
+            ).hexdigest(),
+            str(row[3] or ""),
+        )
+    return state
+
+
+def preserve_unchanged_geometry_sources(
+    conn: sqlite3.Connection,
+    previous: dict[str, tuple[str, str]],
+) -> int:
+    """Keep the published summary source when its assessment is unchanged."""
+    current = geometry_evidence_state(conn)
+    updates = [
+        (prior_source, asset_id)
+        for asset_id, (digest, prior_source) in previous.items()
+        if prior_source
+        and asset_id in current
+        and current[asset_id][0] == digest
+        and current[asset_id][1] != prior_source
+    ]
+    conn.executemany(
+        "UPDATE public_non_dicom_assets SET geometry_assessment_source=? "
+        "WHERE asset_id=?",
+        updates,
+    )
+    return len(updates)
+
+
 def ingest_geometry_coverage(
     conn: sqlite3.Connection, paths: list[Path] | None
 ) -> int:
@@ -7510,8 +7557,12 @@ def import_geometry_database(
         ensure_geometry_schema(conn)
         try:
             conn.execute("BEGIN IMMEDIATE")
+            previous_geometry = geometry_evidence_state(conn)
             reset_counts = reset_geometry_surface(conn)
             result_counts = ingest_geometry_results(conn, geometry_results)
+            result_counts["unchanged_sources_preserved"] = (
+                preserve_unchanged_geometry_sources(conn, previous_geometry)
+            )
             coverage_rows = ingest_geometry_coverage(conn, geometry_coverage)
             generated = datetime.now(timezone.utc).isoformat()
             meta = {

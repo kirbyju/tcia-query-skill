@@ -130,6 +130,118 @@ ARTIFACT_IDS = {
     "correction": "correction_registry",
 }
 
+GEOMETRY_SUMMARY_COLUMNS = {
+    "geometry_status",
+    "geometry_assessment_method",
+    "geometry_assessment_source",
+    "geometry_assessed_at_utc",
+    "geometry_details_json",
+}
+
+
+def accepted_geometry_refreshes(
+    high_changes: list[dict[str, object]],
+    assets: list[tuple[str, Path, Path | None]],
+    report_path: Path | None,
+) -> list[dict[str, object]]:
+    """Recognize only safe geometry invalidations for explicitly changed scopes."""
+    if report_path is None:
+        return []
+    payload = json.loads(report_path.read_text(encoding="utf-8"))
+    records = payload.get("records")
+    if not isinstance(records, list):
+        raise RuntimeError("geometry refresh report records must be a list")
+    changed_scopes = {
+        (
+            str(item.get("dataset_type") or ""),
+            str(item.get("short_title") or ""),
+            str(item.get("download_id") or ""),
+        )
+        for item in records
+        if isinstance(item, dict) and item.get("status") in {"new", "changed"}
+    }
+    public_asset = next((item for item in assets if item[0] == "public"), None)
+    if not changed_scopes or public_asset is None or public_asset[2] is None:
+        return []
+    _, new_path, old_path = public_asset
+    if not old_path.exists():
+        return []
+    accepted: list[dict[str, object]] = []
+    with sqlite3.connect(new_path) as new, sqlite3.connect(old_path) as old:
+        columns = [
+            str(row[1])
+            for row in new.execute("PRAGMA table_info(public_non_dicom_assets)")
+        ]
+        selected = ", ".join(quote_identifier(name) for name in columns)
+        new_rows: dict[str, dict[str, object]] = {}
+        old_rows: dict[str, dict[str, object]] = {}
+        for scope in changed_scopes:
+            parameters = tuple(scope)
+            for row in new.execute(
+                f"SELECT {selected} FROM public_non_dicom_assets "
+                "WHERE dataset_type=? AND short_title=? AND download_id=?",
+                parameters,
+            ):
+                record = dict(zip(columns, row))
+                new_rows[str(record["asset_id"])] = record
+            for row in old.execute(
+                f"SELECT {selected} FROM public_non_dicom_assets "
+                "WHERE dataset_type=? AND short_title=? AND download_id=?",
+                parameters,
+            ):
+                record = dict(zip(columns, row))
+                old_rows[str(record["asset_id"])] = record
+        for change in high_changes:
+            if (
+                change.get("artifact") != "public_non_dicom"
+                or change.get("table") != "public_non_dicom_assets"
+                or change.get("change_kind") != "modified"
+            ):
+                continue
+            primary_key = change.get("primary_key")
+            if not (
+                isinstance(primary_key, list)
+                and len(primary_key) == 1
+                and isinstance(primary_key[0], list)
+                and len(primary_key[0]) == 2
+                and primary_key[0][0] == "asset_id"
+            ):
+                continue
+            asset_id = str(primary_key[0][1])
+            after = new_rows.get(asset_id)
+            before = old_rows.get(asset_id)
+            if after is None or before is None:
+                continue
+            changed_columns = {
+                name for name in columns if canonical_value(before[name]) != canonical_value(after[name])
+            }
+            scope = tuple(
+                str(after.get(name) or "")
+                for name in ("dataset_type", "short_title", "download_id")
+            )
+            safe_after = (
+                after.get("geometry_status") == "not_checked"
+                and after.get("geometry_assessment_method") == "not_assessed"
+                and (after.get("geometry_assessment_source") or "") == ""
+                and after.get("geometry_assessed_at_utc") is None
+                and after.get("geometry_details_json") == "{}"
+            )
+            assessed_before = str(before.get("geometry_status") or "").startswith("checked_") or before.get("geometry_status") == "mixed"
+            if (
+                scope in changed_scopes
+                and changed_columns
+                and changed_columns.issubset(GEOMETRY_SUMMARY_COLUMNS)
+                and safe_after
+                and assessed_before
+            ):
+                accepted.append({
+                    **change,
+                    "scope": list(scope),
+                    "changed_columns": sorted(changed_columns),
+                    "reason": "changed geometry scope safely invalidated pending HPC refresh",
+                })
+    return accepted
+
 
 def quote_identifier(value: str) -> str:
     return '"' + value.replace('"', '""') + '"'
@@ -709,7 +821,19 @@ def build_report(args: argparse.Namespace) -> tuple[str, list[str], dict[str, ob
     consumed: list[str] = []
     duplicates: list[str] = []
     unexplained_changes: list[dict[str, object]] = []
+    geometry_refreshes = accepted_geometry_refreshes(
+        high_changes,
+        assets,
+        Path(args.geometry_refresh_report)
+        if getattr(args, "geometry_refresh_report", None)
+        else None,
+    )
+    accepted_geometry_identities = {
+        explanation_identity(item) for item in geometry_refreshes
+    }
     for change in high_changes:
+        if explanation_identity(change) in accepted_geometry_identities:
+            continue
         matches = by_identity.get(explanation_identity(change), [])
         if len(matches) == 1:
             consumed.append(str(matches[0]["effect_id"]))
@@ -846,6 +970,12 @@ def build_report(args: argparse.Namespace) -> tuple[str, list[str], dict[str, ob
     if unexplained_high:
         lines.extend(["", "### Unexplained high-severity semantic changes", ""])
         lines.extend(f"- `{item}`" for item in unexplained_high)
+    if geometry_refreshes:
+        lines.extend(["", "### Accepted geometry refresh invalidations", ""])
+        lines.append(
+            f"- {len(geometry_refreshes):,} assessed asset rows were safely reset "
+            "to `not_checked` in explicitly changed scopes."
+        )
     if malformed_explanations or duplicates or unused:
         lines.extend(["", "### Invalid or unused semantic explanations", ""])
         lines.extend(f"- malformed: `{item}`" for item in malformed_explanations)
@@ -857,6 +987,7 @@ def build_report(args: argparse.Namespace) -> tuple[str, list[str], dict[str, ob
         "warnings": warnings,
         "unexplained_high_severity": unexplained_high,
         "semantic_changes": high_changes,
+        "accepted_geometry_refreshes": geometry_refreshes,
         "primary_key_migrations": primary_key_migrations,
         "baseline_modes": baseline_modes,
         "semantic_explanations": {
@@ -886,6 +1017,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--json-out")
     parser.add_argument("--max-items", type=int, default=20)
     parser.add_argument("--github-actions", action="store_true")
+    parser.add_argument(
+        "--geometry-refresh-report",
+        help="Geometry seed comparison report used for strict safe-invalidation classification.",
+    )
     parser.add_argument("--fail-on-unexplained-high", action="store_true")
     parser.add_argument(
         "--explanations-db",

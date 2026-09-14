@@ -17,7 +17,7 @@ class GeometrySeedTests(unittest.TestCase):
         workflow = (SCRIPTS.parent / ".github/workflows/build-metadata-v2-preview.yml").read_text()
         self.assertIn("tcia_geometry_seed.py verify-release", workflow)
         self.assertIn("tcia_geometry_seed.py compare", workflow)
-        self.assertIn("--reset-geometry", workflow)
+        self.assertNotIn("--reset-geometry", workflow)
         self.assertIn("public_non_dicom_metadata.py import-geometry", workflow)
 
     def setUp(self):

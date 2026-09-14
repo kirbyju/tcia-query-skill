@@ -234,6 +234,9 @@ download scopes with the seed ledger.
 - removed jobs are pruned;
 - new or changed jobs remain explicitly `not_checked` and produce a workflow
   warning plus JSON/CSV refresh reports;
+- the semantic gate accepts only geometry-summary resets to safe `not_checked`
+  defaults whose dataset type, short title, and download ID exactly match a
+  `new` or `changed` scope in that refresh report;
 - a missing, corrupt, or structurally invalid seed stops the release;
 - public DICOM is excluded and belongs in IDC/idc-index.
 

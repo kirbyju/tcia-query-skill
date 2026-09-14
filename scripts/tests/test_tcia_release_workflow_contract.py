@@ -204,6 +204,20 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
             semantic_block.index("rm -f cache/public_non_dicom_baseline.sqlite"),
         )
 
+    def test_geometry_refresh_is_atomic_and_strictly_scoped_at_gate(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        build_step = workflow.index("Build public non-DICOM metadata")
+        semantic_step = workflow.index("Enforce exact semantic change explanations")
+        block = workflow[build_step:semantic_step]
+        build_command = block[:block.index("tcia_geometry_batch.py plan")]
+        self.assertNotIn("--reset-geometry", build_command)
+        self.assertIn("tcia_public_non_dicom_metadata.py import-geometry", block)
+        semantic_block = workflow[semantic_step:]
+        self.assertIn(
+            "--geometry-refresh-report cache/reports/public_non_dicom_geometry_refresh.json",
+            semantic_block,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
