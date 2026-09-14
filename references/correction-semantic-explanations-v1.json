@@ -1,5 +1,2655 @@
 {
   "explanations": [],
+  "explanation_batches": [
+    {
+      "batch_id": "rhuh-gbm-wordpress-diagnosis-correction-2026-09-11-part-1",
+      "reviewer": "Justin Kirby (TCIA WordPress curator)",
+      "approved_at": "2026-09-14T12:55:00Z",
+      "rationale": "The TCIA WordPress curator confirmed that RHUH-GBM cancer_types was corrected from the erroneous Astrocytoma label to Glioblastoma. The Collection title and description identify the 40 subjects as primary glioblastoma cases. The WordPress source-row change also regenerated exact primary-site fact identifiers even though the Head value did not change. Approval is limited to the exact row-digest transitions captured by source run 34795088108.",
+      "evidence_id": "wordpress:collection:rhuh-gbm:diagnosis-correction-2026-09-11",
+      "evidence": "Current TCIA WordPress API record RHUH-GBM reports cancer_types Glioblastoma and cancer_locations Head; curator confirmed the diagnosis correction was made on 2026-09-11.",
+      "change_count": 50,
+      "changes_sha256": "2cb0863ad9b6b5731c5c9fde7bbf38cff165d7c386e760c6e9b8687bf54af0b9",
+      "changes": [
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "012fab94680b614c5392c098e0ec791ede7c768ad7abbb15dd2a8e784e6c6673"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "c8ec71b1337b00962016d2fd55b87121d1bde842daa2a3d4458faee0117d31bb"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "03ed2d8163feb77acb26865bbd6b85065ed752f633964c58cbd887565638fde5"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "187cac3ef6a0172e33c0485ccb144b4379744be8064402d786fb306626dc1d0f"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "048ed309bfedfb9a96ef88a0644c4a8e716f729a296d5c59f83e03dc3bc1200c"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "09b6be5cdbc65429404847e3f218afc0700369afccf7ecc8866fd9db28e3985e",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "04bd234781e2f1b8bdd5814abfe002b8111f13c4ad263331e2aec62287d754c1"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "ba87a527ab56d03626ecfc60189d3b613c69d0abb392fe048e500ba1166ece04",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "0ae4882b2afeaf72a44fbe98b7aa47b6ffdbf71fd0bea3e77e1089beadaf1ab7"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "216c5cabe17e9552185797593467279ea4752db1f4105ef1411feec85f8fb8c0",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "0d37c0e44de07b98517a463b5da89c1617dd6830e44b5c30b56717579dd180e2"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "3c4ae5ab1712f715b635fb876b045bfa6ffc823e20441adfa0f855beaecfa8a5"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "0d3df1d8ee54de6b41a0eb84baa1e4c4ae00e3a8d301df5236fc224fcd337706"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "48c6fdc43ec48d9344c4a7b4cdc86a7fbe464132dc8a87fbc4076d4ebfd29266",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "0d541e247186bf50ae0fa99a419d845e61343f97f8fd0a688191e9221dabd42a"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "bc638d1965f5f9d477b75a79b13a300b692c0378650f69be604668aa221d75b9"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "0e84a99b197c23cb8e46febda5f18f395fa19242e331f32f1a9341ee103f5139"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "f053348f08ee323bbcad9f7491d06c69ab7bb86f5584133605bcf480b65cd6a5",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "0f7db40438852070daa044bc61d9de81af3124cd00a64bb030724dc28b080868"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "0f73e05f4882e24f192e6e9b7b96276ad6aaf0f031424ff826bf4edc3264b5e3",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "107a51b870384a7a8b812afa702adf388d414804ab24a76f811a6ccef8cae1ff"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "64c48ad676563dcb0111f148670ea110b4a3d32bf1d420ef94a0fb8bd49ed7bc",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "11a30c563214a37f3af17814a3520822fb9e077ea172db1001e67ea76c88ea85"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "611ccd2bc99babddb16bdaa0d0f5b1382af15953b7df7250053930e09781eb6c",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "13c457cc5a78e9ab60079b71164a7903cb4cdb5564025f3f34ebce65e50d256c"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "3c25e76a0800b001e10d9833b758d3229e5aa7c9e5dd50bec59622e8790c9450"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "181c1fe258d1ddf7f4264fa3ac64e614ba7e96a3d6694b3b26e4db99e65daaae"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "5cdb9cf0c1da58cc0922b79ce656d9e03fad75dc3ee54e47aa1d7514de63f03b"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "185ed3d85cba5250c1aaa3431a2a7bf3c54dd83a65f616f7907d29a14b0cfdef"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "7ace5e70cf5c7bb1e2992fe1dd48b258152587372fa43676e6b5cf2741563589",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "188bd77472e9a9fc18ca1358b22339eb1b9ab349fc5d8d18a5f9f2456496942d"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "fc3b17db8b2c6f847a6feedfa8caf6753ee35b4f4c748dabba63e98bd8658ff9",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "1d4413d8c378cd18833e811f883faededec54e4e008d5dadcfe4633ea6a407f0"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "c66ccf3efc944f58a3601cea586f7718230210ff097a345dc6f06b26e87da9e0"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "1dc5412c228d7129036aebe64121df6b28d234b95eb0366d47fcb70557f237c7"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "0ffa121038c96e8d44e361b8aff99fdf7af435f4dfc0d742fa76eadaf82342c3",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "1e161e5e11e9efcb6b6d38b8519df2045aa17e63dbdc3df2773f7988f60f41eb"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "a8c8c0121bb7e64391b6b473e39f0a0b1b3ea941daeb1db6b5ddb6f7b5085a15"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "1fb846cff8591f89af66e498cff11ee2697470dd74acfda105d470766f75c1b5"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "31e3fedf27ecc7ed891f5e84f69b26ae552e5a8b91bb6afcc81178743fda229b",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "1fc95f4196da8a8b56387bb1f5431dd2648468374a47df9382af6be064a83db2"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "c0a544598a248efd48bcf9b2160b131c5693c8b7a4114ae64d848aa5d5e2be84",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "201a28ad814a2cffc20b39baf736d9a2a9869a7ae83c007ec1a4cfd1067a87c4"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "c68d50bf7802aef6408effb2b9b688651db7382eca08d398c602a5c390c641ef"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "2206628d3d723c4ac12f8bac3ece60d2f9cef28a77171b41ad4197aa31dd55ff"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "1b5ea81b978f4a90da5f6b7088d2193910dfab37234f8de0318e006f828530fe"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "2298ec434d1ac2ef7b5f4b2e676a9613cb70bdb99d995aab4dae3c1a97cc441b"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "e873be504e701ba7f85d22efe6fe2bf033bf80e8866223ebc6277c22410368e4"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "24a09fb7b9449d1e86230eaac26366c6343505a5b7c33d9e57c7d80a1f8c9fb0"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "57616d7b4f36579d7a6ae2a5a249154e9b71f1c5b8b1583e8cbf8ead4e620961"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "24f5899d3ad730312ed3d9f0b99ea8d00cf1d195803704908984e7453bdcf885"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "6c93a888ce05b21923c6d7b04ff5003b7db4e19803923029199cfd4a121e8fd1"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "26091dd6c736a8fdbea7474a021f667bccb2928524420d09eca9b5b564a5f738"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "2c90e7686b44db59a17bda0b540137d0367744b0d6cc4e2a6c5b121c56985c91"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "286fccd9f612c6eee530e97a45c0d97dda22af9c63f1f980cdf956a2e4aedba3"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "5bd6582543225732dc2db4ac6693aadc23106c71c35100e64bd1c847370a92fe",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "29741e1b1597b10b93820a2d82e3b53427cf83319cc5f52dfcf5e9dee8b16d1c"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "b3e99976bc5f58c6f4358b777ca7fde2e23c7dc6bdeb7d1ea15617530d4d0781",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "2d9c65f21e011d733bd4ccfbda715735dab628929e4c327a47a5f954b491cfd1"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "211796fb5c25c20618668d0e441777b6abc24fbbd2046d028f7147880fcf8227",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "2efc55ad335a9a90e60a059e00c67d43a0fa3192dc5a5f4dc42815607ab05d4c"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "54bc1ac3ba4ee85a68e8b5a54518cdb45ade0a1cad422a125b6530489b6b6e50",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "2f91d0ebe2008919f1ab252db7e1a2c2ec0e094647c0c8ae4c98103c7a3e7b86"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "fac2d2d859f8f5a18918b4c927800aa6ab443a207d7ec859336f38dd3baaf00d"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "335faca0a42e8eb916e2e0294b22351a160dd94b1cbdc82be7d5443a580a3f82"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "b55d124b2d9e86be0e09891beb351bb2b13c98f3b6d6595f2cc8d9336f8e8698"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "33f4c923ca097b27431ad6e542e6913eb0a7dea9d13c0d344564bb2cb8fc411c"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "efe68d0445ee301729b707691dad621ac14c932177d5eb709f11ceaf7f5a28dd"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "366a937d7426c7159b5b06d603c98582b092eab117456812720c9ee0907b8791"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "c981cc823fbc3389c1cc7a78ca6761655a4a1cd03fbe769c2c42962103675fef"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "383b9bd9d52ff964b9e33e33fbf48ab72efcb0c13a244ecb4d7659fcac43da1d"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "c606208d4c6345bed115db0908867e986968c68643bff17437514b860aada9c1",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "387800a448dd5a51bf97d7811408f9bd83b9aea658e0b3a7190b9fac7cb2d658"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "003789374a04841e7c5f5639f66ed4d98a351e9885b184a92e2161eac23df973",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "3b2616a1db6d1c6f1ca51752417afca97480234ad95c75f7adb1c0d95e701926"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "6b2e8e5d77138ddf8bdbc27474c84547806c418345ffa12f7449d6b5b5c6295d",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "3b793e5d32021213933df4dba887264b84a52fe8972099cae0fe7b60e32bc797"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "5a3de6c525dbdf8273bd4a21fff2add2c86d1c71fd7e4d7d416377947f96d1d4",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "3c3906209f840a1f42d3e7d6e9ef10f01cd7c179f4f685103620c7ead7ca1c2f"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "656a568cb32ddd594e77e23cd67a9a60c72714030eace4a84f9031013721eb70"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "3c55bf248cbb8443d55553b86b71a1434682ede5572857ef240abedd1983eac2"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "eca2595e7d1378e98fe0b50339d71bb644902429400b0c7a1eeef6308f8f341e",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "3e204ec28eec7d1bbd0a4f68bb83f7354677683e2b05b233775945dc2776745c"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "882db1a0106436dab877733248495292e8c9f8070eacb025b74e2a40af101beb"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "3f713e8d4c6bc6d63b85fb239c6f36fda393f37bf211b672f1d69d47ccd73abc"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "9109b518a4725b855b5b607885bac42092a4e46d4495e3be65a87eeaee8bbea2"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "45d72a8a5a663c5d1487041bb7828d3fdd0e2215b99d86aa9a74837fed1ec66f"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "63b1cb74b861999f8c47904dac420566de220226914a2ec95f24b143f8fcd526"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "48bb51833f9f70ae9b1bf808001ba004a892b6dd5c520bf500d52926929d7c88"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "945ab902c7f81a2a840f8012cd2ee3cac0e0591e5d92f8448024c51284efc54d"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "4a31321c6a2d74d7a27d6b9941538303deece3c9233dab009507f31c58919f0d"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "15303880bf269373da86164847b460e2dc7c540d3888516c655b82af2f2fecea"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "4aec431ca9578aac4c8f08f070d1b20f7ce12f085beeaa8b31a9fd6248cdc89e"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "2a1afd799f482750c973a92c77a375965874b8e2f2ab8cf73026a1d738ed1bc8"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "549d3155e5990a35e17c7fbd3c97fed777d489504a79456d9ea96f999be08f98"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "b5181bd1b080cc90bdb89fc51b812fa0998728b5a1536f0deb90bdcf665e4bd2",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "55899fb3d366a9e81674a1cb9c0e2fa657a5bb7a3826a3d2eb0c49237a8578e8"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "fafca1196fb8ac16b21c891d3d9dcdbbc1bc5566815337974ebe83b946429e14",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "55cc1a7aed15cd220618710bccacc8af1b0f97fc5f38f70af908e49ea835af40"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "316eea33e37d731a8af41ef9ec72cb9b51c7939f1e61ac0589577c00b20eb33f"
+        }
+      ]
+    },
+    {
+      "batch_id": "rhuh-gbm-wordpress-diagnosis-correction-2026-09-11-part-2",
+      "reviewer": "Justin Kirby (TCIA WordPress curator)",
+      "approved_at": "2026-09-14T12:55:00Z",
+      "rationale": "The TCIA WordPress curator confirmed that RHUH-GBM cancer_types was corrected from the erroneous Astrocytoma label to Glioblastoma. The Collection title and description identify the 40 subjects as primary glioblastoma cases. The WordPress source-row change also regenerated exact primary-site fact identifiers even though the Head value did not change. Approval is limited to the exact row-digest transitions captured by source run 34795088108.",
+      "evidence_id": "wordpress:collection:rhuh-gbm:diagnosis-correction-2026-09-11",
+      "evidence": "Current TCIA WordPress API record RHUH-GBM reports cancer_types Glioblastoma and cancer_locations Head; curator confirmed the diagnosis correction was made on 2026-09-11.",
+      "change_count": 50,
+      "changes_sha256": "d8e0916c5ba1a32e65acdd40d3f10642bea2053bd54fe60809bf768e069e8e1a",
+      "changes": [
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "563c43e8ef25371302dbaaf2647cad6f617b33bfc9cfc4920254bd24d9e60673"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "e262b182180f81a07e3fa3e2ff483470a7caeaba6e1f2968b46783b5ef8a4467"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "5a17788af20cc82bb43c69d0e9edc76e07b31632ef3aa554f6ece23cb7cb96b2"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "2b76d4d35ed64cd95038387e37bb298f0556075b1ac883a8f6c49d33ed584ea1"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "5b03dd83512e2af22612df66bf435fa35d99ba6c4d37368f6a6568a50877c557"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "ad828aef25a87934475b05a73ccb02a5958c574df3c777e53cbbc2633d1ac21c",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "5b15f55f3232ac2100a8b18f53c4c0db64951961b8c2d0b4ddfd53faf1a60864"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "26833dc4c547d47f505c783cff86754ae460b95ec830da7824e83802a092c0ec"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "5b67fb626d9cadbd81603b9bd985804ebcb52465909500df1bb8b5fc17e4e6b5"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "eb01c5bb8a67ceb66d706da83d4fbdd0c1ec953ee88315151cd8aaa2b459631f",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "5cb41cc21f411457e1818315cfbdf1be3066fe0693734bdeaa21034f1dbf7f29"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "b186437b745d07037b43d4b1dfb68864e2aa3bc27fa9fdfb3e0498acd349ef5a"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "5cf1975547d8d357afc83cbe205e4520d3ebeae2ea67d4cf19e8a9159f7c27e6"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "6b34f101016176aa15a4572b4bc5f64009280fc9f0f2bb0a906435a83932c946"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "5d00a5746ce1bf13a466569ebecb82d2bc323b9ddab47a9f720f5ef6aabe6b47"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "c1729252d82f2e542c88f0c46ebd43a8ab107eca8a5d14eaaeaaca62f6bb2711",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "5e49c9f1cb6c149ca4673771494d63f4bc4e29efebcab123b714986e48a480ac"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "002e9d5b3129c077b46dc74a57fd0e9a255fa2af2a51a52264f117753b5e1524",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "612e712c65e76ddbd8d5018cc0af7754d0bba72d28c70c90b399f31f4810c590"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "11762d5d8ccd4d3caf773b72e25173497557a101ac0c8445f6273b564cf6e3e9",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "6495152591ac4dd81e7f07bceae71e4165f520c464fddf9c79a84df007f0180a"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "81b6843e537dd86756f50cca795e0b46bc4158852c7700b2f91baf040c7aa2aa",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "67c0137ed8cfc38ae766c9f62a3cdd892f5bc6d053a681494737fbb78c82c8d7"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "9ff192aadc14b2c63a6bed046b0c85d1f550ef0064b328c3c5b6f9bc7220d552"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "67ea460611bcbe2480aaa6406eba39ad71773dcc82fa456cef00b849521c88e2"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "dab5e593d7f76338981232daa1792d67d4e7b34d667cf74db12413a455f43e5d",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "681ba5ec4392b42901d3a5e807e400b0d26733d0b90dcca2a311ad3784a70fab"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "0bbe9b32defd1983d0a21f43f9d3b104bdc0f77e8fe4f423c69d8b3d1136446f",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "6890f57548b70d873539f5ae912fef7b391e1f77fdeab0a0b0f5811257265cf7"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "911a1704be84db4939b34fdd3d5bf41ac220b0b7023fbbd724b69732fac56536",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "6bc05769544789a9716e3128676034d8986ce617d9d47a18e46b0e05e8a7c4dc"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "530ccf9d9b82316d2c4886cacca1956e8e914ddceda092a0de9ca241386d653d",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "6c9ef15c1e7b9cc923f88ed80979013fcf4e20ec69be4c014b2e49257eeb2f84"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "6dc55e03ecc5983b6d62e833cd3dac60cf05eadcd5cb8c3ccb084f17051a7bbc",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "72c73290cda2f6c44c266547e23cf6726975894ac2e40e3523ca34b6c64aec80"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "d22566ad932c73e2a4298cf0d19bd82e67de43d789fd846eecd3431c0a240377",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "73e23430bc6f500faa5a03c6c59c108982fdede5f9d764047fa498ed467faaf6"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "3f88e1af0ceaba3f54a30bb52b1debebcb1410b58f080400bf2d7e6158fb7f76"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "7690c73a03e6e3b3c3621523851562f2c6d090be97896a47b55df499bee306c4"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "6e5bde58b83998d596846ff1b24043d83716df418f072a8aa86a43b11946dc7d"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "773df27f54549b5f41ad3bd8acb2113a23e52b7f8ec9c122ceda08dfb185f0af"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "cce5417551ebbeff32e6a2201bc2e0911535110f4082c17f75f1d67244c14df9",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "791fdd0a010070b03a7852caa291ac62ddce0fa7749d304b9213f68a4c5dcfe1"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "b49d1ce3930f3a1b76c593cd65fcfb6528acd13590870d9722064334e7edc9a6"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "7e4215a9b19c8d73c51ee99f9dabdbfeae6f97bb89800ccea6c71896b29b35cd"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "69acd8fdb8e66f4c47803bd14437207cd3b9e4e4e76b57353e0ad7a69b5dca83",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "7e98cf68ad0496a2d6c62eda0a6b16524be661b94e9cdf5cb37e2e75ad12a9fa"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "a1a946457177b4b743baa6a4d8ece18a5b1330e9a32cf7c52ffdbe0af6425808"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "7f92fdd800af94ebdd915e80a197b0ce6601ada43141f50c77715af10153045f"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "1ef0acbcfd6718f2070275aed3cd9491522c9081a8fbd37c2ef2d79de784b3af"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "80239997ee8359f0122508996da70090315f6240c1ba5dab7e0d00b0168f9a03"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "6847366b2068d607b6b1fa25e6283b5c20f642d44800939e54725c98b102ada3"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "80618ad7e2480b30a8b74cbc943e55681218eabce0a28a9b14e3eca15be028e0"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "98b09bda82be65a48bb9e218b4d45f280cf38fde5bc2e570052b5269d0a709d3"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "82b2dbad356e0ba2257247e58fbaf51df373840d20938d1ddb89dcd1535ea6b8"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "cde2523c52f1330cd4e12063df77b2dfcf87135abb7bd1b3256f49acbc54ce5f"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "84735e7e2297f2b73f1a64585d836af62b368cc853800f7edbb72d7e0bf43866"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "dac7d8355578e0c82ded546bb9e6c25c28c0c09132df42f6ec6e5b2d05ea002e",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "85514134cd5a1369b1ad2450789b643fabc382047fca91068077e060e2a6541b"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "67b6b323909806d8203f9bcc05c197f61146de02275e2eb8da7a1c554e9cb975"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "8563d8fe3b14c487f00c2b7146395d04e363af68f634b568e52997a369d3288a"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "386d3b94c46be5d5f3f33a2c539ead454a4b7fcba8b3ff98c5a7f0900532f156"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "86ac5361d4262405eda4b0b1b5477c7f0bdc10f04c953be9202aecd45920f7c3"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "e601768d4b9b319d552b0248fb3c94e66f2ad7e53a8562a7859634cfef254efe",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "8837cc8a360cf5f350aaf32dc1d4230bbda22769863fd4f87551301933a62782"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "a8d410f2631ac661c50ab49d0fe5e88d5eae25c8c66501f59aa6c1ae04472b36",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "8a7ed6019df5fab931984a3cdd74f701d1993dfb4aea1200e49444294fbfdee5"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "cc126995788bd7aa3c76a336858f4e7aac38615eef0ae1c2f21a0eec72d8f13e",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "8b233390a4c2b5734c0936e5e9460d191f019f62dd49a1669f95dd657736ba25"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "596a8c66a4ef0cfcf6e339b23da02298beaac8f2af6a2159c0f7b97b79f0140d"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "8c06209a7336c11bcbbcf17c4eb196a412cb1a441c6b46439381ebd94c6d3306"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "12ee21c4192df7758ae45a0767ee4595f16dbb3ac7a22ee6a6b90b8a68bebb8c"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "8cc532fd828c00894c8420a562ea993320a0d88d4c2798456432265177742a19"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "08e7366d156cf211b18c4eff93c3b768b729053539c3936a0ad3f8a8a9afbf09",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "8cde507870b9d34172a3a68d2ff441bf8af21ba8fcc73b1a2218b7fe171f7ad2"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "3fe6f1bfe2cf55289a17ba3416f25683940ecaeec9b9e01cabb2a99dcf90db64",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "8e6273567a27c364e0f853caa0bbe6fa27a81999d84b10ced0b5046da3cdc07d"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "90d7e5ba1228a624c7b4b3a5cec4969cb3aa2054ea567d2c4aa531c36cf44969"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "8f6f74129321673b75a2e3cc907822166526f5b1997068246b349bb91be1917f"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "3871a8721ca6c092c0c442c35f452a2796a1b044b625a6cb66ebf362c32dc411",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "8f8dc4c9c97759a2422ab6a2faaac2dd06887e59407197a7e83d6b6cd6cc13d8"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "2a5252489c3c2d43779daa286dc6f81058544416eb88baa75affff685e8a275b"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "92697799a730ee74dbc2757275a02d02b8efac6b28b94dd965ffe7b8b3828941"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "bd4df4643ddd3094180a12a885dacaa2aca54cc5bbec53bfcbad9b9c264c141b"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "94e3fa225e0c89f4e21bfdc22e16dae52710a2c9426b394147eac9f1f872b023"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "71f4872c6a2fa0ccd1918964313b4ce5558753cd485a8376838e8c4a02bfc3af"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "9660d85f5fd7c9c77290c69c7ca5963c51a8732e519ccc06dad11bf07da761dd"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "07149e905c05ed833a120a0c386f8dfa78db00e7f36cc6b7b6c09bd69a102af2",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "9933c2cd1b148c661e29c251d46918a0ad2785cc524729a3e1f2418dd1f89980"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "ae267ad152d96f7df9a89345ddce67ad3c610418154c0c565cf3bce2de7a6a54"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "9996c137ce8634f6b562ead87bd46ab908903fbf9d86055f7c685ee09bbcfc63"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "2a7c1d0ff1e7926d8407978ac18114f27b903cc7a852268ab4b00f49726cdf28",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "9a81a9c0f67a7238d421f7c95f70bf6252fb250c4c836f4d976725ebca069f2d"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "38600024e62911c4773cc7ef0e79b4cebad3eb41411fee7ed5b57b8a08d11671"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "9b5782392ac6068b5dc0d0111ba89045a814289cb51a1b271e7d5d7d84599ed2"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "1f9faced9ab24958631867d360093da341fef0f9af1993f083f53552c83ba937"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "9b5fb8ea84e9414b13205f89b3c7e7122908f9c5b898bec884848af9cc08d1ab"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "ccba7f292e3a4ae60d4350706fce75d7f4be88b9561691cb3cd3e1f1f21f959e"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "9c04948a8f20436181c38735793694651832e6ca73b5dfb0fb0491215b6c97ff"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "7f2741e2a6471b33978d93f9ce67b947419b74d4ede7f64aaa3965736716db7b",
+          "after_sha256": ""
+        }
+      ]
+    },
+    {
+      "batch_id": "rhuh-gbm-wordpress-diagnosis-correction-2026-09-11-part-3",
+      "reviewer": "Justin Kirby (TCIA WordPress curator)",
+      "approved_at": "2026-09-14T12:55:00Z",
+      "rationale": "The TCIA WordPress curator confirmed that RHUH-GBM cancer_types was corrected from the erroneous Astrocytoma label to Glioblastoma. The Collection title and description identify the 40 subjects as primary glioblastoma cases. The WordPress source-row change also regenerated exact primary-site fact identifiers even though the Head value did not change. Approval is limited to the exact row-digest transitions captured by source run 34795088108.",
+      "evidence_id": "wordpress:collection:rhuh-gbm:diagnosis-correction-2026-09-11",
+      "evidence": "Current TCIA WordPress API record RHUH-GBM reports cancer_types Glioblastoma and cancer_locations Head; curator confirmed the diagnosis correction was made on 2026-09-11.",
+      "change_count": 50,
+      "changes_sha256": "616abd939c214d81aa6a3a7b0b385c22e09bfca752af335e017f0d0a364e64ca",
+      "changes": [
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "9d98e29c21c700182b8a92a7ceb330093591c0e85e51807179c840904e819e89"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "b134220d55ae82dad35a9bdeb59a70dd60a6f75648c8149ac57ad86e99e2a2fb"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "9e1632ced95b4cc054ff8ff872473c88d3a88a48faf22c3803128e5f7b05e2cb"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "041aad7ac2c971025fb21052c54943b7c5f461749cc3ad4a171b854138a2a73b",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "a117d99398de034a1d5631c50e44d3e537dfb0d0b9daa9ef900836b86dd5d608"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "40e3b41dbbf41d53bd07ad8f0af2ce45b6826eba06f39c2b91a0866fcc8481e1"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "a1c706ea5b8e2cbb829bff9125a30b101a9831f51c42bcc531941e937a707907"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "d7238fa58eb105c8cab1302a8c42cb0d71115d55bb646ca11b7e954e6531533f",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "a3336c8400123d2d61f8910c90a6dce7ea1035cc738eb3043bf09bf8def0b135"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "8898e046dc72bcddc935fa733491a3b256d4004da0c1f2bd820277ff5b70f706",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "a3fa8d0f20bf72372e2c41dfaa7c8dc430848ad26bdecf2d1f193206798ce347"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "952b35d13a7424a15343c3ae681a98f807fe35459c1ba13e0f46a1045708de2d"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "a499cb5faa84afdfd4e77e121e96ed6d62d61c9568ed4279f23cd044189b8fe2"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "940b51e60919cc95ba55e81a4d0a3f7fa4452bcbd1af50eae1f82623fded6abe"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "a67d939aaea0cee86015ce76ccccfb8b71c82e96a26711dcce1d189cf6c88b6a"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "80124ba524370ec5437cccd60ad426c13f90bb3b9b8dc28efbb324727ef63e1a",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "a6b00faf3d6a00253ef01837ee1dbe2474378bfce5a81a3b1ab045d08f6775e4"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "94fba1c86ecb2cac1236f4de6a670c3db8d843e9e42fb4b69d4343a6bab8fbf8"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "a7e916d5644a8143cc4ac90cdcb2235081dcec43d2f7aa5fbac5a24abcc3ed1d"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "313291b425ab558eba9db77269e2844ee63492a34f84fca8423da40be93de59d"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "a9d8790ec7d0642f8ae37cceb2890530fa41c6415106f0cf3aa101f5bbb66c38"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "820fcd83bd0806a86c35e556e1d143cac4532e900cf4e9f9e5de3dcddbe20570",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "ace47089ce94864b66a2630c3a97d91dbb56893e31785955fc8cb1e175d0fb73"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "3789d3053bceacf2243cb3a70bfa165c50a42bbee38a29c5f2524a62b5e9d36d"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "ad777591efb836fc6aa338cbf6ee64231e06874b93678e65b1dac7cc3b217fd1"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "c82622dc4ebfa7ad718555e91894f91eb1dcee94d657787b6e4b417f89799301"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "add6801fe6ddcd694c4cdb471f23050919939eb21af60c9af485db4aab94df1c"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "42c54928b54b14a20f472470690e6aa542655bf1be781c4bdf79cc1e2420c40c",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "ae2ee3b1d865ec8c453fbc1754d3827903b3cbb9f76d4cf33a7908704ef4c66c"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "e7726c6ceb7fc0e79dd87bebf0eb4de3ae500ae5f79b9350cc2276a3bc9b17c8",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "af1ab2cc393fbe3864bf1c4605d81ca2e00858804cdd32da6870501c5fd87f62"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "96c30c2e1ef659d9a2476cdd074df7be13744575c9838f96759babb02f37ebdc"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "b0249a310c38df32cee2d747b636b09ffa4a33c3aead749bf5588fd4f4583cb3"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "d4cbd4c1744ea5655423ec0c5b5f674ca8ceddd1dde976819934952c46c4f25f",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "b169ba1e055853182b587ebaef03a011ba0d1d9bd1f8b2b49873f4970fecb199"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "ab4a776ea5f1822fb0878235634d78c403691c9b4b1a5790dc761dfdd41b3aea",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "b41145f73606277e760df74c1050a7b557a2711285cd785ee8d69e676a6ec4cb"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "8345131725060ca5cb101ca861e4a1ed95d2fcb5d9fbd08ce673bf57ec20e637",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "b850dfa75c3ac7b85472247fa940130d213250582a8150ab5e92f127688f3de7"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "5ee809db26df1b7e01725c5185f795f523d3877161412ea51f13307be653806b"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "bb78ceec75518853723ddefb4f4311e40998cc79d58bcb67a170b7592f34da67"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "cbf3be379c789dcab8a475452f715e8a368c0259adf9080a20a14979caf5c26f",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "bbc4219e1e5bd8b24e7bd3e847989a99035ce849abcab0cd468d93f763424320"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "a94423ca7aa1abec2e497a265bcd2bb8bb58bf77d53748f007e596281a2af3b9"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "be3ac2c0d5072fb6c2344627f6efcce94c56212be61cad575a2f0a13114a93b3"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "1d6671ee9d085522391946ca02fb9c357f688d59c692b86ac53d09025ac1fcbc"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "be75ae2706a6a089958aba75557f2ecec4d02c112896f04a9cb485073e93f407"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "7ab66ee9c8ef579b7109a5213f0d66829247c43b3cc8cd6ae1d96de07b6cccaf",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "c0d7d71b936993f00516bf3c1b611b8926a0a6af79940acae59f13a53dd9d040"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "b83dd71d744bfe59989c367a63804e7bf0fb8a68c18b0943fba0f8a21f250047"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "c1ea958f6914ad1c3b9e485a9da96c9343f9b14f5c3e5af7d33f351e932c95e4"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "cfd87a1fca00541e36dee2fc698dfd0e3522810079df6c002913db6bfbc2218d",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "c26ac5f05ca479ad870966db8079d5b6a83fa1c38c130e078e8b203140c79334"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "203c1a1e1a04476e009e1f048e98962de605db0d23fcd813c62001d5419c2c99",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "c319e651cb7f6c90afb2b86d873e5b9c65d423e9e8c316c4b6ed696cf118ec7c"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "2475e3ea71522ec3ff5bdfdbf0b2be2075e56dcb431e1dceee7a672bd54973b5",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "c339b53a35248b12bf7feb9dae8b475bc7d993e099966906fc6f0e07fda3e905"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "9ab66ffd3bc3d87a7621e770f0a449e3a77c5f122b6f8acf209a6bb9cb4ceb17",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "c452998c622878a64889ec7d09f23c0c51256727e8b9269d9aae0022e4e6b59f"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "502603fc209ecb4d1d348992108b0127d5cb6ba2f4531fd3d888673f98a4c833"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "c5c9ddc0e80f03e8bbb0d0079fc5f2b8877cd0fb7e281117b3a5baed057763e8"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "f769ff7a16c5a24062f1156ece3ddde788c3e951fe53849c1949299416274daa",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "c6dd382f97021c7edb0b7661ca6f85504431668821a285d20b926a0c3cf1bf41"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "050a791a8cb801493170be0fdd43b374fec44e5c38be0d822b8c7aa38787859b"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "c9114acc14d9d801199f11891a906853c71e11910ce50f04dccb68e64dfbb9b5"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "fdd0fdd5bae96181c3facf627254c47df3d24c820f4f2aa3510479e4adbe2431"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "cb97c011b46f9b5f3a4b5265bbaa4e72d86d0f184720997235cb7b171e2991e7"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "610941db352dc34ef04ac035bc8221a175113a1cbc616a6b7ce26453a96f1b4a",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "cbd740aeaca55714cb81b9b4a45ceb9eb079f0fc607db6e71e6ab526e0136227"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "a0f93b51fcc309e198f6116672893442a9bc11055976ddeee46bdb270b638b79"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "cd57346710e1bd541e0e5419e8727de8d415a9d6673e785c73bdff710ebb1b94"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "1f35a31c66654815aca3c401ed54d2cf4fb7942974e5374d8b5a33bcdecd99e7",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "cdd0ba44a4e2d9d3bdc4d0edab8a93903d406baa4e6e159a6306751a94bf7e35"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "29276aad4433dff1d7a0f066b5b8ddc8ccada5eaa614d8522601c273e8338b94",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "d45694e62ff840c6c4a7b300bf62da136a77d101d7cd9e2e954ce3ab9b2d9e31"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "77f3de3a6c32ba133e1cb803a1241ae5b3efbdaaf13bd4e931103424b74f80e0",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "d4f7cca50d3867afbb6f1906903efe7c54e3c091455dc6478f5357c8431d3250"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "b69e7aba9ff4838033e43db6f0986bcdbce68eea9123e2e74129de52848fc801"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "d842b2f5758bb2757861f28ec2904415022b4d994eb31d8ceeba6b0c8615711a"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "83a190015fd2b2191181f6b3969805579b72d97440e52967a55dfded8a28151a"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "d8ad00cbd6e2d17f323e1c49b8b533c7d79b8554ff9a0a73fa5b0d9f6cfe8d4a"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "7bebf2c9295625f4bf195c341c3fd3fc9d0da0c0fa41be5dc09de541e1f33a00",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "dafd884e0ab3620f2e88c6f3b36af2285cc8ac187879c270ed63adc7585b8490"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "8cc1d9234cef6a35d1f2996996fe21a2680011efcc72958eb3945d17e1a0fc62"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "dbd879a16f589364ce34ee69a5fecaaeb287c917029419fce891c3917c979751"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "fad1e589395c3987237e834be76194f193656643d6ca223f34f59ae3455a137d"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "ddce99d6724ee21453edbef8ff97164a0b4a75f7acc84e0011c9bd28b3c61d8c"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "49f89cbe4cff6978b1493a94e2573b6c8d4b8a666c667f540b2e723cbec512a6"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "e10faa2de8b1ef5ecabbd9633234bdd8fdd89513c21e0d0bce5fd8b6f57f3653"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "6bd91195d43d93725bbc6d0525118b263cb4f0e0395897844365875da2006f91",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "e12f9f3577fced50c8e4ed0ce265eca9af44899934247b1f098c95a57740fc55"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "860408b50a38576e6e2960373fa6b2fe89c587e03cc4b05a348896833c048643",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "e24ac84bb29a29ac2cd147aec31d41e43604f3607957aeb27251f15e59c2d9be"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "39dbe1b13b4cfdd183b884ae99bae51586951d1157d91f06bf27714b59eadd5f",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "e789bb82ae1ae436388523345e1256f01826fea0665c5043331ff1867fd99d0d"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "98dce03e52cb39c2f3d40442133257cec0742c8fdf231f2c64c37b2c8586e1d1",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "e7c9a21c87aa8ed604da364d51ff8f8ecfe2a8801117bba19a417997c7c4bab0"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "269d9fb724d7cac69c5d2ad66991ca1d9edf303308349e5eca1b708af0fdebad",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "e839c7b630a587a1c0d1286613cb9af51436e9b1e939fa8e690f1d0c1cc09868"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "3da76aa31e9a8e58aefb964e0c9944e365e3697fd078814321f7bc99df21c66c"
+        }
+      ]
+    },
+    {
+      "batch_id": "rhuh-gbm-wordpress-diagnosis-correction-2026-09-11-part-4",
+      "reviewer": "Justin Kirby (TCIA WordPress curator)",
+      "approved_at": "2026-09-14T12:55:00Z",
+      "rationale": "The TCIA WordPress curator confirmed that RHUH-GBM cancer_types was corrected from the erroneous Astrocytoma label to Glioblastoma. The Collection title and description identify the 40 subjects as primary glioblastoma cases. The WordPress source-row change also regenerated exact primary-site fact identifiers even though the Head value did not change. Approval is limited to the exact row-digest transitions captured by source run 34795088108.",
+      "evidence_id": "wordpress:collection:rhuh-gbm:diagnosis-correction-2026-09-11",
+      "evidence": "Current TCIA WordPress API record RHUH-GBM reports cancer_types Glioblastoma and cancer_locations Head; curator confirmed the diagnosis correction was made on 2026-09-11.",
+      "change_count": 50,
+      "changes_sha256": "735aa70f12cf3e6428cdcfa44d15d2cb254224d0942165bdc389c00589dc7100",
+      "changes": [
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "ec6108eb41886e2495f405b1de9ac22f87cbbda397eeb8c6b006213ae7f86654"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "f9ccfdb39772c27a09658f312ebff5f1798beb864b104ac53375e0fe97f764ba",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "ed61b19ab21f99b2af080d9c9efe637be16f46cfb4aabdb847486f81bb5c7186"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "851ef85aae896647ec5c3b6b1125131bb00cededfd121b9776d2d0ed7892e437"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "ee6c4195fca16a9a20668dfe6abed65016a0741c8752eabc0f5da40b2277e1da"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "4ec35cc46c2bb1d711d2ba29f03ab0481dd838a4210577f0e008ab80df0552f6"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "f571c9cb5dded446d6057ac02e230479eb0b3b35c1a5f37c7a45e23cbc274613"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "5e19249db5110d7e4ba231ba9564fb88952d30beab58aa87b15449a93353e5af",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "f57a4c05ae5d9d3ab832ee7c23f868cd1393409251bdb6f213f66fd47e42e51a"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "add164181ee78bdd38f8aae63a68b2b9a1fb4dc2ba89f22bf1405edc49e7a64d",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "f80f2612b955561b05d055d0c0315f250f1b75a7744868e5080610c6616c308b"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "3e457c336eea71303eb63539835f38ad2d0de7cbc7cb9729b12700dcb19c4b3f",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "f88827378a81c075594e0ef2c1058c08537e123875afd9f9228503cab7c794bc"
+            ]
+          ],
+          "change_kind": "removed",
+          "before_sha256": "149d918d384991fb898ac6dad432cd4eceaab60f86e58bb2ca37e6569b54bd10",
+          "after_sha256": ""
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "f96cef1aef4369956214395bdd0c80c67032b1b06eeea652f7bbf70ef68e492e"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "57ffe4e20f463e336332b61ded5f162435591818c05e4ec8ca445606afea5758"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "faae47ef8ea304d82983a3ab643d8d4e2ca4704d85864f772f1d91a16eac54fc"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "0c91c3546ea9805844f549dbb3f58efc46f21914e21966db48bc918332ca441e"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_facts",
+          "primary_key": [
+            [
+              "fact_id",
+              "fe6ffbc72202439aec1e8b62313601a57862ebffcb2ec660e1c456e22547c7bb"
+            ]
+          ],
+          "change_kind": "added",
+          "before_sha256": "",
+          "after_sha256": "5083c7a50085130e909d28e5ddedd41208e6e51354c1afd1ec969475e44caac0"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_subjects",
+          "primary_key": [
+            [
+              "subject_key",
+              "rhuhgbm:rhuh-0001"
+            ]
+          ],
+          "change_kind": "modified",
+          "before_sha256": "8b7c42b2961df78c3dea4d1308a4c68d659092085847bbec565942fd5f99474f",
+          "after_sha256": "0a39e4f9df9e6fd91a7ba2dbafcbdf4225e96b98b212f3290f97bb0baa4fe6ba"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_subjects",
+          "primary_key": [
+            [
+              "subject_key",
+              "rhuhgbm:rhuh-0002"
+            ]
+          ],
+          "change_kind": "modified",
+          "before_sha256": "a3bd63f8b74546b500dcc42e69c2138ad065dd6c5af51faa5ec63e0278afb13d",
+          "after_sha256": "9a6d6641c7361816d47f0b5ed0b84c416f401322d9d903418e8b8ff9a3174532"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_subjects",
+          "primary_key": [
+            [
+              "subject_key",
+              "rhuhgbm:rhuh-0003"
+            ]
+          ],
+          "change_kind": "modified",
+          "before_sha256": "d62e17f78cbedec00d1b4b24ecf233ad67afe2dc53f16987795086e57c6cc96f",
+          "after_sha256": "da54cf6cd179c566519221bd76ebe42458e0462776b1246c53d6002b4d129311"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_subjects",
+          "primary_key": [
+            [
+              "subject_key",
+              "rhuhgbm:rhuh-0004"
+            ]
+          ],
+          "change_kind": "modified",
+          "before_sha256": "42955bd757c2f7d593c2e0aafc35fcd14af7702d869939adf3d6e466b9cc8278",
+          "after_sha256": "b6c193783252a3432911edaec5a872c82271759664b04cf6f196974dce81131a"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_subjects",
+          "primary_key": [
+            [
+              "subject_key",
+              "rhuhgbm:rhuh-0005"
+            ]
+          ],
+          "change_kind": "modified",
+          "before_sha256": "beca35d60a7e92be1c5f23c755a156ec645ddaddd63a84896c8265087eb6a26f",
+          "after_sha256": "e3d2fcad8ab17e9b814e97c6c3ea8cee9ab288114de04eb6f801b2c70314f82a"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_subjects",
+          "primary_key": [
+            [
+              "subject_key",
+              "rhuhgbm:rhuh-0006"
+            ]
+          ],
+          "change_kind": "modified",
+          "before_sha256": "cd494d5c8a74f43c5afdc70b8605198e91967c005be449f47230272162f5d32b",
+          "after_sha256": "418058a3ebcf5d07fa6ea79b1d42ecf3b7904033468a55a8cac4f86e32200443"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_subjects",
+          "primary_key": [
+            [
+              "subject_key",
+              "rhuhgbm:rhuh-0007"
+            ]
+          ],
+          "change_kind": "modified",
+          "before_sha256": "6c38da1e0e8a2cb7a252ffc2de068375cd3fb6bed78ae1b655068f2823001251",
+          "after_sha256": "0c073c0ca4f8fdd47594865e8125e47a7398c01afb27764c81f213b466b35656"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_subjects",
+          "primary_key": [
+            [
+              "subject_key",
+              "rhuhgbm:rhuh-0008"
+            ]
+          ],
+          "change_kind": "modified",
+          "before_sha256": "1307f79598a63a207fbb6f17284d1828513b14fb6fc4edf133d2a271d93f810a",
+          "after_sha256": "dfa9ef253af6c7682a4019b875cbf5e9abcc60ed5d5763b649951206a593d8dd"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_subjects",
+          "primary_key": [
+            [
+              "subject_key",
+              "rhuhgbm:rhuh-0009"
+            ]
+          ],
+          "change_kind": "modified",
+          "before_sha256": "149c413ff15aa88876a0e1dd6cd81d02c36ab7ca3e30cedcb4bcd9cadd138e76",
+          "after_sha256": "8f5a6ac0bcc5ade18c76d8da0c2f9398fb98ce70a16eb0e8925cc38b7fe9d08f"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_subjects",
+          "primary_key": [
+            [
+              "subject_key",
+              "rhuhgbm:rhuh-0010"
+            ]
+          ],
+          "change_kind": "modified",
+          "before_sha256": "872c266c362c530bcf760e7c9f6fe0352ae1905cc5c2cc56c120f586e02d0027",
+          "after_sha256": "c7bbe378e1d8025211f6004f19eacb675efa11631cce5eb4677aa5594de76a68"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_subjects",
+          "primary_key": [
+            [
+              "subject_key",
+              "rhuhgbm:rhuh-0011"
+            ]
+          ],
+          "change_kind": "modified",
+          "before_sha256": "19c25caa9b935121535d7c1c091c86f69ac9f0842a6fa141f92b99805ebf4e57",
+          "after_sha256": "e08a192ad865d2e6e3f3b2bc0fb2b82c8e7d9dea69f3a21de2548d9dd649572c"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_subjects",
+          "primary_key": [
+            [
+              "subject_key",
+              "rhuhgbm:rhuh-0012"
+            ]
+          ],
+          "change_kind": "modified",
+          "before_sha256": "52f0fd08ef42c3b8601a7ad16cb8762ef847224eec90aa5a61e5de1b1b91e20c",
+          "after_sha256": "a467003043b1a1c3cdf824b309e6911f1e174f9e864b406de07d7c045c0a3b93"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_subjects",
+          "primary_key": [
+            [
+              "subject_key",
+              "rhuhgbm:rhuh-0013"
+            ]
+          ],
+          "change_kind": "modified",
+          "before_sha256": "ecd4a915bf390116b3cddfe750fe8aa3bd6c7058dd82d0202620a9a34f177397",
+          "after_sha256": "38853769ef05e572672fa26937d905968e7c232e4811fd3c6715a0e30214d87d"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_subjects",
+          "primary_key": [
+            [
+              "subject_key",
+              "rhuhgbm:rhuh-0014"
+            ]
+          ],
+          "change_kind": "modified",
+          "before_sha256": "ca1468f59b183f82ef85e9c61722d83d2d778df4afedaf67ee0a3acdb3fa40ba",
+          "after_sha256": "9a71890732c1126808ae8f508247981f3ec064bd7b9fcf4122a06a014907b0ab"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_subjects",
+          "primary_key": [
+            [
+              "subject_key",
+              "rhuhgbm:rhuh-0015"
+            ]
+          ],
+          "change_kind": "modified",
+          "before_sha256": "8d0809ec6a75e0a56bb628377f0a98557ff96fe369abbd79d5a09df4b4edbfa6",
+          "after_sha256": "12eb7297ec3cd1ca1d4e9480939bd4a5873f91f55c584a40087da107cbcfff9e"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_subjects",
+          "primary_key": [
+            [
+              "subject_key",
+              "rhuhgbm:rhuh-0016"
+            ]
+          ],
+          "change_kind": "modified",
+          "before_sha256": "6a104d19bc5b3ae07dacb686c3f61c67bbb8b8e909d86f1a6d22107bf5593fe6",
+          "after_sha256": "67ebbdaf7bc057a6f2578443ffd8ca72e4a98a892601ef05235ce5c1919c13f7"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_subjects",
+          "primary_key": [
+            [
+              "subject_key",
+              "rhuhgbm:rhuh-0017"
+            ]
+          ],
+          "change_kind": "modified",
+          "before_sha256": "f387eb4c268c1e6dcd3af14e32add4034947f5af77b32e4b10231dd7f29ac345",
+          "after_sha256": "0254851597ed44daaaabe562eade59eef295829bb0186638e04f5302765be95b"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_subjects",
+          "primary_key": [
+            [
+              "subject_key",
+              "rhuhgbm:rhuh-0018"
+            ]
+          ],
+          "change_kind": "modified",
+          "before_sha256": "74d285f8223dd26e0abe9ae12cd253aa1830717a15f97e78cb85c35ea5405564",
+          "after_sha256": "755299793ea80ec2af4d76ecea1f65976f2b2119724ee6909edb4f1399e12c31"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_subjects",
+          "primary_key": [
+            [
+              "subject_key",
+              "rhuhgbm:rhuh-0019"
+            ]
+          ],
+          "change_kind": "modified",
+          "before_sha256": "deafa0204f429506a1ff12ed493ab8ddc30f158c38dc8323685db497d622b36c",
+          "after_sha256": "ef8c3a3bea29a74c99a123e826e19626f8602c5e67194fa2782311e9d5547b5e"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_subjects",
+          "primary_key": [
+            [
+              "subject_key",
+              "rhuhgbm:rhuh-0020"
+            ]
+          ],
+          "change_kind": "modified",
+          "before_sha256": "7de8507526d56a63c57cd2e6cff757a23695ea7fea7a4bda3833dc5dbc67b2a2",
+          "after_sha256": "b677ec20dfb2b8ba806ef95aba7a63d169e2abea869e8a975b09c573674a1dcd"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_subjects",
+          "primary_key": [
+            [
+              "subject_key",
+              "rhuhgbm:rhuh-0021"
+            ]
+          ],
+          "change_kind": "modified",
+          "before_sha256": "c02c1a27c9a29acf0790c326ed45b418566260903276426fee3ed4a33938f0c5",
+          "after_sha256": "ea7aaae0989d23f858cb00d6e07128cb1e882011c4bfb4309ac1f1f4c8ff276a"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_subjects",
+          "primary_key": [
+            [
+              "subject_key",
+              "rhuhgbm:rhuh-0022"
+            ]
+          ],
+          "change_kind": "modified",
+          "before_sha256": "0ec04f96669b0067764b014079ae6c2a51be7eedcc8ba114bff9758231c77a79",
+          "after_sha256": "e0fc1c101c8ed076fcebcd1b85a9527cb331a8d5e89b31fcfdd8d09fe9b91aa4"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_subjects",
+          "primary_key": [
+            [
+              "subject_key",
+              "rhuhgbm:rhuh-0023"
+            ]
+          ],
+          "change_kind": "modified",
+          "before_sha256": "f6a4a73f63b38e1b4009e2870b0d50777cf9e44351b78dc7929b0551e1e55924",
+          "after_sha256": "a6aba71f4cfb1e9babbc239e34575f75d0dceea44c1eb91d54aeb41cda0a105d"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_subjects",
+          "primary_key": [
+            [
+              "subject_key",
+              "rhuhgbm:rhuh-0024"
+            ]
+          ],
+          "change_kind": "modified",
+          "before_sha256": "fd45855640f492ba620f7e830f35d8e70b4a9a374e588b25b9260da754c46f68",
+          "after_sha256": "3ee925af16418d9ea2795a8db61a298ae516ae31efa6ca3fdf2614680ebd9889"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_subjects",
+          "primary_key": [
+            [
+              "subject_key",
+              "rhuhgbm:rhuh-0025"
+            ]
+          ],
+          "change_kind": "modified",
+          "before_sha256": "410e3ca7bac4761fe6a6e254e55043772fd5e295144ea9fa0ef07f7c848d8f1d",
+          "after_sha256": "b7c9da7b3b83afdc31167e9ace6e8c39f88a90172f7e1307f838cd3fe5beeb85"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_subjects",
+          "primary_key": [
+            [
+              "subject_key",
+              "rhuhgbm:rhuh-0026"
+            ]
+          ],
+          "change_kind": "modified",
+          "before_sha256": "76c40c30629af4bf1d492572b6824e0164598eb885c651d10cfe53fe9229dfa7",
+          "after_sha256": "5ae5912bac8d51a4e589b839d995d3a28f2ea53ee44350d6ec74660c0076100d"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_subjects",
+          "primary_key": [
+            [
+              "subject_key",
+              "rhuhgbm:rhuh-0027"
+            ]
+          ],
+          "change_kind": "modified",
+          "before_sha256": "4669a49333034c72c747e95af553cf4493ad1825516532bae6c1820b3639a7d1",
+          "after_sha256": "a9d710a6ba96435b226e993b991b358e0e63c3aa7871db2aef02f0f7a380b3f6"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_subjects",
+          "primary_key": [
+            [
+              "subject_key",
+              "rhuhgbm:rhuh-0028"
+            ]
+          ],
+          "change_kind": "modified",
+          "before_sha256": "d65ad0d3d4a6cd1fc6fdc3e4701410367e480abfaee0ec73cc257462551f3f7a",
+          "after_sha256": "e7b4b8f1f6bc1121a5a560b3d0543458e42a92e4be6bac5fd09904d6ca602987"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_subjects",
+          "primary_key": [
+            [
+              "subject_key",
+              "rhuhgbm:rhuh-0029"
+            ]
+          ],
+          "change_kind": "modified",
+          "before_sha256": "e7f93af4cfeb97445bb5b805d3eae7d4fad4a95eae33ab3e349663bf069f6d39",
+          "after_sha256": "1072ac8d30c539539dcbbf002e07dea64832d9ca7c82f069535efc4f0c394a2d"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_subjects",
+          "primary_key": [
+            [
+              "subject_key",
+              "rhuhgbm:rhuh-0030"
+            ]
+          ],
+          "change_kind": "modified",
+          "before_sha256": "49d7bc63c58fe0aed26bed0531d0ec89b34e2d5ec5e34f497daa1f59d1472e1f",
+          "after_sha256": "ed6e4847c0bd4fd66c9240c0aed8c11d36d173399e2a3d1d0efb8cf37c94f0e1"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_subjects",
+          "primary_key": [
+            [
+              "subject_key",
+              "rhuhgbm:rhuh-0031"
+            ]
+          ],
+          "change_kind": "modified",
+          "before_sha256": "0fa07f03ffb5176874fe6cfd1e3ab061d03de7f2a7cd6481af65b1c7c64b0ad9",
+          "after_sha256": "70fcf28542617d95df3fe26bf554049f36fabcc37a2f34456f516f6bd41c7701"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_subjects",
+          "primary_key": [
+            [
+              "subject_key",
+              "rhuhgbm:rhuh-0032"
+            ]
+          ],
+          "change_kind": "modified",
+          "before_sha256": "33957f8b045c2713db1e357f48f0c95318197e87ce0222294b40f181c97647d2",
+          "after_sha256": "01cd1f096f4492ba8cf13e2880e905357d3b17dcd8b436ecf69d23a772a26c7d"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_subjects",
+          "primary_key": [
+            [
+              "subject_key",
+              "rhuhgbm:rhuh-0033"
+            ]
+          ],
+          "change_kind": "modified",
+          "before_sha256": "c6e6cc9a10e65cd6ae001c41c2c69d13a705c264943d3d71ffdebeda2f404d0d",
+          "after_sha256": "bd4bdca8dcfcdb95ddea6f5bd0daad9924eba10cdb454a137f45c0b414d3c876"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_subjects",
+          "primary_key": [
+            [
+              "subject_key",
+              "rhuhgbm:rhuh-0034"
+            ]
+          ],
+          "change_kind": "modified",
+          "before_sha256": "68eab24e997321b73e401436d120f9aa3a00f000efe6d76541df79eabe270566",
+          "after_sha256": "d6a3de27d6c3ffa6bba900ea136c42256bd79956dad499b80eca833700e5b8f5"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_subjects",
+          "primary_key": [
+            [
+              "subject_key",
+              "rhuhgbm:rhuh-0035"
+            ]
+          ],
+          "change_kind": "modified",
+          "before_sha256": "181973fa1c8d0be350560e708c5afbb7417abaf6979070db224072d9a54a1b55",
+          "after_sha256": "26e930a8a44c0dbd765febbf954f24b236a99754baf3c53b51035d8b344ba4d5"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_subjects",
+          "primary_key": [
+            [
+              "subject_key",
+              "rhuhgbm:rhuh-0036"
+            ]
+          ],
+          "change_kind": "modified",
+          "before_sha256": "bbb572ddeeeb4a3139b8f9f2edac225c7cae7495a5d2ea0e7aa68bb013f6bf1b",
+          "after_sha256": "67ec99abe0ca76a8d7c48603aa9c70794652c74ec6f16925db86debb53e7e93c"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_subjects",
+          "primary_key": [
+            [
+              "subject_key",
+              "rhuhgbm:rhuh-0037"
+            ]
+          ],
+          "change_kind": "modified",
+          "before_sha256": "f3e279bf3753545dadc30e43886e14d1d1a3432afcaf1746009788269d1fcd52",
+          "after_sha256": "ec5f2717c1a58c8fcec7e82297eef07a1fcd12280c8435997217cbba3482aca6"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_subjects",
+          "primary_key": [
+            [
+              "subject_key",
+              "rhuhgbm:rhuh-0038"
+            ]
+          ],
+          "change_kind": "modified",
+          "before_sha256": "a7fd7b473ec68800f5fde4f8e57f2fe18932cbbdeee8e014f32104f0d69c47fd",
+          "after_sha256": "a4c0c4f8d17a048d0cd547deb889f2c29b8672754b84f978b7ae8139e1fcfde9"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_subjects",
+          "primary_key": [
+            [
+              "subject_key",
+              "rhuhgbm:rhuh-0039"
+            ]
+          ],
+          "change_kind": "modified",
+          "before_sha256": "33ecebec248d2a48b03cb6662d00dfa725b172f012fded10ba25ee64a0f433f0",
+          "after_sha256": "9305cbf3be884dad60ff49ba17c926606952e23d52b75e12cdb940e9c3e1c6a2"
+        },
+        {
+          "artifact": "clinical",
+          "entity_table": "clinical_subjects",
+          "primary_key": [
+            [
+              "subject_key",
+              "rhuhgbm:rhuh-0040"
+            ]
+          ],
+          "change_kind": "modified",
+          "before_sha256": "b26021594cdcabbd0602dd1727d2eae2c165d46f68302eadab26f1387112fb48",
+          "after_sha256": "edf61ed70c631d2440bdbb43fce1da2e386be08dc0ce06e463fbb69639223a8b"
+        }
+      ]
+    }
+  ],
   "migration_batches": [
     {
       "alias_count": 105,
@@ -1331,5 +3981,5 @@
       }
     }
   ],
-  "schema_version": 2
+  "schema_version": 3
 }

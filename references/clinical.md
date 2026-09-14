@@ -700,3 +700,10 @@ conflict counts, and `agent_clinical_dataset_inferences` as release QA. A
 successful SQLite integrity check does not imply that every heterogeneous
 clinical table was semantically harmonized or that a dataset-scope inference
 is a confirmed patient observation.
+
+Official download acquisition and table ingestion are reported separately.
+`fetch_failed` means the authoritative artifact could not be retrieved and
+degrades stable-release source health. `ingest_failed` means the artifact was
+retrieved but its format or contents could not be converted into supported
+patient rows; it remains an explicit coverage warning and count in the clinical
+manifest, but is not misreported as an upstream availability failure.

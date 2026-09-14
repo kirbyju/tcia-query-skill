@@ -23,6 +23,52 @@ SPEC.loader.exec_module(CLINICAL)
 
 
 class ClinicalMetadataTest(unittest.TestCase):
+    def test_manifest_separates_source_fetch_health_from_ingest_coverage(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            db = root / "clinical.sqlite"
+            conn = CLINICAL.init_db(db, replace=True)
+            conn.execute(
+                """INSERT INTO clinical_downloads
+                   (source_id,short_title,source_signature,ingest_status,
+                    rows_loaded,subjects_loaded)
+                   VALUES ('source-1','TEST','signature','ingest_failed',0,0)"""
+            )
+            conn.commit()
+            conn.close()
+
+            ingest_manifest = CLINICAL.write_artifacts(
+                db, None, root / "ingest-manifest.json"
+            )
+            self.assertEqual(
+                ingest_manifest["source_status"]["official_clinical_downloads"],
+                "live",
+            )
+            self.assertEqual(
+                ingest_manifest["warning_summary"]["official_ingest_failures"],
+                1,
+            )
+            self.assertEqual(
+                ingest_manifest["warning_summary"]["official_fetch_failures"],
+                0,
+            )
+
+            with sqlite3.connect(db) as conn:
+                conn.execute(
+                    "UPDATE clinical_downloads SET ingest_status='fetch_failed'"
+                )
+            fetch_manifest = CLINICAL.write_artifacts(
+                db, None, root / "fetch-manifest.json"
+            )
+            self.assertEqual(
+                fetch_manifest["source_status"]["official_clinical_downloads"],
+                "failed",
+            )
+            self.assertEqual(
+                fetch_manifest["warning_summary"]["official_fetch_failures"],
+                1,
+            )
+
     def test_tcga_lgg_mask_identifiers_and_duplicate_headers(self) -> None:
         self.assertEqual(
             CLINICAL.choose_subject_column(

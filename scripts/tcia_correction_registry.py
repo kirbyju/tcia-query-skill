@@ -943,10 +943,12 @@ def migrate_semantic_explanations(conn: sqlite3.Connection, path: Path) -> int:
     if not path.exists():
         return 0
     payload = json.loads(path.read_text(encoding="utf-8"))
-    if payload.get("schema_version") not in {1, 2} or not isinstance(payload.get("explanations"), list):
-        raise ValueError("semantic explanation input must use schema_version 1 or 2")
+    if payload.get("schema_version") not in {1, 2, 3} or not isinstance(payload.get("explanations"), list):
+        raise ValueError("semantic explanation input must use schema_version 1, 2, or 3")
     count = 0
-    for item in payload["explanations"]:
+
+    def register_explanation(item: object) -> None:
+        nonlocal count
         required = {
             "artifact", "entity_table", "primary_key", "change_kind",
             "before_sha256", "after_sha256", "reviewer", "approved_at", "rationale",
@@ -1004,6 +1006,45 @@ def migrate_semantic_explanations(conn: sqlite3.Connection, path: Path) -> int:
              kind, before, after, str(effect[0])),
         )
         count += 1
+
+    for item in payload["explanations"]:
+        register_explanation(item)
+
+    for batch in payload.get("explanation_batches") or []:
+        required = {
+            "batch_id", "reviewer", "approved_at", "rationale", "evidence_id",
+            "evidence", "change_count", "changes_sha256", "changes",
+        }
+        if not isinstance(batch, dict) or not required.issubset(batch):
+            raise ValueError("semantic explanation batch is missing required fields")
+        if not isinstance(batch["batch_id"], str) or not batch["batch_id"].strip():
+            raise ValueError("semantic explanation batch_id must be non-empty")
+        parse_utc(str(batch["approved_at"]))
+        changes = batch["changes"]
+        if not isinstance(changes, list) or not changes:
+            raise ValueError("semantic explanation batch changes must be a non-empty list")
+        if batch["change_count"] != len(changes):
+            raise ValueError("semantic explanation batch change_count is invalid")
+        changes_sha256 = hashlib.sha256(canonical_json(changes).encode("utf-8")).hexdigest()
+        if batch["changes_sha256"] != changes_sha256:
+            raise ValueError("semantic explanation batch changes_sha256 is invalid")
+        identities: set[str] = set()
+        for change in changes:
+            if not isinstance(change, dict):
+                raise ValueError("semantic explanation batch change must be an object")
+            identity = canonical_json(change)
+            if identity in identities:
+                raise ValueError("semantic explanation batch contains duplicate changes")
+            identities.add(identity)
+            register_explanation({
+                **change,
+                "reviewer": batch["reviewer"],
+                "approved_at": batch["approved_at"],
+                "rationale": batch["rationale"],
+                "evidence_id": batch["evidence_id"],
+                "evidence": batch["evidence"],
+            })
+
     for batch in payload.get("migration_batches") or []:
         required = {
             "migration_id", "artifact", "entity_table", "primary_key_column",

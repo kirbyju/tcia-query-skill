@@ -187,8 +187,6 @@ jobs:
           python scripts/tcia_v2_staging.py validate \
             --db cache/tcia_metadata_v2_staging.sqlite \
             --verify-sources
-          rm -f cache/public_non_dicom_baseline.sqlite \
-            cache/public_non_dicom_audit_baseline.sqlite
 
       - name: Regenerate the complete web export set from the bundled snapshot
         run: |
@@ -339,6 +337,9 @@ jobs:
             --gzip-out dist/tcia_correction_registry.sqlite.gz \
             --manifest-out dist/tcia_correction_registry_manifest.json
           cat cache/reports/metadata_change_report_final.md >> "$GITHUB_STEP_SUMMARY"
+          rm -f cache/public_non_dicom_baseline.sqlite \
+            cache/public_non_dicom_audit_baseline.sqlite \
+            cache/participant_inventory_baseline.sqlite
 
       - name: Run V2 contract tests
         run: |

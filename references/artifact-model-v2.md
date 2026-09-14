@@ -619,6 +619,12 @@ degraded or unknown authoritative source health unless a reviewed
 reason, approver, and future expiry; expired waivers are rejected. The
 workflow does not deploy, restart, or reconfigure MCP/REST.
 
+Source acquisition health is distinct from parser coverage. An official
+clinical `fetch_failed` status degrades stable promotion, while a successfully
+retrieved artifact that cannot yet be converted is retained as an
+`ingest_failed` manifest warning and coverage count rather than being reported
+as an upstream outage.
+
 Waivers are exceptional, committed release inputs and must use this shape:
 
 ```json

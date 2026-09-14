@@ -165,6 +165,57 @@ class CorrectionIdentityTests(unittest.TestCase):
                     ))
                 self.assertEqual(actual, expected)
 
+    def test_rhuh_exact_change_batches_expand_and_are_digest_pinned(self) -> None:
+        source = ROOT / "references/correction-semantic-explanations-v1.json"
+        payload = json.loads(source.read_text())
+        batches = payload["explanation_batches"]
+        changes = [change for batch in batches for change in batch["changes"]]
+        self.assertEqual(sum(batch["change_count"] for batch in batches), 200)
+        self.assertEqual(len(changes), 200)
+        self.assertEqual(
+            len({registry.canonical_json(change) for change in changes}), 200
+        )
+        for batch in batches:
+            self.assertEqual(
+                batch["changes_sha256"],
+                registry.digest(batch["changes"]),
+            )
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            db = root / "registry.sqlite"
+            registry.build_registry(db, observed_at="2026-09-14T12:55:00Z")
+            with sqlite3.connect(db) as conn:
+                effects = conn.execute(
+                    """SELECT entity_table,effect_kind,before_sha256,after_sha256
+                       FROM correction_effects e
+                       JOIN correction_decisions d ON d.revision_id=e.revision_id
+                       WHERE d.policy_version='semantic-explanations-v1'
+                         AND e.effect_status='approved'"""
+                ).fetchall()
+            self.assertEqual(len(effects), 200)
+            self.assertEqual(
+                {(table, kind): sum(1 for row in effects if row[:2] == (table, kind))
+                 for table, kind in {row[:2] for row in effects}},
+                {
+                    ("clinical_facts", "added"): 80,
+                    ("clinical_facts", "removed"): 80,
+                    ("clinical_subjects", "modified"): 40,
+                },
+            )
+
+            invalid = copy.deepcopy(payload)
+            invalid["explanation_batches"][0]["changes"][0]["after_sha256"] = "f" * 64
+            invalid_path = root / "invalid.json"
+            invalid_path.write_text(json.dumps(invalid))
+            invalid_db = root / "invalid.sqlite"
+            with self.assertRaisesRegex(ValueError, "changes_sha256 is invalid"):
+                registry.build_registry(
+                    invalid_db,
+                    observed_at="2026-09-14T12:55:00Z",
+                    semantic_explanations=invalid_path,
+                )
+
             mutations = (
                 (
                     "old-pk",

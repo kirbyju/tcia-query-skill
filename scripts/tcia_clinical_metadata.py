@@ -6804,6 +6804,7 @@ def materialize_clinical_qc(conn: sqlite3.Connection) -> dict[str, int]:
     )
     expected_non_tabular_downloads = {
         "braintrgammaknife",
+        "cddcesm",
         "dicomsrbreastclinical",
         "ldctandprojectiondata",
         "lungctdiagnosis",
@@ -6815,7 +6816,8 @@ def materialize_clinical_qc(conn: sqlite3.Connection) -> dict[str, int]:
     coverage_warnings = conn.execute(
         """SELECT * FROM clinical_build_warnings
            WHERE warning_type IN ('subject_column_not_found',
-                                  'official_download_failed')"""
+                                  'official_download_fetch_failed',
+                                  'official_download_ingest_failed')"""
     ).fetchall()
     for item in coverage_warnings:
         warning_text = item["warning_text"] or ""
@@ -6839,6 +6841,14 @@ def materialize_clinical_qc(conn: sqlite3.Connection) -> dict[str, int]:
                     "A probable patient-level table was skipped because no "
                     "conservative subject identifier mapping is defined."
                 )
+            )
+        elif item["warning_type"] == "official_download_fetch_failed":
+            rule_id = "official_clinical_download_fetch_failure"
+            disposition = "manual_review"
+            severity = "error"
+            message = (
+                "An official clinical-looking artifact could not be retrieved "
+                "and requires source availability review."
             )
         else:
             expected = (
@@ -7758,7 +7768,7 @@ def write_artifacts(
         "clinical_meta": meta,
         "source_status": {
             "official_clinical_downloads": (
-                "failed" if download_status_counts.get("failed", 0) else "live"
+                "failed" if download_status_counts.get("fetch_failed", 0) else "live"
             ),
             "idc_clinical": (meta.get("idc_clinical_result") or {}).get(
                 "status", "unknown"
@@ -7770,6 +7780,8 @@ def write_artifacts(
         "warning_summary": {
             "clinical_build_warnings": build_warning_count,
             "download_status_counts": download_status_counts,
+            "official_fetch_failures": download_status_counts.get("fetch_failed", 0),
+            "official_ingest_failures": download_status_counts.get("ingest_failed", 0),
         },
     }
     if gzip_path:
@@ -7872,38 +7884,50 @@ def build(args: argparse.Namespace) -> None:
                 status = "skipped"
                 error_text = "official fetch disabled"
             else:
-                savepoint_active = False
                 try:
                     data = fetch_url(
                         row["download_url"],
                         timeout=args.timeout,
                         max_bytes=args.max_artifact_bytes,
                     )
-                    conn.execute("SAVEPOINT official_ingest")
-                    savepoint_active = True
-                    loaded_rows, loaded_subjects = ingest_official_bytes(
-                        conn,
-                        row,
-                        source_id=source_id,
-                        signature=signature,
-                        data=data,
-                    )
-                    conn.execute("RELEASE SAVEPOINT official_ingest")
-                    savepoint_active = False
-                    status = "loaded" if loaded_rows else "no_patient_rows"
                 except Exception as exc:
-                    if savepoint_active:
-                        conn.execute("ROLLBACK TO SAVEPOINT official_ingest")
-                        conn.execute("RELEASE SAVEPOINT official_ingest")
-                    status = "failed"
+                    status = "fetch_failed"
                     error_text = str(exc)
                     warning(
                         conn,
-                        "official_download_failed",
+                        "official_download_fetch_failed",
                         error_text,
                         source_id=source_id,
                         short_title=row["short_title"],
                     )
+                else:
+                    savepoint_active = False
+                    try:
+                        conn.execute("SAVEPOINT official_ingest")
+                        savepoint_active = True
+                        loaded_rows, loaded_subjects = ingest_official_bytes(
+                            conn,
+                            row,
+                            source_id=source_id,
+                            signature=signature,
+                            data=data,
+                        )
+                        conn.execute("RELEASE SAVEPOINT official_ingest")
+                        savepoint_active = False
+                        status = "loaded" if loaded_rows else "no_patient_rows"
+                    except Exception as exc:
+                        if savepoint_active:
+                            conn.execute("ROLLBACK TO SAVEPOINT official_ingest")
+                            conn.execute("RELEASE SAVEPOINT official_ingest")
+                        status = "ingest_failed"
+                        error_text = str(exc)
+                        warning(
+                            conn,
+                            "official_download_ingest_failed",
+                            error_text,
+                            source_id=source_id,
+                            short_title=row["short_title"],
+                        )
         conn.execute(
             """INSERT INTO clinical_downloads
                (source_id, short_title, dataset_type, dataset_title, download_id,

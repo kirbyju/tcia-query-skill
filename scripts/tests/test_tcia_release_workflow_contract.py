@@ -184,6 +184,26 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
             block,
         )
 
+    def test_semantic_baselines_survive_until_exact_change_gate(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        staging_step = workflow.index("Build the runner-local V2 staging ledger")
+        semantic_step = workflow.index("Enforce exact semantic change explanations")
+        contract_tests = workflow.index("Run V2 contract tests", semantic_step)
+        staging_block = workflow[staging_step:semantic_step]
+        semantic_block = workflow[semantic_step:contract_tests]
+
+        for baseline in (
+            "cache/public_non_dicom_baseline.sqlite",
+            "cache/participant_inventory_baseline.sqlite",
+        ):
+            with self.subTest(baseline=baseline):
+                self.assertIn(baseline, semantic_block)
+                self.assertNotIn(f"rm -f {baseline}", staging_block)
+        self.assertLess(
+            semantic_block.index("--fail-on-unexplained-high"),
+            semantic_block.index("rm -f cache/public_non_dicom_baseline.sqlite"),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
