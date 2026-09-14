@@ -1289,7 +1289,7 @@ def geometry_evidence_state(
                   geometry_assessment_source, geometry_assessed_at_utc,
                   geometry_details_json
              FROM public_non_dicom_assets
-            WHERE geometry_status LIKE 'checked_%' OR geometry_status='mixed'"""
+            WHERE COALESCE(geometry_assessment_source, '') != ''"""
     ):
         # The compact research projection intentionally removes verbose details;
         # those remain traceable in the audit companion.  Preserve the research
@@ -7549,15 +7549,24 @@ def import_geometry_database(
     db: Path,
     geometry_results: Path,
     geometry_coverage: list[Path] | None = None,
+    published_db: Path | None = None,
 ) -> dict[str, Any]:
     """Replace an assembly's complete geometry surface in one transaction."""
     if not db.is_file():
         raise FileNotFoundError(f"Public non-DICOM assembly not found: {db}")
+    published_geometry = None
+    if published_db is not None:
+        if not published_db.is_file():
+            raise FileNotFoundError(
+                f"Published public non-DICOM baseline not found: {published_db}"
+            )
+        with closing(connect(published_db)) as published:
+            published_geometry = geometry_evidence_state(published)
     with closing(connect(db)) as conn:
         ensure_geometry_schema(conn)
         try:
             conn.execute("BEGIN IMMEDIATE")
-            previous_geometry = geometry_evidence_state(conn)
+            previous_geometry = published_geometry or geometry_evidence_state(conn)
             reset_counts = reset_geometry_surface(conn)
             result_counts = ingest_geometry_results(conn, geometry_results)
             result_counts["unchanged_sources_preserved"] = (
@@ -7703,6 +7712,10 @@ def parser() -> argparse.ArgumentParser:
     import_geometry.add_argument("--db", required=True)
     import_geometry.add_argument("--geometry-results", required=True)
     import_geometry.add_argument(
+        "--published-db",
+        help="Published compact baseline used to keep unchanged geometry provenance stable.",
+    )
+    import_geometry.add_argument(
         "--geometry-coverage", action="append", default=[]
     )
     return root
@@ -7783,6 +7796,7 @@ def main() -> int:
             Path(args.db),
             Path(args.geometry_results),
             [Path(value) for value in args.geometry_coverage],
+            Path(args.published_db) if args.published_db else None,
         )
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0

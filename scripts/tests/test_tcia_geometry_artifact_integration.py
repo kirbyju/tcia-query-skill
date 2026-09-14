@@ -1,4 +1,5 @@
 import sqlite3
+import shutil
 import sys
 import tempfile
 import unittest
@@ -76,11 +77,17 @@ class GeometryArtifactIntegrationTests(unittest.TestCase):
             write_results(changed, "2", "changed")
 
             public_metadata.import_geometry_database(public_db, first)
+            published_db = root / "published.sqlite"
+            shutil.copy2(public_db, published_db)
             with sqlite3.connect(public_db) as conn:
                 first_source = conn.execute(
                     "SELECT geometry_assessment_source FROM public_non_dicom_assets"
                 ).fetchone()[0]
-            same = public_metadata.import_geometry_database(public_db, second)
+            with sqlite3.connect(public_db) as conn:
+                public_metadata.reset_geometry_surface(conn)
+            same = public_metadata.import_geometry_database(
+                public_db, second, published_db=published_db
+            )
             with sqlite3.connect(public_db) as conn:
                 second_source = conn.execute(
                     "SELECT geometry_assessment_source FROM public_non_dicom_assets"

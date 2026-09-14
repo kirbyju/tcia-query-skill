@@ -230,6 +230,7 @@ jobs:
           python scripts/tcia_public_non_dicom_metadata.py import-geometry \
             --db cache/public_non_dicom_metadata.sqlite \
             --geometry-results cache/current-public-non-dicom-geometry.sqlite \
+            --published-db cache/public_non_dicom_baseline.sqlite \
             "${geometry_coverage_args[@]}"
           {
             echo "### Public non-DICOM geometry seed"

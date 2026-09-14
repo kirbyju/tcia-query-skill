@@ -138,6 +138,26 @@ GEOMETRY_SUMMARY_COLUMNS = {
     "geometry_details_json",
 }
 
+PARTICIPANT_GEOMETRY_SUMMARY_COLUMNS = {
+    "geometry_status",
+    "geometry_checked_count",
+    "geometry_regular_count",
+    "geometry_not_regular_count",
+    "geometry_not_checked_count",
+}
+
+
+def canonical_download_id(value: object) -> str:
+    """Treat a scalar download ID and its singleton JSON-list form equally."""
+    text = str(value or "")
+    try:
+        decoded = json.loads(text)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return text
+    if isinstance(decoded, list) and len(decoded) == 1:
+        return str(decoded[0] or "")
+    return text
+
 
 def accepted_geometry_refreshes(
     high_changes: list[dict[str, object]],
@@ -155,7 +175,7 @@ def accepted_geometry_refreshes(
         (
             str(item.get("dataset_type") or ""),
             str(item.get("short_title") or ""),
-            str(item.get("download_id") or ""),
+            canonical_download_id(item.get("download_id")),
         )
         for item in records
         if isinstance(item, dict) and item.get("status") in {"new", "changed"}
@@ -176,21 +196,23 @@ def accepted_geometry_refreshes(
         new_rows: dict[str, dict[str, object]] = {}
         old_rows: dict[str, dict[str, object]] = {}
         for scope in changed_scopes:
-            parameters = tuple(scope)
+            parameters = tuple(scope[:2])
             for row in new.execute(
                 f"SELECT {selected} FROM public_non_dicom_assets "
-                "WHERE dataset_type=? AND short_title=? AND download_id=?",
+                "WHERE dataset_type=? AND short_title=?",
                 parameters,
             ):
                 record = dict(zip(columns, row))
-                new_rows[str(record["asset_id"])] = record
+                if canonical_download_id(record.get("download_id")) == scope[2]:
+                    new_rows[str(record["asset_id"])] = record
             for row in old.execute(
                 f"SELECT {selected} FROM public_non_dicom_assets "
-                "WHERE dataset_type=? AND short_title=? AND download_id=?",
+                "WHERE dataset_type=? AND short_title=?",
                 parameters,
             ):
                 record = dict(zip(columns, row))
-                old_rows[str(record["asset_id"])] = record
+                if canonical_download_id(record.get("download_id")) == scope[2]:
+                    old_rows[str(record["asset_id"])] = record
         for change in high_changes:
             if (
                 change.get("artifact") != "public_non_dicom"
@@ -216,7 +238,8 @@ def accepted_geometry_refreshes(
                 name for name in columns if canonical_value(before[name]) != canonical_value(after[name])
             }
             scope = tuple(
-                str(after.get(name) or "")
+                canonical_download_id(after.get(name)) if name == "download_id"
+                else str(after.get(name) or "")
                 for name in ("dataset_type", "short_title", "download_id")
             )
             safe_after = (
@@ -240,6 +263,74 @@ def accepted_geometry_refreshes(
                     "changed_columns": sorted(changed_columns),
                     "reason": "changed geometry scope safely invalidated pending HPC refresh",
                 })
+    participant_asset = next((item for item in assets if item[0] == "participant"), None)
+    changed_datasets = {(scope[0], scope[1]) for scope in changed_scopes}
+    if participant_asset is not None and participant_asset[2] is not None:
+        _, new_path, old_path = participant_asset
+        if old_path.exists():
+            with sqlite3.connect(new_path) as new, sqlite3.connect(old_path) as old:
+                columns = [
+                    str(row[1])
+                    for row in new.execute("PRAGMA table_info(participant_assets)")
+                ]
+                selected = ", ".join(f"a.{quote_identifier(name)}" for name in columns)
+                for change in high_changes:
+                    if (
+                        change.get("artifact") != "participant_inventory"
+                        or change.get("table") != "participant_assets"
+                        or change.get("change_kind") != "modified"
+                    ):
+                        continue
+                    primary_key = change.get("primary_key")
+                    if not (
+                        isinstance(primary_key, list)
+                        and len(primary_key) == 1
+                        and isinstance(primary_key[0], list)
+                        and len(primary_key[0]) == 2
+                        and primary_key[0][0] == "participant_asset_id"
+                    ):
+                        continue
+                    participant_asset_id = str(primary_key[0][1])
+                    query = (
+                        f"SELECT {selected}, p.dataset_type, p.short_title "
+                        "FROM participant_assets a JOIN participants p USING(participant_key) "
+                        "WHERE a.participant_asset_id=?"
+                    )
+                    after_row = new.execute(query, (participant_asset_id,)).fetchone()
+                    before_row = old.execute(query, (participant_asset_id,)).fetchone()
+                    if after_row is None or before_row is None:
+                        continue
+                    after = dict(zip((*columns, "dataset_type", "short_title"), after_row))
+                    before = dict(zip((*columns, "dataset_type", "short_title"), before_row))
+                    changed_columns = {
+                        name for name in columns
+                        if canonical_value(before[name]) != canonical_value(after[name])
+                    }
+                    safe_after = (
+                        after.get("geometry_status") == "not_checked"
+                        and int(after.get("geometry_checked_count") or 0) == 0
+                        and int(after.get("geometry_regular_count") or 0) == 0
+                        and int(after.get("geometry_not_regular_count") or 0) == 0
+                        and int(after.get("geometry_not_checked_count") or 0) > 0
+                    )
+                    assessed_before = int(before.get("geometry_checked_count") or 0) > 0
+                    dataset = (
+                        str(after.get("dataset_type") or ""),
+                        str(after.get("short_title") or ""),
+                    )
+                    if (
+                        dataset in changed_datasets
+                        and changed_columns
+                        and changed_columns.issubset(PARTICIPANT_GEOMETRY_SUMMARY_COLUMNS)
+                        and safe_after
+                        and assessed_before
+                    ):
+                        accepted.append({
+                            **change,
+                            "scope": [*dataset, "*"],
+                            "changed_columns": sorted(changed_columns),
+                            "reason": "participant geometry summary safely invalidated by changed public scope",
+                        })
     return accepted
 
 
@@ -972,9 +1063,18 @@ def build_report(args: argparse.Namespace) -> tuple[str, list[str], dict[str, ob
         lines.extend(f"- `{item}`" for item in unexplained_high)
     if geometry_refreshes:
         lines.extend(["", "### Accepted geometry refresh invalidations", ""])
+        public_refreshes = sum(
+            item.get("artifact") == "public_non_dicom"
+            for item in geometry_refreshes
+        )
+        participant_refreshes = sum(
+            item.get("artifact") == "participant_inventory"
+            for item in geometry_refreshes
+        )
         lines.append(
-            f"- {len(geometry_refreshes):,} assessed asset rows were safely reset "
-            "to `not_checked` in explicitly changed scopes."
+            f"- {public_refreshes:,} public asset rows and "
+            f"{participant_refreshes:,} derived participant summary rows were "
+            "safely reset in explicitly changed geometry scopes."
         )
     if malformed_explanations or duplicates or unused:
         lines.extend(["", "### Invalid or unused semantic explanations", ""])

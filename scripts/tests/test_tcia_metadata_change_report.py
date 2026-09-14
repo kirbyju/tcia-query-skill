@@ -48,7 +48,7 @@ class MetadataChangeReportTest(unittest.TestCase):
                 conn.execute(
                     "INSERT INTO public_non_dicom_assets VALUES (?,?,?,?,?,?,?,?,?,?)",
                     (
-                        "asset-a", "Collection", "Demo", "1", "same",
+                        "asset-a", "Collection", "Demo", '["1"]', "same",
                         "checked_grid_geometry", "test@1", "seed:old",
                         "2026-01-01T00:00:00Z",
                         '{"assessment_count":1,"geometry_statuses":["checked_grid_geometry"]}',
@@ -59,7 +59,7 @@ class MetadataChangeReportTest(unittest.TestCase):
                 conn.execute(
                     "INSERT INTO public_non_dicom_assets VALUES (?,?,?,?,?,?,?,?,?,?)",
                     (
-                        "asset-a", "Collection", "Demo", "1", "same",
+                        "asset-a", "Collection", "Demo", '["1"]', "same",
                         "not_checked", "not_assessed", "", None, "{}",
                     ),
                 )
@@ -102,6 +102,62 @@ class MetadataChangeReportTest(unittest.TestCase):
             }))
             mixed_change = subprocess.run(command, text=True, capture_output=True)
             self.assertEqual(mixed_change.returncode, 2)
+
+    def test_participant_geometry_invalidation_follows_changed_public_scope(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            public_old = root / "public-old.sqlite"
+            public_new = root / "public-new.sqlite"
+            participant_old = root / "participant-old.sqlite"
+            participant_new = root / "participant-new.sqlite"
+            report = root / "geometry-refresh.json"
+            for path in (public_old, public_new):
+                with sqlite3.connect(path) as conn:
+                    conn.execute(
+                        "CREATE TABLE public_non_dicom_assets (asset_id TEXT PRIMARY KEY,"
+                        "dataset_type TEXT,short_title TEXT,download_id TEXT)"
+                    )
+            participant_columns = (
+                "participant_asset_id TEXT PRIMARY KEY,participant_key TEXT,"
+                "geometry_status TEXT,geometry_checked_count INTEGER,"
+                "geometry_regular_count INTEGER,geometry_not_regular_count INTEGER,"
+                "geometry_not_checked_count INTEGER"
+            )
+            for path, values in (
+                (participant_old, ("checked_grid_geometry", 3, 3, 0, 0)),
+                (participant_new, ("not_checked", 0, 0, 0, 3)),
+            ):
+                with sqlite3.connect(path) as conn:
+                    conn.execute(
+                        "CREATE TABLE participants (participant_key TEXT PRIMARY KEY,"
+                        "dataset_type TEXT,short_title TEXT)"
+                    )
+                    conn.execute(f"CREATE TABLE participant_assets ({participant_columns})")
+                    conn.execute("INSERT INTO participants VALUES ('p1','Collection','Demo')")
+                    conn.execute(
+                        "INSERT INTO participant_assets VALUES (?,?,?,?,?,?,?)",
+                        ("pa1", "p1", *values),
+                    )
+            report.write_text(json.dumps({"records": [{
+                "status": "changed", "dataset_type": "Collection",
+                "short_title": "Demo", "download_id": "1",
+            }]}))
+            high_change = {
+                "artifact": "participant_inventory",
+                "table": "participant_assets",
+                "change_kind": "modified",
+                "primary_key": [["participant_asset_id", "pa1"]],
+            }
+            accepted = change_report.accepted_geometry_refreshes(
+                [high_change],
+                [
+                    ("public", public_new, public_old),
+                    ("participant", participant_new, participant_old),
+                ],
+                report,
+            )
+            self.assertEqual(len(accepted), 1)
+            self.assertEqual(accepted[0]["scope"], ["Collection", "Demo", "*"])
 
     def test_high_severity_key_must_equal_ordered_sqlite_primary_key(self) -> None:
         with sqlite3.connect(":memory:") as conn:
