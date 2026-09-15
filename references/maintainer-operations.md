@@ -17,6 +17,83 @@ python3 scripts/tcia_v2_bundle.py prune
 
 Use `scripts/tcia_participant_inventory.py`, `scripts/tcia_public_non_dicom_metadata.py`, `scripts/tcia_controlled_access_metadata.py`, `scripts/tcia_clinical_metadata.py`, and `scripts/tcia_correction_registry.py` to build or audit their focused V2 components. The authoritative bundle manifest carries component hashes, decompressed SQLite hashes, schemas, profiles, fingerprints, and provenance. The source workflow imports a prior correction registry only after validating it against both the prior top manifest and immutable GitHub release, then packages a deterministic gzip from the exact staged snapshot. The new registry does not link to the top manifest being built; only previously published immutable releases may be linked, avoiding a fingerprint cycle.
 
+### Local resumable verification
+
+The stable public release is one atomic, fingerprinted bundle. Do not publish a
+clinical, public non-DICOM, or Participant Inventory replacement independently
+under the moving stable tag: the component manifests and cross-component
+identity checks describe one input generation.
+
+Before starting an expensive local rebuild, exercise both CDA endpoints used by
+the clinical builder:
+
+```bash
+python3 scripts/tcia_clinical_metadata.py probe-cda
+```
+
+This probe uses the same pinned client, exact-ID request shape, and bounded
+retry policy as the build. If it fails, stop before public non-DICOM and
+Participant Inventory construction; a prior CDA fallback is useful for
+diagnosis but is intentionally not eligible for stable promotion.
+
+For local repair work, expensive component outputs may instead be retained as
+non-release checkpoints with `scripts/tcia_local_build_cache.py`. A checkpoint
+is selected by SHA-256 hashes of every declared file/directory input plus
+explicit settings. Stored outputs are hash-verified before atomic restoration.
+The utility never uploads or publishes anything.
+
+Use these recommended boundaries:
+
+1. `public-non-dicom`: save the validated public and audit SQLite files, their
+   gzip files/manifests, and the geometry refresh report after the complete
+   **Build public non-DICOM metadata** block succeeds.
+2. `participant-inventory`: save the validated Participant Inventory and audit
+   SQLite files plus their gzip files/manifests after that complete block
+   succeeds.
+3. Never checkpoint away the exact semantic-change explanation gate, correction
+   consumption/package step, V2 contract tests, bundle build/validation,
+   attestation, or published-release validation. Rerun those gates after every
+   restoration.
+
+At minimum, declare `requirements-build.lock`, `scripts/`, `references/`, the
+source and baseline manifests, and every SQLite consumed by the stage as
+inputs. Conservatively hashing all of `scripts/` and `references/` may cause
+extra cache misses, but prevents a relevant code or curation change from being
+silently overlooked. Include non-file settings such as the release contract
+and PathDB inclusion mode with `--value`.
+
+For example, after a successful public non-DICOM block:
+
+```bash
+python3 scripts/tcia_local_build_cache.py save \
+  --stage public-non-dicom \
+  --input requirements-build.lock --input scripts --input references \
+  --input cache/tcia_metadata_v2_staging.sqlite \
+  --input cache/public_non_dicom_baseline.sqlite \
+  --input cache/public_non_dicom_audit_baseline.sqlite \
+  --input cache/public_non_dicom_geometry_seed.sqlite \
+  --input dist/tcia_snapshot_manifest.json \
+  --value release_contract=streamlined --value include_pathdb_files=true \
+  --output cache/public_non_dicom_metadata.sqlite \
+  --output cache/public_non_dicom_audit.sqlite \
+  --output dist/public_non_dicom_metadata.sqlite.gz \
+  --output dist/public_non_dicom_metadata_manifest.json \
+  --output dist/public_non_dicom_audit.sqlite.gz \
+  --output dist/public_non_dicom_audit_manifest.json \
+  --output cache/reports/public_non_dicom_geometry_refresh.json
+```
+
+Before repeating that block, run the corresponding `restore` command with the
+same `--stage`, `--input`, and `--value` arguments (omit `--output`). Exit status
+`0` is a verified hit and `3` is a clean miss; on a miss, rebuild and save the
+stage. If any declared source, code, curation, dependency, or setting changes,
+the fingerprint changes and the old checkpoint is not selected.
+
+When reproducing the Participant Inventory block locally, defer its cleanup of
+`cache/clinical_metadata.sqlite` and `cache/controlled_access_metadata.sqlite`
+until after the checkpoint has been saved. Those files are stage inputs and
+must remain available while its fingerprint is calculated.
+
 `scripts/tcia_metadata_change_report.py --fail-on-unexplained-high` consumes only
 current approved correction effects that exactly match the asset, table,
 complete ordered key, change kind, and before/after row SHA-256 values. Partial

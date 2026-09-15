@@ -910,6 +910,111 @@ class ClinicalMetadataTest(unittest.TestCase):
             )
             conn.close()
 
+    def test_cda_release_metadata_retries_cryptic_client_failure(self) -> None:
+        release_rows = [
+            {
+                "data_source": "CDA",
+                "data_source_version": "test",
+                "data_source_extraction_date": "2026-01-01",
+                "cda_table": "subject",
+                "cda_column": "race",
+            }
+        ]
+
+        class FakeCDA:
+            calls = 0
+
+            @classmethod
+            def release_metadata(cls):
+                cls.calls += 1
+                if cls.calls == 1:
+                    raise KeyError("result")
+                return release_rows
+
+        original_delays = CLINICAL.CDA_RETRY_DELAYS_SECONDS
+        CLINICAL.CDA_RETRY_DELAYS_SECONDS = (0, 0)
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                conn = CLINICAL.init_db(
+                    Path(directory) / "clinical.sqlite", replace=True
+                )
+                result = CLINICAL.ingest_cda_clinical(
+                    conn,
+                    allowed_short_titles=set(),
+                    previous_db=None,
+                    refresh=False,
+                    no_fetch=False,
+                    batch_size=100,
+                    client=FakeCDA(),
+                )
+                conn.close()
+        finally:
+            CLINICAL.CDA_RETRY_DELAYS_SECONDS = original_delays
+        self.assertEqual(FakeCDA.calls, 2)
+        self.assertEqual(result["status"], "no_candidates")
+
+    def test_cda_release_metadata_failure_has_actionable_context(self) -> None:
+        class FakeCDA:
+            calls = 0
+
+            @classmethod
+            def release_metadata(cls):
+                cls.calls += 1
+                raise KeyError("result")
+
+        original_delays = CLINICAL.CDA_RETRY_DELAYS_SECONDS
+        CLINICAL.CDA_RETRY_DELAYS_SECONDS = (0, 0)
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                conn = CLINICAL.init_db(
+                    Path(directory) / "clinical.sqlite", replace=True
+                )
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "CDA release metadata failed after 3 attempts: KeyError",
+                ):
+                    CLINICAL.ingest_cda_clinical(
+                        conn,
+                        allowed_short_titles=set(),
+                        previous_db=None,
+                        refresh=False,
+                        no_fetch=False,
+                        batch_size=100,
+                        client=FakeCDA(),
+                    )
+                conn.close()
+        finally:
+            CLINICAL.CDA_RETRY_DELAYS_SECONDS = original_delays
+        self.assertEqual(FakeCDA.calls, 3)
+
+    def test_cda_probe_exercises_release_and_subject_endpoints(self) -> None:
+        release_rows = [
+            {
+                "data_source": "CDA",
+                "data_source_version": "test",
+                "data_source_extraction_date": "2026-01-01",
+                "cda_table": "subject",
+                "cda_column": "race",
+            }
+        ]
+
+        class FakeCDA:
+            @staticmethod
+            def release_metadata():
+                return release_rows
+
+            @staticmethod
+            def get_subject_data(**kwargs):
+                self.assertIn("match_from_file", kwargs)
+                return CLINICAL.SimpleFrame(
+                    ["subject_id"], [{"subject_id": "TCGA.TCGA-BP-4161"}]
+                )
+
+        result = CLINICAL.probe_cda(FakeCDA())
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["subject_rows"], 1)
+        self.assertEqual(result["release_summary"][0]["version"], "test")
+
     def test_native_cda_harvest_maps_exact_tcga_subject(self) -> None:
         release_rows = [
             {

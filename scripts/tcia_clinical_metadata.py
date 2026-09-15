@@ -31,6 +31,7 @@ import sqlite3
 import sys
 import tarfile
 import tempfile
+import time
 import urllib.error
 import urllib.request
 import zipfile
@@ -51,6 +52,7 @@ REVIEWED_ANALYSIS_RESULT_PARTICIPANTS_CSV = (
 )
 USER_AGENT = "tcia-clinical-metadata/0.1"
 CDA_DOCUMENTATION_URL = "https://cda.readthedocs.io/"
+CDA_RETRY_DELAYS_SECONDS = (2, 8)
 TCGA_BREAST_RADIOGENOMICS_FEATURES_URL = (
     "https://www.cancerimagingarchive.net/wp-content/uploads/"
     "TCGA-Run-2014_91cases_features_UChicago-V2010-MRI-Workstation.xls"
@@ -5831,6 +5833,81 @@ def load_cda_client() -> Any:
     return cdapython
 
 
+def call_cda_with_retries(label: str, callback: Any) -> Any:
+    """Call CDA with bounded retries and preserve useful upstream context.
+
+    cdapython 2.1.0 can turn modeled API error responses into a bare
+    ``KeyError('result')`` (release metadata) or ``None`` (data queries).
+    Treat both as retryable acquisition failures and raise a contextual error
+    after the final attempt so build diagnostics identify CDA as the source.
+    """
+    attempts = len(CDA_RETRY_DELAYS_SECONDS) + 1
+    last_error: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            value = callback()
+            if value is None:
+                raise RuntimeError("CDA client returned no result object")
+            return value
+        except Exception as exc:
+            last_error = exc
+            if attempt == attempts:
+                break
+            time.sleep(CDA_RETRY_DELAYS_SECONDS[attempt - 1])
+    assert last_error is not None
+    raise RuntimeError(
+        f"CDA {label} failed after {attempts} attempts: "
+        f"{type(last_error).__name__}: {last_error}"
+    ) from last_error
+
+
+def probe_cda(client: Any | None = None, subject_id: str = "TCGA-BP-4161") -> dict[str, Any]:
+    """Exercise the release and subject endpoints without building artifacts."""
+    client = client or load_cda_client()
+    release_rows = [
+        dict(row)
+        for row in call_cda_with_retries("release metadata", client.release_metadata)
+    ]
+    if not release_rows:
+        raise RuntimeError("CDA release_metadata returned no release rows")
+    temp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            suffix=".csv",
+            newline="",
+            encoding="utf-8",
+            delete=False,
+        ) as handle:
+            writer = csv.writer(handle)
+            writer.writerow(["subject_id"])
+            writer.writerow([subject_id.upper()])
+            temp_path = Path(handle.name)
+        frame = call_cda_with_retries(
+            "subject probe",
+            lambda: client.get_subject_data(
+                match_from_file={
+                    "input_file": str(temp_path),
+                    "input_column": "subject_id",
+                    "cda_column_to_match": "upstream_id",
+                },
+                add_columns=["observation.*", "treatment.*"],
+                collate_results=True,
+                return_data_as="dataframe",
+            ),
+        )
+    finally:
+        if temp_path and temp_path.exists():
+            temp_path.unlink()
+    return {
+        "ok": True,
+        "subject_id": subject_id.upper(),
+        "subject_rows": len(frame_records(frame)),
+        "release_fingerprint": cda_release_fingerprint(release_rows),
+        "release_summary": cda_release_summary(release_rows),
+    }
+
+
 def tcga_cda_identity_map(
     conn: sqlite3.Connection,
 ) -> dict[str, list[tuple[str, str]]]:
@@ -5923,15 +6000,18 @@ def harvest_cda_tcga_clinical(
                 writer.writerow(["subject_id"])
                 writer.writerows([[subject_id.upper()] for subject_id in batch])
                 temp_path = Path(handle.name)
-            frame = client.get_subject_data(
-                match_from_file={
-                    "input_file": str(temp_path),
-                    "input_column": "subject_id",
-                    "cda_column_to_match": "upstream_id",
-                },
-                add_columns=["observation.*", "treatment.*"],
-                collate_results=True,
-                return_data_as="dataframe",
+            frame = call_cda_with_retries(
+                f"subject batch {result['batches']}",
+                lambda: client.get_subject_data(
+                    match_from_file={
+                        "input_file": str(temp_path),
+                        "input_column": "subject_id",
+                        "cda_column_to_match": "upstream_id",
+                    },
+                    add_columns=["observation.*", "treatment.*"],
+                    collate_results=True,
+                    return_data_as="dataframe",
+                ),
             )
         finally:
             if temp_path and temp_path.exists():
@@ -6118,7 +6198,12 @@ def ingest_cda_clinical(
     harvest_savepoint = False
     try:
         client = client or load_cda_client()
-        release_rows = [dict(row) for row in client.release_metadata()]
+        release_rows = [
+            dict(row)
+            for row in call_cda_with_retries(
+                "release metadata", client.release_metadata
+            )
+        ]
         if not release_rows:
             raise RuntimeError("CDA release_metadata returned no release rows")
         fingerprint = cda_release_fingerprint(release_rows)
@@ -8533,6 +8618,12 @@ def parse_args() -> argparse.Namespace:
     validate_parser = subparsers.add_parser("validate")
     validate_parser.add_argument("--db", default=str(DEFAULT_DB_PATH))
 
+    probe_parser = subparsers.add_parser(
+        "probe-cda",
+        help="Test current CDA release and subject responses without building artifacts.",
+    )
+    probe_parser.add_argument("--subject-id", default="TCGA-BP-4161")
+
     info_parser = subparsers.add_parser("info")
     info_parser.add_argument("--db", default=str(DEFAULT_DB_PATH))
 
@@ -8560,6 +8651,8 @@ def main() -> int:
             build(args)
         elif args.command == "validate":
             print(json.dumps(validate(Path(args.db)), indent=2))
+        elif args.command == "probe-cda":
+            print(json.dumps(probe_cda(subject_id=args.subject_id), indent=2))
         elif args.command == "info":
             conn = sqlite3.connect(args.db)
             result = {
