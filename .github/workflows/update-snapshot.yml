@@ -111,7 +111,8 @@ jobs:
       - name: Validate controlled-access metadata
         run: |
           python scripts/tcia_controlled_access_metadata.py validate \
-            --db dist/controlled_access_metadata.sqlite
+            --db dist/controlled_access_metadata.sqlite \
+            --require-complete-sources
 
       - name: Prepare previous clinical metadata
         env:

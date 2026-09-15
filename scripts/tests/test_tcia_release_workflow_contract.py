@@ -113,6 +113,12 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
         build_lock = (ROOT / "requirements-build.lock").read_text(encoding="utf-8")
         self.assertIn("--hash=sha256:", build_lock)
 
+    def test_controlled_source_validation_is_fail_closed(self) -> None:
+        source = SOURCE_WORKFLOW.read_text(encoding="utf-8")
+        marker = "Validate controlled-access metadata"
+        block = source[source.index(marker):source.index("Prepare previous clinical metadata")]
+        self.assertIn("--require-complete-sources", block)
+
     def test_workflow_run_uses_one_triggering_producer_sha_everywhere(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
         self.assertIn(

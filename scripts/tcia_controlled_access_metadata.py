@@ -22,6 +22,7 @@ import shutil
 import sqlite3
 import sys
 import tempfile
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -998,7 +999,13 @@ def safe_id(*parts: Any) -> str:
     return f"{prefix}:{digest}"
 
 
-def fetch_artifact(url: str, out_dir: Path, no_network: bool) -> tuple[Path | None, str, str]:
+def fetch_artifact(
+    url: str,
+    out_dir: Path,
+    no_network: bool,
+    *,
+    attempts: int = 3,
+) -> tuple[Path | None, str, str]:
     if not url:
         return None, "missing", "blank URL"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -1008,12 +1015,24 @@ def fetch_artifact(url: str, out_dir: Path, no_network: bool) -> tuple[Path | No
     if no_network:
         return None, "skipped", "network disabled and artifact is not cached"
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    try:
-        with urllib.request.urlopen(request, timeout=120) as response:
-            out_path.write_bytes(response.read())
-        return out_path, "fetched", ""
-    except Exception as exc:  # noqa: BLE001 - stored as artifact exception.
-        return None, "error", str(exc)
+    error = ""
+    for attempt in range(1, max(attempts, 1) + 1):
+        try:
+            with urllib.request.urlopen(request, timeout=120) as response:
+                out_path.write_bytes(response.read())
+            return out_path, "fetched", ""
+        except urllib.error.HTTPError as exc:
+            error = str(exc)
+            if exc.code not in {408, 425, 429, 500, 502, 503, 504}:
+                break
+        except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:
+            error = str(exc)
+        except Exception as exc:  # noqa: BLE001 - stored as artifact exception.
+            error = str(exc)
+            break
+        if attempt < max(attempts, 1):
+            time.sleep(attempt)
+    return None, "error", error
 
 
 def local_ctdc_fallback(url: str) -> Path | None:
@@ -2104,11 +2123,22 @@ def validate_db(path: Path) -> dict[str, Any]:
         list(row) for row in conn.execute("PRAGMA foreign_key_check").fetchmany(20)
     ]
     counts = table_counts(conn) if not missing else {}
+    artifact_errors = (
+        int(
+            conn.execute(
+                "SELECT COUNT(*) FROM source_artifacts "
+                "WHERE trim(COALESCE(error, '')) <> ''"
+            ).fetchone()[0]
+        )
+        if "source_artifacts" in existing
+        else 0
+    )
     conn.close()
     return {
         "integrity_check": integrity,
         "foreign_key_violations": foreign_key_rows,
         "missing_tables": missing,
+        "artifact_errors": artifact_errors,
         "table_counts": counts,
     }
 
@@ -2145,7 +2175,7 @@ def build_manifest_from_db(
     counts = table_counts(conn)
     artifact_error_count = int(
         conn.execute(
-            "SELECT COUNT(*) FROM download_artifacts WHERE trim(COALESCE(error, '')) <> ''"
+            "SELECT COUNT(*) FROM source_artifacts WHERE trim(COALESCE(error, '')) <> ''"
         ).fetchone()[0]
     )
     signatures = {
@@ -2575,6 +2605,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     validate.add_argument("--db", default=str(DEFAULT_OUT), help="SQLite path.")
     validate.add_argument("--json", action="store_true", help="Emit JSON.")
+    validate.add_argument(
+        "--require-complete-sources",
+        action="store_true",
+        help="Fail when any required public source artifact could not be fetched.",
+    )
 
     datasets = subparsers.add_parser(
         "datasets", help="Summarize controlled-access metadata by dataset."
@@ -2627,10 +2662,15 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print(f"integrity_check: {payload['integrity_check']}")
             print(f"missing_tables: {', '.join(payload['missing_tables']) or 'none'}")
+            print(f"artifact_errors: {payload['artifact_errors']}")
         return 0 if (
             payload["integrity_check"] == "ok"
             and not payload["foreign_key_violations"]
             and not payload["missing_tables"]
+            and (
+                not args.require_complete_sources
+                or payload["artifact_errors"] == 0
+            )
         ) else 1
     if args.command == "datasets":
         return command_datasets(args)
