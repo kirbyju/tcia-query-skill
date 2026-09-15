@@ -294,6 +294,57 @@ class V2BundleTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "degraded or unknown authoritative sources"):
                 BUNDLE.build_bundle_manifest(root)
 
+    def test_recent_hash_bound_cda_fallback_is_accepted_for_stable(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.create_bundle_files(root)
+            clinical_path = root / BUNDLE.COMPONENTS["clinical"]["manifest"]
+            clinical = json.loads(clinical_path.read_text())
+            clinical["source_status"] = {
+                "cda_clinical": "reused_after_refresh_failure"
+            }
+            clinical["clinical_meta"] = {
+                "cda_clinical_result": {
+                    "status": "reused_after_refresh_failure",
+                    "fallback_provenance": {
+                        "last_successful_at_utc": "2026-09-14T12:00:00+00:00",
+                        "prior_artifact_sha256": "a" * 64,
+                        "source_fingerprint": "b" * 64,
+                    },
+                }
+            }
+            clinical_path.write_text(json.dumps(clinical))
+            at = BUNDLE.parse_utc("2026-09-15T12:00:00+00:00")
+            health = BUNDLE.component_source_health("clinical", clinical, at=at)
+            source = health["sources"]["clinical.cda_clinical"]
+            self.assertEqual(source["status"], "healthy")
+            self.assertEqual(source["freshness"], "verified_stale")
+            self.assertEqual(source["age_seconds"], 86400)
+
+    def test_expired_or_unbound_cda_fallback_remains_degraded(self):
+        manifest = {
+            "source_status": {"cda_clinical": "reused_after_refresh_failure"},
+            "clinical_meta": {
+                "cda_clinical_result": {
+                    "fallback_provenance": {
+                        "last_successful_at_utc": "2026-09-01T12:00:00+00:00",
+                        "prior_artifact_sha256": "a" * 64,
+                        "source_fingerprint": "b" * 64,
+                    }
+                }
+            },
+        }
+        at = BUNDLE.parse_utc("2026-09-15T12:00:00+00:00")
+        health = BUNDLE.component_source_health("clinical", manifest, at=at)
+        self.assertEqual(
+            health["degraded_sources"], ["clinical.cda_clinical"]
+        )
+        del manifest["clinical_meta"]["cda_clinical_result"]["fallback_provenance"]
+        health = BUNDLE.component_source_health("clinical", manifest, at=at)
+        self.assertEqual(
+            health["degraded_sources"], ["clinical.cda_clinical"]
+        )
+
     def test_unknown_source_summary_is_explicit_and_structurally_validated(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

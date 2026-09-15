@@ -2667,6 +2667,35 @@ def previous_meta(previous_db: Path, key: str) -> Any:
         return None
 
 
+def cda_fallback_provenance(previous_db: Path) -> dict[str, str]:
+    """Bind a CDA fallback to the prior artifact and its last live observation."""
+    previous_result = previous_meta(previous_db, "cda_clinical_result") or {}
+    if not isinstance(previous_result, dict):
+        return {}
+    inherited = previous_result.get("fallback_provenance") or {}
+    if not isinstance(inherited, dict):
+        return {}
+    last_successful_at = str(inherited.get("last_successful_at_utc") or "")
+    if not last_successful_at and previous_result.get("status") in {
+        "loaded",
+        "no_candidates",
+        "reused_unchanged_release",
+    }:
+        last_successful_at = str(previous_meta(previous_db, "created_at") or "")
+    source_fingerprint = str(
+        inherited.get("source_fingerprint")
+        or previous_meta(previous_db, "cda_release_fingerprint")
+        or ""
+    )
+    if not last_successful_at or not source_fingerprint:
+        return {}
+    return {
+        "last_successful_at_utc": last_successful_at,
+        "prior_artifact_sha256": file_sha256(previous_db),
+        "source_fingerprint": source_fingerprint,
+    }
+
+
 def copy_idc_previous(
     conn: sqlite3.Connection,
     previous_db: Path,
@@ -6266,6 +6295,9 @@ def ingest_cda_clinical(
                         "release_summary": previous_meta(
                             previous_db, "cda_release_summary"  # type: ignore[arg-type]
                         ) or [],
+                        "fallback_provenance": cda_fallback_provenance(
+                            previous_db  # type: ignore[arg-type]
+                        ),
                     }
                 )
                 return result

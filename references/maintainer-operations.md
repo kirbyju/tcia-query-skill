@@ -32,9 +32,21 @@ python3 scripts/tcia_clinical_metadata.py probe-cda
 ```
 
 This probe uses the same pinned client, exact-ID request shape, and bounded
-retry policy as the build. If it fails, stop before public non-DICOM and
-Participant Inventory construction; a prior CDA fallback is useful for
-diagnosis but is intentionally not eligible for stable promotion.
+retry policy as the build. A successful probe permits a normal live build. If
+it fails, the clinical builder may reuse the prior CDA rows for stable
+promotion only when it can carry forward all three of the following: the last
+successful live-observation time, the CDA release fingerprint, and the exact
+prior clinical SQLite SHA-256. That evidence is accepted for at most seven
+days. Repeated failures carry the original observation time forward rather
+than resetting the clock. Missing, malformed, future-dated, or expired
+evidence remains degraded and blocks stable promotion.
+
+This bounded exception applies only to `clinical.cda_clinical`, which is a
+downstream enrichment source. It does not authorize stale WordPress
+publication/visibility/license/download metadata, controlled-access routing,
+or another source. The downstream workflow runs `preflight-source-health`
+immediately after it verifies and expands the source artifact, before geometry,
+public non-DICOM, and Participant Inventory construction.
 
 For local repair work, expensive component outputs may instead be retained as
 non-release checkpoints with `scripts/tcia_local_build_cache.py`. A checkpoint

@@ -84,6 +84,18 @@ jobs:
           python scripts/tcia_correction_registry.py validate \
             --db cache/tcia_correction_registry.sqlite
 
+      - name: Reject unsafe source state before expensive downstream builds
+        run: |
+          set -euo pipefail
+          waiver_args=()
+          if [ -s .github/tcia-v2-source-health-waiver.json ]; then
+            waiver_args+=(--source-health-waiver .github/tcia-v2-source-health-waiver.json)
+          fi
+          python scripts/tcia_v2_bundle.py preflight-source-health \
+            --asset-dir dist \
+            --release-channel stable \
+            "${waiver_args[@]}"
+
       - name: Download and verify the canonical non-DICOM geometry seed
         env:
           GH_TOKEN: ${{ github.token }}

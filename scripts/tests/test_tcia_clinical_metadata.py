@@ -987,6 +987,62 @@ class ClinicalMetadataTest(unittest.TestCase):
             CLINICAL.CDA_RETRY_DELAYS_SECONDS = original_delays
         self.assertEqual(FakeCDA.calls, 3)
 
+    def test_cda_refresh_failure_records_hash_bound_fallback_provenance(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            previous_path = root / "previous.sqlite"
+            previous = CLINICAL.init_db(previous_path, replace=True)
+            fingerprint = "a" * 64
+            CLINICAL.insert_meta(previous, "schema_version", CLINICAL.SCHEMA_VERSION)
+            CLINICAL.insert_meta(previous, "created_at", "2026-09-14T12:00:00+00:00")
+            CLINICAL.insert_meta(previous, "cda_release_fingerprint", fingerprint)
+            CLINICAL.insert_meta(
+                previous,
+                "cda_clinical_result",
+                {"status": "loaded", "release_fingerprint": fingerprint},
+            )
+            CLINICAL.insert_source(
+                previous,
+                source_id="cda:tcgakirc",
+                source_kind="cda",
+                short_title="TCGA-KIRC",
+                source_signature_value=fingerprint,
+            )
+            previous.commit()
+            previous.close()
+            expected_sha256 = CLINICAL.file_sha256(previous_path)
+
+            class FailingCDA:
+                @staticmethod
+                def release_metadata():
+                    raise RuntimeError("service unavailable")
+
+            current = CLINICAL.init_db(root / "current.sqlite", replace=True)
+            original_delays = CLINICAL.CDA_RETRY_DELAYS_SECONDS
+            CLINICAL.CDA_RETRY_DELAYS_SECONDS = (0, 0)
+            try:
+                result = CLINICAL.ingest_cda_clinical(
+                    current,
+                    allowed_short_titles={"TCGA-KIRC"},
+                    previous_db=previous_path,
+                    refresh=False,
+                    no_fetch=False,
+                    batch_size=100,
+                    client=FailingCDA(),
+                )
+            finally:
+                CLINICAL.CDA_RETRY_DELAYS_SECONDS = original_delays
+                current.close()
+            self.assertEqual(result["status"], "reused_after_refresh_failure")
+            self.assertEqual(
+                result["fallback_provenance"],
+                {
+                    "last_successful_at_utc": "2026-09-14T12:00:00+00:00",
+                    "prior_artifact_sha256": expected_sha256,
+                    "source_fingerprint": fingerprint,
+                },
+            )
+
     def test_cda_probe_exercises_release_and_subject_endpoints(self) -> None:
         release_rows = [
             {

@@ -161,6 +161,12 @@ DEGRADED_SOURCE_MODES = {
     "reused_offline",
 }
 WAIVER_SCHEMA_VERSION = 1
+VERIFIED_STALE_SOURCE_MAX_AGE_SECONDS = {
+    # CDA is a downstream enrichment source. A recent, validated prior artifact
+    # may bridge a short CDA service outage without changing TCIA publication,
+    # access, or routing authority.
+    "clinical.cda_clinical": 7 * 24 * 60 * 60,
+}
 
 
 def canonical_json(value: Any) -> str:
@@ -208,17 +214,88 @@ def load_source_health_waivers(path: Path | None, *, at: dt.datetime) -> list[di
     return result
 
 
-def component_source_health(component: str, manifest: dict[str, Any]) -> dict[str, Any]:
+def verified_stale_source_details(
+    source: str,
+    mode: str,
+    manifest: dict[str, Any],
+    *,
+    at: dt.datetime,
+) -> dict[str, Any] | None:
+    """Return bounded stale-source evidence when the source policy permits it."""
+    max_age = VERIFIED_STALE_SOURCE_MAX_AGE_SECONDS.get(source)
+    if max_age is None or mode != "reused_after_refresh_failure":
+        return None
+    component_meta = manifest.get("clinical_meta") or {}
+    if not isinstance(component_meta, dict):
+        return None
+    source_result = component_meta.get("cda_clinical_result") or {}
+    if not isinstance(source_result, dict):
+        return None
+    provenance = source_result.get("fallback_provenance") or {}
+    if not isinstance(provenance, dict):
+        return None
+    last_successful = str(provenance.get("last_successful_at_utc") or "")
+    source_fingerprint = str(provenance.get("source_fingerprint") or "")
+    prior_artifact_sha256 = str(provenance.get("prior_artifact_sha256") or "")
+    if not (
+        len(source_fingerprint) == 64
+        and all(
+            character in "0123456789abcdef"
+            for character in source_fingerprint.lower()
+        )
+        and len(prior_artifact_sha256) == 64
+        and all(
+            character in "0123456789abcdef"
+            for character in prior_artifact_sha256.lower()
+        )
+    ):
+        return None
+    try:
+        observed_at = parse_utc(last_successful)
+    except (TypeError, ValueError):
+        return None
+    age_seconds = int((at - observed_at).total_seconds())
+    if age_seconds < 0 or age_seconds > max_age:
+        return None
+    return {
+        "freshness": "verified_stale",
+        "last_successful_at_utc": observed_at.isoformat(),
+        "age_seconds": age_seconds,
+        "max_age_seconds": max_age,
+        "source_fingerprint": source_fingerprint,
+        "prior_artifact_sha256": prior_artifact_sha256,
+        "failure_reason": str(source_result.get("error") or "")[:500],
+    }
+
+
+def component_source_health(
+    component: str,
+    manifest: dict[str, Any],
+    *,
+    at: dt.datetime | None = None,
+) -> dict[str, Any]:
     """Summarize source acquisition health without copying local paths."""
+    at = at or dt.datetime.now(dt.timezone.utc)
     sources: dict[str, dict[str, Any]] = {}
     warnings: list[dict[str, str]] = []
 
     def record(name: str, mode: Any, message: str = "") -> None:
         normalized = str(mode or "unknown")
-        status = "degraded" if normalized in DEGRADED_SOURCE_MODES else "healthy"
-        if normalized not in HEALTHY_SOURCE_MODES | DEGRADED_SOURCE_MODES:
-            status = "unknown"
-        sources[name] = {"status": status, "mode": normalized}
+        stale_details = verified_stale_source_details(name, normalized, manifest, at=at)
+        if stale_details is not None:
+            sources[name] = {"status": "healthy", "mode": normalized, **stale_details}
+            failure_reason = str(stale_details.get("failure_reason") or "")
+            warnings.append(
+                {
+                    "source": name,
+                    "message": failure_reason or "using a verified recent prior snapshot",
+                }
+            )
+        else:
+            status = "degraded" if normalized in DEGRADED_SOURCE_MODES else "healthy"
+            if normalized not in HEALTHY_SOURCE_MODES | DEGRADED_SOURCE_MODES:
+                status = "unknown"
+            sources[name] = {"status": status, "mode": normalized}
         if message:
             warnings.append({"source": name, "message": message[:500]})
 
@@ -277,9 +354,12 @@ def component_source_health(component: str, manifest: dict[str, Any]) -> dict[st
 def summarize_bundle_health(
     component_manifests: dict[str, dict[str, Any]],
     waivers: list[dict[str, str]],
+    *,
+    at: dt.datetime | None = None,
 ) -> dict[str, Any]:
+    at = at or dt.datetime.now(dt.timezone.utc)
     components = {
-        name: component_source_health(name, manifest)
+        name: component_source_health(name, manifest, at=at)
         for name, manifest in sorted(component_manifests.items())
     }
     degraded = sorted(
@@ -311,6 +391,42 @@ def summarize_bundle_health(
         "unused_waivers": unused_waivers,
         "warning_count": sum(item["warning_count"] for item in components.values()),
     }
+
+
+def preflight_source_health(
+    asset_dir: Path,
+    *,
+    release_channel: str = "stable",
+    source_health_waiver: Path | None = None,
+    at: dt.datetime | None = None,
+) -> dict[str, Any]:
+    """Validate source components and promotion health before expensive builds."""
+    at = at or dt.datetime.now(dt.timezone.utc)
+    validate_component_assets(
+        asset_dir, SOURCE_COMPONENTS, validate_snapshot_exports=False
+    )
+    manifests = {
+        name: load_component_manifest(asset_dir, name) for name in SOURCE_COMPONENTS
+    }
+    waivers = load_source_health_waivers(source_health_waiver, at=at)
+    health = summarize_bundle_health(manifests, waivers, at=at)
+    errors: list[str] = []
+    if health["unused_waivers"]:
+        errors.append(
+            "Source-health waivers do not match a currently degraded source: "
+            + ", ".join(health["unused_waivers"])
+        )
+    blocked = sorted(
+        health["unwaived_degraded_sources"]
+        + health["unwaived_unknown_sources"]
+    )
+    if release_channel == "stable" and blocked:
+        errors.append(
+            "Stable V2 promotion rejected degraded or unknown authoritative sources without "
+            "an active scoped waiver: "
+            + ", ".join(blocked)
+        )
+    return {"ok": not errors, "errors": errors, "source_health": health}
 
 
 def validate_source_health_summary(health: Any, *, release_channel: str) -> list[str]:
@@ -1185,6 +1301,8 @@ def load_component_manifest(asset_dir: Path, component: str) -> dict[str, Any]:
 def validate_component_assets(
     asset_dir: Path,
     component_names: tuple[str, ...] | None = None,
+    *,
+    validate_snapshot_exports: bool = True,
 ) -> dict[str, dict[str, Any]]:
     errors: list[str] = []
     components: dict[str, dict[str, Any]] = {}
@@ -1235,7 +1353,7 @@ def validate_component_assets(
         }
 
     snapshot_manifest = components.get("snapshot")
-    if snapshot_manifest:
+    if snapshot_manifest and validate_snapshot_exports:
         raw_snapshot_manifest = load_component_manifest(asset_dir, "snapshot")
         web_exports = raw_snapshot_manifest.get("web_exports") or {}
         for export_name in WEB_EXPORT_ASSETS:
@@ -1516,7 +1634,9 @@ def build_bundle_manifest(
             details.pop("manifest_asset", None)
     generated_at = dt.datetime.now(dt.timezone.utc)
     waivers = load_source_health_waivers(source_health_waiver, at=generated_at)
-    source_health = summarize_bundle_health(component_manifests, waivers)
+    source_health = summarize_bundle_health(
+        component_manifests, waivers, at=generated_at
+    )
     if source_health["unused_waivers"]:
         raise RuntimeError(
             "Source-health waivers do not match a currently degraded source: "
@@ -2055,6 +2175,17 @@ def parser() -> argparse.ArgumentParser:
     validate = sub.add_parser("validate", help="Validate a complete V2 bundle directory.")
     validate.add_argument("--asset-dir", required=True)
     validate.add_argument("--manifest", required=True)
+    preflight = sub.add_parser(
+        "preflight-source-health",
+        help="Validate source component health before expensive downstream builds.",
+    )
+    preflight.add_argument("--asset-dir", required=True)
+    preflight.add_argument(
+        "--release-channel",
+        choices=("stable", "preview", "candidate"),
+        default="stable",
+    )
+    preflight.add_argument("--source-health-waiver")
     source = sub.add_parser("validate-source", help="Validate copied assets against a captured source release.")
     source.add_argument("--asset-dir", required=True)
     source.add_argument("--source-release-json", required=True)
@@ -2159,6 +2290,16 @@ def main() -> int:
         return 0
     if args.command == "validate":
         result = validate_bundle(Path(args.asset_dir), Path(args.manifest))
+        print(json.dumps(result, indent=2, sort_keys=True))
+        return 0 if result["ok"] else 1
+    if args.command == "preflight-source-health":
+        result = preflight_source_health(
+            Path(args.asset_dir),
+            release_channel=args.release_channel,
+            source_health_waiver=(
+                Path(args.source_health_waiver) if args.source_health_waiver else None
+            ),
+        )
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0 if result["ok"] else 1
     if args.command == "validate-source":

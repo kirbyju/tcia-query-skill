@@ -619,6 +619,16 @@ degraded or unknown authoritative source health unless a reviewed
 reason, approver, and future expiry; expired waivers are rejected. The
 workflow does not deploy, restart, or reconfigure MCP/REST.
 
+One built-in stale-while-revalidate policy is narrower than a waiver: CDA
+clinical enrichment may reuse a validated prior clinical artifact for no more
+than seven days during a refresh failure. The component records the original
+last successful observation, CDA release fingerprint, prior artifact SHA-256,
+and failure reason. The observation time is carried across consecutive
+fallbacks and cannot be refreshed by another failed request. All TCIA
+publication, visibility, licensing, download, and controlled-access sources
+remain fail-closed. The source-health policy is evaluated before expensive
+derived components and again when the complete atomic bundle is assembled.
+
 Source acquisition health is distinct from parser coverage. An official
 clinical `fetch_failed` status degrades stable promotion, while a successfully
 retrieved artifact that cannot yet be converted is retained as an
