@@ -35,6 +35,11 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
         self.assertIn("Initialize diagnostics-only status", source)
         self.assertIn("Finalize diagnostics-only status", source)
         self.assertIn("if: ${{ always() }}", source)
+        diagnostic_header = source[
+            source.index("Upload non-release semantic-gate diagnostics"):
+            source.index("uses: actions/upload-artifact", diagnostic_step)
+        ]
+        self.assertIn("continue-on-error: true", diagnostic_header)
         self.assertIn(
             "tcia-metadata-v2-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}",
             source,

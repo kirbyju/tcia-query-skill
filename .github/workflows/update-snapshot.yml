@@ -362,6 +362,7 @@ jobs:
 
       - name: Upload non-release semantic-gate diagnostics
         if: ${{ always() }}
+        continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: tcia-metadata-v2-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
