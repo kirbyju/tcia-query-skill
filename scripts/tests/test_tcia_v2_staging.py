@@ -61,6 +61,7 @@ class V2StagingTests(unittest.TestCase):
         omit_cross_component_fk: bool = False,
         satisfied_additional_fk: bool = False,
         compact_split: bool = False,
+        null_child_asset_id: bool = False,
         bundle_schema_version: int = 2,
     ) -> Path:
         research, research_manifest = components["public_non_dicom_baseline"]
@@ -111,7 +112,8 @@ class V2StagingTests(unittest.TestCase):
             conn.execute("PRAGMA foreign_keys=OFF")
             conn.execute(
                 "CREATE TABLE public_non_dicom_crosswalk_evidence ("
-                f"crosswalk_id TEXT PRIMARY KEY, asset_id {child_declared_type} NOT NULL, "
+                f"crosswalk_id TEXT PRIMARY KEY, asset_id {child_declared_type} "
+                f"{' ' if compact_split else 'NOT NULL '}, "
                 "short_title TEXT NOT NULL"
                 + (
                     ")"
@@ -123,7 +125,7 @@ class V2StagingTests(unittest.TestCase):
                 "INSERT INTO public_non_dicom_crosswalk_evidence VALUES (?, ?, ?)",
                 (
                     "crosswalk-1",
-                    orphan_asset_id or asset_id,
+                    None if null_child_asset_id else (orphan_asset_id or asset_id),
                     "OTHER" if short_title_mismatch else "TEST",
                 ),
             )
@@ -378,7 +380,31 @@ class V2StagingTests(unittest.TestCase):
             check = result["cross_component_foreign_keys"][0]
             self.assertEqual(check["declaration_mode"], "manifest_paired")
             self.assertEqual(check["standalone_violation_rows"], 0)
+            self.assertEqual(check["child_null_rows"], 0)
             self.assertEqual(check["matched_rows"], 1)
+
+    def test_build_rejects_compact_cross_component_null_child_key(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            components = {
+                component: self.create_component(root, component)
+                for component in staging.COMPONENT_ORDER
+            }
+            bundle_manifest = self.create_legacy_public_cross_component_pair(
+                components,
+                omit_cross_component_fk=True,
+                compact_split=True,
+                null_child_asset_id=True,
+            )
+            with self.assertRaisesRegex(
+                RuntimeError, "cross-component child key contains nulls.*count=1"
+            ):
+                staging.build_staging_database(
+                    root / "staging.sqlite",
+                    components=components,
+                    baseline_bundle_manifest_path=bundle_manifest,
+                    replace=True,
+                )
 
     def test_build_validates_schema_3_bundle_pin(self):
         with tempfile.TemporaryDirectory() as directory:

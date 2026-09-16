@@ -104,7 +104,7 @@
     "scripts/tcia_v2_bundle.py": "33ffed1c02015b89553992f865b2365eebf9fdbb6e8edc77e15419fd8d2de378",
     "scripts/tcia_v2_checkpoint.py": "a25c2e0b7c88aa44d227fe11523bf16a822f8ac52259703fd4483b1efa375bda",
     "scripts/tcia_v2_parity.py": "0a651d86c0bce64ee82c0bb8da3e4fe848bf7738f6a305c4f65da37cbe9f7e69",
-    "scripts/tcia_v2_staging.py": "349b042a63c20e96e169e40b9c6332b02fff6fe717cc572be476baf9be317747",
+    "scripts/tcia_v2_staging.py": "23956a5bc09c3d7ee6ec7d74f88b458c59f716a80b6ca16ce6026ba66480bfc2",
     "scripts/tcia_wordpress_search.py": "b58dc8c3c4d68d19b9e46e943399fcb0051038587058ad7090a15b1390c88dbe",
     "scripts/tests/test_tcia_artifact_model.py": "df0a8944a2f8459cc1dbcddaa07859c1d91ca62266719d4247fd314c333ef153",
     "scripts/tests/test_tcia_clinical_metadata.py": "add621e1eadbc2157a9bcf1c9f05555369b5220d9c8424c6cdff91b6beda9dc2",
@@ -127,9 +127,9 @@
     "scripts/tests/test_tcia_v2_bundle.py": "fca72df2471115ae4a75ede504b9b1b3a5c6317d5a49304b188f7af33d11a6d8",
     "scripts/tests/test_tcia_v2_checkpoint.py": "4553d2bb4688966bdc8af5cc05aac654a4687a79d8e1f2c1a9e5c64748fc7d28",
     "scripts/tests/test_tcia_v2_parity.py": "27f51ddd8bbc200eb85327cd716db37f2f7d12393bb25445ba4f5d6b6f8301ae",
-    "scripts/tests/test_tcia_v2_staging.py": "4d6a3effc2a77b77959413a8db9654e35acc5c0406d40b2861ffaefec3c466d0"
+    "scripts/tests/test_tcia_v2_staging.py": "dda82d5c65b8e03b543fc80c44f30acf47a6c29861b1565104e96c568399ec25"
   },
   "schema_version": 1,
-  "skill_version": "2026.09.16.3",
-  "updated_at_utc": "2026-09-16T14:39:52.216226+00:00"
+  "skill_version": "2026.09.16.4",
+  "updated_at_utc": "2026-09-16T17:59:24.262464+00:00"
 }

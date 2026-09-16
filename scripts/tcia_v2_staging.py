@@ -320,7 +320,7 @@ def validate_component_foreign_keys(
                     f"{component} cross-component parent key is not a primary key: "
                     f"{parent_table}.{parent_column}"
                 )
-            if int(child_columns[child_column][3]) != 1:
+            if not compact_split and int(child_columns[child_column][3]) != 1:
                 raise RuntimeError(
                     f"{component} cross-component child key is nullable: "
                     f"{child_table}.{child_column}"
@@ -337,6 +337,17 @@ def validate_component_foreign_keys(
                     f"{component} cross-component declared key type mismatch: "
                     f"child={child_type or 'untyped'} expected={expected_child_type}; "
                     f"parent={parent_type or 'untyped'} expected={expected_parent_type}"
+                )
+            child_nulls = int(
+                conn.execute(
+                    f"SELECT COUNT(*) FROM main.{quote_identifier(child_table)} "
+                    f"WHERE {quote_identifier(child_column)} IS NULL"
+                ).fetchone()[0]
+            )
+            if child_nulls:
+                raise RuntimeError(
+                    f"{component} cross-component child key contains nulls: "
+                    f"{child_table}.{child_column}; count={child_nulls}"
                 )
             for table, columns, column in (
                 (child_table, child_columns, coherence_column),
@@ -471,6 +482,7 @@ def validate_component_foreign_keys(
                     "manifest_paired" if compact_split else "legacy_sqlite_foreign_key"
                 ),
                 "standalone_violation_rows": standalone_violation_rows,
+                "child_null_rows": child_nulls,
                 "child_rows": child_rows,
                 "matched_rows": child_rows - orphan_count,
                 "distinct_child_keys": distinct_child_keys,
