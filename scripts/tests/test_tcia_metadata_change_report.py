@@ -258,6 +258,76 @@ class MetadataChangeReportTest(unittest.TestCase):
                         for item in payload["unexplained_high_severity"]
                     ))
 
+    def test_registry_refresh_times_and_health_details_are_nonsemantic(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            snapshot = root / "snapshot.sqlite"
+            registry_path = root / "registry.sqlite"
+            prior = root / "prior.sqlite"
+            report = root / "report.json"
+            self._snapshot(snapshot, include_new=False)
+            with sqlite3.connect(snapshot) as conn:
+                conn.execute(
+                    "UPDATE agent_datasets SET title='Old Dataset with 10 patients'"
+                )
+                conn.commit()
+
+            registry.build_registry(
+                registry_path,
+                snapshot=snapshot,
+                observed_at="2026-09-15T00:00:00Z",
+            )
+            shutil.copy2(registry_path, prior)
+            registry.build_registry(
+                registry_path,
+                snapshot=snapshot,
+                observed_at="2026-09-16T00:00:00Z",
+                replace=True,
+            )
+
+            with sqlite3.connect(prior) as old, sqlite3.connect(registry_path) as new:
+                old_time = old.execute(
+                    "SELECT last_observed_at FROM correction_cases "
+                    "WHERE current_revision_id IS NULL AND short_title='OLD'"
+                ).fetchone()[0]
+                new_time = new.execute(
+                    "SELECT last_observed_at FROM correction_cases "
+                    "WHERE current_revision_id IS NULL AND short_title='OLD'"
+                ).fetchone()[0]
+                self.assertNotEqual(old_time, new_time)
+                new.execute(
+                    "UPDATE registry_meta SET value=? WHERE key='source_health_json'",
+                    (json.dumps({
+                        "status": "unverified",
+                        "generated_at_utc": "2026-09-16T00:00:00Z",
+                        "manifest_sha256": "new-manifest",
+                    }),),
+                )
+                new.commit()
+
+            result = subprocess.run(
+                [
+                    sys.executable, str(SCRIPT),
+                    "--correction-new", str(registry_path),
+                    "--correction-old", str(prior),
+                    "--json-out", str(report),
+                    "--fail-on-unexplained-high",
+                ],
+                text=True, capture_output=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            payload = json.loads(report.read_text())
+            correction_rows = [
+                row for row in payload["comparisons"]
+                if row["asset"] == "correction"
+            ]
+            self.assertTrue(correction_rows)
+            self.assertTrue(all(
+                row["added"] == row["removed"] == row["modified"] == 0
+                for row in correction_rows
+            ))
+            self.assertFalse(payload["unexplained_high_severity"])
+
     def test_report_digest_is_semantic_across_repeated_runs(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "correction.sqlite"
@@ -601,7 +671,7 @@ class MetadataChangeReportTest(unittest.TestCase):
             self.assertEqual(duplicate.returncode, 2)
             self.assertTrue(json.loads(report.read_text())["semantic_explanations"]["duplicate_matches"])
 
-    def test_correction_meta_ignores_build_time_but_gates_source_health(self) -> None:
+    def test_correction_meta_ignores_build_time_and_health_details_but_gates_status(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             old = root / "old.sqlite"
@@ -610,6 +680,16 @@ class MetadataChangeReportTest(unittest.TestCase):
             self._correction_meta(old, "2026-09-10T00:00:00Z", "verified_current")
             self._correction_meta(same, "2026-09-11T00:00:00Z", "verified_current")
             self._correction_meta(changed, "2026-09-11T00:00:00Z", "degraded")
+            with sqlite3.connect(same) as conn:
+                conn.execute(
+                    "UPDATE registry_meta SET value=? WHERE key='source_health_json'",
+                    (json.dumps({
+                        "status": "verified_current",
+                        "generated_at_utc": "2026-09-11T00:00:00Z",
+                        "manifest_sha256": "new-manifest",
+                    }),),
+                )
+                conn.commit()
             unchanged = subprocess.run(
                 [sys.executable, str(SCRIPT), "--correction-new", str(same),
                  "--correction-old", str(old), "--fail-on-unexplained-high"],

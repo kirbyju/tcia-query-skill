@@ -85,13 +85,14 @@ PROFILES = {
     "correction": (
         TableSpec(
             "registry_meta", ("key",), "high",
-            "key IN ('source_health','source_health_json','active_decision_set_sha256')",
+            "key IN ('source_health','active_decision_set_sha256')",
         ),
         TableSpec("correction_observations", ("observation_id",)),
         TableSpec(
             "correction_cases", ("case_id",), "high",
             "current_revision_id IS NULL OR current_revision_id NOT IN "
             "(SELECT revision_id FROM correction_decisions WHERE source_kind='semantic_change_explanation')",
+            nonsemantic_columns=("last_observed_at",),
         ),
         TableSpec("correction_proposals", ("proposal_id",)),
         TableSpec(
