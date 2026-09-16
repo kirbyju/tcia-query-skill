@@ -14,6 +14,7 @@ from typing import Any
 
 
 STAGING_SCHEMA_VERSION = 3
+SUPPORTED_BASELINE_BUNDLE_SCHEMA_VERSIONS = {2, 3}
 COMPONENT_ORDER = (
     "snapshot",
     "public_non_dicom_baseline",
@@ -520,7 +521,7 @@ def validate_cross_component_bundle_pin(
     bundle = load_json(path)
     if (
         bundle.get("artifact") != "tcia_metadata_v2_bundle"
-        or bundle.get("schema_version") != 2
+        or bundle.get("schema_version") not in SUPPORTED_BASELINE_BUNDLE_SCHEMA_VERSIONS
         or bundle.get("release_contract") != "streamlined"
     ):
         raise RuntimeError("cross-component bundle manifest contract mismatch")
@@ -541,6 +542,10 @@ def validate_cross_component_bundle_pin(
             for name, details in sorted((bundle.get("assets") or {}).items())
         },
     }
+    if bundle.get("schema_version") == 3:
+        fingerprint_payload["source_health"] = bundle.get("source_health")
+        if "decision_sets" in bundle:
+            fingerprint_payload["decision_sets"] = bundle.get("decision_sets")
     expected_fingerprint = hashlib.sha256(
         canonical_json(fingerprint_payload).encode("utf-8")
     ).hexdigest()

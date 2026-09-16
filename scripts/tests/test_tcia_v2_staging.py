@@ -61,6 +61,7 @@ class V2StagingTests(unittest.TestCase):
         omit_cross_component_fk: bool = False,
         satisfied_additional_fk: bool = False,
         compact_split: bool = False,
+        bundle_schema_version: int = 2,
     ) -> Path:
         research, research_manifest = components["public_non_dicom_baseline"]
         research.unlink()
@@ -173,7 +174,7 @@ class V2StagingTests(unittest.TestCase):
         audit_manifest.write_text(json.dumps(audit_payload))
         bundle = {
             "artifact": "tcia_metadata_v2_bundle",
-            "schema_version": 2,
+            "schema_version": bundle_schema_version,
             "release_channel": "stable",
             "release_tag": "tcia-metadata-v2-latest",
             "release_contract": "streamlined",
@@ -201,6 +202,13 @@ class V2StagingTests(unittest.TestCase):
                 }
             },
         }
+        if bundle_schema_version == 3:
+            bundle["source_health"] = {
+                "status": "verified_current",
+                "unwaived_degraded_sources": [],
+                "unwaived_unknown_sources": [],
+            }
+            bundle["decision_sets"] = {}
         fingerprint_payload = {
             "artifact": bundle["artifact"],
             "schema_version": bundle["schema_version"],
@@ -214,6 +222,9 @@ class V2StagingTests(unittest.TestCase):
                 for name, details in sorted(bundle["assets"].items())
             },
         }
+        if bundle_schema_version == 3:
+            fingerprint_payload["source_health"] = bundle["source_health"]
+            fingerprint_payload["decision_sets"] = bundle["decision_sets"]
         bundle["release_fingerprint"] = hashlib.sha256(
             staging.canonical_json(fingerprint_payload).encode()
         ).hexdigest()
@@ -368,6 +379,44 @@ class V2StagingTests(unittest.TestCase):
             self.assertEqual(check["declaration_mode"], "manifest_paired")
             self.assertEqual(check["standalone_violation_rows"], 0)
             self.assertEqual(check["matched_rows"], 1)
+
+    def test_build_validates_schema_3_bundle_pin(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            components = {
+                component: self.create_component(root, component)
+                for component in staging.COMPONENT_ORDER
+            }
+            bundle_manifest = self.create_legacy_public_cross_component_pair(
+                components,
+                omit_cross_component_fk=True,
+                compact_split=True,
+                bundle_schema_version=3,
+            )
+            result = staging.build_staging_database(
+                root / "staging.sqlite",
+                components=components,
+                baseline_bundle_manifest_path=bundle_manifest,
+                replace=True,
+            )
+            self.assertEqual(len(result["cross_component_foreign_keys"]), 1)
+            self.assertEqual(
+                result["cross_component_foreign_keys"][0]["declaration_mode"],
+                "manifest_paired",
+            )
+
+            payload = json.loads(bundle_manifest.read_text())
+            payload["source_health"]["status"] = "degraded"
+            bundle_manifest.write_text(json.dumps(payload))
+            with self.assertRaisesRegex(
+                RuntimeError, "bundle release fingerprint mismatch"
+            ):
+                staging.build_staging_database(
+                    root / "tampered.sqlite",
+                    components=components,
+                    baseline_bundle_manifest_path=bundle_manifest,
+                    replace=True,
+                )
 
     def test_build_rejects_compact_cross_component_orphan_without_sqlite_fk(self):
         with tempfile.TemporaryDirectory() as directory:
