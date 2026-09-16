@@ -44,6 +44,10 @@ CROSS_COMPONENT_FOREIGN_KEYS = {
         },
     ),
 }
+COMPACT_AUDIT_JOIN_CONTRACT = (
+    "Join integer audit entities to stable source entity identifiers through "
+    "agent_entity_payloads or agent_normalized_field_provenance."
+)
 
 SCHEMA = """
 PRAGMA foreign_keys = ON;
@@ -159,6 +163,12 @@ def validate_component_foreign_keys(
 
     verified: list[dict[str, Any]] = []
     accepted_violation_keys: set[tuple[str, str, int]] = set()
+    audit_meta = dict(
+        conn.execute("SELECT key, value FROM main.audit_meta")
+    ) if conn.execute(
+        "SELECT 1 FROM main.sqlite_master WHERE type='table' AND name='audit_meta'"
+    ).fetchone() else {}
+    compact_split = audit_meta.get("join_contract") == COMPACT_AUDIT_JOIN_CONTRACT
     expected_declarations = sorted(
         (
             str(contract["child_table"]),
@@ -172,7 +182,7 @@ def validate_component_foreign_keys(
             "NONE",
         )
         for contract in contracts
-    )
+    ) if not compact_split else []
     actual_declarations = foreign_key_declarations(conn)
     if actual_declarations != expected_declarations:
         raise RuntimeError(
@@ -189,38 +199,40 @@ def validate_component_foreign_keys(
         parent_column = str(contract["parent_column"])
         parent_bundle_component = str(contract["parent_bundle_component"])
         coherence_column = str(contract["coherence_column"])
-        declarations = list(
-            conn.execute(f"PRAGMA foreign_key_list({quote_identifier(child_table)})")
-        )
-        matches = [
-            row
-            for row in declarations
-            if (
-                str(row[2]),
-                str(row[3]),
-                str(row[4]),
-                str(row[5]),
-                str(row[6]),
-                str(row[7]),
+        foreign_key_id: int | None = None
+        if not compact_split:
+            declarations = list(
+                conn.execute(f"PRAGMA foreign_key_list({quote_identifier(child_table)})")
             )
-            == (
-                parent_table,
-                child_column,
-                parent_column,
-                "NO ACTION",
-                "NO ACTION",
-                "NONE",
-            )
-            and int(row[1]) == 0
-        ]
-        if len(declarations) != 1 or len(matches) != 1:
-            raise RuntimeError(
-                f"{component} cross-component foreign-key declaration mismatch: "
-                f"{child_table}.{child_column} -> {parent_component}."
-                f"{parent_table}.{parent_column}"
-            )
-        foreign_key_id = int(matches[0][0])
-        accepted_violation_keys.add((child_table, parent_table, foreign_key_id))
+            matches = [
+                row
+                for row in declarations
+                if (
+                    str(row[2]),
+                    str(row[3]),
+                    str(row[4]),
+                    str(row[5]),
+                    str(row[6]),
+                    str(row[7]),
+                )
+                == (
+                    parent_table,
+                    child_column,
+                    parent_column,
+                    "NO ACTION",
+                    "NO ACTION",
+                    "NONE",
+                )
+                and int(row[1]) == 0
+            ]
+            if len(declarations) != 1 or len(matches) != 1:
+                raise RuntimeError(
+                    f"{component} cross-component foreign-key declaration mismatch: "
+                    f"{child_table}.{child_column} -> {parent_component}."
+                    f"{parent_table}.{parent_column}"
+                )
+            foreign_key_id = int(matches[0][0])
+            accepted_violation_keys.add((child_table, parent_table, foreign_key_id))
         local_parent = conn.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
             (parent_table,),
@@ -266,11 +278,6 @@ def validate_component_foreign_keys(
             (f"file:{parent_database}?mode=ro",),
         )
         try:
-            audit_meta = dict(
-                conn.execute("SELECT key, value FROM main.audit_meta")
-            ) if conn.execute(
-                "SELECT 1 FROM main.sqlite_master WHERE type='table' AND name='audit_meta'"
-            ).fetchone() else {}
             parent_meta = dict(
                 conn.execute(f"SELECT key, value FROM {alias}.artifact_meta")
             ) if conn.execute(
@@ -443,7 +450,7 @@ def validate_component_foreign_keys(
                 f"{coherence_column}; count={coherence_mismatches}; "
                 f"first {limit}={canonical_json(coherence_sample)}"
             )
-        standalone_violation_rows = int(
+        standalone_violation_rows = 0 if foreign_key_id is None else int(
             conn.execute(
                 "SELECT COUNT(*) FROM pragma_foreign_key_check "
                 'WHERE "table"=? AND parent=? AND fkid=?',
@@ -459,6 +466,9 @@ def validate_component_foreign_keys(
                 "parent_table": parent_table,
                 "parent_column": parent_column,
                 "bundle_release_fingerprint": bundle_pin,
+                "declaration_mode": (
+                    "manifest_paired" if compact_split else "legacy_sqlite_foreign_key"
+                ),
                 "standalone_violation_rows": standalone_violation_rows,
                 "child_rows": child_rows,
                 "matched_rows": child_rows - orphan_count,

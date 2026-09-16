@@ -60,6 +60,7 @@ class V2StagingTests(unittest.TestCase):
         parent_declared_type: str = "TEXT",
         omit_cross_component_fk: bool = False,
         satisfied_additional_fk: bool = False,
+        compact_split: bool = False,
     ) -> Path:
         research, research_manifest = components["public_non_dicom_baseline"]
         research.unlink()
@@ -134,6 +135,11 @@ class V2StagingTests(unittest.TestCase):
                     ("schema_version", "3"),
                 ),
             )
+            if compact_split:
+                conn.execute(
+                    "INSERT INTO audit_meta VALUES ('join_contract', ?)",
+                    (staging.COMPACT_AUDIT_JOIN_CONTRACT,),
+                )
             if local_shadow_parent:
                 conn.execute(
                     "CREATE TABLE public_non_dicom_assets (asset_id TEXT PRIMARY KEY)"
@@ -329,6 +335,7 @@ class V2StagingTests(unittest.TestCase):
             self.assertEqual(check["orphan_rows"], 0)
             self.assertEqual(check["coherence_mismatches"], 0)
             self.assertEqual(len(check["bundle_release_fingerprint"]), 64)
+            self.assertEqual(check["declaration_mode"], "legacy_sqlite_foreign_key")
             with closing(sqlite3.connect(ledger)) as conn:
                 recorded = json.loads(
                     conn.execute(
@@ -336,7 +343,54 @@ class V2StagingTests(unittest.TestCase):
                         "WHERE key='cross_component_foreign_keys'"
                     ).fetchone()[0]
                 )
-            self.assertEqual(recorded, result["cross_component_foreign_keys"])
+                self.assertEqual(recorded, result["cross_component_foreign_keys"])
+
+    def test_build_validates_compact_cross_component_pair_without_sqlite_fk(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            components = {
+                component: self.create_component(root, component)
+                for component in staging.COMPONENT_ORDER
+            }
+            bundle_manifest = self.create_legacy_public_cross_component_pair(
+                components,
+                omit_cross_component_fk=True,
+                compact_split=True,
+            )
+            result = staging.build_staging_database(
+                root / "staging.sqlite",
+                components=components,
+                baseline_bundle_manifest_path=bundle_manifest,
+                replace=True,
+            )
+            self.assertEqual(len(result["cross_component_foreign_keys"]), 1)
+            check = result["cross_component_foreign_keys"][0]
+            self.assertEqual(check["declaration_mode"], "manifest_paired")
+            self.assertEqual(check["standalone_violation_rows"], 0)
+            self.assertEqual(check["matched_rows"], 1)
+
+    def test_build_rejects_compact_cross_component_orphan_without_sqlite_fk(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            components = {
+                component: self.create_component(root, component)
+                for component in staging.COMPONENT_ORDER
+            }
+            bundle_manifest = self.create_legacy_public_cross_component_pair(
+                components,
+                orphan_asset_id="missing-asset",
+                omit_cross_component_fk=True,
+                compact_split=True,
+            )
+            with self.assertRaisesRegex(
+                RuntimeError, "cross-component foreign-key orphans.*count=1"
+            ):
+                staging.build_staging_database(
+                    root / "staging.sqlite",
+                    components=components,
+                    baseline_bundle_manifest_path=bundle_manifest,
+                    replace=True,
+                )
 
     def test_build_rejects_legacy_cross_component_orphan(self):
         with tempfile.TemporaryDirectory() as directory:
