@@ -432,9 +432,13 @@ def load_dataset_types(snapshot_db: Path) -> dict[str, tuple[str, str]]:
     with closing(connect(snapshot_db)) as source:
         if not table_exists(source, "agent_datasets"):
             raise RuntimeError("Base TCIA snapshot is missing agent_datasets")
+        columns = {
+            str(row[1]) for row in source.execute("PRAGMA table_info(agent_datasets)")
+        }
+        visible_clause = " AND COALESCE(hidden, 0) = 0" if "hidden" in columns else ""
         rows = source.execute(
             "SELECT DISTINCT dataset_type, short_title FROM agent_datasets "
-            "WHERE COALESCE(short_title, '') <> ''"
+            "WHERE COALESCE(short_title, '') <> ''" + visible_clause
         ).fetchall()
     result: dict[str, tuple[str, str]] = {}
     for row in rows:
@@ -460,6 +464,35 @@ def resolve_dataset_identity(
         supplied.casefold(),
         (str(fallback_type or "Collection").strip() or "Collection", supplied),
     )
+
+
+def require_authoritative_dataset_identities(
+    conn: sqlite3.Connection,
+    dataset_types: dict[str, tuple[str, str]],
+) -> int:
+    """Reject source-derived inventory rows outside the visible WordPress contract."""
+    authoritative = {
+        (dataset_type.casefold(), short_title.casefold())
+        for dataset_type, short_title in dataset_types.values()
+    }
+    observed = {
+        (str(row[0]).strip(), str(row[1]).strip())
+        for table in ("participants", "dataset_assets_without_participant_crosswalk")
+        for row in conn.execute(
+            f"SELECT DISTINCT dataset_type, short_title FROM {table}"
+        )
+    }
+    invalid = sorted(
+        f"{dataset_type}/{short_title}"
+        for dataset_type, short_title in observed
+        if (dataset_type.casefold(), short_title.casefold()) not in authoritative
+    )
+    if invalid:
+        raise RuntimeError(
+            "Source artifacts contain datasets absent from the authoritative visible "
+            "WordPress snapshot: " + ", ".join(invalid)
+        )
+    return len(observed)
 
 
 def normalize_dataset_name(value: Any) -> str:
@@ -2183,6 +2216,9 @@ def build_database(
                 include_clinical_values=include_clinical_values,
             ),
         }
+        counts["authoritative_dataset_identities"] = (
+            require_authoritative_dataset_identities(conn, dataset_types)
+        )
         clinical_alias_counts = apply_clinical_participant_aliases(conn, clinical_db)
         counts.update(clinical_alias_counts)
         counts["display_identifiers_selected"] = select_display_participant_ids(conn)

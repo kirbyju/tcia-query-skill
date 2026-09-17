@@ -389,6 +389,7 @@ class BundleComponent(PublicModel):
     sqlite_sha256: str
     gzip_sha256: str | None = None
     manifest_asset: str | None = None
+    source_manifest: str | None = None
     profile: str | None = None
     release_fingerprint: str | None = None
     storage_contract: str | JsonObject | None = None

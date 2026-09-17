@@ -4027,6 +4027,60 @@ def ingest_pathology_packages(conn: sqlite3.Connection, pathology_db: Path) -> i
     return count
 
 
+PATHDB_COLLECTION_IDENTITY_OVERRIDES = {
+    "Bone-Marrow-Cytomorphology": {
+        "short_title": "Bone-Marrow-Cytomorphology_MLL_Helmholtz_Fraunhofer",
+        "evidence": (
+            "The current visible TCIA WordPress Collection uses the longer short title; "
+            "PathDB retains the earlier collection label."
+        ),
+    },
+    "CPTAC-non-CCRCC": {
+        "short_title": "CPTAC-CCRCC",
+        "evidence": (
+            "TCIA WordPress CPTAC-CCRCC version 13 explicitly added the non-CCRCC/rare "
+            "kidney tumor participants represented by this PathDB collection label."
+        ),
+    },
+}
+
+
+def pathdb_dataset_identity(
+    source: sqlite3.Connection, raw_collection: object
+) -> tuple[str, str, dict[str, str]]:
+    """Resolve a PathDB label to one current visible WordPress dataset identity."""
+    raw = str(raw_collection or "").strip()
+    override = PATHDB_COLLECTION_IDENTITY_OVERRIDES.get(raw)
+    candidate = str((override or {}).get("short_title") or raw)
+    dataset_columns = {
+        str(row[1]) for row in source.execute("PRAGMA table_info(agent_datasets)")
+    }
+    hidden_clause = "AND COALESCE(hidden, 0) = 0" if "hidden" in dataset_columns else ""
+    rows = source.execute(
+        "SELECT DISTINCT dataset_type, short_title FROM agent_datasets "
+        "WHERE lower(trim(short_title)) = lower(trim(?)) " + hidden_clause,
+        (candidate,),
+    ).fetchall()
+    if len(rows) != 1:
+        raise RuntimeError(
+            "PathDB collection has no unique current visible TCIA WordPress identity: "
+            f"raw_collection={raw!r}, candidate={candidate!r}, matches={len(rows)}"
+        )
+    dataset_type = str(rows[0]["dataset_type"] or "").strip()
+    short_title = str(rows[0]["short_title"] or "").strip()
+    resolution = {
+        "raw_pathdb_collection": raw,
+        "canonical_tcia_short_title": short_title,
+        "identity_resolution_method": (
+            "reviewed_pathdb_collection_alias" if override else "exact_wordpress_short_title"
+        ),
+        "identity_evidence": str(
+            (override or {}).get("evidence") or "Exact current short-title match."
+        ),
+    }
+    return dataset_type, short_title, resolution
+
+
 def ingest_pathdb(conn: sqlite3.Connection, snapshot_db: Path, include_files: bool) -> int:
     if not include_files:
         return 0
@@ -4034,7 +4088,16 @@ def ingest_pathdb(conn: sqlite3.Connection, snapshot_db: Path, include_files: bo
     with closing(connect(snapshot_db)) as source:
         if not table_exists(source, "agent_pathdb_slides"):
             return 0
+        identity_cache: dict[str, tuple[str, str, dict[str, str]]] = {}
         for row in source.execute("SELECT * FROM agent_pathdb_slides ORDER BY collection, patient_id, slide_id"):
+            raw_collection = str(row["collection"] or "").strip()
+            if raw_collection not in identity_cache:
+                identity_cache[raw_collection] = pathdb_dataset_identity(
+                    source, raw_collection
+                )
+            dataset_type, short_title, identity_resolution = identity_cache[
+                raw_collection
+            ]
             url = str(row["wsiimage_url"] or "")
             viewer_url = str(row["camicroscope_url"] or "")
             file_format = normalize_format(row["data_format"] or format_from_path(url))
@@ -4065,12 +4128,12 @@ def ingest_pathdb(conn: sqlite3.Connection, snapshot_db: Path, include_files: bo
                 conn,
                 {
                     "asset_id": asset_id,
-                    "dataset_type": "Collection",
-                    "short_title": row["collection"],
+                    "dataset_type": dataset_type,
+                    "short_title": short_title,
                     "download_row_id": None,
                     "download_id": "",
                     "subject_id": scalar_subject_id,
-                    "subject_id_namespace": f"tcia_dataset:{row['collection']}",
+                    "subject_id_namespace": f"tcia_dataset:{short_title}",
                     "participant_link_status": link_status,
                     "asset_granularity": "file",
                     "asset_name": row["slide_id"],
@@ -4094,8 +4157,13 @@ def ingest_pathdb(conn: sqlite3.Connection, snapshot_db: Path, include_files: bo
                     "raw_values_json": json_dumps({
                         "protocol": row["protocol"], "magnification": row["magnification"],
                         "camic_id": row["camic_id"], "raw_patient_id": row["patient_id"] or "",
+                        "raw_pathdb_collection": row["collection"],
                     }),
-                    "provenance_json": json_dumps({"source_artifact": "tcia_snapshot", "source_view": "agent_pathdb_slides"}),
+                    "provenance_json": json_dumps({
+                        "source_artifact": "tcia_snapshot",
+                        "source_view": "agent_pathdb_slides",
+                        **identity_resolution,
+                    }),
                     "quality_flag_json": json_dumps({"equivalence_to_submitter_package": "unresolved"}),
                 },
             )
@@ -4103,9 +4171,9 @@ def ingest_pathdb(conn: sqlite3.Connection, snapshot_db: Path, include_files: bo
                 insert_asset_participant(
                     conn,
                     asset_id=asset_id,
-                    short_title=row["collection"],
+                    short_title=short_title,
                     subject_id=resolved_subject_id,
-                    namespace=f"tcia_dataset:{row['collection']}",
+                    namespace=f"tcia_dataset:{short_title}",
                     raw_subject_id=raw_subject_id,
                     participant_role=("tma_block_member" if is_hancock_tma_block else "depicted_subject"),
                     link_status=link_status,

@@ -714,6 +714,7 @@ class TciaQueryServiceTests(unittest.TestCase):
                 "database_asset": asset,
                 "schema_version": schema,
                 "sqlite_sha256": character * 64,
+                "source_manifest": f"{name}_manifest.json",
             }
             for name, asset, schema, character in (
                 ("snapshot", "tcia_snapshot.sqlite.gz", 19, "a"),

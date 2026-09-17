@@ -217,6 +217,7 @@ class V2AuditSplitTests(unittest.TestCase):
                 "public_db": root / "missing-public.sqlite",
                 "controlled_db": root / "missing-controlled.sqlite",
                 "clinical_db": clinical,
+                "idc_db": root / "missing-idc.sqlite",
                 "replace": True,
             }
             participants.build_database(compact, **common)

@@ -1284,7 +1284,8 @@ class BuilderTests(unittest.TestCase):
         conn.executemany("INSERT INTO agent_current_downloads VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
         conn.executemany(
             "INSERT INTO agent_datasets VALUES (?, ?)",
-            [(row[1], row[2]) for row in rows],
+            [(row[1], row[2]) for row in rows]
+            + [("Collection", "HANCOCK")],
         )
         conn.commit()
         conn.close()
@@ -2176,6 +2177,114 @@ class BuilderTests(unittest.TestCase):
                 json.loads(slide_metadata[3])["magnification"]["source_kind"],
                 "pathdb_slide_csv",
             )
+            conn.close()
+
+    def test_pathdb_legacy_collection_labels_use_reviewed_wordpress_identities(self):
+        import sqlite3
+
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            snapshot = base / "snapshot.sqlite"
+            output = base / "public.sqlite"
+            self.build_snapshot(snapshot)
+            conn = sqlite3.connect(snapshot)
+            conn.executemany(
+                "INSERT INTO agent_datasets VALUES (?, ?)",
+                [
+                    (
+                        "Collection",
+                        "Bone-Marrow-Cytomorphology_MLL_Helmholtz_Fraunhofer",
+                    ),
+                    ("Collection", "CPTAC-CCRCC"),
+                    ("Analysis Result", "CPTAC-Glioblastoma-CODEX"),
+                ],
+            )
+            conn.executemany(
+                "INSERT INTO agent_pathdb_slides VALUES (?,?,?,?,?,?,?,?,?,?)",
+                [
+                    (
+                        "Bone-Marrow-Cytomorphology", "1", "slide-1", "1", "", "",
+                        "SVS", "SM", "", "",
+                    ),
+                    (
+                        "CPTAC-non-CCRCC", "C3N-1", "slide-2", "2", "", "",
+                        "SVS", "SM", "", "",
+                    ),
+                    (
+                        "CPTAC-Glioblastoma-CODEX", "C3N-2", "slide-3", "3", "", "",
+                        "TIFF", "SM", "", "",
+                    ),
+                ],
+            )
+            conn.commit()
+            conn.close()
+
+            public.build_database(
+                snapshot,
+                output,
+                nifti_db=None,
+                pathology_db=None,
+                include_pathdb_files=True,
+                replace=True,
+            )
+
+            conn = sqlite3.connect(output)
+            rows = conn.execute(
+                "SELECT dataset_type, short_title, raw_values_json, provenance_json "
+                "FROM public_non_dicom_assets WHERE source_system='tcia_pathdb' "
+                "ORDER BY short_title"
+            ).fetchall()
+            conn.close()
+            self.assertEqual(
+                [(row[0], row[1]) for row in rows],
+                [
+                    (
+                        "Collection",
+                        "Bone-Marrow-Cytomorphology_MLL_Helmholtz_Fraunhofer",
+                    ),
+                    ("Collection", "CPTAC-CCRCC"),
+                    ("Analysis Result", "CPTAC-Glioblastoma-CODEX"),
+                ],
+            )
+            self.assertEqual(
+                {json.loads(row[2])["raw_pathdb_collection"] for row in rows},
+                {
+                    "Bone-Marrow-Cytomorphology",
+                    "CPTAC-non-CCRCC",
+                    "CPTAC-Glioblastoma-CODEX",
+                },
+            )
+            self.assertEqual(
+                [json.loads(row[3])["identity_resolution_method"] for row in rows],
+                [
+                    "reviewed_pathdb_collection_alias",
+                    "reviewed_pathdb_collection_alias",
+                    "exact_wordpress_short_title",
+                ],
+            )
+
+    def test_participant_inventory_rejects_non_wordpress_dataset_identity(self):
+        import sqlite3
+
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "participants.sqlite"
+            conn = participants.connect(output)
+            conn.executescript(participants.SCHEMA)
+            conn.execute(
+                "INSERT INTO participants VALUES (?,?,?,?,?,?,?,?)",
+                (
+                    "p1", "Collection", "LEGACY-NAME", "CASE-1", "dataset_scoped",
+                    "single_namespace", "source_identifier", "not_asserted",
+                ),
+            )
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "absent from the authoritative visible WordPress snapshot",
+            ):
+                participants.require_authoritative_dataset_identities(
+                    conn,
+                    {"current-name": ("Collection", "CURRENT-NAME")},
+                )
             conn.close()
 
     def test_reviewed_crosswalk_adds_file_evidence_and_resolves_download_flag(self):
