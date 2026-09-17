@@ -305,10 +305,12 @@ jobs:
           # identities with the 165 source-confirmed clinical participants.
           # The official I-SPY2 clinical crosswalk consolidates 985 research-ID
           # aliases with their corresponding ISPY2-prefixed DICOM PatientIDs.
+          # CPTAC-Glioblastoma-CODEX is authoritatively published as an
+          # Analysis Result, so it must not inflate Collection coverage.
           python scripts/tcia_participant_inventory.py validate \
             --db cache/participant_inventory.sqlite \
-            --min-collection-participants 124684 \
-            --min-collections 222 \
+            --min-collection-participants 124674 \
+            --min-collections 221 \
             --min-analysis-result-participants 11730 \
             --min-analysis-results 29
           # Participant Inventory is now self-contained for search/summary.
