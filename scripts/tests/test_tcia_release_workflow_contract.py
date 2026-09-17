@@ -6,6 +6,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github" / "workflows" / "build-metadata-v2-preview.yml"
 SOURCE_WORKFLOW = ROOT / ".github" / "workflows" / "update-snapshot.yml"
+RESUME_WORKFLOW = ROOT / ".github" / "workflows" / "resume-metadata-v2-release.yml"
 
 
 class ReleaseWorkflowContractTests(unittest.TestCase):
@@ -142,14 +143,32 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
             workflow.count('test "$(resolve_tag_sha "$tag")" = "$PRODUCER_SHA"'),
             2,
         )
+        immutable = workflow[
+            workflow.index("Publish immutable validated V2 release"):
+            workflow.index("Update moving latest alias after immutable publication")
+        ]
         self.assertRegex(
-            workflow,
+            immutable,
             re.compile(
-                r"gh release create \"\$tag\" \"\$publish_dir\"/\*.*?"
-                r"--target \"\$PRODUCER_SHA\"",
+                r"gh release create \"\$tag\".*?--target \"\$PRODUCER_SHA\"",
                 re.DOTALL,
             ),
         )
+        self.assertIn("upload_exact()", immutable)
+        self.assertIn('for asset in "$publish_dir"/*', immutable)
+        self.assertNotIn('gh release create "$tag" "$publish_dir"/*', immutable)
+
+    def test_failed_late_release_can_resume_from_candidate_without_rebuilding(self) -> None:
+        workflow = RESUME_WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn("candidate_run_id:", workflow)
+        self.assertIn("producer_sha:", workflow)
+        self.assertIn("name: tcia-metadata-v2-candidate", workflow)
+        self.assertIn("--existing-report cache/reports/metadata_change_report_final.json", workflow)
+        self.assertIn("Rebuild and validate only the bundle layer", workflow)
+        self.assertIn("Attest resumed validated V2 bundle provenance", workflow)
+        self.assertGreaterEqual(workflow.count("upload_exact()"), 2)
+        self.assertNotIn("Build public non-DICOM metadata", workflow)
+        self.assertNotIn("Build Participant Inventory", workflow)
 
     def test_moving_alias_has_validated_backup_and_failure_restoration(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")

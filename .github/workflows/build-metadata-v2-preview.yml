@@ -494,14 +494,45 @@ jobs:
             fi
             printf '%s\n' "$object_sha"
           }
+          asset_matches() {
+            local release_tag="$1" path="$2" name local_size local_sha remote
+            name="$(basename "$path")"
+            local_size="$(stat -c '%s' "$path")"
+            local_sha="$(sha256sum "$path" | cut -d' ' -f1)"
+            remote="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${release_tag}" \
+              --jq ".assets[] | select(.name == \"${name}\") | [.size, (.digest // \"\")] | @tsv")"
+            [ "$remote" = "${local_size}"$'\t'"sha256:${local_sha}" ]
+          }
+          upload_exact() {
+            local release_tag="$1" path="$2" name attempt
+            name="$(basename "$path")"
+            if asset_matches "$release_tag" "$path"; then
+              return 0
+            fi
+            gh release delete-asset "$release_tag" "$name" --yes >/dev/null 2>&1 || true
+            for attempt in 1 2 3; do
+              if gh release upload "$release_tag" "$path" && asset_matches "$release_tag" "$path"; then
+                return 0
+              fi
+              if asset_matches "$release_tag" "$path"; then
+                return 0
+              fi
+              sleep 5
+            done
+            echo "Failed to publish exact release asset: $name" >&2
+            return 1
+          }
           if gh release view "$tag" >/dev/null 2>&1; then
-            echo "Immutable release already exists; validating without overwriting."
+            test "$(resolve_tag_sha "$tag")" = "$PRODUCER_SHA"
           else
-            gh release create "$tag" "$publish_dir"/* \
+            gh release create "$tag" \
               --target "$PRODUCER_SHA" \
               --title "TCIA metadata V2 ${tag#tcia-metadata-v2-}" \
               --notes "$notes"
           fi
+          for asset in "$publish_dir"/*; do
+            upload_exact "$tag" "$asset"
+          done
           test "$(resolve_tag_sha "$tag")" = "$PRODUCER_SHA"
           gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" > immutable-release.json
           python scripts/tcia_v2_bundle.py validate-published \

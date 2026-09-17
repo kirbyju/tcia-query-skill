@@ -1,0 +1,186 @@
+name: Resume TCIA metadata V2 release
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_run_id:
+        description: Failed V2 build run containing tcia-metadata-v2-candidate
+        required: true
+        type: string
+      producer_sha:
+        description: Exact producer commit recorded by the candidate
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  attestations: write
+  contents: write
+  id-token: write
+
+concurrency:
+  group: tcia-metadata-v2
+  cancel-in-progress: false
+
+jobs:
+  resume:
+    runs-on: ubuntu-latest
+    env:
+      PRODUCER_SHA: ${{ inputs.producer_sha }}
+    steps:
+      - name: Check out exact producer
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ inputs.producer_sha }}
+
+      - name: Verify producer identity
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$PRODUCER_SHA"
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+
+      - name: Download retained V2 candidate
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: tcia-metadata-v2-candidate
+          run-id: ${{ inputs.candidate_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Replay and consume exact semantic explanations
+        run: |
+          set -euo pipefail
+          python scripts/tcia_metadata_change_report.py \
+            --existing-report cache/reports/metadata_change_report_final.json \
+            --explanations-db cache/tcia_correction_registry.sqlite \
+            --json-out cache/reports/metadata_change_report_final.json \
+            --fail-on-unexplained-high
+          python scripts/tcia_correction_registry.py consume-explanations \
+            --db cache/tcia_correction_registry.sqlite \
+            --report cache/reports/metadata_change_report_final.json
+          python scripts/tcia_correction_registry.py package \
+            --db cache/tcia_correction_registry.sqlite \
+            --gzip-out dist/tcia_correction_registry.sqlite.gz \
+            --manifest-out dist/tcia_correction_registry_manifest.json
+
+      - name: Rebuild and validate only the bundle layer
+        id: bundle
+        run: |
+          set -euo pipefail
+          python scripts/tcia_v2_bundle.py build \
+            --asset-dir dist \
+            --source-tag "workflow-artifact:update-tcia-metadata-v2-source-inputs" \
+            --release-channel stable \
+            --release-tag tcia-metadata-v2-latest \
+            --producer-commit "$PRODUCER_SHA" \
+            --producer-skill-version "$(python -c 'import json; print(json.load(open("skill_version.json"))["skill_version"])')" \
+            --release-contract streamlined \
+            --out dist/tcia_metadata_v2_bundle_manifest.json
+          python scripts/tcia_v2_bundle.py validate \
+            --asset-dir dist \
+            --manifest dist/tcia_metadata_v2_bundle_manifest.json
+          python scripts/tcia_v2_bundle.py materialize \
+            --asset-dir dist \
+            --manifest dist/tcia_metadata_v2_bundle_manifest.json \
+            --out-dir release-dist
+          fingerprint="$(python -c 'import json; print(json.load(open("release-dist/tcia_metadata_v2_bundle_manifest.json"))["release_fingerprint"])')"
+          release_date="$(python -c 'import json; print(json.load(open("release-dist/tcia_metadata_v2_bundle_manifest.json"))["generated_at_utc"][:10].replace("-", "."))')"
+          echo "fingerprint=$fingerprint" >> "$GITHUB_OUTPUT"
+          echo "immutable_tag=tcia-metadata-v2-${release_date}-${fingerprint:0:12}" >> "$GITHUB_OUTPUT"
+
+      - name: Attest resumed validated V2 bundle provenance
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
+        with:
+          subject-path: release-dist/*
+
+      - name: Publish immutable bundle idempotently
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.bundle.outputs.immutable_tag }}
+        run: |
+          set -euo pipefail
+          publish_dir="release-dist"
+          asset_matches() {
+            local release_tag="$1" path="$2" name local_size local_sha remote
+            name="$(basename "$path")"
+            local_size="$(stat -c '%s' "$path")"
+            local_sha="$(sha256sum "$path" | cut -d' ' -f1)"
+            remote="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${release_tag}" \
+              --jq ".assets[] | select(.name == \"${name}\") | [.size, (.digest // \"\")] | @tsv")"
+            [ "$remote" = "${local_size}"$'\t'"sha256:${local_sha}" ]
+          }
+          upload_exact() {
+            local release_tag="$1" path="$2" name attempt
+            name="$(basename "$path")"
+            if asset_matches "$release_tag" "$path"; then return 0; fi
+            gh release delete-asset "$release_tag" "$name" --yes >/dev/null 2>&1 || true
+            for attempt in 1 2 3; do
+              if gh release upload "$release_tag" "$path" && asset_matches "$release_tag" "$path"; then return 0; fi
+              if asset_matches "$release_tag" "$path"; then return 0; fi
+              sleep 5
+            done
+            return 1
+          }
+          if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" \
+              --target "$PRODUCER_SHA" \
+              --title "TCIA metadata V2 ${RELEASE_TAG#tcia-metadata-v2-}" \
+              --notes "Immutable TCIA Metadata Artifact Model V2 generation resumed from a validated candidate checkpoint."
+          fi
+          for asset in "$publish_dir"/*; do upload_exact "$RELEASE_TAG" "$asset"; done
+          gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" > immutable-release.json
+          python scripts/tcia_v2_bundle.py validate-published \
+            --manifest "$publish_dir/tcia_metadata_v2_bundle_manifest.json" \
+            --release-json immutable-release.json
+
+      - name: Update and validate moving latest alias idempotently
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="tcia-metadata-v2-latest"
+          publish_dir="release-dist"
+          asset_matches() {
+            local release_tag="$1" path="$2" name local_size local_sha remote
+            name="$(basename "$path")"
+            local_size="$(stat -c '%s' "$path")"
+            local_sha="$(sha256sum "$path" | cut -d' ' -f1)"
+            remote="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${release_tag}" \
+              --jq ".assets[] | select(.name == \"${name}\") | [.size, (.digest // \"\")] | @tsv")"
+            [ "$remote" = "${local_size}"$'\t'"sha256:${local_sha}" ]
+          }
+          upload_exact() {
+            local release_tag="$1" path="$2" name attempt
+            name="$(basename "$path")"
+            if asset_matches "$release_tag" "$path"; then return 0; fi
+            gh release delete-asset "$release_tag" "$name" --yes >/dev/null 2>&1 || true
+            for attempt in 1 2 3; do
+              if gh release upload "$release_tag" "$path" && asset_matches "$release_tag" "$path"; then return 0; fi
+              if asset_matches "$release_tag" "$path"; then return 0; fi
+              sleep 5
+            done
+            return 1
+          }
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" \
+              --target "$PRODUCER_SHA" \
+              --title "TCIA metadata V2 latest" \
+              --notes "Validated TCIA Metadata Artifact Model V2 bundle."
+          fi
+          for asset in "$publish_dir"/*; do
+            [ "$(basename "$asset")" = "tcia_metadata_v2_bundle_manifest.json" ] || upload_exact "$tag" "$asset"
+          done
+          while read -r name; do
+            [ -f "$publish_dir/$name" ] || gh release delete-asset "$tag" "$name" --yes
+          done < <(gh release view "$tag" --json assets --jq '.assets[].name')
+          upload_exact "$tag" "$publish_dir/tcia_metadata_v2_bundle_manifest.json"
+          gh api --method PATCH \
+            "repos/${GITHUB_REPOSITORY}/git/refs/tags/${tag}" \
+            -f sha="$PRODUCER_SHA" -F force=true >/dev/null
+          gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" > latest-release.json
+          python scripts/tcia_v2_bundle.py validate-published \
+            --manifest "$publish_dir/tcia_metadata_v2_bundle_manifest.json" \
+            --release-json latest-release.json
