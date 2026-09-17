@@ -331,7 +331,7 @@ jobs:
             --artifact participant_inventory \
             --db cache/participant_inventory_audit.sqlite
 
-      - name: Enforce exact semantic change explanations
+      - name: Generate exact semantic change report
         run: |
           python scripts/tcia_metadata_change_report.py \
             --public-new cache/public_non_dicom_metadata.sqlite \
@@ -340,10 +340,33 @@ jobs:
             --participant-old cache/participant_inventory_baseline.sqlite \
             --explanations-db cache/tcia_correction_registry.sqlite \
             --geometry-refresh-report cache/reports/public_non_dicom_geometry_refresh.json \
-            --fail-on-unexplained-high \
             --github-actions \
             --markdown-out cache/reports/metadata_change_report_final.md \
             --json-out cache/reports/metadata_change_report_final.json
+
+      # Preserve the expensive build before the late semantic gate. Maintainers
+      # can iterate on exact explanation declarations by replaying the retained
+      # report, without rebuilding either multi-gigabyte SQLite artifact.
+      - name: Retain resumable V2 candidate before semantic gate
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: tcia-metadata-v2-candidate
+          path: |
+            dist/
+            cache/tcia_correction_registry.sqlite
+            cache/reports/metadata_change_report_final.md
+            cache/reports/metadata_change_report_final.json
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
+      - name: Enforce exact semantic change explanations by replay
+        run: |
+          python scripts/tcia_metadata_change_report.py \
+            --existing-report cache/reports/metadata_change_report_final.json \
+            --explanations-db cache/tcia_correction_registry.sqlite \
+            --json-out cache/reports/metadata_change_report_final.json \
+            --fail-on-unexplained-high
           python scripts/tcia_correction_registry.py consume-explanations \
             --db cache/tcia_correction_registry.sqlite \
             --report cache/reports/metadata_change_report_final.json

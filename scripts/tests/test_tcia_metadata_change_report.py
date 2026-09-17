@@ -671,6 +671,68 @@ class MetadataChangeReportTest(unittest.TestCase):
             self.assertEqual(duplicate.returncode, 2)
             self.assertTrue(json.loads(report.read_text())["semantic_explanations"]["duplicate_matches"])
 
+    def test_aggregate_explanation_requires_exact_table_count_and_change_digest(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            old = root / "old.sqlite"
+            new = root / "new.sqlite"
+            explanations = root / "corrections.sqlite"
+            empty_explanations = root / "empty-explanations.json"
+            report = root / "report.json"
+            self._public(old, [("a", "A", "raw-a")])
+            self._public(new, [("a", "A2", "raw-a")])
+            empty_explanations.write_text(
+                json.dumps({"schema_version": 4, "explanations": []})
+            )
+            registry.build_registry(
+                explanations,
+                observed_at="2026-09-17T18:30:00Z",
+                semantic_explanations=empty_explanations,
+            )
+            command = [
+                sys.executable, str(SCRIPT), "--public-new", str(new),
+                "--public-old", str(old), "--explanations-db", str(explanations),
+                "--json-out", str(report), "--fail-on-unexplained-high",
+            ]
+            initial = subprocess.run(command, text=True, capture_output=True)
+            self.assertEqual(initial.returncode, 2)
+            changes = json.loads(report.read_text())["semantic_changes"]
+            fingerprint = change_report.aggregate_explanation_identity(changes)
+            with sqlite3.connect(explanations) as conn:
+                effect_id = conn.execute(
+                    """SELECT e.effect_id FROM correction_effects e
+                         JOIN correction_decisions d USING(revision_id)
+                         JOIN correction_cases c ON c.current_revision_id=d.revision_id
+                        WHERE d.status='approved' LIMIT 1"""
+                ).fetchone()[0]
+                conn.execute(
+                    """UPDATE correction_effects
+                          SET artifact='public_non_dicom',
+                              entity_table='public_non_dicom_assets',entity_id=?,
+                              effect_kind='added',before_sha256='',after_sha256=?,
+                              effect_status='approved'
+                        WHERE effect_id=?""",
+                    (json.dumps([
+                        ["semantic_change_batch_sha256", fingerprint],
+                        ["change_count", str(len(changes))],
+                    ]), fingerprint, effect_id),
+                )
+                conn.commit()
+            exact = subprocess.run(command, text=True, capture_output=True)
+            self.assertEqual(exact.returncode, 0, exact.stdout + exact.stderr)
+            self.assertEqual(
+                json.loads(report.read_text())["semantic_explanations"]["consumed_effect_ids"],
+                [effect_id],
+            )
+            with sqlite3.connect(explanations) as conn:
+                conn.execute(
+                    "UPDATE correction_effects SET after_sha256=? WHERE effect_id=?",
+                    ("f" * 64, effect_id),
+                )
+                conn.commit()
+            tampered = subprocess.run(command, text=True, capture_output=True)
+            self.assertEqual(tampered.returncode, 2)
+
     def test_correction_meta_ignores_build_time_and_health_details_but_gates_status(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

@@ -198,7 +198,7 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
     def test_semantic_baselines_survive_until_exact_change_gate(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
         staging_step = workflow.index("Build the runner-local V2 staging ledger")
-        semantic_step = workflow.index("Enforce exact semantic change explanations")
+        semantic_step = workflow.index("Generate exact semantic change report")
         contract_tests = workflow.index("Run V2 contract tests", semantic_step)
         staging_block = workflow[staging_step:semantic_step]
         semantic_block = workflow[semantic_step:contract_tests]
@@ -218,7 +218,7 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
     def test_geometry_refresh_is_atomic_and_strictly_scoped_at_gate(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
         build_step = workflow.index("Build public non-DICOM metadata")
-        semantic_step = workflow.index("Enforce exact semantic change explanations")
+        semantic_step = workflow.index("Generate exact semantic change report")
         block = workflow[build_step:semantic_step]
         build_command = block[:block.index("tcia_geometry_batch.py plan")]
         self.assertNotIn("--reset-geometry", build_command)
@@ -228,6 +228,30 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
             "--geometry-refresh-report cache/reports/public_non_dicom_geometry_refresh.json",
             semantic_block,
         )
+
+    def test_semantic_gate_is_checkpointed_and_replayable(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        report_step = workflow.index("Generate exact semantic change report")
+        checkpoint_step = workflow.index(
+            "Retain resumable V2 candidate before semantic gate"
+        )
+        enforcement_step = workflow.index(
+            "Enforce exact semantic change explanations by replay"
+        )
+        contract_tests = workflow.index("Run V2 contract tests", enforcement_step)
+
+        self.assertLess(report_step, checkpoint_step)
+        self.assertLess(checkpoint_step, enforcement_step)
+        checkpoint_block = workflow[checkpoint_step:enforcement_step]
+        self.assertIn("dist/", checkpoint_block)
+        self.assertIn("cache/tcia_correction_registry.sqlite", checkpoint_block)
+        self.assertIn("cache/reports/metadata_change_report_final.json", checkpoint_block)
+        enforcement_block = workflow[enforcement_step:contract_tests]
+        self.assertIn(
+            "--existing-report cache/reports/metadata_change_report_final.json",
+            enforcement_block,
+        )
+        self.assertIn("--fail-on-unexplained-high", enforcement_block)
 
 
 if __name__ == "__main__":

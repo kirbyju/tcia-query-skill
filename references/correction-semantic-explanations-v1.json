@@ -1,5 +1,77 @@
 {
   "explanations": [],
+  "aggregate_explanation_batches": [
+    {
+      "batch_id": "pathdb-canonical-dataset-identity-public-assets-2026-09-17",
+      "reviewer": "Justin Kirby (TCIA artifact maintainer)",
+      "approved_at": "2026-09-17T18:30:00Z",
+      "rationale": "The PathDB import now resolves reviewed legacy source labels to the single current visible TCIA WordPress dataset identity and authoritative dataset type while preserving each raw PathDB label in provenance. This exact batch is limited to public asset rows whose canonical dataset identity or dataset type changed.",
+      "evidence_id": "github-actions:run:35250666681:metadata_change_report_final",
+      "evidence": "Run 35250666681 rebuilt the real V2 artifacts from producer 3a9ee817 and recorded the exact row identities and before/after digests in metadata_change_report_final.json.",
+      "artifact": "public_non_dicom",
+      "entity_table": "public_non_dicom_assets",
+      "change_count": 171631,
+      "change_kind_counts": {"modified": 171631},
+      "changes_sha256": "e1f0ae0da5bb462553761dff469e33c3c392fc09aa3a891a3a86026b5905a282",
+      "negative_scope": ["no asset additions or removals", "no raw PathDB label replacement", "no unrelated public metadata changes"]
+    },
+    {
+      "batch_id": "pathdb-canonical-dataset-identity-public-participant-links-2026-09-17",
+      "reviewer": "Justin Kirby (TCIA artifact maintainer)",
+      "approved_at": "2026-09-17T18:30:00Z",
+      "rationale": "Canonical PathDB dataset identities regenerate the exact asset-participant relationship identifiers derived from dataset identity. The underlying files and raw PathDB participant labels are preserved; this batch approves only the exact removed and added relationship rows recorded by the failed-closed change report.",
+      "evidence_id": "github-actions:run:35250666681:metadata_change_report_final",
+      "evidence": "Run 35250666681 recorded the exact relationship-key migration caused by canonical PathDB dataset identity resolution.",
+      "artifact": "public_non_dicom",
+      "entity_table": "public_non_dicom_asset_participants",
+      "change_count": 343132,
+      "change_kind_counts": {"added": 171630, "removed": 171502},
+      "changes_sha256": "dab7e604ecdf1dbc6ac1e84eec001a31d1cf0badc99a2eddb626adec4edfcdf9",
+      "negative_scope": ["no blanket relationship approval", "no raw participant-label replacement", "no unrelated public metadata changes"]
+    },
+    {
+      "batch_id": "pathdb-canonical-dataset-identity-participants-2026-09-17",
+      "reviewer": "Justin Kirby (TCIA artifact maintainer)",
+      "approved_at": "2026-09-17T18:30:00Z",
+      "rationale": "Participant identities derived from the corrected canonical dataset identity and authoritative dataset type replace their legacy dataset-scoped identities. The exact added and removed participant rows are digest-pinned to the reviewed release candidate.",
+      "evidence_id": "github-actions:run:35250666681:metadata_change_report_final",
+      "evidence": "Run 35250666681 recorded the exact participant identity transition after PathDB dataset normalization and CPTAC-Glioblastoma-CODEX reclassification as an Analysis Result.",
+      "artifact": "participant_inventory",
+      "entity_table": "participants",
+      "change_count": 110,
+      "change_kind_counts": {"added": 50, "removed": 60},
+      "changes_sha256": "49013e0a9a8b04daa6869d8282a3844ac38bbfad731e267b9e7ecd10ee9abe06",
+      "negative_scope": ["no heuristic cross-dataset participant merge", "no raw identifier replacement", "no unrelated participant changes"]
+    },
+    {
+      "batch_id": "pathdb-canonical-dataset-identity-participant-identifiers-2026-09-17",
+      "reviewer": "Justin Kirby (TCIA artifact maintainer)",
+      "approved_at": "2026-09-17T18:30:00Z",
+      "rationale": "Participant identifier rows are re-keyed only where their owning dataset-scoped participant identity changed under the reviewed canonical PathDB dataset mapping. The exact added and removed rows are digest-pinned.",
+      "evidence_id": "github-actions:run:35250666681:metadata_change_report_final",
+      "evidence": "Run 35250666681 recorded the exact participant identifier transitions associated with the reviewed dataset identity migration.",
+      "artifact": "participant_inventory",
+      "entity_table": "participant_identifiers",
+      "change_count": 159,
+      "change_kind_counts": {"added": 99, "removed": 60},
+      "changes_sha256": "7427eeb58afff5d2414b72cc112113fcb77a3473f805b5347f4d8676ee6a47cc",
+      "negative_scope": ["no raw identifier replacement", "no unrelated identifier changes", "no blanket participant approval"]
+    },
+    {
+      "batch_id": "pathdb-canonical-dataset-identity-participant-assets-2026-09-17",
+      "reviewer": "Justin Kirby (TCIA artifact maintainer)",
+      "approved_at": "2026-09-17T18:30:00Z",
+      "rationale": "Participant asset relationships are re-keyed only where their owning dataset-scoped participant identity changed under the reviewed canonical PathDB dataset mapping. The exact added and removed rows are digest-pinned.",
+      "evidence_id": "github-actions:run:35250666681:metadata_change_report_final",
+      "evidence": "Run 35250666681 recorded the exact participant asset transitions associated with the reviewed dataset identity migration.",
+      "artifact": "participant_inventory",
+      "entity_table": "participant_assets",
+      "change_count": 159,
+      "change_kind_counts": {"added": 99, "removed": 60},
+      "changes_sha256": "340a07e3080f91d5b1ffbfc2abed950ccd7a9aa68085a574d04e01e4e1b5422e",
+      "negative_scope": ["no asset reassignment outside the exact migration", "no unrelated relationship changes", "no blanket participant approval"]
+    }
+  ],
   "explanation_batches": [
     {
       "batch_id": "rhuh-gbm-wordpress-diagnosis-correction-2026-09-11-part-1",
@@ -4006,5 +4078,5 @@
       }
     }
   ],
-  "schema_version": 3
+  "schema_version": 4
 }

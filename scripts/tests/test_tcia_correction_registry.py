@@ -313,6 +313,38 @@ class CorrectionIdentityTests(unittest.TestCase):
                             observed_at="2026-09-11T16:11:16Z",
                         )
 
+    def test_aggregate_semantic_batches_are_compact_and_approved(self) -> None:
+        source = ROOT / "references/correction-semantic-explanations-v1.json"
+        payload = json.loads(source.read_text())
+        batches = payload["aggregate_explanation_batches"]
+        self.assertEqual(payload["schema_version"], 4)
+        self.assertEqual(len(batches), 5)
+        self.assertEqual(sum(batch["change_count"] for batch in batches), 515191)
+        with tempfile.TemporaryDirectory() as directory:
+            db = Path(directory) / "registry.sqlite"
+            registry.build_registry(db, observed_at="2026-09-17T18:30:00Z")
+            with sqlite3.connect(db) as conn:
+                effects = conn.execute(
+                    """SELECT e.entity_id,e.effect_kind,e.after_sha256,e.effect_status
+                         FROM correction_effects e
+                         JOIN correction_decisions d USING(revision_id)
+                        WHERE d.policy_version='semantic-aggregate-explanations-v1'"""
+                ).fetchall()
+            self.assertEqual(len(effects), 5)
+            self.assertTrue(all(row[1] == "added" for row in effects))
+            self.assertTrue(all(row[2] and row[3] == "approved" for row in effects))
+
+            invalid = copy.deepcopy(payload)
+            invalid["aggregate_explanation_batches"][0]["change_count"] += 1
+            invalid_path = Path(directory) / "invalid-aggregate.json"
+            invalid_path.write_text(json.dumps(invalid))
+            with self.assertRaisesRegex(ValueError, "batch contract is invalid"):
+                registry.build_registry(
+                    Path(directory) / "invalid.sqlite",
+                    observed_at="2026-09-17T18:30:00Z",
+                    semantic_explanations=invalid_path,
+                )
+
     def test_initial_registry_bootstrap_is_exact_auditable_and_one_time(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

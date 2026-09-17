@@ -555,11 +555,12 @@ def compare_keyed_rows(
 
 def load_explanations(
     path: Path | None, *, allowed_artifacts: set[str],
-) -> tuple[list[dict[str, object]], list[str]]:
+) -> tuple[list[dict[str, object]], list[dict[str, object]], list[str]]:
     """Load only approved effects on current approved decision revisions."""
     if path is None:
-        return [], []
+        return [], [], []
     explanations: list[dict[str, object]] = []
+    aggregate_explanations: list[dict[str, object]] = []
     malformed: list[str] = []
     with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as conn:
         rows = conn.execute(
@@ -603,6 +604,23 @@ def load_explanations(
                     raise ValueError("removed effects require only a before SHA-256")
                 if kind == "modified" and (not before or not after or before == after):
                     raise ValueError("modified effects require distinct before/after SHA-256 values")
+                if (
+                    len(primary_key) == 2
+                    and primary_key[0][0] == "semantic_change_batch_sha256"
+                    and primary_key[1][0] == "change_count"
+                ):
+                    change_count = int(primary_key[1][1])
+                    if (
+                        kind != "added" or before or after != primary_key[0][1]
+                        or change_count < 1
+                    ):
+                        raise ValueError("aggregate semantic batch effect is invalid")
+                    aggregate_explanations.append({
+                        "effect_id": str(effect_id), "artifact": str(artifact),
+                        "table": str(table), "change_count": change_count,
+                        "changes_sha256": str(after),
+                    })
+                    continue
             except (ValueError, TypeError, json.JSONDecodeError) as exc:
                 malformed.append(f"{effect_id}: {exc}")
                 continue
@@ -612,7 +630,7 @@ def load_explanations(
                 "change_kind": str(kind), "before_sha256": before,
                 "after_sha256": after,
             })
-    return explanations, malformed
+    return explanations, aggregate_explanations, malformed
 
 
 def explanation_identity(change: dict[str, object]) -> str:
@@ -622,6 +640,76 @@ def explanation_identity(change: dict[str, object]) -> str:
             "before_sha256", "after_sha256",
         )}, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
     )
+
+
+def aggregate_explanation_identity(changes: list[dict[str, object]]) -> str:
+    normalized = [
+        {key: change[key] for key in (
+            "artifact", "table", "primary_key", "change_kind",
+            "before_sha256", "after_sha256",
+        )}
+        for change in changes
+    ]
+    normalized.sort(key=explanation_identity)
+    return hashlib.sha256(
+        json.dumps(
+            normalized, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+def match_semantic_explanations(
+    high_changes: list[dict[str, object]],
+    explanations: list[dict[str, object]],
+    aggregate_explanations: list[dict[str, object]],
+    *,
+    accepted_identities: set[str] | None = None,
+) -> tuple[list[str], list[str], list[dict[str, object]], list[str]]:
+    by_identity: dict[str, list[dict[str, object]]] = {}
+    for explanation in explanations:
+        by_identity.setdefault(explanation_identity(explanation), []).append(explanation)
+    accepted = accepted_identities or set()
+    consumed: list[str] = []
+    duplicates: list[str] = []
+    unmatched: list[dict[str, object]] = []
+    for change in high_changes:
+        identity = explanation_identity(change)
+        if identity in accepted:
+            continue
+        matches = by_identity.get(identity, [])
+        if len(matches) == 1:
+            consumed.append(str(matches[0]["effect_id"]))
+        elif len(matches) > 1:
+            duplicates.append(identity)
+        else:
+            unmatched.append(change)
+    aggregate_by_identity: dict[tuple[str, str, int, str], list[dict[str, object]]] = {}
+    for explanation in aggregate_explanations:
+        identity = (
+            str(explanation["artifact"]), str(explanation["table"]),
+            int(explanation["change_count"]), str(explanation["changes_sha256"]),
+        )
+        aggregate_by_identity.setdefault(identity, []).append(explanation)
+    unexplained: list[dict[str, object]] = []
+    grouped: dict[tuple[str, str], list[dict[str, object]]] = {}
+    for change in unmatched:
+        grouped.setdefault((str(change["artifact"]), str(change["table"])), []).append(change)
+    for (artifact, table), changes in grouped.items():
+        identity = (artifact, table, len(changes), aggregate_explanation_identity(changes))
+        matches = aggregate_by_identity.get(identity, [])
+        if len(matches) == 1:
+            consumed.append(str(matches[0]["effect_id"]))
+        elif len(matches) > 1:
+            duplicates.append(json.dumps(identity, separators=(",", ":")))
+        else:
+            unexplained.extend(changes)
+    all_effects = explanations + aggregate_explanations
+    consumed_set = set(consumed)
+    unused = sorted(
+        str(item["effect_id"]) for item in all_effects
+        if str(item["effect_id"]) not in consumed_set
+    )
+    return sorted(consumed), sorted(duplicates), unexplained, unused
 
 
 def screening_reviews(conn: sqlite3.Connection) -> dict[str, dict[str, str]]:
@@ -903,16 +991,10 @@ def build_report(args: argparse.Namespace) -> tuple[str, list[str], dict[str, ob
             except (KeyError, TypeError, ValueError, json.JSONDecodeError, sqlite3.Error) as exc:
                 raise RuntimeError(f"invalid correction baseline: {exc}") from exc
 
-    explanations, malformed_explanations = load_explanations(
+    explanations, aggregate_explanations, malformed_explanations = load_explanations(
         Path(args.explanations_db) if getattr(args, "explanations_db", None) else None,
         allowed_artifacts={ARTIFACT_IDS[name] for name, _, _ in assets},
     )
-    by_identity: dict[str, list[dict[str, object]]] = {}
-    for explanation in explanations:
-        by_identity.setdefault(explanation_identity(explanation), []).append(explanation)
-    consumed: list[str] = []
-    duplicates: list[str] = []
-    unexplained_changes: list[dict[str, object]] = []
     geometry_refreshes = accepted_geometry_refreshes(
         high_changes,
         assets,
@@ -923,19 +1005,9 @@ def build_report(args: argparse.Namespace) -> tuple[str, list[str], dict[str, ob
     accepted_geometry_identities = {
         explanation_identity(item) for item in geometry_refreshes
     }
-    for change in high_changes:
-        if explanation_identity(change) in accepted_geometry_identities:
-            continue
-        matches = by_identity.get(explanation_identity(change), [])
-        if len(matches) == 1:
-            consumed.append(str(matches[0]["effect_id"]))
-        elif len(matches) > 1:
-            duplicates.append(explanation_identity(change))
-        else:
-            unexplained_changes.append(change)
-    unused = sorted(
-        str(item["effect_id"]) for item in explanations
-        if str(item["effect_id"]) not in set(consumed)
+    consumed, duplicates, unexplained_changes, unused = match_semantic_explanations(
+        high_changes, explanations, aggregate_explanations,
+        accepted_identities=accepted_geometry_identities,
     )
     unexplained_high = [
         f"{item['artifact']}.{item['table']}: {item['change_kind']} "
@@ -1111,6 +1183,10 @@ def build_report(args: argparse.Namespace) -> tuple[str, list[str], dict[str, ob
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--existing-report",
+        help="Replay semantic explanations against an existing JSON change report without rebuilding artifacts.",
+    )
     for name in PROFILES:
         parser.add_argument(f"--{name}-new")
         parser.add_argument(f"--{name}-old")
@@ -1132,6 +1208,66 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+    if args.existing_report:
+        if not args.explanations_db:
+            print("error: --existing-report requires --explanations-db")
+            return 1
+        try:
+            summary = json.loads(Path(args.existing_report).read_text(encoding="utf-8"))
+            high_changes = list(summary.get("semantic_changes") or [])
+            allowed_artifacts = {str(item["artifact"]) for item in high_changes}
+            explanations, aggregate_explanations, malformed = load_explanations(
+                Path(args.explanations_db), allowed_artifacts=allowed_artifacts,
+            )
+            accepted = {
+                explanation_identity(item)
+                for item in (summary.get("accepted_geometry_refreshes") or [])
+            }
+            consumed, duplicates, unexplained, unused = match_semantic_explanations(
+                high_changes, explanations, aggregate_explanations,
+                accepted_identities=accepted,
+            )
+            summary["unexplained_high_severity"] = [
+                f"{item['artifact']}.{item['table']}: {item['change_kind']} "
+                + "/".join(str(value) for _, value in item["primary_key"])
+                for item in unexplained
+            ]
+            summary["semantic_explanations"] = {
+                "consumed_effect_ids": consumed,
+                "duplicate_matches": duplicates,
+                "malformed_effects": sorted(malformed),
+                "unused_effect_ids": unused,
+            }
+            semantic_payload = {
+                key: summary[key] for key in (
+                    "schema_version", "comparisons", "warnings",
+                    "unexplained_high_severity", "semantic_changes",
+                    "accepted_geometry_refreshes", "primary_key_migrations",
+                    "baseline_modes", "semantic_explanations",
+                )
+            }
+            summary["report_sha256"] = hashlib.sha256(
+                json.dumps(
+                    semantic_payload, sort_keys=True, separators=(",", ":")
+                ).encode("utf-8")
+            ).hexdigest()
+            output = Path(args.json_out or args.existing_report)
+            output.write_text(
+                json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+            )
+        except (KeyError, TypeError, ValueError, OSError, sqlite3.Error, json.JSONDecodeError) as exc:
+            print(f"error: {exc}")
+            return 1
+        errors = summary["semantic_explanations"]
+        if (
+            summary["unexplained_high_severity"]
+            or errors["duplicate_matches"] or errors["malformed_effects"]
+            or errors["unused_effect_ids"]
+        ):
+            print("error: semantic changes lack an exact one-to-one approved explanation")
+            return 2
+        print(f"report_sha256={summary['report_sha256']}")
+        return 0
     try:
         markdown, warnings, summary = build_report(args)
     except (RuntimeError, OSError, sqlite3.Error) as exc:

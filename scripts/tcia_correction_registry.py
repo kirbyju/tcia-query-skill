@@ -943,8 +943,8 @@ def migrate_semantic_explanations(conn: sqlite3.Connection, path: Path) -> int:
     if not path.exists():
         return 0
     payload = json.loads(path.read_text(encoding="utf-8"))
-    if payload.get("schema_version") not in {1, 2, 3} or not isinstance(payload.get("explanations"), list):
-        raise ValueError("semantic explanation input must use schema_version 1, 2, or 3")
+    if payload.get("schema_version") not in {1, 2, 3, 4} or not isinstance(payload.get("explanations"), list):
+        raise ValueError("semantic explanation input must use schema_version 1, 2, 3, or 4")
     count = 0
 
     def register_explanation(item: object) -> None:
@@ -1044,6 +1044,83 @@ def migrate_semantic_explanations(conn: sqlite3.Connection, path: Path) -> int:
                 "evidence_id": batch["evidence_id"],
                 "evidence": batch["evidence"],
             })
+
+    for batch in payload.get("aggregate_explanation_batches") or []:
+        required = {
+            "batch_id", "reviewer", "approved_at", "rationale", "evidence_id",
+            "evidence", "artifact", "entity_table", "change_count",
+            "change_kind_counts", "changes_sha256", "negative_scope",
+        }
+        if not isinstance(batch, dict) or not required.issubset(batch):
+            raise ValueError("aggregate semantic explanation batch is missing required fields")
+        parse_utc(str(batch["approved_at"]))
+        change_count = int(batch["change_count"])
+        kind_counts = batch["change_kind_counts"]
+        changes_sha256 = str(batch["changes_sha256"])
+        if (
+            not isinstance(batch["batch_id"], str) or not batch["batch_id"].strip()
+            or change_count < 1
+            or not isinstance(kind_counts, dict)
+            or set(kind_counts) - {"added", "removed", "modified"}
+            or any(not isinstance(value, int) or value < 0 for value in kind_counts.values())
+            or sum(kind_counts.values()) != change_count
+            or not re.fullmatch(r"[0-9a-f]{64}", changes_sha256)
+        ):
+            raise ValueError("aggregate semantic explanation batch contract is invalid")
+        negative_scope = batch["negative_scope"]
+        if not isinstance(negative_scope, list) or not negative_scope:
+            raise ValueError("aggregate semantic explanation negative scope is invalid")
+        entity_id = canonical_json([
+            ["semantic_change_batch_sha256", changes_sha256],
+            ["change_count", str(change_count)],
+        ])
+        target = canonical_json({
+            "batch_id": batch["batch_id"],
+            "artifact": batch["artifact"],
+            "table": batch["entity_table"],
+            "change_count": change_count,
+            "change_kind_counts": kind_counts,
+            "changes_sha256": changes_sha256,
+        })
+        revision_id = make_reviewed_decision(
+            conn, source_kind="semantic_change_explanation",
+            dataset_type="release", short_title=str(batch["artifact"]),
+            decision_type="semantic_change_batch", target=target, status="approved",
+            reviewer=str(batch["reviewer"]), reviewed_at=str(batch["approved_at"]),
+            rationale=str(batch["rationale"]),
+            resolution={"approved_change_batch": json.loads(target)},
+            scope_extra={"affected_artifact": str(batch["artifact"])},
+            negative_scope={"must_not": list(negative_scope)},
+            expected_effects=[{
+                "artifact": str(batch["artifact"]),
+                "entity_table": str(batch["entity_table"]),
+                "entity_id": entity_id,
+                "effect_kind": "added",
+                "after_sha256": changes_sha256,
+                "after": {
+                    "change_count": change_count,
+                    "change_kind_counts": kind_counts,
+                    "changes_sha256": changes_sha256,
+                },
+            }],
+            evidence=[{
+                "source_record_id": str(batch["evidence_id"]),
+                "excerpt": str(batch["evidence"]),
+            }],
+            policy_version="semantic-aggregate-explanations-v1",
+        )
+        effect = conn.execute(
+            "SELECT effect_id FROM correction_effects WHERE revision_id=?", (revision_id,)
+        ).fetchone()
+        conn.execute(
+            """UPDATE correction_effects
+                  SET artifact=?,entity_table=?,entity_id=?,effect_kind='added',
+                      before_sha256='',after_sha256=?,effect_status='approved'
+                WHERE effect_id=? AND effect_status!='consumed'""",
+            (str(batch["artifact"]), str(batch["entity_table"]), entity_id,
+             changes_sha256, str(effect[0])),
+        )
+        count += 1
 
     for batch in payload.get("migration_batches") or []:
         required = {
