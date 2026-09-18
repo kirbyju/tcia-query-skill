@@ -744,6 +744,8 @@ class TciaQueryServiceTests(unittest.TestCase):
         }))
         self.bundle_install_state.write_text(json.dumps({
             "artifact": "tcia_metadata_v2_install",
+            "install_schema_version": 2,
+            "generation": "test-research_detail",
             "release_fingerprint": "f" * 64,
             "installed_profile": "research_detail",
             "installed_assets": installed_assets,
@@ -821,6 +823,8 @@ class TciaQueryServiceTests(unittest.TestCase):
             setattr(self.service, name, lambda: self.fail("bundle_info opened SQLite"))
         info = self.service.bundle_info()
         self.assertEqual(info["v2_bundle"]["release_fingerprint"], "f" * 64)
+        self.assertEqual(info["v2_install"]["install_schema_version"], 2)
+        self.assertEqual(info["v2_install"]["generation"], "test-research_detail")
         self.assertTrue(info["v2_capabilities"]["participant_search"])
         self.assertTrue(info["v2_capabilities"]["public_non_dicom_detail"])
         self.assertNotIn("participant_counts", info)

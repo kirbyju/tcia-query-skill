@@ -416,6 +416,8 @@ class BundleManifest(PublicModel):
 
 class BundleInstall(PublicModel):
     artifact: str
+    install_schema_version: int | None = None
+    generation: str | None = None
     installed_assets: list[str]
     installed_profile: str
     release_fingerprint: str

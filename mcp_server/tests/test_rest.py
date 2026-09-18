@@ -66,6 +66,39 @@ class RestV2ContractTests(unittest.TestCase):
             route.endpoint(), {"v2_bundle": {"release_fingerprint": "test"}}
         )
 
+    def test_v2_bundle_accepts_current_install_receipt_fields(self) -> None:
+        class Service:
+            def bundle_info(self):
+                return {
+                    "v2_bundle_manifest_exists": True,
+                    "v2_install_state_exists": True,
+                    "count_policy": "Build-time metadata only.",
+                    "v2_install": {
+                        "artifact": "tcia_metadata_v2_install",
+                        "install_schema_version": 2,
+                        "generation": "fingerprint-research_detail",
+                        "installed_assets": ["tcia_snapshot.sqlite.gz"],
+                        "installed_profile": "research_detail",
+                        "release_fingerprint": "f" * 64,
+                    },
+                    "v2_capabilities": {
+                        "participant_search": False,
+                        "public_non_dicom_detail": False,
+                        "bundle_manifest": True,
+                        "install_state": True,
+                        "public_dicom_authority": "IDC",
+                        "publication_authority": "TCIA WordPress",
+                    },
+                }
+
+        response = TestClient(create_app(Service())).get("/v2/bundle")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["v2_install"]["install_schema_version"], 2)
+        self.assertEqual(
+            response.json()["v2_install"]["generation"],
+            "fingerprint-research_detail",
+        )
+
     def test_v2_openapi_exposes_data_facets_and_geometry_filters(self) -> None:
         schema = create_app().openapi()
         participant_properties = schema["components"]["schemas"][
