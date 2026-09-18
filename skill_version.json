@@ -10,13 +10,13 @@
     "mcp_server/__main__.py": "1c4a072b5351c80fd38b3e76d558ed25ad75ccb17d13876e2c3c59ff5a851366",
     "mcp_server/requirements.txt": "a54d55639d05688eb41c474b2ddcd8c2eb04fc038a31801e9bbe428402ab3a8b",
     "mcp_server/tcia_query_mcp/__init__.py": "353fc2e7fb85a4909190f51dad91dcdd3660cbe71cec52c5e2d13316fe8b88cc",
-    "mcp_server/tcia_query_mcp/models.py": "71e379593a97f184139962af8036c57754e8d19dfb7541b90dcaead44c29e22d",
+    "mcp_server/tcia_query_mcp/models.py": "3e04486ac5a6e205ff39ec88b96e2b873068089ef78c51782cd6ec12442b427f",
     "mcp_server/tcia_query_mcp/rest.py": "0cef64b10685873bdeb77aa52615f8c85b5895b708e17181769af114e77b65fd",
     "mcp_server/tcia_query_mcp/server.py": "c76cd6725cca5b5019b05919793aca1f4c1eecdb483f8637ab1fa8391f9a4ddb",
     "mcp_server/tcia_query_mcp/service.py": "f8579dbebac46644508fb9e7f2413eaf33f7aa144540c80d7962370a12d460cb",
-    "mcp_server/tests/test_rest.py": "86765ccdb0368b75966fbf48fbdc9998b56df28a7413d33c51a075985f65ba5f",
+    "mcp_server/tests/test_rest.py": "3fd266c93a16b7197fc4fef4c4b3cda0a60da3737d4101d840604188bc3563ce",
     "mcp_server/tests/test_server.py": "b4b99bbe9f9efb3bc2cbe07a5aa626e9420e71e47a4e102bcf491d6beb5ddc26",
-    "mcp_server/tests/test_service.py": "88b02339aaa81d50ef096f2266137f99c9f144a1afa487359ee961ef2301b4a3",
+    "mcp_server/tests/test_service.py": "3f9a6deaafcd17230be5fc734539bd2dfd9dba1adf135c45cfef7f51f686e055",
     "references/api-upgrade-notes.md": "89f5a003f5c5af7772acc3be46b309123cc874258ec2bc2774e4981b7e110e6f",
     "references/artifact-model-v2.md": "f90b1a0ba463e135a11a5ad66d314af73d89b65d35fa1bc1cd18cd142ac5aec9",
     "references/aspera.md": "64fc04697a55ef2d3ba560ae7ca7540b9ab62f4af218b7556ceaaf2b52fcfc32",
@@ -130,6 +130,6 @@
     "scripts/tests/test_tcia_v2_staging.py": "dda82d5c65b8e03b543fc80c44f30acf47a6c29861b1565104e96c568399ec25"
   },
   "schema_version": 1,
-  "skill_version": "2026.09.17.3",
-  "updated_at_utc": "2026-09-17T21:23:35.927728+00:00"
+  "skill_version": "2026.09.18.1",
+  "updated_at_utc": "2026-09-18T12:36:13.948988+00:00"
 }
