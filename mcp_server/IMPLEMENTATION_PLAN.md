@@ -13,7 +13,8 @@ Follow the IDC-REST-MCP pattern:
 1. Keep TCIA query behavior in a protocol-independent service layer
    (`tcia_query_mcp/service.py`).
 2. Expose normal HTTP endpoints through FastAPI (`tcia_query_mcp/rest.py`).
-3. Expose LLM-facing tools and guidance resources through FastMCP
+3. Expose LLM-facing tools and guidance resources through MCP Python SDK 2's
+   `MCPServer`
    (`tcia_query_mcp/server.py`).
 4. Test the service layer directly, then add parity tests for REST/MCP as the
    server surface stabilizes.
@@ -53,7 +54,7 @@ service. Public DICOM detail stays in IDC.
 ## Guardrails
 
 - Do not expose arbitrary SQL, shell execution, or live WordPress scraping.
-- Exclude hidden/staged/retired WordPress rows by default.
+- Keep internal WordPress source state outside the public service contract.
 - Use WordPress Collection and Analysis Result rows as the TCIA publication
   authority.
 - Use WordPress-aligned Data Category, Data Type, and File Format facets for

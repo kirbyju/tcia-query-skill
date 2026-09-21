@@ -21,7 +21,7 @@ Start from the EndNote XML when the user asks for:
 - publication counts, years, journals, PMIDs, or manuscript DOIs
 - literature mining by topic, modality, disease, biomarker, model type, or endpoint
 
-Start from DataCite only when the user asks about TCIA dataset DOI metadata, versions, citation metadata for a dataset DOI, or DOI relationship provenance. After finding dataset DOIs in the EndNote XML, use WordPress snapshot records if you need TCIA page links, short titles, access/license status, download routes, or hidden-record filtering.
+Start from DataCite only when the user asks about TCIA dataset DOI metadata, versions, citation metadata for a dataset DOI, or DOI relationship provenance. After finding dataset DOIs in the EndNote XML, use TCIA snapshot records if you need TCIA page links, short titles, access/license status, or download routes.
 
 ## Helper Script
 

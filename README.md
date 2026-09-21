@@ -49,10 +49,16 @@ WordPress scraping, credentials, or controlled-data downloads. Availability
 and capacity are not guaranteed. V2 is the supported and documented REST
 interface for new clients.
 
+For ordinary one-off questions, prefer MCP or the V2 REST API. The server
+queries its already-installed validated bundle and returns compact results, so
+the user does not need to download SQLite or JSONL artifacts. Local artifacts
+remain available for offline use, bulk analysis, custom SQL, pinned-release
+reproducibility, and operating another server.
+
 Server 0.3.0 adds compact discovery responses, opaque cursor pagination,
 typed problem responses, and separate liveness/readiness checks. It removes
-the hidden-record switch from public contracts. Supported V1 URLs are deprecated
-breaking aliases with migration headers; retired standalone NIfTI/pathology V1
+legacy internal query controls from public contracts. Supported V1 URLs are
+deprecated breaking aliases with migration headers; retired standalone NIfTI/pathology V1
 URLs return `410 Gone`. See [API upgrade notes](./references/api-upgrade-notes.md).
 
 See [mcp_server/README.md](./mcp_server/README.md) for the tool surface and
@@ -63,6 +69,17 @@ instructions for running your own MCP/REST server.
 The repository follows the agent-skills layout: [SKILL.md](./SKILL.md) contains
 the main instructions, with focused material under [references/](./references/)
 and deterministic helpers under [scripts/](./scripts/).
+
+The [reference directory guide](./references/README.md) distinguishes
+agent-facing guidance, implementation/operations contracts, and checked-in
+build inputs that must not be treated as disposable documentation.
+
+Repository contributors and coding agents should also follow
+[AGENTS.md](./AGENTS.md). Release-sensitive maintenance work has a separate
+repo-local workflow under
+[`.agents/skills/tcia-release-verification`](./.agents/skills/tcia-release-verification/),
+so public query guidance remains distinct from build and release operations.
+Agent-routing and answer-quality cases live under [`evals/`](./evals/).
 
 ### OpenAI Codex
 
@@ -81,12 +98,16 @@ to load `SKILL.md`; full local functionality also requires access to the
 repository's references, Python scripts, SQLite files, and network sources.
 
 For environments that cannot run Python or SQLite, use the hosted demo above
-or follow [references/mcp-and-web-llms.md](./references/mcp-and-web-llms.md).
+or follow [references/web-browser-llms.md](./references/web-browser-llms.md).
 
-## Quick Start
+## Local And Offline Quick Start
 
 Python 3 is required. These examples use `python3`; substitute your
 environment's Python 3 launcher if it has a different name.
+
+Skip this installation for routine questions when the hosted MCP or REST
+service is available. The local path is intended for offline, bulk,
+custom-SQL, pinned-release, or server-operation workflows.
 
 From the skill root, install the manifest-pinned V2 research core. This fetches
 the base WordPress snapshot and compact Participant Inventory as one validated
@@ -209,6 +230,7 @@ audit evidence are optional. See
 
 - [SKILL.md](./SKILL.md): agent workflow, routing rules, and guardrails
 - [references/routing.md](./references/routing.md): source and access routing
+- [references/README.md](./references/README.md): reference categories and maintenance rules
 - [references/schema.md](./references/schema.md): SQLite views and query patterns
 - [references/snapshots.md](./references/snapshots.md): freshness and releases
 - [references/artifact-model-v2.md](./references/artifact-model-v2.md): public non-DICOM and Participant Inventory contracts

@@ -50,6 +50,27 @@ class SkillVersionManifestTests(unittest.TestCase):
             self.assertFalse(result["ok"])
             self.assertEqual(result["untracked"], ["references/new.md"])
 
+    def test_manifest_includes_agent_policy_and_eval_contracts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "SKILL.md").write_text("current\n", encoding="utf-8")
+            (root / "AGENTS.md").write_text("policy\n", encoding="utf-8")
+            maintenance_skill = root / ".agents" / "skills" / "release-check"
+            maintenance_skill.mkdir(parents=True)
+            (maintenance_skill / "SKILL.md").write_text("maintenance\n", encoding="utf-8")
+            evals = root / "evals"
+            evals.mkdir()
+            (evals / "prompts.csv").write_text(
+                "id,should_trigger,prompt\npositive,true,Find a TCIA dataset\n",
+                encoding="utf-8",
+            )
+
+            files = VERSIONING.build_manifest("2026.09.21.1", root)["files"]
+
+            self.assertIn("AGENTS.md", files)
+            self.assertIn(".agents/skills/release-check/SKILL.md", files)
+            self.assertIn("evals/prompts.csv", files)
+
     def test_freshness_requires_remote_and_local_manifests_to_match(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

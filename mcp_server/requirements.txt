@@ -2,7 +2,7 @@
 #
 # The core TCIA skill scripts use only the Python standard library where
 # possible. Install this file only on hosts that will run the server.
-mcp==1.30.0
+mcp==2.0.0
 fastapi==0.141.1
 uvicorn[standard]==0.52.4
 pydantic==2.13.5

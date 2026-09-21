@@ -54,7 +54,14 @@ official public patient tables only when their audited counts are exactly
 492 and 215 subjects, 80 overlapping, and 627 in the union. This identifies
 the TCIA cohort but does not grant controlled-image access.
 
-The workflow validates that the SQLite file contains the documented `agent_*` views, writes web-friendly exports from those views, and compares a release fingerprint built from the source-content hash, schema version, SQLite hash, and export hashes. It skips release uploads only when the release fingerprint is unchanged. Raw WordPress builder tables retain hidden/staged rows for internal producer needs, but public dataset/download/version views and exports exclude them. The authoritative bundle manifest also reports per-source live/fallback/degraded health and bounded warning summaries.
+The workflow validates that the SQLite file contains the documented `agent_*`
+views, writes web-friendly exports from those views, and compares a release
+fingerprint built from the source-content hash, schema version, SQLite hash,
+and export hashes. It skips release uploads only when the release fingerprint
+is unchanged. The authoritative bundle manifest also reports per-source
+live/fallback/degraded health and bounded warning summaries. Raw-source
+investigation is a maintainer concern documented in
+`references/maintainer-operations.md`.
 
 Each scheduled or manual run also compares the newly built base,
 controlled-access, and clinical SQLite files with their previously published
@@ -207,7 +214,8 @@ Direct release URLs:
 
 When an environment has no SQLite execution path, use the compressed exports
 only if it can decompress gzip; otherwise use the hosted MCP reference
-implementation. For MCP guidance, see `references/mcp-and-web-llms.md`.
+implementation. For MCP implementation guidance, see `mcp_server/README.md`; for
+browser-only discovery, see `references/web-browser-llms.md`.
 
 ## WordPress Version Tables
 
@@ -249,17 +257,22 @@ Do not perform the full CDA harvest twice daily. The release fingerprint is
 the normal gate; use `refresh_cda=true` only for a forced validation. See
 `references/clinical.md`.
 
-## Optional NIfTI SQLite
+## Public Non-DICOM Detail And Audit SQLite
 
-The NIfTI SQLite is a file-grain metadata layer mined from visible, non-controlled current NIfTI download records, companion spreadsheets, root `.sums` files, and accepted Aspera listings. It is too large and too specialized to bundle with the normal snapshot refresh.
+NIfTI, pathology, and other public non-DICOM file-grain metadata are unified in
+`public_non_dicom_metadata.sqlite`; verbose reconciliation and retained legacy
+checkpoint evidence live in `public_non_dicom_audit.sqlite`. Both are selected
+and hash-pinned by the V2 bundle manifest. Install `research_detail` for routine
+file-level queries and `audit_support` only for provenance or reconciliation
+work.
 
-Use `references/nifti.md` for table details and examples. The scheduled GitHub Action should not rebuild the NIfTI database by default. Instead, it compares the current snapshot's visible non-controlled NIfTI download signature and expected optional SQLite schema version against `nifti_metadata_manifest.json`, then emits a warning if a manual NIfTI refresh is needed. A refresh should use the fresh base snapshot so WordPress download titles and `agent_nifti_*` views are current.
-
-## Optional Pathology SQLite
-
-The pathology SQLite is a package/download metadata layer for visible, non-controlled current pathology Aspera download records. It contains Collection Manager download scope, PathDB crosswalk rows for enrichment/disparity review, curator-facing disparity rows, and package/file-object tables populated from Aspera browse output or root `.sums` inventories. `normalized_file_rows_available` means imported Aspera package rows have been normalized. `not_imported` means Aspera package inventory rows are not available for that dataset in the release. The legacy `pathdb_file_objects_available` status can appear only in locally built or older SQLite files that opted into PathDB file-object seeding.
-
-Use `references/pathology.md` for table details and examples. The scheduled GitHub Action validates pathology metadata from the fresh snapshot but does not publish a pathology release by default. Publishing is tied to a manual workflow dispatch that refreshes the Aspera package inventory with `scripts/tcia_pathology_aspera_inventory.py` and passes it with `--package-inventory-tsv`.
+The scheduled workflow refreshes current WordPress and PathDB scope, applies
+checksum-pinned reviewed inputs, imports only compatible geometry evidence, and
+publishes the unified components as part of the atomic bundle. It does not
+publish standalone NIfTI or pathology databases. See
+`references/artifact-model-v2.md` for the contract, `references/nifti.md` for
+NIfTI-specific interpretation, and `references/pathology.md` for pathology
+routing and retained audit tables.
 
 ## Optional Controlled-Access SQLite
 

@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["overall_pass", "score", "checks"],
+  "properties": {
+    "overall_pass": {"type": "boolean"},
+    "score": {"type": "integer", "minimum": 0, "maximum": 100},
+    "checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "pass", "notes"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "enum": [
+              "correct-routing",
+              "publication-authority",
+              "provenance-and-identity",
+              "access-and-authorization",
+              "evidence-and-citations",
+              "freshness-state",
+              "bounded-output"
+            ]
+          },
+          "pass": {"type": "boolean"},
+          "notes": {"type": "string"}
+        }
+      }
+    }
+  }
+}

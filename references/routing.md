@@ -7,8 +7,6 @@ Use TCIA WordPress as the authoritative allowlist. For normal agent work, query 
 - `https://cancerimagingarchive.net/api/v2/collections`
 - `https://cancerimagingarchive.net/api/v2/analysis-results`
 
-Exclude records where `hide_from_browse_table = "1"` from public queries and answers. Hidden records may be pre-release staging pages for submitter review or retired/outdated datasets that TCIA does not want users to accidentally select. Raw hidden-state investigation is a local maintainer workflow described in `maintainer-operations.md`; it is not part of the public service contract.
-
 Use WordPress license metadata to decide open versus controlled access. Do not use `collection_page_accessibility` or `result_page_accessibility`; those fields are being phased out. Creative Commons licenses mean open access. Creative Commons NonCommercial licenses are open access with a noncommercial-use restriction. If license text indicates NIH Controlled Data Access, TCIA Restricted, or another controlled/restricted license, alert users that the dataset is not open access and link to the TCIA NIH Controlled Data Access Policy before giving access, API-key, or TCIA Data Retriever instructions: `https://www.cancerimagingarchive.net/nih-controlled-data-access-policy/`.
 
 Use these WordPress fields as cross-system keys:
@@ -30,7 +28,7 @@ Downstream field mappings:
 
 ## Discovery Process
 
-For DOI, citation, or version questions, start with DataCite records in the SQLite snapshot, not WordPress. Use `agent_datacite_dois` or `scripts/datacite_tcia_dois.py`, then use `agent_datasets` to confirm TCIA publication, hidden/visible status, access/license, and dataset pages.
+For DOI, citation, or version questions, start with DataCite records in the SQLite snapshot, not WordPress. Use `agent_datacite_dois` or `scripts/datacite_tcia_dois.py`, then use `agent_datasets` to confirm TCIA publication, access/license, and dataset pages.
 
 For peer-reviewed manuscripts written about TCIA data, start with TCIA's Publications EndNote XML export, not DataCite. Load `references/publications.md` and use `scripts/tcia_publications.py` to search title, abstract, keywords, journal, PMID, manuscript DOI, and linked TCIA dataset DOI values.
 
@@ -48,13 +46,12 @@ For non-DOI discovery:
 
 1. Query `agent_datasets` for both WordPress Collections and Analysis Results.
 2. Use `agent_current_downloads` and `agent_dataset_access_summary` when the answer depends on modalities, files, route labels, or access/license details.
-3. Remove hidden records by default.
-4. Filter locally so criteria can match custom fields, download labels, and flattened snapshot columns.
-5. Use the snapshot's verbose-normalized text fields for abstracts/descriptions when needed.
-6. Flag controlled access from license metadata only. Creative Commons means open; Creative Commons NonCommercial means open with noncommercial restriction; controlled/restricted license text means controlled access.
-7. Enrich only the filtered candidate set through IDC, CDA, the controlled-access SQLite, CTDC, General Commons, PathDB, or DataCite.
-8. If a candidate does not appear in WordPress, exclude it from TCIA-published results. If useful, mention it separately as related or derived.
-9. If a named dataset is absent after refreshing the local snapshot, say the published snapshot may not include the newest TCIA metadata yet. Ask the user to try again after the next 7:17 AM or 7:17 PM America/New_York snapshot run has had time to finish, then rerun `python scripts/tcia_v2_bundle.py install --profile research_core`.
+3. Filter locally so criteria can match custom fields, download labels, and flattened snapshot columns.
+4. Use the snapshot's verbose-normalized text fields for abstracts/descriptions when needed.
+5. Flag controlled access from license metadata only. Creative Commons means open; Creative Commons NonCommercial means open with noncommercial restriction; controlled/restricted license text means controlled access.
+6. Enrich only the filtered candidate set through IDC, CDA, the controlled-access SQLite, CTDC, General Commons, PathDB, or DataCite.
+7. If a candidate does not appear in WordPress, exclude it from TCIA-published results. If useful, mention it separately as related or derived.
+8. If a named dataset is absent after refreshing the local snapshot, say the published snapshot may not include the newest TCIA metadata yet. Ask the user to try again after the next 7:17 AM or 7:17 PM America/New_York snapshot run has had time to finish, then rerun `python scripts/tcia_v2_bundle.py install --profile research_core`.
 
 ## Snapshot Querying
 
@@ -70,7 +67,7 @@ installed skill instead of silently overwriting it. If network verification is
 unavailable, do not describe the local cache as current without the user's
 explicit acceptance of offline/unverified results.
 
-Live source API details are maintainer/developer context for `scripts/tcia_snapshot.py build`, not the normal end-user discovery path. If an agent cannot query SQLite, it should use the release exports documented in `snapshots.md` and `mcp-and-web-llms.md`, not live WordPress API calls.
+Live source API details are maintainer/developer context for `scripts/tcia_snapshot.py build`, not the normal end-user discovery path. If an agent cannot query SQLite, it should use MCP/REST or the release exports documented in `snapshots.md`. A browser-only agent should use the canonical public pages described in `web-browser-llms.md`, not scrape live WordPress APIs.
 
 ## Access Route Details
 
@@ -140,7 +137,7 @@ Supporting files:
 DOI/citation:
 
 - Start with DataCite to inspect DOI metadata, related identifiers, versions, and external derived records.
-- Use WordPress after DataCite to confirm visible TCIA Collection/Analysis Result status, access/license, and dataset page/download routing.
+- Use the TCIA snapshot after DataCite to confirm TCIA publication, access/license, and dataset page/download routing.
 
 Peer-reviewed publications:
 
@@ -161,7 +158,7 @@ Use `agent_current_downloads` when answering file/download questions. If you nee
 
 For Collections, use `collection_downloads` as the actual dataset download records. For Analysis Results, use `result_downloads` as the actual result file records. Source collection metadata explains provenance only; do not present source collection downloads as if they are the Analysis Result files. If an Analysis Result lacks `result_downloads`, say that result-file metadata is unavailable in the current snapshot instead of substituting `collection_downloads`. Do not rely only on top-level `data_types` for modality filtering; mixed collections can have modality labels only on individual download records.
 
-When answering whether a Collection lacks ground truth, reusable labels, segmentations, classifications, or annotations, check related visible Analysis Results before concluding labels are absent. A Collection's own download records may lack `Image Annotations`, `SEG`, `RTSTRUCT`, `SR`, `Segmentation`, `Classification`, `Measurement`, or `Fiducial` labels even when a separate TCIA Analysis Result publishes those labels. Use the related-Analysis-Result SQL pattern in `references/schema.md`, and report related results separately with their own DOI, access terms, and download labels.
+When answering whether a Collection lacks ground truth, reusable labels, segmentations, classifications, or annotations, check related Analysis Results before concluding labels are absent. A Collection's own download records may lack `Image Annotations`, `SEG`, `RTSTRUCT`, `SR`, `Segmentation`, `Classification`, `Measurement`, or `Fiducial` labels even when a separate TCIA Analysis Result publishes those labels. Use the related-Analysis-Result SQL pattern in `references/schema.md`, and report related results separately with their own DOI, access terms, and download labels.
 
 `download_type` is intended as the parent category, but all three fields are multi-select. Mixed parent categories are normal when one download record represents a combined TCIA Data Retriever manifest or package. Examples:
 
@@ -203,7 +200,6 @@ For exact dataset questions, give a short prose summary first, then a table of a
 ## Common Caveats
 
 - WordPress metadata can contain HTML; strip tags before quoting or matching.
-- WordPress `hide_from_browse_table = "1"` means hidden. Treat hidden records as out of scope for public user-facing discovery unless the explicit TCIA staff exception applies.
 - The snapshot is built from verbose WordPress source metadata. If a very recent field is absent, ask the user to try again after the next scheduled snapshot run and refresh with `python scripts/tcia_v2_bundle.py install --profile research_core`.
 - Controlled-access metadata can be visible even when file downloads require approval. Determine controlled status from license metadata, then link to the TCIA NIH Controlled Data Access Policy for current request, dbGaP approval, JSON API key, and TCIA Data Retriever configuration steps. An authorized agent-run transfer requires an explicit user request, an official CRDC manifest, and the path to the user's own key.
 - Controlled-access data cannot be previewed through public browser viewers before download. Report metadata and access guidance instead of constructing OHIF, SliM, VolView, IDC, NBIA, PathDB, or other public viewer URLs.

@@ -1,10 +1,22 @@
 # API Upgrade Notes
 
+## MCP Python SDK 2 And Protocol 2026-07-28
+
+The MCP adapter now uses MCP Python SDK 2.x. One Streamable HTTP endpoint serves
+the current `2026-07-28` stateless protocol and the earlier handshake-era
+revisions, so existing clients continue to connect while newer clients can use
+`server/discover`.
+
+This protocol revision is independent of the TCIA V2 metadata bundle version and
+release fingerprint. MCP negotiation describes how a client talks to the server;
+`get_snapshot_info` describes which TCIA metadata generation the server queries.
+
 ## Server 0.3.0
 
 This release intentionally narrows and types the public agent/API contract.
 
-- Public MCP and REST inputs no longer accept `include_hidden`. Public service methods always query visible WordPress records. Maintainer-only raw inspection remains a local CLI concern.
+- Public MCP and REST inputs no longer expose legacy internal-source query
+  switches. Raw-source inspection remains a maintainer-only local CLI concern.
 - `search_datasets` returns compact summaries. Call `get_dataset` for narrative fields, complete access/license detail, current downloads, and related Analysis Results.
 - High-volume dataset, participant, download, participant-asset, public non-DICOM, and V1-release searches return `has_more`, `truncated`, and `next_cursor`. Pass `next_cursor` back with the same filters and limit. Cursors are opaque and bound to the query, declared release/component identity, and actual installed-file generation; restart pagination after any install or in-place artifact change. V1-release discovery is newest-first.
 - Limits outside each operation's documented range are rejected instead of silently defaulted or clamped.

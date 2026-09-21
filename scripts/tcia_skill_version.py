@@ -15,6 +15,7 @@ SCHEMA_VERSION = 1
 SKILL_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_MANIFEST = SKILL_ROOT / "skill_version.json"
 INCLUDED_TOP_LEVEL_FILES = (
+    "AGENTS.md",
     "README.md",
     "SKILL.md",
     "requirements-build.txt",
@@ -23,7 +24,7 @@ INCLUDED_TOP_LEVEL_FILES = (
     "requirements-server.lock",
 )
 INCLUDED_SUFFIXES = {".csv", ".json", ".md", ".py", ".txt", ".yaml", ".yml"}
-INCLUDED_DIRECTORIES = ("agents", "mcp_server", "references", "scripts")
+INCLUDED_DIRECTORIES = (".agents", "agents", "evals", "mcp_server", "references", "scripts")
 EXCLUDED_NAMES = {"__pycache__", ".DS_Store"}
 
 

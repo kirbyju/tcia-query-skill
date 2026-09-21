@@ -70,7 +70,7 @@ validating client or mapper changes.
 
 ## TCIA Cohort Workflow
 
-1. Confirm the dataset is a visible TCIA Collection or Analysis Result in WordPress.
+1. Confirm the dataset is a TCIA-published Collection or Analysis Result.
 2. Decide whether CDA is answering a real enrichment question. Use direct TCIA artifacts or IDC clinical tables for official collection clinical data; use CDA for harmonized cross-commons discovery and summaries.
 3. Obtain subject identifiers from IDC/TCIA metadata. For public DICOM, IDC patient/subject metadata is usually the best starting point after WordPress provenance is confirmed.
 4. Validate identifier shape. CDA `subject_id` values may include source/project prefixes, such as `TCGA.TCGA-04-1369`; raw DICOM `PatientID` values may not match directly.

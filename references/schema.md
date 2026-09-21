@@ -114,7 +114,7 @@ Key columns:
 - `dataset_type`: `Collection` or `Analysis Result`.
 - `short_title`: WordPress short title; use this as the cross-system key.
 - `short_title_key`: normalized short-title join key used internally for version history matching across punctuation/case differences.
-- `title`, `doi`, `link`, `date_updated`, `hidden`.
+- `title`, `doi`, `link`, `date_updated`.
 - `current_version_number`: current Collection Manager version number, when exposed by WordPress.
 - `license_status`, `licenses`, `controlled_access`, `noncommercial_license`.
 - `access_level`: `open`, `open_noncommercial`, `controlled`, `mixed`, `review_needed`, or `unknown`.
@@ -126,12 +126,11 @@ Key columns:
 - `has_tcia_clinical_download`, `has_external_clinical_resource`.
 - `source_collections`: populated for some Analysis Results; use it as strong relationship evidence when mapping an Analysis Result back to source Collections.
 
-Default user-facing filter:
+Basic dataset query:
 
 ```sql
 SELECT short_title, title, access_level, doi, link
 FROM agent_datasets
-WHERE hidden = 0
 ORDER BY short_title;
 ```
 
@@ -141,7 +140,7 @@ One row per current nested `collection_downloads` or `result_downloads` record. 
 
 Key columns:
 
-- `short_title`, `title`, `dataset_type`, `hidden`.
+- `short_title`, `title`, `dataset_type`.
 - `download_id`, `download_title`, `download_url`, `download_metadata`, `search_url`.
 - `download_types`, `data_types`, `file_types`, `external_resources`: JSON arrays as text.
 - `license_label`, `license_url`, `requirements_label`, `requirements_url`, `requirements_text`.
@@ -155,8 +154,7 @@ SELECT DISTINCT d.short_title, d.download_title, d.access_level, d.download_url
 FROM agent_current_downloads d
 JOIN wordpress_download_labels l
   ON l.download_row_id = d.download_row_id
-WHERE d.hidden = 0
-  AND l.label_kind = 'data_type'
+WHERE l.label_kind = 'data_type'
   AND l.label = 'MR';
 ```
 
@@ -195,8 +193,7 @@ SELECT
   controlled_download_titles,
   resolved_controlled_access_policy_url
 FROM agent_dataset_access_summary
-WHERE hidden = 0
-  AND resolved_access_level = 'mixed';
+WHERE resolved_access_level = 'mixed';
 ```
 
 ### `agent_dataset_versions`
@@ -205,7 +202,7 @@ One row per current TCIA dataset matched to a `/api/v2/versions` record. The mat
 
 Key columns:
 
-- Dataset columns: `source`, `dataset_type`, `short_title`, `title`, `doi`, `link`, `date_updated`, `current_version_number`, `subjects`, `hidden`.
+- Dataset columns: `source`, `dataset_type`, `short_title`, `title`, `doi`, `link`, `date_updated`, `current_version_number`, `subjects`.
 - Version columns: `version_id`, `version_slug`, `version_post_title`, `version_number`, `version_date`, `version_related_short_title`.
 - `match_method`: `exact_short_title` or `normalized_short_title`.
 - `version_downloads`, `version_text`, `version_normalized_json`, `version_raw_json`.
@@ -215,8 +212,7 @@ Find the version history for a dataset:
 ```sql
 SELECT short_title, version_number, version_date, version_post_title, match_method
 FROM agent_dataset_versions
-WHERE hidden = 0
-  AND short_title = 'CT Images in COVID-19'
+WHERE short_title = 'CT Images in COVID-19'
 ORDER BY CAST(NULLIF(version_number, '') AS INTEGER), version_date;
 ```
 
@@ -226,12 +222,12 @@ One row per current TCIA dataset with the best available version 1 release date.
 
 Key columns:
 
-- Dataset columns: `source`, `dataset_type`, `short_title`, `title`, `doi`, `link`, `date_updated`, `current_version_number`, `subjects`, `hidden`.
+- Dataset columns: `source`, `dataset_type`, `short_title`, `title`, `doi`, `link`, `date_updated`, `current_version_number`, `subjects`.
 - `v1_release_date`: best available first-release date.
 - `v1_release_date_source`: `versions_endpoint_exact_short_title`, `versions_endpoint_normalized_short_title`, `current_record_still_v1_date_updated`, or blank when no v1 date can be inferred.
 - Version provenance: `version_id`, `version_slug`, `version_post_title`, `version_related_short_title`, `match_method`.
 
-Find visible datasets first released since a given date:
+Find datasets first released since a given date:
 
 ```sql
 SELECT dataset_type,
@@ -242,8 +238,7 @@ SELECT dataset_type,
        subjects,
        link
 FROM agent_dataset_v1_releases
-WHERE hidden = 0
-  AND v1_release_date >= '2025-01-01'
+WHERE v1_release_date >= '2025-01-01'
 ORDER BY v1_release_date, lower(short_title);
 ```
 
@@ -277,7 +272,7 @@ Key columns:
 
 ## Related Analysis Result Checks
 
-When a user asks whether a Collection has ground truth, labels, segmentations, classifications, or annotations, do not stop after checking the Collection's own current downloads. TCIA often publishes reusable annotation files as separate Analysis Result datasets. Before saying a Collection has no labels, search visible Analysis Results and report any related result separately.
+When a user asks whether a Collection has ground truth, labels, segmentations, classifications, or annotations, do not stop after checking the Collection's own current downloads. TCIA often publishes reusable annotation files as separate Analysis Result datasets. Before saying a Collection has no labels, search published Analysis Results and report any related result separately.
 
 Use ranked relationship evidence. Prefer explicit `source_collections`; then result short-title patterns such as `EAY131-Tumor-Annotations`; then result titles that name the Collection; then result download/search URLs or manifest filenames scoped to the Collection. Avoid broad `raw_json LIKE '%short_title%'` matching as primary evidence because program metadata may list many related datasets and cause false positives.
 
@@ -288,8 +283,7 @@ WITH input(short_title) AS (VALUES ('EAY131')),
 collection AS (
   SELECT short_title, title
   FROM agent_datasets
-  WHERE hidden = 0
-    AND source = 'collections'
+  WHERE source = 'collections'
     AND lower(short_title) = lower((SELECT short_title FROM input))
 ),
 collection_norm AS (
@@ -303,8 +297,7 @@ annotation_results AS (
          ar.source_collections,
          lower(replace(replace(replace(ar.short_title, ' ', ''), '-', ''), '_', '')) AS norm_result_short_title
   FROM agent_datasets ar
-  WHERE ar.hidden = 0
-    AND ar.source = 'analysis-results'
+  WHERE ar.source = 'analysis-results'
     AND (
       lower(COALESCE(ar.download_data_types, '')) LIKE '%seg%'
       OR lower(COALESCE(ar.download_data_types, '')) LIKE '%rtstruct%'
@@ -324,8 +317,7 @@ download_scope AS (
                             COALESCE(d.download_url, '') || ' ' ||
                             COALESCE(d.download_metadata, ''))) AS scoped_urls
   FROM agent_current_downloads d
-  WHERE d.hidden = 0
-    AND d.parent_source = 'analysis-results'
+  WHERE d.parent_source = 'analysis-results'
   GROUP BY d.short_title
 )
 SELECT ar.short_title AS analysis_result,
@@ -373,7 +365,9 @@ For broad or ambiguous Collection short titles, inspect the returned `relationsh
 
 ## Base Tables
 
-Use base tables when the views do not expose a needed detail.
+Use base tables only for maintainer or forensic work when the public views do
+not expose a needed detail. Normal agent queries should stay on the public
+views; raw-source inspection is documented in `maintainer-operations.md`.
 
 - `snapshot_meta`: schema version, source hashes, source URLs, generated timestamp, and counts.
 - `wordpress_records`: WordPress Collections, Analysis Results, and global Downloads endpoint rows. `raw_json` stores source JSON. `normalized_json` is populated for Collections and Analysis Results.
@@ -384,37 +378,13 @@ Use base tables when the views do not expose a needed detail.
 - `pathdb_collection_summary`: collection-level PathDB patient/slide summaries.
 - `datacite_dois`: TCIA DOI prefix records from DataCite.
 
-## Pathology Audit Tables
+## Retained Pathology Audit Checkpoint
 
-Install the V2 `audit_support` profile and query the retained pathology tables
-in `cache/tcia-metadata-v2-latest/public_non_dicom_audit.sqlite` only after the
-base snapshot has confirmed TCIA provenance, visibility, and access/license
-metadata. Important tables:
-
-- `pathology_downloads`: visible, non-controlled, current pathology Aspera download records selected from Collection Manager/WordPress metadata.
-- `pathology_download_label_matches`: label/title evidence for why a download was selected as pathology-related.
-- `pathology_package_files`: imported Aspera package browse or `.sums` inventory rows. This table may be empty before package inventories are imported.
-- `pathology_file_objects`: normalized file rows derived from imported Aspera package inventories.
-- `pathdb_slide_crosswalk`: PathDB rows matched by exact TCIA/PathDB collection short title for enrichment and discrepancy review. These rows do not define the Aspera package inventory.
-- `pathology_disparities`: curator-facing rows for PathDB/download scope mismatches, multiple-download cases, and future package-file reconciliation issues.
-
-Prefer the agent-facing views for normal use:
-
-- `agent_pathology_downloads`: current pathology Aspera download records with `download_label` fallback text.
-- `agent_pathology_dataset_summary`: dataset-level scope plus `package_inventory_status`.
-- `agent_pathology_package_files`: imported package inventory rows when available.
-- `agent_pathology_file_objects`: normalized file objects from imported Aspera package rows.
-
-`package_inventory_status = 'normalized_file_rows_available'` means imported Aspera package rows have been normalized into file objects. `package_inventory_status = 'not_imported'` means Aspera package inventory rows are not available for that dataset in the release. `pathdb_file_objects_available` can appear only in locally built or legacy SQLite files that opted into PathDB file-object seeding.
-
-Common pathology summary:
-
-```sql
-SELECT short_title, download_records, pathdb_collection_slide_count,
-       package_inventory_status, open_noncommercial_downloads
-FROM agent_pathology_dataset_summary
-ORDER BY lower(short_title);
-```
+The unified public non-DICOM research artifact replaces the standalone
+pathology query model. The `audit_support` profile retains immutable migration
+evidence under `source_pathology__*` tables for reproducibility; it is not a
+second current pathology API. See `pathology.md` for the exact retained tables
+and use `agent_public_non_dicom_assets` for routine file-level queries.
 
 ## V2 Controlled-Access Detail
 
@@ -649,73 +619,14 @@ WHERE eligible = 1
 ORDER BY subjects_applied DESC;
 ```
 
-## NIfTI Audit Tables
+## Retained NIfTI Audit Checkpoint
 
-Install the V2 `audit_support` profile and query the retained NIfTI tables in
-`cache/tcia-metadata-v2-latest/public_non_dicom_audit.sqlite` only after the
-base snapshot has confirmed TCIA provenance, visibility, and access/license
-metadata. Prefer these agent-facing views:
-
-- `agent_nifti_downloads`: WordPress NIfTI download provenance with `download_label` fallback text.
-- `agent_nifti_dataset_summary`: all NIfTI download scope plus file/radiology/derived-object counts.
-- `agent_nifti_files`: canonical radiology file/series rows with lower-snake-case aliases such as `series_instance_uid` and `study_instance_uid` when source UIDs exist.
-- `agent_nifti_derived_objects`: segmentation, annotation, and transformed-image rows with best-effort source references.
-- `agent_nifti_characteristics`: dataset-by-dataset reviewed object role, associated imaging modality, preferred source NIfTI volume, `source_reference_count`, source dataset/access level/DICOM UIDs, alternate DICOM SEG representation, download-level WordPress provenance, and canonical study grouping. It stays one row per reviewed file even when a derived image has multiple source volumes. `NIfTI` remains implicit at file grain and WordPress labels are joined from `nifti_downloads`. `source_access_level` describes the related source image and can therefore be `controlled` even when the NIfTI download is open. It covers every current NIfTI dataset in the release.
-- `agent_nifti_characteristics_summary`: unambiguous source-image, associated-segmentation, transformed-image, and fiducial-annotation counts for reviewed datasets.
-- `agent_nifti_review_issues`: one row per unresolved dataset-level issue. Filter `status = 'manual_review'` for the active queue; affected-file counts and evidence remain compact at dataset grain.
-
-Common NIfTI summary:
-
-```sql
-SELECT short_title, nifti_downloads, nifti_files,
-       radiology_series_rows, mr_files, ct_files
-FROM agent_nifti_dataset_summary
-ORDER BY lower(short_title);
-```
-
-Reviewed CT-ORG characteristics:
-
-```sql
-SELECT subject_id, file_name, object_role, associated_imaging_modality,
-       study_id, study_id_source, source_nifti_volume_file_name,
-       source_dicom_series_instance_uid, classification_confidence
-FROM agent_nifti_characteristics
-WHERE short_title = 'CT-ORG'
-ORDER BY subject_id, object_role, file_name;
-```
-
-Reviewed Healthy-Total-Body-CTs source linkage:
-
-```sql
-SELECT subject_id, file_name, object_role, associated_imaging_modality,
-       study_id, study_id_source, source_dataset_short_title,
-       source_access_level, source_dicom_series_instance_uid,
-       source_dicom_study_instance_uid, reference_confidence
-FROM agent_nifti_characteristics
-WHERE short_title = 'Healthy-Total-Body-CTs'
-ORDER BY subject_id;
-```
-
-Reviewed BCBM-RadioGenomics characteristics:
-
-```sql
-SELECT subject_id, procedure_id, study_id, file_name, object_role, associated_imaging_modality,
-       segmentation_representation, source_nifti_volume_file_name,
-       source_dicom_series_instance_uid,
-       classification_confidence
-FROM agent_nifti_characteristics
-WHERE short_title = 'BCBM-RadioGenomics'
-ORDER BY subject_id, study_id, object_role, file_name;
-```
-
-Open NIfTI review issues:
-
-```sql
-SELECT short_title, issue_code, affected_files, description
-FROM agent_nifti_review_issues
-WHERE status = 'manual_review'
-ORDER BY lower(short_title), issue_code;
-```
+The unified public non-DICOM research artifact replaces the standalone NIfTI
+query model. The `audit_support` profile retains immutable migration evidence
+under `source_nifti__*` tables for reproducibility; those tables are historical
+evidence, not current agent views. See `nifti.md` for the exact retained tables
+and use `agent_public_non_dicom_assets` plus
+`agent_public_non_dicom_image_metadata` for routine queries.
 
 ## Common Joins
 
@@ -726,8 +637,7 @@ SELECT d.short_title, d.title, w.download_title, w.access_level, w.download_url
 FROM agent_datasets d
 JOIN agent_current_downloads w
   ON w.parent_source = d.source
- AND w.short_title = d.short_title
-WHERE d.hidden = 0;
+ AND w.short_title = d.short_title;
 ```
 
 Join datasets to PathDB slides:
@@ -736,8 +646,7 @@ Join datasets to PathDB slides:
 SELECT d.short_title, d.title, p.patient_id, p.slide_id, p.camicroscope_url
 FROM agent_datasets d
 JOIN agent_pathdb_slides p
-  ON lower(p.collection) = lower(d.short_title)
-WHERE d.hidden = 0;
+  ON lower(p.collection) = lower(d.short_title);
 ```
 
 Find controlled or mixed-access datasets with CT, PET, and annotation/result labels:
@@ -746,27 +655,26 @@ Find controlled or mixed-access datasets with CT, PET, and annotation/result lab
 SELECT DISTINCT s.short_title, s.title, s.dataset_type,
        s.resolved_access_level, s.download_data_types, s.download_types, s.link
 FROM agent_dataset_access_summary s
-WHERE s.hidden = 0
-  AND s.resolved_access_level IN ('controlled', 'mixed')
+WHERE s.resolved_access_level IN ('controlled', 'mixed')
   AND EXISTS (
     SELECT 1 FROM agent_current_downloads d, json_each(d.data_types) x
-    WHERE d.short_title = s.short_title AND d.hidden = 0
+    WHERE d.short_title = s.short_title
       AND lower(x.value) IN ('ct', 'computed tomography')
   )
   AND EXISTS (
     SELECT 1 FROM agent_current_downloads d, json_each(d.data_types) x
-    WHERE d.short_title = s.short_title AND d.hidden = 0
+    WHERE d.short_title = s.short_title
       AND lower(x.value) IN ('pt', 'pet')
   )
   AND (
     EXISTS (
       SELECT 1 FROM agent_current_downloads d, json_each(d.data_types) x
-      WHERE d.short_title = s.short_title AND d.hidden = 0
+      WHERE d.short_title = s.short_title
         AND lower(x.value) IN ('seg', 'segmentation', 'rtstruct', 'sr', 'annotation', 'annotations')
     )
     OR EXISTS (
       SELECT 1 FROM agent_current_downloads d, json_each(d.download_types) x
-      WHERE d.short_title = s.short_title AND d.hidden = 0
+      WHERE d.short_title = s.short_title
         AND lower(x.value) LIKE '%annotation%'
     )
   )

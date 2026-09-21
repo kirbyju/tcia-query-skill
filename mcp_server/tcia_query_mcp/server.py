@@ -15,8 +15,8 @@ from functools import wraps
 from pathlib import Path
 from typing import Any
 
-from mcp.server.fastmcp import FastMCP
-from mcp.server.fastmcp.exceptions import ToolError
+from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import ToolAnnotations
 from starlette.routing import Route
@@ -51,7 +51,7 @@ SERVER_TITLE = "TCIA Query MCP"
 
 INSTRUCTIONS = """Read-only, snapshot-local TCIA metadata. Start with
 get_snapshot_info. Use search tools for compact discovery and follow with detail
-tools. Only visible WordPress Collections and Analysis Results are returned.
+tools. Results cover TCIA-published Collections and Analysis Results.
 Check download-level access and format labels before routing: public DICOM detail
 belongs to IDC/idc-index; controlled metadata never grants access. Preserve
 dataset-scoped participant identity and check coverage before completeness claims.
@@ -60,7 +60,7 @@ This server never transfers payload data."""
 GUIDE = f"""\
 # Querying TCIA With This MCP Server
 
-TCIA provenance comes from visible WordPress Collection and Analysis Result
+TCIA provenance comes from WordPress Collection and Analysis Result
 records in the base snapshot. Downstream resources such as IDC, CDA, General
 Commons, CTDC, PathDB, DataCite, and Aspera enrich or route access; they do not
 decide whether something is TCIA-published.
@@ -70,7 +70,7 @@ Recommended workflow:
 1. Call `get_snapshot_info` and confirm the V2 bundle fingerprint, research
    core, and any needed optional detail artifact.
 2. Use `search_datasets` for broad discovery. Use `get_dataset` for one short
-   title, including current downloads and related visible Analysis Results.
+   title, including current downloads and related Analysis Results.
 3. Use `summarize_access` before any download guidance. Creative Commons is
    open access, Creative Commons NonCommercial is open with a noncommercial
    restriction, and controlled/restricted licenses require the TCIA policy:
@@ -155,14 +155,12 @@ def _transport_security() -> TransportSecuritySettings:
     return TransportSecuritySettings(enable_dns_rebinding_protection=False)
 
 
-mcp = FastMCP(
+mcp = MCPServer(
     "TCIA Query",
+    title=SERVER_TITLE,
+    version=__version__,
     instructions=INSTRUCTIONS,
-    stateless_http=True,
-    json_response=True,
-    transport_security=_transport_security(),
 )
-mcp._mcp_server.version = __version__
 
 QUERY_ANNOTATIONS = ToolAnnotations(
     readOnlyHint=True,
@@ -383,7 +381,7 @@ def search_datasets(
     cursor: str | None = None,
     limit: int = 25,
 ) -> DatasetSearchResponse:
-    """Search visible TCIA WordPress Collections and Analysis Results.
+    """Search TCIA-published Collections and Analysis Results.
 
     Use this for TCIA provenance and discovery. Filter by download-level modality/file labels
     when the user asks about data formats, and by top-level external_resources when the user asks
@@ -867,12 +865,18 @@ def snapshot_info_resource() -> str:
     return json.dumps(service().bundle_info(), indent=2, sort_keys=True)
 
 
-def http_app(server: FastMCP | None = None):
-    """Return the Starlette app for FastMCP streamable HTTP transport."""
+def http_app(server: MCPServer | None = None, *, host: str = "127.0.0.1"):
+    """Return the dual-era Starlette app for MCP streamable HTTP transport."""
 
     server = server or mcp
-    app = server.streamable_http_app()
-    configured = server.settings.streamable_http_path
+    configured = "/mcp"
+    app = server.streamable_http_app(
+        streamable_http_path=configured,
+        stateless_http=True,
+        json_response=True,
+        transport_security=_transport_security(),
+        host=host,
+    )
     base = configured.rstrip("/")
     spellings = [base, f"{base}/"] if base else ["/"]
     found = {r.path: r for r in app.router.routes if isinstance(r, Route) and r.path in spellings}
@@ -923,9 +927,7 @@ def main(argv: list[str] | None = None) -> int:
 
     import uvicorn
 
-    mcp.settings.host = args.host
-    mcp.settings.port = args.port
-    uvicorn.run(http_app(), host=args.host, port=args.port, log_level=mcp.settings.log_level.lower())
+    uvicorn.run(http_app(host=args.host), host=args.host, port=args.port, log_level="info")
     return 0
 
 

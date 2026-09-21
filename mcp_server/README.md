@@ -79,8 +79,6 @@ responses; use `/v2/public-non-dicom/assets`.
 
 ## Public Contract
 
-- All public queries exclude hidden, staged, and retired WordPress records;
-  there is no public `include_hidden` input.
 - `search_datasets` is intentionally compact. Use `get_dataset` for narrative
   and complete download/access detail.
 - High-volume dataset, participant, download, participant-asset, and public
@@ -180,6 +178,17 @@ http://127.0.0.1:8765/mcp
 A public read-only reference implementation backed by the current V2 bundle is
 available at [https://tcia.duckdns.org/mcp](https://tcia.duckdns.org/mcp).
 This is a streamable HTTP MCP protocol endpoint, not a normal web page.
+
+The server uses MCP Python SDK 2.x and serves both protocol eras from the same
+endpoint:
+
+- `2026-07-28`: stateless requests with `server/discover` and no initialization
+  handshake or protocol session.
+- `2025-11-25` and earlier supported revisions: the compatibility handshake used
+  by existing clients.
+
+Clients should negotiate automatically. Deployments should not pin callers to a
+single protocol revision unless a compatibility test specifically requires it.
 
 Keep the process bound to `127.0.0.1` unless it is running only on a private
 network. Put HTTPS, authentication, and access controls in front of it with a

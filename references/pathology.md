@@ -52,8 +52,8 @@ from a standalone pathology database.
 
 ## Interpretation
 
-- WordPress decides TCIA publication scope, visibility, access level, license,
-  DOI, and the user-facing download route.
+- WordPress decides TCIA publication scope, access level, license, DOI, and the
+  user-facing download route.
 - PathDB is best-effort enrichment and may not cover every package file.
 - PathDB copies may be converted or reformatted for browser viewing. Do not
   imply byte equivalence with the Aspera package.
@@ -62,8 +62,8 @@ from a standalone pathology database.
 - `collection_only` PathDB matches establish dataset scope, not file identity.
   File identity requires exact URL, filename plus collection, a reviewed slide
   pattern, or equivalent explicit evidence.
-- Hidden and controlled downloads are excluded from the public artifact and
-  must not be authorized through this metadata.
+- Controlled downloads are not part of this public artifact and require the
+  separate controlled-access route.
 
 New package inventories or reconciliation corrections should be added as
 reviewed V2 references or native adapters with source checksums, observation

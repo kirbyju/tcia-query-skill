@@ -1,7 +1,7 @@
 # TCIA NIfTI Metadata
 
 TCIA WordPress metadata is authoritative for whether a NIfTI package is a
-current, visible TCIA download. File-level discovery is provided only through
+current TCIA-published download. File-level discovery is provided only through
 the unified V2 public non-DICOM artifact. The standalone NIfTI SQLite is
 retired and is neither a release asset nor a routine producer input.
 

@@ -1,12 +1,12 @@
 # DataCite Relationships
 
-Use DataCite snapshot records first for DOI metadata, citations, and versions. Use WordPress snapshot records afterward to confirm TCIA publication status, hidden/visible status, access/license, and user-facing dataset pages.
+Use DataCite snapshot records first for DOI metadata, citations, and versions. Use TCIA records afterward to confirm whether the work is TCIA-published and to obtain access/license details and user-facing dataset pages.
 
 ## TCIA DOI Metadata
 
 TCIA mints dataset DOIs through DataCite. The SQLite snapshot stores DataCite records under the TCIA DOI prefix `10.7937` in `agent_datacite_dois`.
 
-DataCite records include DOI, title, publisher, publication year, URL, version, rights, identifiers such as `TCIA Short Name`, and related identifiers. Use WordPress snapshot records after DataCite when the answer needs TCIA page visibility, hidden-record filtering, access/license status, or download routing.
+DataCite records include DOI, title, publisher, publication year, URL, version, rights, identifiers such as `TCIA Short Name`, and related identifiers. Use the TCIA snapshot after DataCite when the answer needs TCIA publication status, access/license status, or download routing.
 
 Bundled helper:
 
@@ -22,8 +22,8 @@ External records may declare that they are derived from a TCIA DOI. For example,
 
 Interpretation:
 
-- If the derived record is listed in WordPress as a Collection or Analysis Result, it is TCIA-published.
-- If it is not listed in WordPress, it is externally published but related to TCIA.
+- If the derived record is listed by TCIA as a Collection or Analysis Result, it is TCIA-published.
+- Otherwise it is externally published but related to TCIA.
 - Mention external derived records in a separate "Related derived data" section when helpful.
 
 ## Query Pattern
@@ -45,4 +45,4 @@ When discussing related DOI records, include:
 - Relation type, such as `IsDerivedFrom`.
 - Publisher or repository, such as Zenodo, if available.
 - Clear provenance wording: "external derived record" vs. "TCIA-published Analysis Result".
-- Whether WordPress confirms the record is a visible TCIA Collection or Analysis Result.
+- Whether TCIA confirms the record as a Collection or Analysis Result.

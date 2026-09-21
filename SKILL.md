@@ -1,6 +1,7 @@
 ---
 name: tcia-query-skill
-description: Find, verify, cite, visualize, and route TCIA-published datasets and verified manuscripts about TCIA data. Use for TCIA discovery by disease, modality, body site, species, data type, access/license, DOI, program, clinical/supporting data, annotation availability, participants, viewers, or download routes across TCIA WordPress, IDC, CRDC commons, PathDB, DataCite, and Aspera.
+description: Find and verify TCIA-published datasets and verified publications about TCIA data. Use for TCIA Collections or Analysis Results, participant and annotation availability, provenance, access and license questions, viewers, or official download routes.
+license: Apache-2.0
 ---
 
 # TCIA Query Skill
@@ -9,13 +10,15 @@ description: Find, verify, cite, visualize, and route TCIA-published datasets an
 
 TCIA WordPress Collection and Analysis Result records decide whether a dataset is TCIA-published. Use the release-backed SQLite snapshot or snapshot-backed MCP/REST service for normal discovery. IDC, CDA, General Commons, CTDC, PathDB, DataCite, Zenodo, and Aspera may enrich or route access; they do not establish TCIA publication.
 
-Only visible WordPress records belong in public answers. The public service never exposes hidden, staged, or retired records. Maintainers investigating raw source state must use the explicit local CLI workflow in `references/maintainer-operations.md`.
-
 For peer-reviewed papers about TCIA data, use TCIA's Publications EndNote export via `scripts/tcia_publications.py`; DataCite describes dataset DOI metadata, not the verified manuscript bibliography. For DOI-centered metadata, start with DataCite and confirm publication/access in WordPress.
 
-## Before A Freshness-Sensitive Query
+## Choose The Data Surface
 
-From the skill root:
+For ordinary one-off and interactive questions, prefer a reachable snapshot-backed MCP service. Start with `get_snapshot_info`, then use compact search tools and follow only relevant candidates with detail tools. Do not download local artifacts merely to answer a routine query.
+
+If MCP is unavailable but the client can make HTTP requests, use the V2 REST service. Install release artifacts locally only when remote MCP/REST is unavailable or the user needs offline use, bulk analysis, custom SQL, a pinned reproducible release, or a local server. Browser-only agents should follow `references/web-browser-llms.md`.
+
+For a local artifact workflow, run from the skill root:
 
 ```bash
 python3 scripts/tcia_freshness.py check
@@ -24,7 +27,9 @@ python3 scripts/tcia_v2_bundle.py install --profile research_core
 
 The bundle manifest is the release contract. The installer stages a complete generation and verifies gzip/SQLite hashes, SQLite integrity, and foreign keys before atomically switching it into service. Valid legacy flat installs migrate automatically. Install `research_detail` only for file-grain clinical, controlled-access, and public non-DICOM work; install `audit_support` only for verbose provenance/QC and the full correction registry. The compact correction digest, counts, and source-health status remain in the top manifest.
 
-If code is out of date, ask the user to update it. If remote freshness verification fails, label results offline/unverified and report the installed release fingerprint and timestamp. Do not silently switch to live WordPress discovery. Web-only agents should follow `references/mcp-and-web-llms.md`.
+For freshness-sensitive remote answers, report the MCP/REST service's installed release fingerprint and timestamp. When the user needs confirmation that it is the latest published release, compare that fingerprint with the small current bundle manifest; do not download payload artifacts for this comparison. If the comparison cannot be completed, distinguish a validated deployed generation from latest-release status instead of claiming current verification.
+
+If local code is out of date, ask the user to update it. If remote freshness verification fails, label results offline/unverified and report the installed release fingerprint and timestamp. Do not silently switch to live WordPress discovery.
 
 Publishing a validated release does not update a deployed MCP/REST process.
 Operators still run the normal bundle install command and restart the services;
@@ -32,10 +37,10 @@ rollback selects a retained verified generation and also requires a restart.
 
 ## Query Workflow
 
-1. Confirm bundle fingerprint and capabilities with `get_snapshot_info` or the V2 manifest.
+1. Confirm the selected service or local bundle fingerprint and capabilities with `get_snapshot_info`, `/v2/bundle`, or the V2 manifest.
 2. Use `search_datasets` for compact discovery. Follow a candidate with `get_dataset` for narrative, current downloads, license/access details, and related Analysis Results.
 3. Use download-level labels for modality, file type, access, and route decisions. Split mixed datasets into open and controlled components.
-4. Check related visible Analysis Results before saying a Collection lacks annotations, segmentations, labels, or ground truth.
+4. Check related Analysis Results before saying a Collection lacks annotations, segmentations, labels, or ground truth.
 5. Use `search_participants` for availability, `get_participant_assets` for drill-down, and `get_dataset_participant_coverage` before completeness claims. Participant identity is dataset-scoped; Collections and Analysis Results remain distinct.
 6. Follow `next_cursor` while `has_more` is true. Keep the same filters and limit because cursors are release/component/file-generation-local and query-bound; restart after any artifact change.
 7. Cite the TCIA page and DOI where available. State access/license caveats and distinguish verified, published, deployed, and unverified status.
@@ -46,15 +51,16 @@ rollback selects a retained verified generation and also requires a restart.
 | --- | --- |
 | Snapshot schema, SQL, releases, freshness | `references/schema.md`, `references/snapshots.md` |
 | V2 bundle, Participant Inventory, public non-DICOM | `references/artifact-model-v2.md` |
-| MCP, REST, or web-only use | `references/mcp-and-web-llms.md` |
+| Browser-only or web-search use | `references/web-browser-llms.md` |
+| MCP/REST tools, protocol, deployment, or compatibility | `mcp_server/README.md`, `references/api-upgrade-notes.md` |
 | Agent/server upgrade compatibility | `references/api-upgrade-notes.md` |
-| Maintainer builds, raw hidden-state checks, operations | `references/maintainer-operations.md` |
+| Maintainer builds, raw-source checks, operations | `references/maintainer-operations.md` |
 | Publications and verified manuscripts | `references/publications.md` |
 | Public DICOM and annotations | `references/idc-dicom-downloads.md` |
 | Participant-level clinical facts | `references/clinical.md` |
 | Controlled access or authorized retrieval | `references/controlled-access.md` |
 | NIfTI or public non-DICOM imaging | `references/nifti.md`, `references/artifact-model-v2.md` |
-| Pathology, PathDB, or Aspera packages | `references/pathdb.md`, `references/aspera.md` |
+| Pathology, PathDB, or Aspera packages | `references/pathology.md`, `references/pathdb.md`, `references/aspera.md` |
 | Viewer links | `references/visualization.md` |
 | CDA enrichment | `references/cda.md` |
 | General Commons | `references/general-commons-graphql.md` |

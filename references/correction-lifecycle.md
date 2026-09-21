@@ -2,9 +2,9 @@
 
 Use `scripts/tcia_correction_registry.py` to record derived-metadata corrections
 without changing the authoritative WordPress, clinical, workbook, or file-list
-source rows. The registry is additive: current builders and their existing
-reviewed inputs remain the production behavior until the bundle workflow is
-explicitly wired to publish the registry.
+source rows. Current builders continue to apply their reviewed inputs, while
+the release workflow packages the registry as the audit record for those
+decisions and their observed effects.
 
 ## Evidence model
 
@@ -27,7 +27,7 @@ Machine-extracted WordPress clues are always `proposal_only=1`, use candidate
 confidence, and cannot directly create an approved decision. Current clue
 classes cover identifier/naming contracts, Collection/Analysis Result source
 relationships, count statements, access restrictions, geometry wording, and
-explicit unavailability. Hidden WordPress records are outside this lifecycle.
+explicit unavailability.
 
 `correction_decisions` is append-only. `decision_id` identifies one logical
 scope. `revision_id` includes status, reviewer/approver, review timestamps,
@@ -163,11 +163,9 @@ trip the high-severity gate.
 `--fail-on-unexplained-high` returns status 2 when high-severity semantic
 changes remain unexplained.
 
-The strict option is intentionally not enabled in a workflow by this change.
-The final bundle integrator should build the registry before reporting, pass
-the old/new registry with `--correction-old/--correction-new`, persist both
-Markdown and JSON reports, and enable the strict gate after correction-effect
-matching is part of the release build.
+The release workflow enables the strict gate after building the registry,
+passes the old/new registry with `--correction-old/--correction-new`, persists
+the Markdown and JSON reports, and matches observed changes to approved effects.
 
 ## Declarative assertions
 
@@ -177,21 +175,16 @@ group names its evidence file. Dynamic expectations such as optional PathDB
 inclusion remain in code until their parameterized contract is represented
 without weakening the existing gate.
 
-## Integration hooks deliberately left to the final bundle integrator
+## Release integration
 
-No workflow, MCP, REST, deployment, or service file is changed here. The final
-integrator should:
+The bundle workflow now builds and validates the registry from the exact staged
+snapshot, compares old and new registry state during semantic reporting,
+matches observed effects to approved corrections, packages the complete
+registry in `audit_support`, and promotes compact correction/source-health
+summaries into the top manifest. Release linkage is finalized against the
+published fingerprint without introducing a fingerprint cycle.
 
-1. build and validate the registry from the exact staged snapshot and manifest;
-2. persist it in audit support or define it as a new hash-pinned component;
-3. pass registry old/new paths into semantic change reporting;
-4. match observed row effects to approved correction effects before enabling
-   the unexplained-high hard gate;
-5. link the final release fingerprint, source health, and change-report digest;
-6. promote correction/source-health summaries into the top bundle manifest;
-7. use `--full-content` audit reconstruction when release runtime permits, or
-   retain the deterministic sample plus schedule the full digest as a required
-   pre-promotion job.
-
-Do not describe the registry as published or deployed until those integration
-steps have completed and the released SQLite/hash contract has been verified.
+Keep those gates atomic with the rest of the bundle. A local registry build or
+green unit test is not evidence that a release was published or deployed;
+verify the immutable release asset, bundle fingerprint, and installed receipt
+before making that claim.

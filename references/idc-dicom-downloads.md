@@ -48,7 +48,7 @@ Do not silently install packages. If package installation is not allowed, explai
 
 ## Workflow
 
-1. Confirm the dataset is a visible TCIA WordPress Collection or Analysis Result.
+1. Confirm the dataset is a TCIA-published Collection or Analysis Result.
 2. Check WordPress license metadata before giving download commands.
 3. Identify DICOM download candidates from snapshot `file_type = DICOM`, existing `.tcia` manifest URLs, CSV/TSV/XLSX manifest URLs, or DICOM-specific `data_type` values such as CT, MR, PT, RTSTRUCT, SEG, SR, DX, MG, CR, NM, RTDOSE, RTPLAN, RTIMAGE, REG, KO, PR, RWV, OT, US, XA, RF, and SC.
 4. For open/public data, before downloading, ask whether the user wants direct agent download in the current environment or a portable TCIA Data Retriever CSV manifest. For controlled data, require the policy/dbGaP/API-key workflow in `references/controlled-access.md`.
