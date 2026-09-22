@@ -2,12 +2,12 @@
   "files": {
     ".agents/skills/tcia-release-verification/SKILL.md": "4813cd18d31e45cf2536f5e80fcd74e81f66dbbfae1a97b341b659f517bc208d",
     "AGENTS.md": "25af7a2157ae17686d34c85d4b6becf38d00d38a741baadc59cdfbcbf322e4a8",
-    "README.md": "c3f0942211cac2fdd88e7fec4a9399e6fccc20985551ef320ff7650023ef3b58",
-    "SKILL.md": "a74cfa3138469b4ef3557185ed85d441a68c32ff2b3a45f376579d5c94051f43",
+    "README.md": "f2500cd2ef56a3f03349d14c1ca68f12e8432cbc91fc591b3dee9889df70d158",
+    "SKILL.md": "ba2d3fa7bfec7a1bf4c5b69fbd0cc5a2a5ec302afd2d679ef5841a687f98d7d7",
     "agents/openai.yaml": "ea107d3e983d86fd1c397f8a347b4202193bb3c987cd74514c6c20c4100581f0",
     "evals/README.md": "d1d3a3212ee938b2dd4fc775eb21c434e1aa0335620d36a1d410a82b380f0704",
     "evals/answer-rubric.schema.json": "881379b3384e81aa4faef8f4f826e09f4d48967ec6e81a077a482156224915c0",
-    "evals/prompts.csv": "8fd959c7080d51cbc27bc5f3e3a2efc116159aef54ce17f7a008c77e75046500",
+    "evals/prompts.csv": "9d2d055ddb52c8664dabb3bca75405df955fec3bb301079d122779d26ee1ef40",
     "mcp_server/DEPLOYMENT.md": "96cb86da43d75eabe81533b0c4c4493b4644a46c9be53ac7eeca60ec946c8867",
     "mcp_server/IMPLEMENTATION_PLAN.md": "40127cbb9e542d9b9173452175fce181878989afad4274fe7303f23b0ebca73c",
     "mcp_server/README.md": "427d9249147c437b490ebb71ccc09257cc8f33d66af93de869b5238a15b2c000",
@@ -58,7 +58,7 @@
     "references/reviewed_analysis_result_source_collections_v1.csv": "e5c0942778e5397163a334192010a2c63e756e7d98b09a62c19ae9e1e72fad32",
     "references/routing.md": "e7599009d7b6ee66adad94ca88c28efef01ffbeb52b5857d7327d8370654b8e9",
     "references/schema.md": "280e680483cdffa8defc931b04be45575fb47184a8c677d68c4eba393eaf9961",
-    "references/snapshots.md": "a878594b01c9b37a5a98d2e4fd8b0b0517546590c8c1c74b82b35944bc01e94c",
+    "references/snapshots.md": "8690bd90c6aa4041308ff9d1bcc50784d5e3b8d41fac3accea0949e5b741618d",
     "references/tcga_gbm_qi_radiogenomics_aim_inventory_v1.csv": "d19d81d8aad5a0d96f8f23ca41add1235accaf2d2d3f78a704118f7aae0b7892",
     "references/tcga_gbm_qi_radiogenomics_aim_inventory_v1.json": "eea045615ef1a80c44c8f561dfbaac0f5d1890f9c211372835e5329be3927686",
     "references/tcga_lgg_mask_inventory_v1.csv": "8900a732f860dedd75dca19dc3785f0b7d6262e64186e8fd7893f442ce899202",
@@ -112,7 +112,7 @@
     "scripts/tcia_v2_parity.py": "0a651d86c0bce64ee82c0bb8da3e4fe848bf7738f6a305c4f65da37cbe9f7e69",
     "scripts/tcia_v2_staging.py": "23956a5bc09c3d7ee6ec7d74f88b458c59f716a80b6ca16ce6026ba66480bfc2",
     "scripts/tcia_wordpress_search.py": "b58dc8c3c4d68d19b9e46e943399fcb0051038587058ad7090a15b1390c88dbe",
-    "scripts/tests/test_skill_eval_contract.py": "3251a6ddecb4c34b4d85f1ad3ec7e9aabfc2c85fa5782b499ef8a9f3f2670c40",
+    "scripts/tests/test_skill_eval_contract.py": "d4884aed3eb65262dc52723dcbab624bcd71a804435c46d27a6edca7d479775c",
     "scripts/tests/test_tcia_artifact_model.py": "a5a6962eaf840d88afd75bd04388150d7d685e2206b6fa59987aa76704dcb0d0",
     "scripts/tests/test_tcia_clinical_metadata.py": "add621e1eadbc2157a9bcf1c9f05555369b5220d9c8424c6cdff91b6beda9dc2",
     "scripts/tests/test_tcia_controlled_access_metadata.py": "0017c05cea1f7f73a68033fb6ca8c4a072cabfaaf8dc6415d6d9c86b840f7bd6",
@@ -137,6 +137,6 @@
     "scripts/tests/test_tcia_v2_staging.py": "dda82d5c65b8e03b543fc80c44f30acf47a6c29861b1565104e96c568399ec25"
   },
   "schema_version": 1,
-  "skill_version": "2026.09.21.1",
-  "updated_at_utc": "2026-09-21T17:38:01.976182+00:00"
+  "skill_version": "2026.09.22.1",
+  "updated_at_utc": "2026-09-22T13:55:44.827496+00:00"
 }

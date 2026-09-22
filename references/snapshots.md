@@ -104,6 +104,12 @@ TTL, timeout, retry count, and receipt path are configurable with
 ETag conditional requests, and receipt/remote-manifest hashes are checked before
 cached results are trusted.
 
+This command is a skill-guidance check. It retrieves only the small remote
+`skill_version.json` when needed; it does not inspect, install, or download V2
+metadata artifacts. Run it near the start of a new substantive TCIA task when
+the installed scripts are available, regardless of whether the eventual query
+uses MCP, REST, canonical web pages, or local artifacts.
+
 Set the shared install directory for MCP/REST or other consumers:
 
 ```bash
@@ -118,7 +124,9 @@ not fall back to live public APIs for normal end-user discovery.
 End users do not need to reinstall the skill just to receive newer TCIA metadata. Skill code/instructions and snapshot data are separate.
 
 - Reinstall or update the skill only when the skill instructions or scripts changed.
-- Verify skill code, then refresh the manifest-pinned V2 research core:
+- Use MCP or REST for routine questions without downloading artifacts.
+- Only after choosing a local artifact workflow, verify skill code and refresh
+  the manifest-pinned V2 research core:
 
 ```bash
 python scripts/tcia_freshness.py check
@@ -131,8 +139,15 @@ When the skill is current, the bundle installer compares the remote V2
 fingerprint with the installed state, verifies the top-level and component
 contracts, and stages changed assets. It replaces installed files only after
 compressed and decompressed hashes plus SQLite integrity checks pass. Run this
-preflight at the start of each discovery task; having a local database is not
-evidence that it is still the newest published artifact.
+preflight for freshness-sensitive work that uses local artifacts; having a
+local database is not evidence that it is still the newest published artifact.
+Do not run it merely because a remote MCP/REST user asked a routine question.
+
+For a remote service, use `get_snapshot_info` or `/v2/bundle` to report the
+deployed fingerprint and timestamp. If latest-published status matters, compare
+that fingerprint with the small current bundle manifest. A lagging deployment
+is an operator update concern, not a reason to ask the remote user to install
+local artifacts.
 
 Install only the additional profiles needed for the task. `research_detail`
 adds NIfTI, pathology, controlled-access, and clinical file-grain metadata;

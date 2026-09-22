@@ -109,9 +109,20 @@ Skip this installation for routine questions when the hosted MCP or REST
 service is available. The local path is intended for offline, bulk,
 custom-SQL, pinned-release, or server-operation workflows.
 
-From the skill root, install the manifest-pinned V2 research core. This fetches
-the base WordPress snapshot and compact Participant Inventory as one validated
-release contract:
+Checking whether the installed skill guidance is current is separate and
+lightweight:
+
+```bash
+python3 scripts/tcia_freshness.py check
+```
+
+That command validates local skill files and retrieves only the small
+`skill_version.json` manifest when its six-hour cache expires. It never
+downloads metadata artifacts or updates the skill automatically.
+
+Only after choosing the local artifact workflow, install the manifest-pinned V2
+research core. This fetches the base WordPress snapshot and compact Participant
+Inventory as one validated release contract:
 
 ```bash
 python3 scripts/tcia_v2_bundle.py install --profile research_core
@@ -206,14 +217,31 @@ for every possible download. In a tightly restricted environment, start with
 the core domains or use the hosted demo, then approve optional destinations for
 the specific workflow rather than broadly allowing all external traffic.
 
-## Data Freshness
+## Skill And Metadata Freshness
+
+### Skill guidance
+
+Run `scripts/tcia_freshness.py check` near the start of a new substantive TCIA
+task when the installed scripts are available. It checks local operational
+files against the version manifest on GitHub `main`, caches successful remote
+checks for six hours, and reports an update requirement instead of silently
+replacing skill code. It does not check or download metadata artifacts.
+
+### Hosted MCP/REST metadata
+
+For ordinary remote queries, inspect the deployed fingerprint and timestamp
+through MCP `get_snapshot_info` or REST `/v2/bundle`. Compare that fingerprint
+with the small current bundle manifest only when latest-published status
+matters. If the hosted service is behind, report deployment lag; do not direct
+the user to download local artifacts merely to answer a routine question.
+
+### Local artifact metadata
 
 The base snapshot is normally rebuilt at 7:17 AM and 7:17 PM
-America/New_York, followed by the V2 bundle producer. Run
-`scripts/tcia_freshness.py check` to verify local operational files against the
-version manifest on GitHub `main`, then run the V2 bundle installer to refresh
-the checksum-verified research core. The skill check reports an update
-requirement instead of silently replacing skill code.
+America/New_York, followed by the V2 bundle producer. Users who have explicitly
+chosen offline, bulk, custom-SQL, pinned-release, or server-operation work can
+run the V2 bundle installer to compare and refresh the checksum-verified local
+profile. MCP/REST users do not need a local artifact refresh.
 
 If network verification fails, local results are offline/unverified and should
 not be described as current. See [references/snapshots.md](./references/snapshots.md)

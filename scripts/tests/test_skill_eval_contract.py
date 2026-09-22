@@ -10,9 +10,12 @@ RUBRIC = ROOT / "evals" / "answer-rubric.schema.json"
 
 
 class SkillEvalContractTests(unittest.TestCase):
-    def test_prompt_set_has_unique_positive_and_negative_cases(self):
+    def _prompt_rows(self):
         with PROMPTS.open(newline="", encoding="utf-8") as handle:
-            rows = list(csv.DictReader(handle))
+            return list(csv.DictReader(handle))
+
+    def test_prompt_set_has_unique_positive_and_negative_cases(self):
+        rows = self._prompt_rows()
 
         self.assertGreaterEqual(len(rows), 10)
         self.assertEqual(
@@ -28,6 +31,22 @@ class SkillEvalContractTests(unittest.TestCase):
             self.assertTrue(row["prompt"].strip())
             self.assertTrue(row["required_behaviors"].strip())
             self.assertTrue(row["forbidden_behaviors"].strip())
+
+    def test_freshness_cases_separate_skill_checks_from_artifact_updates(self):
+        rows = {row["id"]: row for row in self._prompt_rows()}
+        self.assertEqual(rows["skill-guidance-freshness"]["should_trigger"], "true")
+        self.assertIn(
+            "Do not install, refresh, or download metadata artifacts",
+            rows["skill-guidance-freshness"]["forbidden_behaviors"],
+        )
+        self.assertIn(
+            "operator concern",
+            rows["remote-service-lag"]["required_behaviors"],
+        )
+        self.assertIn(
+            "install the smallest adequate manifest-pinned profile",
+            rows["explicit-local-artifacts"]["required_behaviors"],
+        )
 
     def test_rubric_schema_has_stable_scoring_fields(self):
         schema = json.loads(RUBRIC.read_text(encoding="utf-8"))

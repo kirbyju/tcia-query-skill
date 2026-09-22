@@ -12,22 +12,38 @@ TCIA WordPress Collection and Analysis Result records decide whether a dataset i
 
 For peer-reviewed papers about TCIA data, use TCIA's Publications EndNote export via `scripts/tcia_publications.py`; DataCite describes dataset DOI metadata, not the verified manuscript bibliography. For DOI-centered metadata, start with DataCite and confirm publication/access in WordPress.
 
+## Check Skill Guidance Freshness
+
+At the start of a new substantive TCIA task, when the installed scripts are
+available, run:
+
+```bash
+python3 scripts/tcia_freshness.py check
+```
+
+This checks local skill-file integrity and compares the small
+`skill_version.json` manifest with GitHub `main`. Successful remote checks are
+cached for six hours. It does not inspect, install, or download metadata
+artifacts, and it never updates the skill automatically. If it reports
+`update_required`, ask the user to update the skill before making
+freshness-sensitive claims. A failed network check makes skill freshness
+unverified; it does not by itself require an artifact download.
+
 ## Choose The Data Surface
 
 For ordinary one-off and interactive questions, prefer a reachable snapshot-backed MCP service. Start with `get_snapshot_info`, then use compact search tools and follow only relevant candidates with detail tools. Do not download local artifacts merely to answer a routine query.
 
 If MCP is unavailable but the client can make HTTP requests, use the V2 REST service. Install release artifacts locally only when remote MCP/REST is unavailable or the user needs offline use, bulk analysis, custom SQL, a pinned reproducible release, or a local server. Browser-only agents should follow `references/web-browser-llms.md`.
 
-For a local artifact workflow, run from the skill root:
+Only after the user chooses a local artifact workflow, run from the skill root:
 
 ```bash
-python3 scripts/tcia_freshness.py check
 python3 scripts/tcia_v2_bundle.py install --profile research_core
 ```
 
 The bundle manifest is the release contract. The installer stages a complete generation and verifies gzip/SQLite hashes, SQLite integrity, and foreign keys before atomically switching it into service. Valid legacy flat installs migrate automatically. Install `research_detail` only for file-grain clinical, controlled-access, and public non-DICOM work; install `audit_support` only for verbose provenance/QC and the full correction registry. The compact correction digest, counts, and source-health status remain in the top manifest.
 
-For freshness-sensitive remote answers, report the MCP/REST service's installed release fingerprint and timestamp. When the user needs confirmation that it is the latest published release, compare that fingerprint with the small current bundle manifest; do not download payload artifacts for this comparison. If the comparison cannot be completed, distinguish a validated deployed generation from latest-release status instead of claiming current verification.
+For freshness-sensitive remote answers, report the MCP/REST service's installed release fingerprint and timestamp. When the user needs confirmation that it is the latest published release, compare that fingerprint with the small current bundle manifest; do not download payload artifacts for this comparison. If the service is behind, report the deployment lag as an operator concern rather than asking the user to install local artifacts. If the comparison cannot be completed, distinguish a validated deployed generation from latest-release status instead of claiming current verification.
 
 If local code is out of date, ask the user to update it. If remote freshness verification fails, label results offline/unverified and report the installed release fingerprint and timestamp. Do not silently switch to live WordPress discovery.
 
