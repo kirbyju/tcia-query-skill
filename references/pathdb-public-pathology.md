@@ -1,4 +1,4 @@
-# PathDB Metadata
+# PathDB Public Pathology
 
 Use this reference for TCIA non-DICOM histopathology data after WordPress confirms the dataset is TCIA-published.
 
@@ -65,29 +65,9 @@ python scripts/pathdb_metadata.py --doi 10.7937/jw9a-8k71 --json
 
 The helper adds a derived `camicroscope_url` field for slide-level preview links when `camic_id` is present.
 
-## caMicroscope Viewer
+## Preview Before Download
 
-For public non-DICOM PathDB slide images, use caMicroscope for browser visualization before download. Build viewer URLs from the CSV `camic_id`, not `slide_id`.
-
-The URL parameter is named `slideId`, but PathDB expects the numeric `camic_id`. The CSV `slide_id` often contains a specimen or slide label such as `C3L-00017-22`; do not put that label in the `slideId` URL parameter.
-
-```text
-https://pathdb.cancerimagingarchive.net/caMicroscope/apps/mini/viewer.html?mode=pathdb&slideId=<camic_id>
-```
-
-Example:
-
-```text
-https://pathdb.cancerimagingarchive.net/caMicroscope/apps/mini/viewer.html?mode=pathdb&slideId=314525
-```
-
-For example, if the CSV row has `slide_id = C3L-00017-22` and `camic_id = 217324`, the correct URL is:
-
-```text
-https://pathdb.cancerimagingarchive.net/caMicroscope/apps/mini/viewer.html?mode=pathdb&slideId=217324
-```
-
-Only use this route for open/public PathDB slides. If WordPress license metadata indicates controlled/restricted access, do not construct caMicroscope links; follow controlled-access guidance instead.
+Public PathDB slides can be previewed in caMicroscope before download when a numeric `camic_id` is available. Load `visualization.md` for the viewer URL pattern, identifier requirements, and controlled-access boundary; do not duplicate those mechanics here.
 
 ## Response Guidance
 

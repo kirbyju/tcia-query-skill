@@ -2,7 +2,7 @@
 
 ## Authority And Keys
 
-Use TCIA WordPress as the authoritative allowlist. For normal agent work, query the local SQLite snapshot and its agent-facing views first. For web-only environments without SQLite execution, use the V2 release exports before any live API. The snapshot builder uses the current WordPress V2 source endpoints:
+Use TCIA WordPress as the authoritative allowlist. Access the release-backed evidence through the surface suited to the environment: MCP for an MCP-capable interactive agent, REST for an HTTP-capable client without MCP, canonical public pages for browser-only agents, or validated local artifacts for offline, bulk, custom-SQL, pinned-release, and server workflows. Surface selection does not change the authority or access rules. The snapshot builder uses the current WordPress V2 source endpoints:
 
 - `https://cancerimagingarchive.net/api/v2/collections`
 - `https://cancerimagingarchive.net/api/v2/analysis-results`
@@ -28,7 +28,7 @@ Downstream field mappings:
 
 ## Discovery Process
 
-For DOI, citation, or version questions, start with DataCite records in the SQLite snapshot, not WordPress. Use `agent_datacite_dois` or `scripts/datacite_tcia_dois.py`, then use `agent_datasets` to confirm TCIA publication, access/license, and dataset pages.
+For DOI, citation, or version questions, start with DataCite records exposed by the selected snapshot-backed surface, not WordPress records alone. In a local workflow, use `agent_datacite_dois` or `scripts/datacite_tcia_dois.py`, then use `agent_datasets` to confirm TCIA publication, access/license, and dataset pages.
 
 For peer-reviewed manuscripts written about TCIA data, start with TCIA's Publications EndNote XML export, not DataCite. Load `references/publications.md` and use `scripts/tcia_publications.py` to search title, abstract, keywords, journal, PMID, manuscript DOI, and linked TCIA dataset DOI values.
 
@@ -44,28 +44,20 @@ Do not infer a file-level change from `date_updated` alone. Confirm version hist
 
 For non-DOI discovery:
 
-1. Query `agent_datasets` for both WordPress Collections and Analysis Results.
-2. Use `agent_current_downloads` and `agent_dataset_access_summary` when the answer depends on modalities, files, route labels, or access/license details.
+1. Search both WordPress Collections and Analysis Results with compact MCP/REST tools or local `agent_datasets` views.
+2. Follow relevant candidates with dataset detail. In local SQL, use `agent_current_downloads` and `agent_dataset_access_summary` when the answer depends on modalities, files, route labels, or access/license details.
 3. Filter locally so criteria can match custom fields, download labels, and flattened snapshot columns.
 4. Use the snapshot's verbose-normalized text fields for abstracts/descriptions when needed.
 5. Flag controlled access from license metadata only. Creative Commons means open; Creative Commons NonCommercial means open with noncommercial restriction; controlled/restricted license text means controlled access.
 6. Enrich only the filtered candidate set through IDC, CDA, the controlled-access SQLite, CTDC, General Commons, PathDB, or DataCite.
 7. If a candidate does not appear in WordPress, exclude it from TCIA-published results. If useful, mention it separately as related or derived.
-8. If a named dataset is absent after refreshing the local snapshot, say the published snapshot may not include the newest TCIA metadata yet. Ask the user to try again after the next 7:17 AM or 7:17 PM America/New_York snapshot run has had time to finish, then rerun `python scripts/tcia_v2_bundle.py install --profile research_core`.
+8. If a named dataset is absent, report the selected service or bundle fingerprint and timestamp. Compare it with the small current release manifest when latest-published status matters. Treat remote deployment lag as an operator concern; refresh artifacts only when the user has selected a local workflow.
 
 ## Snapshot Querying
 
-Prefer direct SQL against the agent-facing views when the user asks for precise criteria, joins, or counts. Prefer `scripts/tcia_wordpress_search.py`, `scripts/pathdb_metadata.py`, and `scripts/datacite_tcia_dois.py` for lightweight command-line searches.
+Use compact MCP tools or corresponding V2 REST endpoints for ordinary remote questions. Use direct SQL against agent-facing views, `scripts/tcia_wordpress_search.py`, `scripts/pathdb_metadata.py`, and `scripts/datacite_tcia_dois.py` only after the user selects a local artifact workflow or the task requires local execution.
 
-Before discovery, run `python scripts/tcia_freshness.py check`, then
-`python scripts/tcia_v2_bundle.py install --profile research_core` from the
-skill root. The first command verifies operational files against GitHub
-`main`; the second refreshes the checksum-verified V2 contract. Install
-`research_detail` only when the task needs file-grain detail. If skill
-verification reports `update_required`, stop and direct the user to update the
-installed skill instead of silently overwriting it. If network verification is
-unavailable, do not describe the local cache as current without the user's
-explicit acceptance of offline/unverified results.
+At the start of a substantive task, run `python scripts/tcia_freshness.py check` when the installed script is available. It checks skill guidance, not metadata artifacts. Install or refresh `research_core` only for an explicitly selected local artifact workflow; add `research_detail` only when file-grain detail is required. If skill verification reports `update_required`, direct the user to update the installed skill instead of silently overwriting it. If network verification is unavailable, do not describe local guidance or data as current without clearly labeling the result offline/unverified.
 
 Live source API details are maintainer/developer context for `scripts/tcia_snapshot.py build`, not the normal end-user discovery path. If an agent cannot query SQLite, it should use MCP/REST or the release exports documented in `snapshots.md`. A browser-only agent should use the canonical public pages described in `web-browser-llms.md`, not scrape live WordPress APIs.
 
@@ -73,18 +65,18 @@ Live source API details are maintainer/developer context for `scripts/tcia_snaps
 
 Public DICOM radiology or DICOM pathology:
 
-- Route open-access/public DICOM to IDC and `idc-index` first. This also applies to public DICOM annotation/result objects such as RTSTRUCT, SEG, SR, RTDOSE, RTPLAN, and other DICOM files.
+- Route open-access/public DICOM to IDC. Choose a configured IDC MCP connection for an MCP-capable agent, the current official IDC REST guidance for an HTTP-capable client without MCP, or the current IDC skill guidance for local execution. Let IDC document the exact capability split. This also applies to public DICOM annotation/result objects such as RTSTRUCT, SEG, SR, RTDOSE, RTPLAN, and other DICOM files.
 - Use IDC-specific tooling for series selection, series/file metadata, visualization, licenses, citations, and downloads after TCIA provenance and access/license checks are established from the snapshot.
 - Do not query live WordPress for DICOM series, modality, annotation, or file details during end-user tasks. The snapshot's WordPress fields identify TCIA publication/download/access metadata; IDC/idc-index is the preferred public DICOM detail source.
-- Avoid duplicating the IDC skill. If available, use it after TCIA provenance is established.
-- For browser visualization, load `visualization.md`. Use OHIF v3 for open radiology DICOM, SliM for open DICOM slide microscopy (`SM`), and VolView only after mapping the requested series to a public S3 folder or `crdc_series_uuid`. Return clickable links; do not install browser automation just to preview examples.
+- Avoid duplicating the IDC skill or IDC REST/MCP documentation. Use the focused TCIA boundary and routing rules in `idc-public-dicom.md` after TCIA provenance is established.
+- For browser visualization, load `visualization.md`. Request a current IDC-generated viewer URL for public DICOM; keep only TCIA-specific access boundaries and PathDB mechanics locally.
 - Before downloading DICOM data, ask whether the user wants direct agent download in the current environment or a portable TCIA Data Retriever CSV manifest created from Series Instance UIDs.
 - TCIA is phasing out NBIA. Do not use NBIA as the first route for public DICOM downloads.
 - For new Data Retriever CSV manifests, `SeriesInstanceUID` means public DICOM: IDC/S3 first, then TCIA/NBIA v4 fallback only when needed.
 - Use existing WordPress `.tcia` manifest files as Series Instance UID allowlists for IDC/idc-index lookups when helpful, but treat `.tcia` as a legacy input format.
 - Use NBIA only as a fallback when requested public DICOM series cannot be found in IDC/idc-index, or when the user explicitly asks for NBIA after being warned that IDC is preferred.
 - If NBIA fallback is needed, tell users to use the NBIA v4 API documented by `https://cbiit.github.io/NBIA-TCIA/nbia-api.yaml`.
-- Load `idc-dicom-downloads.md` for the TCIA-specific IDC download workflow.
+- Load `idc-public-dicom.md` for the TCIA-specific IDC workflow. Load `nbia-public-dicom-fallback.md` only after IDC lacks expected public series or for an explicit NBIA request.
 
 Controlled-access face datasets:
 
@@ -124,10 +116,10 @@ Non-DICOM pathology:
 - Route slide-level metadata and browser visualization questions to PathDB.
 - Prefer the stable PathDB cohort-builder CSV for rich slide-level metadata.
 - Match WordPress short title to CSV `collection`; the PathDB API collection list may use `collectionName`.
-- For open/public PathDB slides, construct caMicroscope browser viewer URLs from CSV `camic_id`: `https://pathdb.cancerimagingarchive.net/caMicroscope/apps/mini/viewer.html?mode=pathdb&slideId=<camic_id>`. The URL parameter is named `slideId`, but it must use numeric `camic_id`, not CSV `slide_id` or `patient_id`.
+- For open/public PathDB slide previews, load `visualization.md` for the caMicroscope URL pattern and identifier rules.
 - If the same pathology data are available through both PathDB and Aspera, explain the provenance difference: Aspera packages are the original submitter-provided data, while PathDB data may be converted or reformatted for TCIA's browser-based pathology viewer. Recommend Aspera for analyses that require the exact source files.
 - Use `tcia_utils.pathdb` if installed.
-- Load `pathdb.md` for the stable CSV URL, columns, and helper script.
+- Load `pathdb-public-pathology.md` for the stable CSV URL, columns, and helper script.
 
 Supporting files:
 
@@ -189,7 +181,7 @@ For search/discovery:
 | Type | Collection or Analysis Result |
 | Match reason | Cite the matching cancer type, modality, data type, body site, DOI, etc. |
 | Access route | IDC, CTDC, General Commons, PathDB, WordPress downloads, Aspera, or DataCite |
-| Visualization route | None for controlled access; OHIF v3, SliM, or VolView for open/public DICOM in IDC; caMicroscope for open/public PathDB slides |
+| Visualization route | None for controlled access; current IDC-generated viewer URL for public DICOM; caMicroscope for open/public PathDB slides |
 | Download delivery | Direct agent download or portable Data Retriever CSV manifest when DICOM Series Instance UIDs are available |
 | Access/license | Open Creative Commons, Open Creative Commons NonCommercial, controlled/restricted, or license-review-needed |
 | DOI/citation | Link DOI when present |
@@ -200,9 +192,9 @@ For exact dataset questions, give a short prose summary first, then a table of a
 ## Common Caveats
 
 - WordPress metadata can contain HTML; strip tags before quoting or matching.
-- The snapshot is built from verbose WordPress source metadata. If a very recent field is absent, ask the user to try again after the next scheduled snapshot run and refresh with `python scripts/tcia_v2_bundle.py install --profile research_core`.
+- The snapshot is built from verbose WordPress source metadata. If a very recent field is absent, report the selected service or bundle timestamp. Treat remote deployment lag as an operator concern; suggest a local bundle refresh only to users already working locally.
 - Controlled-access metadata can be visible even when file downloads require approval. Determine controlled status from license metadata, then link to the TCIA NIH Controlled Data Access Policy for current request, dbGaP approval, JSON API key, and TCIA Data Retriever configuration steps. An authorized agent-run transfer requires an explicit user request, an official CRDC manifest, and the path to the user's own key.
-- Controlled-access data cannot be previewed through public browser viewers before download. Report metadata and access guidance instead of constructing OHIF, SliM, VolView, IDC, NBIA, PathDB, or other public viewer URLs.
+- Controlled-access data cannot be previewed through public browser viewers before download. Report metadata and access guidance instead of constructing IDC, NBIA, caMicroscope, PathDB, or other public viewer URLs.
 - Visualization answers should provide links for users to open in their own browser. Do not install Playwright or other browser automation just to demonstrate viewer links.
 - For open-access/public DICOM downloads, prefer IDC/idc-index. Existing TCIA `.tcia` manifests can be parsed for Series Instance UID allowlists, but NBIA should be fallback-only for public DICOM. New portable Data Retriever manifests should be CSV/TSV/XLSX-compatible, not `.tcia`, unless the user explicitly asks for the legacy NBIA-era format. If NBIA fallback is needed, use the NBIA v4 API documented by `https://cbiit.github.io/NBIA-TCIA/nbia-api.yaml`. For controlled-access DICOM, use WordPress license metadata plus the downstream route identified by current WordPress metadata, such as CTDC for Biobank controlled-access face data or General Commons for non-Biobank face data routed there; do not imply public IDC/NBIA download.
 - For new Data Retriever CSV manifests, route by one preferred header only: `SeriesInstanceUID` for public DICOM, `imageUrl` for PathDB/direct public files, or `drs_uri` for controlled-access files when official WordPress, CTDC, or General Commons manifests provide DRS URIs. Avoid mixed-route manifests because Data Retriever applies header precedence.

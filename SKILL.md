@@ -31,9 +31,16 @@ unverified; it does not by itself require an artifact download.
 
 ## Choose The Data Surface
 
-For ordinary one-off and interactive questions, prefer a reachable snapshot-backed MCP service. Start with `get_snapshot_info`, then use compact search tools and follow only relevant candidates with detail tools. Do not download local artifacts merely to answer a routine query.
+Choose the query surface by the agent's execution environment and the user's requested outcome:
 
-If MCP is unavailable but the client can make HTTP requests, use the V2 REST service. Install release artifacts locally only when remote MCP/REST is unavailable or the user needs offline use, bulk analysis, custom SQL, a pinned reproducible release, or a local server. Browser-only agents should follow `references/web-browser-llms.md`.
+| Environment or need | Preferred TCIA surface |
+| --- | --- |
+| MCP-capable agent doing an ordinary interactive query | Snapshot-backed MCP service |
+| HTTP-capable agent, script, or application without MCP | V2 REST service |
+| Browser-only agent without MCP or programmable HTTP | Canonical public pages in `references/web-browser-llms.md` |
+| Offline work, bulk analysis, custom SQL, pinned-release reproducibility, or operating a local server | Validated local V2 artifacts |
+
+This selection controls how the same release-backed evidence is accessed; it does not change TCIA publication authority, license rules, or provenance requirements. When MCP is selected, start with `get_snapshot_info`, use compact search tools, and follow only relevant candidates with detail tools. Do not download local artifacts merely to answer a routine query.
 
 Only after the user chooses a local artifact workflow, run from the skill root:
 
@@ -72,20 +79,21 @@ rollback selects a retained verified generation and also requires a restart.
 | Agent/server upgrade compatibility | `references/api-upgrade-notes.md` |
 | Maintainer builds, raw-source checks, operations | `references/maintainer-operations.md` |
 | Publications and verified manuscripts | `references/publications.md` |
-| Public DICOM and annotations | `references/idc-dicom-downloads.md` |
+| Public DICOM and annotations | `references/idc-public-dicom.md` |
+| Public DICOM missing from IDC or explicit NBIA request | `references/nbia-public-dicom-fallback.md` |
 | Participant-level clinical facts | `references/clinical.md` |
 | Controlled access or authorized retrieval | `references/controlled-access.md` |
 | NIfTI or public non-DICOM imaging | `references/nifti.md`, `references/artifact-model-v2.md` |
-| Pathology, PathDB, or Aspera packages | `references/pathology.md`, `references/pathdb.md`, `references/aspera.md` |
+| Pathology, PathDB, or Aspera packages | `references/pathology.md`, `references/pathdb-public-pathology.md`, `references/aspera.md` |
 | Viewer links | `references/visualization.md` |
 | CDA enrichment | `references/cda.md` |
 | General Commons | `references/general-commons-graphql.md` |
-| DOI versions/relationships | `references/datacite-relationships.md` |
+| DOI versions/relationships | `references/datacite-doi-relationships.md` |
 
 ## Access And Download Rules
 
 - Creative Commons is open. Creative Commons NonCommercial is open with a noncommercial restriction. Controlled/restricted licenses require the current TCIA policy and authorized route.
-- Public DICOM detail and download should use IDC/idc-index first. NBIA v4 is a fallback only when IDC lacks the requested series or the user explicitly requests it after the preference is explained.
+- For public DICOM detail, preview, and retrieval planning, load `references/idc-public-dicom.md` and choose IDC MCP, REST, or local `idc-index` by environment. NBIA v4 is a fallback only when IDC lacks the requested series or the user explicitly requests it after the preference is explained.
 - Controlled-access metadata and manifests do not grant authorization. Never make public viewer or download links for controlled data.
 - Before transferring payloads, ask whether the user wants a direct download in the active environment or a portable manifest/file list.
 - For controlled downloads, require an explicit transfer request and a user-specified path to their valid JSON key. Use only official TCIA/CRDC manifests and the official TCIA Data Retriever. Never print, copy, embed, upload, or send credential contents elsewhere.
@@ -100,7 +108,7 @@ rollback selects a retained verified generation and also requires a restart.
 - Clinical identity is `(short_title, subject_id)`. Preserve fact provenance, inference flags, source precedence, and conflicts; load `references/clinical.md` before patient-level claims.
 - Use CDA only for enrichment after validating TCIA/IDC identifiers. Do not use it to claim TCIA publication, official clinical completeness, or access rights.
 - Do not broaden downstream searches beyond validated TCIA short titles, DOIs, or participant identifiers without explicit exploratory scope.
-- Viewer routing: OHIF for public radiology, SliM for public slide microscopy, and VolView only after mapping to a public S3 path or CRDC series UUID. VolView is not UID-based.
+- Viewer routing: use `references/visualization.md`. For IDC, request a current viewer URL from the selected IDC surface rather than copying viewer products or URL formats into this skill; PathDB preview rules remain TCIA-specific.
 - Do not install browser automation merely to show a viewer example; return a link unless browser interaction was requested.
 - Do not make medical, legal, regulatory, or suitability conclusions. Report metadata, evidence, uncertainty, and access terms.
 

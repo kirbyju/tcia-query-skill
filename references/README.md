@@ -12,11 +12,12 @@ These files explain how to answer a particular class of question:
 | --- | --- |
 | Source and access routing | `routing.md` |
 | Browser-only and web-search agents | `web-browser-llms.md` |
-| Dataset DOI relationships | `datacite-relationships.md` |
+| Dataset DOI relationships | `datacite-doi-relationships.md` |
 | Publications about TCIA data | `publications.md` |
-| DICOM access and downloads | `idc-dicom-downloads.md` |
+| Public DICOM discovery, preview, and access | `idc-public-dicom.md` |
+| NBIA fallback and legacy `.tcia` manifests | `nbia-public-dicom-fallback.md` |
 | NIfTI and public non-DICOM | `nifti.md` |
-| Pathology, PathDB, and Aspera | `pathology.md`, `pathdb.md`, `aspera.md` |
+| Pathology, PathDB, and Aspera | `pathology.md`, `pathdb-public-pathology.md`, `aspera.md` |
 | Clinical and controlled access | `clinical.md`, `controlled-access.md` |
 | CDA and General Commons enrichment | `cda.md`, `general-commons-graphql.md` |
 | Viewer links | `visualization.md` |

@@ -49,11 +49,13 @@ WordPress scraping, credentials, or controlled-data downloads. Availability
 and capacity are not guaranteed. V2 is the supported and documented REST
 interface for new clients.
 
-For ordinary one-off questions, prefer MCP or the V2 REST API. The server
-queries its already-installed validated bundle and returns compact results, so
-the user does not need to download SQLite or JSONL artifacts. Local artifacts
-remain available for offline use, bulk analysis, custom SQL, pinned-release
-reproducibility, and operating another server.
+For ordinary one-off questions, use MCP when the agent supports it or the V2
+REST API when the client can make HTTP requests without MCP. Browser-only
+agents can use the canonical public routes documented under `references/`.
+The server queries its already-installed validated bundle and returns compact
+results, so the user does not need to download SQLite or JSONL artifacts.
+Local artifacts remain available for offline use, bulk analysis, custom SQL,
+pinned-release reproducibility, and operating another server.
 
 Server 0.3.0 adds compact discovery responses, opaque cursor pagination,
 typed problem responses, and separate liveness/readiness checks. It removes
@@ -204,8 +206,6 @@ Optional enrichments and routes:
 - `general.datacommons.cancer.gov` for General Commons metadata
 - `glioblastoma.alleninstitute.org` for the Allen IvyGAP clinical source
 - `raw.githubusercontent.com` for selected public GitHub-hosted source files
-- `viewer.imaging.datacommons.cancer.gov` for IDC viewer links
-- `volview.kitware.app` for VolView links
 - `tcia.duckdns.org` when using the hosted MCP/REST demo instead of local data
 
 IDC/idc-index, CDA, package installation, and actual data transfer may require
@@ -266,6 +266,10 @@ audit evidence are optional. See
 - [references/controlled-access.md](./references/controlled-access.md): controlled-access policy and authorized Data Retriever use
 - [references/nifti.md](./references/nifti.md): unified V2 NIfTI metadata
 - [references/pathology.md](./references/pathology.md): unified V2 PathDB/Aspera pathology metadata
+- [references/pathdb-public-pathology.md](./references/pathdb-public-pathology.md): public PathDB slide metadata and routing
+- [references/idc-public-dicom.md](./references/idc-public-dicom.md): public IDC discovery, preview, manifests, and downloads
+- [references/nbia-public-dicom-fallback.md](./references/nbia-public-dicom-fallback.md): NBIA fallback and legacy `.tcia` manifests
+- [references/datacite-doi-relationships.md](./references/datacite-doi-relationships.md): DOI metadata and related external records
 - [references/publications.md](./references/publications.md): verified publication searches
 - [references/visualization.md](./references/visualization.md): viewer routing
 - [mcp_server/README.md](./mcp_server/README.md): local MCP/REST service

@@ -1,4 +1,4 @@
-# DataCite Relationships
+# DataCite DOI Relationships
 
 Use DataCite snapshot records first for DOI metadata, citations, and versions. Use TCIA records afterward to confirm whether the work is TCIA-published and to obtain access/license details and user-facing dataset pages.
 

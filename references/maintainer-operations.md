@@ -177,7 +177,6 @@ Do not advertise this option to public clients or use its records in ordinary di
 - `scripts/tcia_metadata_change_report.py`: compare rebuilt artifacts and produce review summaries.
 - `scripts/tcia_manifest_series_uids.py`: extract Series Instance UIDs from legacy manifests.
 - `scripts/tcia_create_data_retriever_csv.py`: create supported route-column manifests.
-- `scripts/idc_viewer_urls.py`: create viewer URLs after provenance/access/IDC validation.
 - `scripts/datacite_tcia_dois.py` and `scripts/tcia_publications.py`: DOI and verified-publication maintenance/query utilities.
 
 See `references/snapshots.md`, `references/schema.md`, and `references/artifact-model-v2.md` for the detailed release and database contracts.
