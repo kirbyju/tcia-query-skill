@@ -15,7 +15,7 @@ their connector and HTTP support independently.
 
 1. If the client already supports a remote MCP connection, use
    `https://tcia.duckdns.org/mcp` and follow `mcp_server/README.md`.
-2. If it can make arbitrary HTTP requests, use the V2 REST service at
+2. If it can make arbitrary HTTP requests, use the REST service at
    `https://tcia.duckdns.org/v2`. Its OpenAPI document is
    `https://tcia.duckdns.org/v2/openapi.json`.
 3. If it has web search or page retrieval only, use canonical TCIA Collection
@@ -68,7 +68,7 @@ instead of claiming that the REST service was queried.
 If web pages, MCP, and REST are unavailable but the host can retrieve and
 decompress files, resolve the current GitHub release and read
 `tcia_metadata_v2_bundle_manifest.json` before selecting an asset from that same
-release. Use `snapshots.md` and `artifact-model-v2.md` for the artifact contract.
+release. Use `snapshots.md` and `artifact-model.md` for the artifact contract.
 
 The compressed JSONL exports are fallbacks for environments that can process
 gzip and line-delimited JSON but cannot query SQLite. They are not precomputed

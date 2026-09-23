@@ -1,7 +1,7 @@
 # Public non-DICOM geometry batch analysis on SLURM
 
 This workflow downloads the open, volume-capable non-DICOM assets
-represented in the TCIA Metadata V2 public non-DICOM artifact and analyzes
+represented in the TCIA public non-DICOM artifact and analyzes
 their geometry without reading pixel or voxel arrays into memory.
 
 It deliberately excludes:
@@ -10,7 +10,7 @@ It deliberately excludes:
   `volume_geometry_index`;
 - controlled or restricted assets;
 - pathology, still-image, video, clinical, and supporting-file formats;
-- files not represented by the selected V2 release.
+- files not represented by the selected release.
 
 The default formats are NIfTI, MHA, MHD, and NRRD. A DICOM parser remains in
 the utility for explicitly requested diagnostic runs, but those results are not
@@ -20,7 +20,7 @@ treated as proof of geometric coherence.
 
 ## Storage and network expectations
 
-At the time this workflow was prepared, the local V2 detail artifact resolved
+At the time this workflow was prepared, the local detail artifact resolved
 54 open download groups with approximately 870 GiB of cataloged payload. Some
 Aspera packages contain additional non-target files, so provision more space
 than the catalog total. Use a shared project or scratch filesystem rather than
@@ -28,7 +28,7 @@ home-directory storage.
 
 The job plan groups transfers by published download route. It does not submit
 one transfer per file. HTTP downloads use resumable `curl`; Aspera downloads
-use the exact Faspex URL from the V2 artifact and `ascli`/`ascp`. The downloader
+use the exact Faspex URL from the release artifact and `ascli`/`ascp`. The downloader
 uses the current Faspex 5 public-link workflow even when a published TCIA URL
 retains a legacy-looking `/aspera/faspex/` path. HTTP retry options are detected
 from the installed `curl`, so older cluster releases that lack
@@ -68,7 +68,7 @@ smaller than `public_non_dicom_metadata.sqlite`. Keep
 `jobs.private.jsonl` protected during transfer because it contains the exact
 published package links.
 
-If the cluster will create the plan instead, install the current V2 detail
+If the cluster will create the plan instead, install the current detail
 artifact there first. From a `tcia-query-skill` checkout:
 
 ```bash
@@ -156,7 +156,7 @@ The default analyzer uses:
 
 Results are one row per discovered volume file. If DICOM is explicitly selected
 for source diagnosis, its results are one row per Series Instance UID and stay
-outside the V2 public-non-DICOM release artifact.
+outside the public non-DICOM release artifact.
 
 ## 6. Merge and return the compact results
 
@@ -202,7 +202,7 @@ document the missing path and source error in a mode-0640-or-more-restrictive
 `results/<job_id>.coverage.json`, and notify the dataset curator. The analyzer
 accepts that marker so the available files can be assessed, but the coverage
 record remains explicitly incomplete. Import such a sidecar with the repeatable
-`--geometry-coverage` option when building the V2 detail artifact.
+`--geometry-coverage` option when building the detail artifact.
 
 ## Result meanings
 
@@ -224,7 +224,7 @@ clinical usability, or correctness of voxel values.
 
 ## Scheduled-release behavior
 
-GitHub Actions does not repeat the HPC transfer or header analysis. The V2
+GitHub Actions does not repeat the HPC transfer or header analysis. The release
 release workflow downloads the immutable geometry seed named by
 `references/public_non_dicom_geometry_results_manifest.json`, verifies its
 size and SHA-256, regenerates the current safe job plan, and compares current

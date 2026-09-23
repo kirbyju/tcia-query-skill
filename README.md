@@ -46,10 +46,10 @@ The MCP URL is a protocol endpoint, not a normal web page; configure it in an
 MCP-capable client using streamable HTTP. The demo is intended for evaluation
 and read-only queries. It does not expose arbitrary SQL, shell access, live
 WordPress scraping, credentials, or controlled-data downloads. Availability
-and capacity are not guaranteed. V2 is the supported and documented REST
-interface for new clients.
+and capacity are not guaranteed. The routes under `/v2/` are the supported and
+documented REST interface for new clients.
 
-For ordinary one-off questions, use MCP when the agent supports it or the V2
+For ordinary one-off questions, use MCP when the agent supports it or the
 REST API when the client can make HTTP requests without MCP. Browser-only
 agents can use the canonical public routes documented under `references/`.
 The server queries its already-installed validated bundle and returns compact
@@ -57,11 +57,8 @@ results, so the user does not need to download SQLite or JSONL artifacts.
 Local artifacts remain available for offline use, bulk analysis, custom SQL,
 pinned-release reproducibility, and operating another server.
 
-Server 0.3.0 adds compact discovery responses, opaque cursor pagination,
-typed problem responses, and separate liveness/readiness checks. It removes
-legacy internal query controls from public contracts. Supported V1 URLs are
-deprecated breaking aliases with migration headers; retired standalone NIfTI/pathology V1
-URLs return `410 Gone`. See [API upgrade notes](./references/api-upgrade-notes.md).
+See [API upgrade notes](./references/api-upgrade-notes.md) for compatibility,
+migration, and client-visible protocol changes.
 
 See [mcp_server/README.md](./mcp_server/README.md) for the tool surface and
 instructions for running your own MCP/REST server.
@@ -122,7 +119,7 @@ That command validates local skill files and retrieves only the small
 `skill_version.json` manifest when its six-hour cache expires. It never
 downloads metadata artifacts or updates the skill automatically.
 
-Only after choosing the local artifact workflow, install the manifest-pinned V2
+Only after choosing the local artifact workflow, install the manifest-pinned
 research core. This fetches the base WordPress snapshot and compact Participant
 Inventory as one validated release contract:
 
@@ -238,9 +235,9 @@ the user to download local artifacts merely to answer a routine question.
 ### Local artifact metadata
 
 The base snapshot is normally rebuilt at 7:17 AM and 7:17 PM
-America/New_York, followed by the V2 bundle producer. Users who have explicitly
+America/New_York, followed by the bundle producer. Users who have explicitly
 chosen offline, bulk, custom-SQL, pinned-release, or server-operation work can
-run the V2 bundle installer to compare and refresh the checksum-verified local
+run the bundle installer to compare and refresh the checksum-verified local
 profile. MCP/REST users do not need a local artifact refresh.
 
 If network verification fails, local results are offline/unverified and should
@@ -252,7 +249,7 @@ The default release contract is the moving `tcia-metadata-v2-latest` tag, with
 immutable releases retained for reproducibility. Research-core contains the
 base snapshot and compact Participant Inventory; file-grain detail and verbose
 audit evidence are optional. See
-[references/artifact-model-v2.md](./references/artifact-model-v2.md).
+[references/artifact-model.md](./references/artifact-model.md).
 
 ## Documentation Map
 
@@ -261,11 +258,11 @@ audit evidence are optional. See
 - [references/README.md](./references/README.md): reference categories and maintenance rules
 - [references/schema.md](./references/schema.md): SQLite views and query patterns
 - [references/snapshots.md](./references/snapshots.md): freshness and releases
-- [references/artifact-model-v2.md](./references/artifact-model-v2.md): public non-DICOM and Participant Inventory contracts
+- [references/artifact-model.md](./references/artifact-model.md): public non-DICOM and Participant Inventory contracts
 - [references/clinical.md](./references/clinical.md): patient-level clinical data
 - [references/controlled-access.md](./references/controlled-access.md): controlled-access policy and authorized Data Retriever use
-- [references/nifti.md](./references/nifti.md): unified V2 NIfTI metadata
-- [references/pathology.md](./references/pathology.md): unified V2 PathDB/Aspera pathology metadata
+- [references/nifti.md](./references/nifti.md): unified NIfTI metadata
+- [references/pathology.md](./references/pathology.md): unified PathDB/Aspera pathology metadata
 - [references/pathdb-public-pathology.md](./references/pathdb-public-pathology.md): public PathDB slide metadata and routing
 - [references/idc-public-dicom.md](./references/idc-public-dicom.md): public IDC discovery, preview, manifests, and downloads
 - [references/nbia-public-dicom-fallback.md](./references/nbia-public-dicom-fallback.md): NBIA fallback and legacy `.tcia` manifests

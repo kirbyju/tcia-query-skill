@@ -108,7 +108,7 @@ python scripts/tcia_clinical_metadata.py export-qc \\
 
 Add `--all` to include accepted automatic normalizations and exclusions.
 Use `--collection RADCURE` (or another exact Collection short title) to
-produce a dataset-specific review queue. The V2 release retains detailed
+produce a dataset-specific review queue. The release retains detailed
 clinical-review material in the Participant Inventory audit companion; export
 a CSV locally only when a separate review file is useful.
 Use `--all` when auditing accepted automatic findings, including

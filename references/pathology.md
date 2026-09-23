@@ -2,10 +2,10 @@
 
 TCIA WordPress metadata is authoritative for current public pathology download
 scope. PathDB provides slide metadata and browser-viewing enrichment. Unified
-V2 public non-DICOM detail is the file-level query artifact; the standalone
+Public non-DICOM detail is the file-level query artifact; the standalone
 pathology SQLite is retired from releases and routine production.
 
-## Install V2 Detail
+## Install Local Detail
 
 ```bash
 python scripts/tcia_v2_bundle.py install --profile research_detail
@@ -47,7 +47,7 @@ The audit companion retains the exact last parity-validated rows in:
 - `source_pathology__pathology_disparities`
 
 These are historical audit evidence. Current WordPress aggregates and PathDB
-file rows are refreshed directly into unified V2; the checkpoint is not rebuilt
+file rows are refreshed directly into the unified artifact; the checkpoint is not rebuilt
 from a standalone pathology database.
 
 ## Interpretation
@@ -66,6 +66,6 @@ from a standalone pathology database.
   separate controlled-access route.
 
 New package inventories or reconciliation corrections should be added as
-reviewed V2 references or native adapters with source checksums, observation
+reviewed references or native adapters with source checksums, observation
 dates, and additive QC fields. The legacy pathology builders remain only for
 migration forensics and reproducibility; do not publish their SQLite outputs.

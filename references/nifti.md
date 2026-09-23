@@ -2,10 +2,10 @@
 
 TCIA WordPress metadata is authoritative for whether a NIfTI package is a
 current TCIA-published download. File-level discovery is provided only through
-the unified V2 public non-DICOM artifact. The standalone NIfTI SQLite is
+the unified public non-DICOM artifact. The standalone NIfTI SQLite is
 retired and is neither a release asset nor a routine producer input.
 
-## Install V2 Detail
+## Install Local Detail
 
 ```bash
 python scripts/tcia_v2_bundle.py install --profile research_detail
@@ -63,8 +63,8 @@ The audit companion retains the exact last parity-validated rows in:
 - `source_nifti__annotation_groups`
 
 These tables are historical audit evidence. They are not refreshed from a
-standalone NIfTI artifact. New corrections belong in reviewed V2 references or
-native V2 source adapters and must preserve source values and provenance.
+standalone NIfTI artifact. New corrections belong in reviewed references or
+native source adapters and must preserve source values and provenance.
 
 ## Reviewed Dataset Contracts
 

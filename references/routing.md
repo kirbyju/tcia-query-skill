@@ -2,7 +2,7 @@
 
 ## Authority And Keys
 
-Use TCIA WordPress as the authoritative allowlist. Access the release-backed evidence through the surface suited to the environment: MCP for an MCP-capable interactive agent, REST for an HTTP-capable client without MCP, canonical public pages for browser-only agents, or validated local artifacts for offline, bulk, custom-SQL, pinned-release, and server workflows. Surface selection does not change the authority or access rules. The snapshot builder uses the current WordPress V2 source endpoints:
+Use TCIA WordPress as the authoritative allowlist. Access the release-backed evidence through the surface suited to the environment: MCP for an MCP-capable interactive agent, REST for an HTTP-capable client without MCP, canonical public pages for browser-only agents, or validated local artifacts for offline, bulk, custom-SQL, pinned-release, and server workflows. Surface selection does not change the authority or access rules. The snapshot builder uses the current WordPress API endpoints:
 
 - `https://cancerimagingarchive.net/api/v2/collections`
 - `https://cancerimagingarchive.net/api/v2/analysis-results`
@@ -55,7 +55,7 @@ For non-DOI discovery:
 
 ## Snapshot Querying
 
-Use compact MCP tools or corresponding V2 REST endpoints for ordinary remote questions. Use direct SQL against agent-facing views, `scripts/tcia_wordpress_search.py`, `scripts/pathdb_metadata.py`, and `scripts/datacite_tcia_dois.py` only after the user selects a local artifact workflow or the task requires local execution.
+Use compact MCP tools or corresponding REST endpoints for ordinary remote questions. Use direct SQL against agent-facing views, `scripts/tcia_wordpress_search.py`, `scripts/pathdb_metadata.py`, and `scripts/datacite_tcia_dois.py` only after the user selects a local artifact workflow or the task requires local execution.
 
 At the start of a substantive task, run `python scripts/tcia_freshness.py check` when the installed script is available. It checks skill guidance, not metadata artifacts. Install or refresh `research_core` only for an explicitly selected local artifact workflow; add `research_detail` only when file-grain detail is required. If skill verification reports `update_required`, direct the user to update the installed skill instead of silently overwriting it. If network verification is unavailable, do not describe local guidance or data as current without clearly labeling the result offline/unverified.
 

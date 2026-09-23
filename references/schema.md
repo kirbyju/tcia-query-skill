@@ -4,14 +4,14 @@ Use this reference when querying
 `cache/tcia-metadata-v2-latest/tcia_snapshot.sqlite` or a database selected by
 `TCIA_SNAPSHOT_DB`.
 
-The default V2 release exposes two compressed web exports: `agent_datasets.jsonl.gz` for `agent_dataset_access_summary` and `agent_current_downloads.jsonl.gz` for `agent_current_downloads`. Query `agent_dataset_versions` and `agent_dataset_v1_releases` inside `tcia_snapshot.sqlite` (or through MCP/REST); the streamlined release does not publish separate timeline JSONL files or plain JSONL copies. Filter the V2 exports for controlled/mixed access, modalities, DICOM annotation labels, and download routes instead of relying on prompt-specific precomputed answers.
+The default release exposes two compressed web exports: `agent_datasets.jsonl.gz` for `agent_dataset_access_summary` and `agent_current_downloads.jsonl.gz` for `agent_current_downloads`. Query `agent_dataset_versions` and `agent_dataset_v1_releases` inside `tcia_snapshot.sqlite` (or through MCP/REST); the streamlined release does not publish separate timeline JSONL files or plain JSONL copies. Filter the exports for controlled/mixed access, modalities, DICOM annotation labels, and download routes instead of relying on prompt-specific precomputed answers.
 
 NIfTI and pathology file-grain rows are unified in
-`public_non_dicom_metadata.sqlite`, installed with the V2 `research_detail`
+`public_non_dicom_metadata.sqlite`, installed with the `research_detail`
 profile. Specialized retained source rows and QC are in its audit companion.
 
-The V2 public non-DICOM and Participant Inventory contracts are documented in
-`references/artifact-model-v2.md`. They use profile-based downloads and
+The public non-DICOM and Participant Inventory contracts are documented in
+`references/artifact-model.md`. They use profile-based downloads and
 optional audit companions under one manifest-pinned release contract.
 
 During a full build, reviewed and automated public non-DICOM crosswalks are
@@ -96,7 +96,7 @@ composite IDs remain in `raw_subject_id`. Use
 `managed_representation_correspondence` relationships only as published
 filename correspondence; they do not establish checksum or byte equality.
 
-The controlled-access and clinical SQLite databases are installed with the V2
+The controlled-access and clinical SQLite databases are installed with the
 `research_detail` profile and documented in `references/controlled-access.md`
 and `references/clinical.md`.
 
@@ -386,7 +386,7 @@ evidence under `source_pathology__*` tables for reproducibility; it is not a
 second current pathology API. See `pathology.md` for the exact retained tables
 and use `agent_public_non_dicom_assets` for routine file-level queries.
 
-## V2 Controlled-Access Detail
+## Controlled-Access Detail
 
 Use `cache/tcia-metadata-v2-latest/controlled_access_metadata.sqlite` only after the base snapshot has confirmed TCIA provenance and controlled/restricted access. The data are public metadata extracted from WordPress-controlled download records, public manifests, public spreadsheet metadata URLs, and WordPress `download_metadata` fields. The SQLite does not grant file access and must not be used to download controlled data directly.
 
@@ -431,7 +431,7 @@ WHERE route_system = 'ctdc'
 LIMIT 25;
 ```
 
-## V2 Patient-Level Clinical Detail
+## Patient-Level Clinical Detail
 
 Use `cache/tcia-metadata-v2-latest/clinical_metadata.sqlite` only after the base snapshot confirms
 TCIA provenance, visibility, and access/license metadata. Important tables:

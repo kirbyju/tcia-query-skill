@@ -1,4 +1,4 @@
-# TCIA Metadata Artifact Model V2
+# TCIA Metadata Artifact Model
 
 Use this reference for public non-DICOM inventory, managed-system provenance,
 Participant Explorer integration, and migration from the May 2026 artifact line.
@@ -113,7 +113,7 @@ Use semantic WordPress context in addition to extensions. Do not classify an
 unrelated PNG in a clinical supporting package as imaging merely because its
 extension is PNG.
 
-Routine builds start from the manifest-pinned unified V2 research/audit pair,
+Routine builds start from the manifest-pinned unified research/audit pair,
 losslessly materialize an internal assembly, refresh current WordPress and
 PathDB scopes directly, and apply checksum-pinned reviewed references. The
 retired standalone NIfTI and pathology artifacts are not producer inputs.
@@ -172,7 +172,7 @@ run. `references/public_non_dicom_geometry_results_manifest.json` pins its
 release tag, asset name, byte sizes, SHA-256 digests, and row/job counts;
 documented partial-source exceptions are small committed sidecars under
 `references/public_non_dicom_geometry_coverage/`. The seed is an internal
-release input, not another user-facing V2 component: its non-DICOM assessment
+release input, not another user-facing component: its non-DICOM assessment
 rows are imported into the normal `public_non_dicom` research-detail artifact.
 
 Each scheduled build regenerates the current non-DICOM job scope and imports
@@ -335,7 +335,7 @@ inferring identity from filenames. XML remains a dataset-scoped annotation
 format here; it is not added to the global non-DICOM image-format vocabulary.
 
 `CPTAC-Glioblastoma-CODEX` uses a hash-pinned 52-row package inventory so the
-V2 build does not depend on the retired pathology artifact. The official XLSX
+The bundle build does not depend on the retired pathology artifact. The official XLSX
 maps exact WSI/cropped filenames and specimen, timepoint, or composite labels
 to 12 parent patients. The projection covers all 52 submitted files and all 52
 PathDB records. Corresponding Aspera and PathDB records remain separate managed
@@ -380,7 +380,7 @@ equipment codes from the reviewed `CDD-CESM` crosswalk. PathDB rows contribute
 the pathology CSV fields already available at file grain, including protocol,
 magnification, species, cancer type/location, and format. The legacy NIfTI
 artifact remains the detailed source for its broader file metadata and is
-projected into this V2 layer rather than replaced.
+projected into this artifact layer rather than replaced.
 
 Use the coverage surface to decide whether an exploratory field should become
 a stable projected column. Use the notes surface as the review queue. A useful
@@ -512,7 +512,7 @@ Query IDC for public DICOM detail. Query the public non-DICOM, controlled, or
 clinical detail artifacts only when the user drills down.
 
 For compact public-DICOM presence, project `collection_id`,
-`analysis_result_id`, and `PatientID` directly from the IDC index during the V2
+`analysis_result_id`, and `PatientID` directly from the IDC index during the
 build. Include a Collection membership when IDC identifies a visible TCIA
 Collection and a distinct Analysis Result membership when IDC supplies a
 visible TCIA `analysis_result_id`. Do not pass this projection through the
@@ -522,7 +522,7 @@ participant from a source Collection. Previously retained
 compatibility evidence, but they must not be presented as confirmed current IDC
 presence or used to create Analysis Result memberships.
 
-## V2 Release Channels
+## Release Channels
 
 Use `tcia-metadata-v2-latest` as the supported moving compatibility alias.
 Each changed stable bundle is first published and validated under an immutable
@@ -600,7 +600,7 @@ The first command is a dry run that reports active and stale bytes. Top-level
 workspaces rather than installed release content and remain outside this
 receipt-aware cleanup contract.
 
-The V2 build runs after each successful scheduled base-snapshot workflow. It
+The bundle build runs after each successful scheduled base-snapshot workflow. It
 checks out and records the triggering workflow's exact `head_sha`, downloads
 the run-scoped Actions artifact, and verifies the component manifests and
 their declared file hashes before building. GitHub Actions artifacts do not
@@ -656,7 +656,7 @@ The build rejects expired, duplicate, incomplete, or unused waiver scopes.
 ### Build-time staging and legacy-detail retirement
 
 Source release assets and the direct build-time IDC participant projection are
-first resolved into an explicit build contract rather than passed to V2
+first resolved into an explicit build contract rather than passed to release
 builders as an implicit collection of unrelated inputs. The IDC projection is
 restricted to visible WordPress Collections and Analysis Results, retains both
 dataset identity dimensions, and contains participant/study/series summaries
@@ -689,7 +689,7 @@ python3 scripts/tcia_v2_staging.py validate \
 Legacy parity has been established and the transition is complete. Routine
 production never downloads the standalone NIfTI or pathology databases.
 Instead, `scripts/tcia_v2_audit.py materialize-assembly` losslessly restores a
-manifest-pinned unified V2 research/audit pair, and
+manifest-pinned unified research/audit pair, and
 `scripts/tcia_v2_checkpoint.py extract-from-audit` carries the immutable
 `source_nifti__*` and `source_pathology__*` checkpoint forward. The historical
 parity script and legacy builders remain migration-forensics tools only.
@@ -732,7 +732,7 @@ checkpoint, and the clinical manual-review CSV is retained losslessly as a
 Participant Inventory audit table. Component hashes, decompressed SQLite
 hashes, schemas, fingerprints, profiles, and provenance are inline in the
 bundle manifest, so per-component manifests are unnecessary. The installer
-uses this inline streamlined contract for the moving V2 release. Standalone
+uses this inline streamlined contract for the moving release. Standalone
 NIfTI/pathology components are absent from every current bundle contract.
 
 Verbose provenance and troubleshooting payloads are distributed separately as
@@ -740,7 +740,7 @@ Verbose provenance and troubleshooting payloads are distributed separately as
 Use the `audit_support` profile in the bundle manifest when those companions are
 needed; stable entity IDs provide the join back to the research databases.
 
-Use `scripts/tcia_v2_bundle.py install` for the stable V2 release. Its
+Use `scripts/tcia_v2_bundle.py install` for the stable release. Its
 per-component validation metadata is inline in the bundle manifest rather than
 distributed as separate manifests.
 

@@ -1,8 +1,8 @@
 # SQLite Metadata Snapshots
 
-For the default V2 bundle contract, load `references/artifact-model-v2.md`.
-After successful scheduled base-snapshot updates, the V2 workflow resolves the
-source components into a build-time staging contract, builds the compact V2
+For the default bundle contract, load `references/artifact-model.md`.
+After successful scheduled base-snapshot updates, the release workflow resolves the
+source components into a build-time staging contract, builds the compact
 research databases and audit companions, and publishes the streamlined
 profile-based bundle only when its fingerprint changes. The stable bundle has
 nine payload assets plus one authoritative manifest; only the current dataset
@@ -22,7 +22,7 @@ The skill uses a local SQLite snapshot for routine TCIA discovery instead of que
 
 Generated snapshot files are intentionally not committed to the repository.
 GitHub Actions builds them twice daily at 7:17 AM and 7:17 PM
-America/New_York and publishes changed content through the V2 bundle:
+America/New_York and publishes changed content through the release bundle:
 
 - `tcia_snapshot.sqlite.gz`
 - `participant_inventory.sqlite.gz`
@@ -41,7 +41,7 @@ uses a hybrid refresh: unchanged direct official artifacts and same-version IDC
 clinical tables are reused, while schema or IDC version changes trigger full
 reprocessing. NIfTI and pathology research rows are unified in the public
 non-DICOM artifact, with specialized source rows and QC retained in its audit
-companion. Every published component is selected and hash-pinned by the same V2
+companion. Every published component is selected and hash-pinned by the same
 bundle manifest.
 
 The imaging-subject allowlist is built from every IDC collection that maps
@@ -83,7 +83,7 @@ GitHub scheduled workflows can start late. If a user asks about a dataset that a
 
 ## Local Cache
 
-The V2 installer stores validated artifacts in fingerprinted generations and
+The bundle installer stores validated artifacts in fingerprinted generations and
 keeps the historical paths through an atomic `current` pointer:
 
 ```text
@@ -105,7 +105,7 @@ ETag conditional requests, and receipt/remote-manifest hashes are checked before
 cached results are trusted.
 
 This command is a skill-guidance check. It retrieves only the small remote
-`skill_version.json` when needed; it does not inspect, install, or download V2
+`skill_version.json` when needed; it does not inspect, install, or download
 metadata artifacts. Run it near the start of a new substantive TCIA task when
 the installed scripts are available, regardless of whether the eventual query
 uses MCP, REST, canonical web pages, or local artifacts.
@@ -116,7 +116,7 @@ Set the shared install directory for MCP/REST or other consumers:
 export TCIA_V2_INSTALL_DIR=/path/to/cache/tcia-metadata-v2-latest
 ```
 
-The helper scripts use the installed V2 snapshot and detail artifacts. They do
+The helper scripts use the installed snapshot and detail artifacts. They do
 not fall back to live public APIs for normal end-user discovery.
 
 ## Refresh Local Metadata
@@ -126,7 +126,7 @@ End users do not need to reinstall the skill just to receive newer TCIA metadata
 - Reinstall or update the skill only when the skill instructions or scripts changed.
 - Use MCP or REST for routine questions without downloading artifacts.
 - Only after choosing a local artifact workflow, verify skill code and refresh
-  the manifest-pinned V2 research core:
+  the manifest-pinned research core:
 
 ```bash
 python scripts/tcia_freshness.py check
@@ -135,7 +135,7 @@ python scripts/tcia_v2_bundle.py install --profile research_core
 
 The freshness helper first fetches `skill_version.json` from GitHub `main` and compares its version plus per-file hashes with the installed `SKILL.md`, agent metadata, references, scripts, and MCP files. If code differs, it exits with `update_required` and does not overwrite the installed skill. This deliberate stop prevents an old script from silently operating against a newer artifact schema and preserves the user's authority over skill installation or replacement.
 
-When the skill is current, the bundle installer compares the remote V2
+When the skill is current, the bundle installer compares the remote
 fingerprint with the installed state, verifies the top-level and component
 contracts, and stages changed assets. It replaces installed files only after
 compressed and decompressed hashes plus SQLite integrity checks pass. Run this
@@ -174,7 +174,7 @@ The validation workflow checks this manifest on pushes and pull requests. A mism
 ## Build A Snapshot
 
 This section is for maintainers and developers improving the skill. End users
-trying to find or download TCIA data should use the published V2 bundle, not
+trying to find or download TCIA data should use the published bundle, not
 live API queries.
 
 From the skill root:
@@ -277,7 +277,7 @@ the normal gate; use `refresh_cda=true` only for a forced validation. See
 NIfTI, pathology, and other public non-DICOM file-grain metadata are unified in
 `public_non_dicom_metadata.sqlite`; verbose reconciliation and retained legacy
 checkpoint evidence live in `public_non_dicom_audit.sqlite`. Both are selected
-and hash-pinned by the V2 bundle manifest. Install `research_detail` for routine
+and hash-pinned by the bundle manifest. Install `research_detail` for routine
 file-level queries and `audit_support` only for provenance or reconciliation
 work.
 
@@ -285,7 +285,7 @@ The scheduled workflow refreshes current WordPress and PathDB scope, applies
 checksum-pinned reviewed inputs, imports only compatible geometry evidence, and
 publishes the unified components as part of the atomic bundle. It does not
 publish standalone NIfTI or pathology databases. See
-`references/artifact-model-v2.md` for the contract, `references/nifti.md` for
+`references/artifact-model.md` for the contract, `references/nifti.md` for
 NIfTI-specific interpretation, and `references/pathology.md` for pathology
 routing and retained audit tables.
 

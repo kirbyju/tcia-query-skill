@@ -15,7 +15,7 @@ python3 scripts/tcia_v2_bundle.py prune
 
 `prune` is a dry run unless `--apply` is supplied. It removes only obsolete installer-owned files recorded by receipts; it does not remove arbitrary `outputs/`, `dist/`, or maintainer build directories.
 
-Use `scripts/tcia_participant_inventory.py`, `scripts/tcia_public_non_dicom_metadata.py`, `scripts/tcia_controlled_access_metadata.py`, `scripts/tcia_clinical_metadata.py`, and `scripts/tcia_correction_registry.py` to build or audit their focused V2 components. The authoritative bundle manifest carries component hashes, decompressed SQLite hashes, schemas, profiles, fingerprints, and provenance. The source workflow imports a prior correction registry only after validating it against both the prior top manifest and immutable GitHub release, then packages a deterministic gzip from the exact staged snapshot. The new registry does not link to the top manifest being built; only previously published immutable releases may be linked, avoiding a fingerprint cycle.
+Use `scripts/tcia_participant_inventory.py`, `scripts/tcia_public_non_dicom_metadata.py`, `scripts/tcia_controlled_access_metadata.py`, `scripts/tcia_clinical_metadata.py`, and `scripts/tcia_correction_registry.py` to build or audit their focused components. The authoritative bundle manifest carries component hashes, decompressed SQLite hashes, schemas, profiles, fingerprints, and provenance. The source workflow imports a prior correction registry only after validating it against both the prior top manifest and immutable GitHub release, then packages a deterministic gzip from the exact staged snapshot. The new registry does not link to the top manifest being built; only previously published immutable releases may be linked, avoiding a fingerprint cycle.
 
 ### Local resumable verification
 
@@ -179,4 +179,13 @@ Do not advertise this option to public clients or use its records in ordinary di
 - `scripts/tcia_create_data_retriever_csv.py`: create supported route-column manifests.
 - `scripts/datacite_tcia_dois.py` and `scripts/tcia_publications.py`: DOI and verified-publication maintenance/query utilities.
 
-See `references/snapshots.md`, `references/schema.md`, and `references/artifact-model-v2.md` for the detailed release and database contracts.
+See `references/snapshots.md`, `references/schema.md`, and `references/artifact-model.md` for the detailed release and database contracts.
+
+## Versioned Identifier Policy
+
+Treat identifiers such as `/v2/`, `scripts/tcia_v2_bundle.py`, `TCIA_V2_*`,
+`tcia_metadata_v2_bundle_manifest.json`, and `tcia-metadata-v2-latest` as
+compatibility contracts. Preserve them in commands, endpoints, configuration,
+release assets, and migration notes. In general public prose, describe the
+REST service, release bundle, installer, and artifacts without embedding a
+version number unless the version distinction is material to the task.

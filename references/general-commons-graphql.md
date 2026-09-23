@@ -1,6 +1,6 @@
 # General Commons GraphQL
 
-Use this reference for direct General Commons GraphQL work on controlled-access TCIA DICOM/face datasets that WordPress or GC metadata route to General Commons. For routine TCIA controlled-access file metadata, install the V2 `research_detail` profile and use the WordPress-derived controlled-access SQLite described in `references/controlled-access.md`. For Biobank controlled-access face data, use the current WordPress CTDC manifests/download/view links and dbGaP study `phs002192` guidance instead of GC `phs004225`. For broader cross-CRDC subject enrichment that includes General Commons alongside IDC, GDC, and PDC, use `cda.md` instead.
+Use this reference for direct General Commons GraphQL work on controlled-access TCIA DICOM/face datasets that WordPress or GC metadata route to General Commons. For routine TCIA controlled-access file metadata, install the `research_detail` profile and use the WordPress-derived controlled-access SQLite described in `references/controlled-access.md`. For Biobank controlled-access face data, use the current WordPress CTDC manifests/download/view links and dbGaP study `phs002192` guidance instead of GC `phs004225`. For broader cross-CRDC subject enrichment that includes General Commons alongside IDC, GDC, and PDC, use `cda.md` instead.
 
 ## Constants
 
@@ -10,7 +10,7 @@ Use this reference for direct General Commons GraphQL work on controlled-access 
 - File metadata filters may use the returned `study_name` rather than the short acronym. Discover by `study_acronym` first, then use `study_name` for file overview queries when needed.
 
 The `/v1/graphql/` path is General Commons' own API version and is unrelated
-to the TCIA Query REST service, whose documented interface is `/v2/`.
+to the TCIA Query REST service, whose documented routes are under `/v2/`.
 
 ## Pagination
 

@@ -36,9 +36,9 @@ Choose the query surface by the agent's execution environment and the user's req
 | Environment or need | Preferred TCIA surface |
 | --- | --- |
 | MCP-capable agent doing an ordinary interactive query | Snapshot-backed MCP service |
-| HTTP-capable agent, script, or application without MCP | V2 REST service |
+| HTTP-capable agent, script, or application without MCP | REST service |
 | Browser-only agent without MCP or programmable HTTP | Canonical public pages in `references/web-browser-llms.md` |
-| Offline work, bulk analysis, custom SQL, pinned-release reproducibility, or operating a local server | Validated local V2 artifacts |
+| Offline work, bulk analysis, custom SQL, pinned-release reproducibility, or operating a local server | Validated local artifacts |
 
 This selection controls how the same release-backed evidence is accessed; it does not change TCIA publication authority, license rules, or provenance requirements. When MCP is selected, start with `get_snapshot_info`, use compact search tools, and follow only relevant candidates with detail tools. Do not download local artifacts merely to answer a routine query.
 
@@ -60,7 +60,7 @@ rollback selects a retained verified generation and also requires a restart.
 
 ## Query Workflow
 
-1. Confirm the selected service or local bundle fingerprint and capabilities with `get_snapshot_info`, `/v2/bundle`, or the V2 manifest.
+1. Confirm the selected service or local bundle fingerprint and capabilities with `get_snapshot_info`, `/v2/bundle`, or the release manifest.
 2. Use `search_datasets` for compact discovery. Follow a candidate with `get_dataset` for narrative, current downloads, license/access details, and related Analysis Results.
 3. Use download-level labels for modality, file type, access, and route decisions. Split mixed datasets into open and controlled components.
 4. Check related Analysis Results before saying a Collection lacks annotations, segmentations, labels, or ground truth.
@@ -73,7 +73,7 @@ rollback selects a retained verified generation and also requires a restart.
 | Request | Load and use |
 | --- | --- |
 | Snapshot schema, SQL, releases, freshness | `references/schema.md`, `references/snapshots.md` |
-| V2 bundle, Participant Inventory, public non-DICOM | `references/artifact-model-v2.md` |
+| Release bundle, Participant Inventory, public non-DICOM | `references/artifact-model.md` |
 | Browser-only or web-search use | `references/web-browser-llms.md` |
 | MCP/REST tools, protocol, deployment, or compatibility | `mcp_server/README.md`, `references/api-upgrade-notes.md` |
 | Agent/server upgrade compatibility | `references/api-upgrade-notes.md` |
@@ -83,7 +83,7 @@ rollback selects a retained verified generation and also requires a restart.
 | Public DICOM missing from IDC or explicit NBIA request | `references/nbia-public-dicom-fallback.md` |
 | Participant-level clinical facts | `references/clinical.md` |
 | Controlled access or authorized retrieval | `references/controlled-access.md` |
-| NIfTI or public non-DICOM imaging | `references/nifti.md`, `references/artifact-model-v2.md` |
+| NIfTI or public non-DICOM imaging | `references/nifti.md`, `references/artifact-model.md` |
 | Pathology, PathDB, or Aspera packages | `references/pathology.md`, `references/pathdb-public-pathology.md`, `references/aspera.md` |
 | Viewer links | `references/visualization.md` |
 | CDA enrichment | `references/cda.md` |
@@ -104,7 +104,7 @@ rollback selects a retained verified generation and also requires a restart.
 
 - Preserve dataset/source provenance. A downstream record derived from a TCIA DOI remains external unless WordPress lists it as a Collection or Analysis Result.
 - License metadata, not generic page visibility, determines access. Clearly distinguish open, noncommercial, mixed, and controlled/restricted states.
-- Public DICOM detail remains in IDC. Use the V2 public non-DICOM artifact for NIfTI, MHA/MHD, NRRD, images/video, pathology, and reviewed IDC-missing exceptions. Do not infer annotation-to-source relationships without evidence.
+- Public DICOM detail remains in IDC. Use the public non-DICOM artifact for NIfTI, MHA/MHD, NRRD, images/video, pathology, and reviewed IDC-missing exceptions. Do not infer annotation-to-source relationships without evidence.
 - Clinical identity is `(short_title, subject_id)`. Preserve fact provenance, inference flags, source precedence, and conflicts; load `references/clinical.md` before patient-level claims.
 - Use CDA only for enrichment after validating TCIA/IDC identifiers. Do not use it to claim TCIA publication, official clinical completeness, or access rights.
 - Do not broaden downstream searches beyond validated TCIA short titles, DOIs, or participant identifiers without explicit exploratory scope.

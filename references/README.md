@@ -31,7 +31,7 @@ normal user answer:
 | --- | --- |
 | SQLite tables and query examples | `schema.md` |
 | Release installation and freshness | `snapshots.md` |
-| V2 component boundaries and provenance | `artifact-model-v2.md` |
+| Artifact component boundaries and provenance | `artifact-model.md` |
 | MCP/REST migration notes | `api-upgrade-notes.md` |
 | Build, validation, and raw-source investigation | `maintainer-operations.md` |
 | Reviewed correction evidence and release gates | `correction-lifecycle.md` |
@@ -41,7 +41,7 @@ normal user answer:
 
 The CSV, JSON, `.sums`, schema, geometry-manifest, and geometry-coverage files
 in this directory are not general documentation. They are reviewed,
-checksum-sensitive inputs consumed by V2 builders and workflows. Their paths
+checksum-sensitive inputs consumed by release builders and workflows. Their paths
 are part of the current producer contract; do not rename, relocate, or delete
 them based only on apparent duplication or a low Markdown link count.
 

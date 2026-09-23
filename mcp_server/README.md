@@ -10,16 +10,16 @@ tcia_query_mcp/server.py   # MCP tools/resources for LLM clients
 tcia_query_mcp/rest.py     # FastAPI routes for scripts, checks, and apps
 ```
 
-The server defaults to the manifest-pinned V2 research core and optional detail
+The server defaults to the manifest-pinned research core and optional detail
 profiles:
 
 - `tcia_snapshot.sqlite`: required TCIA WordPress/DataCite/PathDB snapshot.
-- `participant_inventory.sqlite`: required V2 dataset-scoped participant availability.
-- `public_non_dicom_metadata.sqlite`: optional V2 public non-DICOM file-grain detail.
+- `participant_inventory.sqlite`: required dataset-scoped participant availability.
+- `public_non_dicom_metadata.sqlite`: optional public non-DICOM file-grain detail.
 - `controlled_access_metadata.sqlite`: optional controlled-access file-grain public metadata.
 - `clinical_metadata.sqlite`: optional patient-level resolved clinical facts, provenance, and conflicts.
 
-The streamlined V2 release does not contain standalone NIfTI or pathology
+The streamlined release does not contain standalone NIfTI or pathology
 databases. Their research detail is unified in `public_non_dicom_metadata.sqlite`;
 specialized source rows and QC evidence are retained in its audit companion.
 
@@ -54,7 +54,7 @@ Optional detail tools:
 - `get_clinical_facts`
 - `get_clinical_conflicts`
 
-The default public MCP surface contains these 20 supported V2 tools. NIfTI,
+The default public MCP surface contains these 20 supported tools. NIfTI,
 pathology, and other public non-DICOM discovery uses
 `find_public_non_dicom_assets`. Set `requires_annotations=true` to select
 non-DICOM `segmentation`, `annotation`, and `annotation_snapshot` roles. This
@@ -69,7 +69,7 @@ filters for public non-DICOM assets rather than the primary user-facing model.
 Use `modalities` and `geometry_statuses` on `find_public_non_dicom_assets` for
 file-grain geometry review.
 
-The default REST documentation is under `/v2/docs`. V2 routes cover dataset and
+The default REST documentation is under `/v2/docs`. The REST routes cover dataset and
 release history, participants, public non-DICOM detail, controlled-access public
 metadata, clinical detail, and TCIA DICOM annotation-download signals. Public
 DICOM series relationships remain an IDC/idc-index concern. Retired specialized
@@ -96,7 +96,7 @@ responses; use `/v2/public-non-dicom/assets`.
 - `/v2/live` reports process liveness. `/v2/ready` validates the install
   manifest/receipt, component schemas and query surfaces, and visible dataset
   coherence; unchanged results are cached. `/v2/health` remains an undocumented alias.
-- The V2 OpenAPI document omits every V1 route. Supported V1 URLs remain
+- The current OpenAPI document omits every V1 route. Supported V1 URLs remain
   breaking deprecated aliases; retired NIfTI/pathology URLs return `410 Gone`.
   All return `Deprecation`, `Sunset`, and migration `Link` headers.
 
@@ -122,7 +122,7 @@ For production, create the virtual environment, pip cache, logs, and SQLite
 snapshots in a server-local runtime directory rather than inside the Git
 checkout. See `DEPLOYMENT.md`.
 
-## Configure V2 Artifacts
+## Configure Release Artifacts
 
 Install the research core first. The bundle manifest pins the base snapshot and
 Participant Inventory to one release fingerprint:
@@ -142,7 +142,7 @@ automatically. At least one verified prior generation is retained and can be
 selected with `python3 scripts/tcia_v2_bundle.py rollback` before restarting
 MCP/REST.
 
-By default the V2 service prefers validated files under
+By default the service prefers validated files under
 `cache/tcia-metadata-v2-latest/`. Production deployments can set
 `TCIA_V2_INSTALL_DIR`, or
 set the individual streamlined paths explicitly:
@@ -175,7 +175,7 @@ The HTTP MCP endpoint is:
 http://127.0.0.1:8765/mcp
 ```
 
-A public read-only reference implementation backed by the current V2 bundle is
+A public read-only reference implementation backed by the current release bundle is
 available at [https://tcia.duckdns.org/mcp](https://tcia.duckdns.org/mcp).
 This is a streamable HTTP MCP protocol endpoint, not a normal web page.
 
@@ -203,7 +203,7 @@ scripts, dashboards, or non-MCP clients:
 python3 -m mcp_server.tcia_query_mcp.rest --host 127.0.0.1 --port 8766
 ```
 
-V2 is the documented default. Interactive docs are available at:
+The current REST interface is documented under `/v2/`. Interactive docs are available at:
 
 ```text
 http://127.0.0.1:8766/v2/docs
