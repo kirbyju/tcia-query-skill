@@ -351,6 +351,15 @@ provide the file-level crosswalk. The package `.sums` file reports the
 empty-file MD5 for every nonempty NRRD; the builder preserves that raw value as
 an invalid placeholder and leaves the verified checksum field blank.
 
+`Duke-Breast-Cancer-MRI` uses the official 100-row training and 27-row test
+companion lists to project the 2D NRRD download to 127 dataset-scoped
+participants. The 3D README describes a 100-subject NRRD cohort using the Duke
+PatientID naming contract, so that download is projected to the 100 participants
+in the companion training list. These rows use `participant_file_group` only to
+express availability: the source does not publish a complete NRRD file
+inventory, so filenames, package paths, represented-file counts, geometry, and
+DICOM identifiers remain unset.
+
 Brain-TR-GammaKnife's controlled DICOM rows remain participant/file linked in
 the controlled-access artifact. Its separate controlled NRRD download is not
 promoted into the public non-DICOM artifact, and historical IDC evidence does

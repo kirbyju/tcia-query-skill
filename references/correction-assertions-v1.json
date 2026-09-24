@@ -55,6 +55,19 @@
         "remind_nrrd_participant_links": 356
       }
     },
+    "duke_breast_mri_nrrd": {
+      "evidence": ["references/duke_breast_cancer_mri_nrrd_participants_v1.json"],
+      "expected": {
+        "duke_nrrd_download_assets": 2,
+        "duke_nrrd_participant_group_assets": 227,
+        "duke_nrrd_participants": 127,
+        "duke_nrrd_2d_participants": 127,
+        "duke_nrrd_3d_participants": 100,
+        "duke_nrrd_participant_links": 227,
+        "duke_nrrd_unasserted_file_paths": 227,
+        "duke_nrrd_geometry_unset": 227
+      }
+    },
     "tcga_lgg_mask": {
       "evidence": ["references/tcga_lgg_mask_inventory_v1.json"],
       "expected": {

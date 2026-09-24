@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "dataset_type": "Collection",
+  "short_title": "Duke-Breast-Cancer-MRI",
+  "reviewed_at": "2026-09-24",
+  "reviewer_decision": "Track published NRRD participant identifiers without duplicating DICOM identifiers or geometry.",
+  "source_files": {
+    "train": {
+      "path": "references/duke_breast_cancer_mri_nrrd_train_ids_v1.csv",
+      "source_url": "https://www.cancerimagingarchive.net/wp-content/uploads/train_ids.csv",
+      "source_sha256": "effd69b4ff9e6ceb5e496ea09459af0c5aae2aed4df88277d70912c6ee3fba2f",
+      "normalized_sha256": "095de7febcc37a8665a51ff60c5266a54454055b6a2d8d76ab96a7cfdafd76db"
+    },
+    "test": {
+      "path": "references/duke_breast_cancer_mri_nrrd_test_ids_v1.csv",
+      "source_url": "https://www.cancerimagingarchive.net/wp-content/uploads/test_ids.csv",
+      "source_sha256": "1c2c928d55be15dfe9f17c108c44efaff9a5d1a68145a21192a71903d94efaa5",
+      "normalized_sha256": "b58fe90e61a6a93e2aa1893c27bcd3901f41b872e3405a4c7089e7f223d7dcc9"
+    },
+    "readme": {
+      "source_url": "https://www.cancerimagingarchive.net/wp-content/uploads/duke_README.txt",
+      "source_sha256": "b165c2c0322559442c4c4f060c02693c498b4e6f6bb6ca390bc27318d952ef60"
+    }
+  },
+  "downloads": {
+    "42203": {
+      "label": "2D Breast and FGT MRI Segmentations",
+      "participant_sources": ["train", "test"],
+      "expected_participants": 127,
+      "evidence_note": "The WordPress companion train and test ID files list 100 and 27 disjoint Duke Patient IDs for the 127-subject 2D segmentation download."
+    },
+    "42217": {
+      "label": "3D Breast and FGT MRI Segmentations",
+      "participant_sources": ["train"],
+      "expected_participants": 100,
+      "evidence_note": "The linked README describes a 100-subject NRRD cohort and embeds the Duke Patient ID in the NRRD naming contract; the 100-subject companion list supplies those identifiers."
+    }
+  }
+}

@@ -77,6 +77,11 @@ native source adapters and must preserve source values and provenance.
 - ReMIND NRRD segmentations use a checked-in, checksum-pinned package inventory;
   356 files cover all 114 subjects, while 113 subjects have the preoperative
   whole-tumor segmentation represented by the WordPress summary count.
+- Duke-Breast-Cancer-MRI uses checksum-pinned official companion lists to link
+  the 2D NRRD download to 127 participants and the 3D NRRD download to 100
+  participants. Because no file inventory is published, these are conservative
+  participant file groups with filenames, file counts, geometry, and DICOM
+  identifiers left unset.
 - Longitudinal datasets must keep visit/date information in study grouping; a
   participant identifier alone is not a study identifier.
 - DICOM UIDs and alternate DICOM representations must remain separate from the

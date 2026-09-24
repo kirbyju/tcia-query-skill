@@ -69,6 +69,9 @@ DEFAULT_BRATS_CROSSWALK_PROVENANCE = SKILL_ROOT / "references" / "brats2021_tcia
 DEFAULT_IMAGE_METADATA_CSV = SKILL_ROOT / "references" / "public_non_dicom_image_metadata_v1.csv"
 DEFAULT_REMIND_NRRD_INVENTORY = SKILL_ROOT / "references" / "remind_nrrd_inventory_v1.sums"
 DEFAULT_REMIND_NRRD_PROVENANCE = SKILL_ROOT / "references" / "remind_nrrd_inventory_v1.json"
+DEFAULT_DUKE_NRRD_PARTICIPANTS = (
+    SKILL_ROOT / "references" / "duke_breast_cancer_mri_nrrd_participants_v1.json"
+)
 DEFAULT_TCGA_LGG_MASK_INVENTORY = SKILL_ROOT / "references" / "tcga_lgg_mask_inventory_v1.csv"
 DEFAULT_TCGA_LGG_MASK_VASARI = SKILL_ROOT / "references" / "tcga_lgg_mask_vasari_participants_v1.csv"
 DEFAULT_TCGA_LGG_MASK_PROVENANCE = SKILL_ROOT / "references" / "tcga_lgg_mask_inventory_v1.json"
@@ -123,6 +126,7 @@ GEOMETRY_STATUSES = {
 BRATS_SHORT_TITLE = "RSNA-ASNR-MICCAI-BraTS-2021"
 BCBM_SHORT_TITLE = "BCBM-RadioGenomics"
 REMIND_SHORT_TITLE = "ReMIND"
+DUKE_BREAST_MRI_SHORT_TITLE = "Duke-Breast-Cancer-MRI"
 TCGA_LGG_MASK_SHORT_TITLE = "TCGA-LGG-Mask"
 CPTAC_GBM_CODEX_SHORT_TITLE = "CPTAC-Glioblastoma-CODEX"
 TCGA_GBM_QI_SHORT_TITLE = "TCGA-GBM-QI-Radiogenomics"
@@ -2773,6 +2777,203 @@ def ingest_remind_nrrd_inventory(
             )
             imported += 1
     return imported
+
+
+def load_duke_nrrd_participants(
+    provenance_path: Path = DEFAULT_DUKE_NRRD_PARTICIPANTS,
+) -> tuple[dict[str, list[str]], dict[str, Any]]:
+    """Load the reviewed Duke NRRD participant lists and verify their digests."""
+    provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+    if (
+        provenance.get("schema_version") != 1
+        or provenance.get("short_title") != DUKE_BREAST_MRI_SHORT_TITLE
+    ):
+        raise RuntimeError(f"Invalid Duke NRRD participant reference: {provenance_path}")
+    source_lists: dict[str, list[str]] = {}
+    for source_name in ("train", "test"):
+        source = (provenance.get("source_files") or {}).get(source_name) or {}
+        path = SKILL_ROOT / str(source.get("path") or "")
+        expected_digest = str(source.get("normalized_sha256") or "")
+        if not path.is_file() or not expected_digest:
+            raise RuntimeError(f"Duke NRRD {source_name} participant reference is missing")
+        actual_digest = file_sha256(path)
+        if actual_digest != expected_digest:
+            raise RuntimeError(
+                f"Duke NRRD {source_name} participant digest mismatch: "
+                f"{actual_digest} != {expected_digest}"
+            )
+        with path.open(newline="", encoding="utf-8") as handle:
+            rows = [str(row.get("subject_id") or "").strip() for row in csv.DictReader(handle)]
+        if (
+            not rows
+            or len(rows) != len(set(rows))
+            or any(not re.fullmatch(r"Breast_MRI_\d{3}", item) for item in rows)
+        ):
+            raise RuntimeError(f"Duke NRRD {source_name} participant list is malformed")
+        source_lists[source_name] = rows
+    if len(source_lists["train"]) != 100 or len(source_lists["test"]) != 27:
+        raise RuntimeError("Duke NRRD participant list count changed")
+    if set(source_lists["train"]) & set(source_lists["test"]):
+        raise RuntimeError("Duke NRRD train and test participant lists overlap")
+    return source_lists, provenance
+
+
+def ingest_duke_nrrd_participant_groups(
+    conn: sqlite3.Connection,
+    provenance_path: Path = DEFAULT_DUKE_NRRD_PARTICIPANTS,
+) -> dict[str, int]:
+    """Project reviewed Duke NRRD availability at participant-group grain.
+
+    The official companion lists establish which dataset-scoped participants
+    are represented, but they do not inventory every NRRD package path. Keep
+    file names, file counts, DICOM identifiers, and geometry unset rather than
+    manufacturing file-level detail.
+    """
+    source_lists, provenance = load_duke_nrrd_participants(provenance_path)
+    downloads = {
+        str(row["download_id"]): row
+        for row in conn.execute(
+            """SELECT * FROM public_non_dicom_assets
+               WHERE short_title = ? AND file_format = 'NRRD'
+                 AND asset_granularity = 'download'""",
+            (DUKE_BREAST_MRI_SHORT_TITLE,),
+        )
+    }
+    if not downloads:
+        return {"assets": 0, "participants": 0, "links": 0}
+    specifications = provenance.get("downloads") or {}
+    expected_downloads = set(specifications)
+    if set(downloads) != expected_downloads:
+        raise RuntimeError(
+            "Duke NRRD download contract changed: "
+            f"observed={sorted(downloads)} expected={sorted(expected_downloads)}"
+        )
+    reviewed_at = str(provenance.get("reviewed_at") or "")
+    reference_digest = file_sha256(provenance_path)
+    try:
+        reference_locator = str(provenance_path.relative_to(SKILL_ROOT))
+    except ValueError:
+        reference_locator = str(provenance_path)
+    counts = {"assets": 0, "participants": 0, "links": 0}
+    unique_participants: set[str] = set()
+    for download_id, specification in sorted(specifications.items()):
+        participant_sources = [str(item) for item in specification["participant_sources"]]
+        participant_ids = sorted({
+            subject_id
+            for source_name in participant_sources
+            for subject_id in source_lists[source_name]
+        })
+        expected_participants = int(specification["expected_participants"])
+        if len(participant_ids) != expected_participants:
+            raise RuntimeError(
+                f"Duke NRRD {download_id} participant count changed: "
+                f"{len(participant_ids)} != {expected_participants}"
+            )
+        download = downloads[download_id]
+        for subject_id in participant_ids:
+            cohort_roles = [
+                source_name for source_name in participant_sources
+                if subject_id in source_lists[source_name]
+            ]
+            asset_id = stable_id(
+                "asset", "duke_nrrd_participant_group", download_id, subject_id
+            )
+            mapping_method = "reviewed_duke_nrrd_companion_participant_list"
+            evidence = {
+                "download_id": download_id,
+                "participant_sources": cohort_roles,
+                "reference": reference_locator,
+                "reference_sha256": reference_digest,
+                "mapping_method": mapping_method,
+                "file_grain_inventory_available": False,
+            }
+            insert_asset(conn, {
+                "asset_id": asset_id,
+                "dataset_type": str(download["dataset_type"]),
+                "short_title": DUKE_BREAST_MRI_SHORT_TITLE,
+                "download_row_id": download["download_row_id"],
+                "download_id": download_id,
+                "subject_id": subject_id,
+                "subject_id_namespace": f"tcia_dataset:{DUKE_BREAST_MRI_SHORT_TITLE}",
+                "participant_link_status": "reviewed_source_crosswalk",
+                "asset_granularity": "participant_file_group",
+                "asset_name": f"{download['asset_name']} for {subject_id}",
+                "file_name": "",
+                "package_path": "",
+                "file_format": "NRRD",
+                "container_format": str(download["container_format"] or ""),
+                "media_kind": str(download["media_kind"] or "image_volume"),
+                "spatial_dimensionality": "unknown",
+                "temporal_dimensionality": "unknown",
+                "imaging_domain": str(download["imaging_domain"] or "imaging_annotation"),
+                "modality": str(download["modality"] or ""),
+                "object_role": str(download["object_role"] or "segmentation"),
+                "represented_file_count": None,
+                "size_bytes": None,
+                "checksum": "",
+                "checksum_algorithm": "",
+                "representation_provenance_class": str(
+                    download["representation_provenance_class"] or "submitted_original"
+                ),
+                "source_system": str(download["source_system"] or "tcia_aspera"),
+                "source_record_id": f"{download_id}:participant:{subject_id}",
+                "source_url": str(download["source_url"] or ""),
+                "raw_values_json": json_dumps({"participant_sources": cohort_roles}),
+                "provenance_json": json_dumps({
+                    "source_artifact": "reviewed_duke_nrrd_participants",
+                    "reference_provenance": provenance,
+                    **evidence,
+                }),
+                "quality_flag_json": json_dumps({
+                    "participant_inventory": "reviewed_source_crosswalk",
+                    "file_detail": "source_confirmed_unavailable",
+                    "geometry": "not_checked_without_file_inventory",
+                }),
+            })
+            insert_asset_participant(
+                conn,
+                asset_id=asset_id,
+                short_title=DUKE_BREAST_MRI_SHORT_TITLE,
+                subject_id=subject_id,
+                namespace=f"tcia_dataset:{DUKE_BREAST_MRI_SHORT_TITLE}",
+                raw_subject_id=subject_id,
+                participant_role="depicted_subject",
+                link_status="reviewed_source_crosswalk",
+                evidence=evidence,
+            )
+            conn.execute(
+                """INSERT OR REPLACE INTO public_non_dicom_crosswalk_evidence
+                   VALUES (?, ?, ?, ?, ?, ?, 'high', ?, ?, '', ?, ?)""",
+                (
+                    stable_id("crosswalk", asset_id, subject_id, mapping_method),
+                    asset_id, DUKE_BREAST_MRI_SHORT_TITLE, subject_id, subject_id,
+                    mapping_method,
+                    str(((provenance.get("source_files") or {}).get(cohort_roles[0]) or {}).get("source_url") or ""),
+                    str(specification.get("evidence_note") or ""),
+                    reviewed_at, json_dumps(evidence),
+                ),
+            )
+            if download["source_url"]:
+                insert_location(
+                    conn,
+                    location_values(
+                        asset_id,
+                        str(download["source_url"]),
+                        representation_class=str(
+                            download["representation_provenance_class"]
+                            or "submitted_original"
+                        ),
+                        provenance={
+                            "source_artifact": "reviewed_duke_nrrd_participants",
+                            "download_id": download_id,
+                        },
+                    ),
+                )
+            counts["assets"] += 1
+            counts["links"] += 1
+            unique_participants.add(subject_id)
+    counts["participants"] = len(unique_participants)
+    return counts
 
 
 def ingest_tcga_gbm_qi_aim_inventory(
@@ -6507,13 +6708,13 @@ def refresh_participant_crosswalk_review_issues(conn: sqlite3.Connection) -> int
 
 
 def mark_downloads_with_linked_file_grain(conn: sqlite3.Connection) -> int:
-    """Resolve parent download placeholders when linked child files exist.
+    """Resolve parent placeholders when linked files or participant groups exist.
 
     NIfTI file metadata can retain ``download_id`` as a JSON array because one
     file record may be associated with more than one WordPress download.  The
     WordPress parent asset stores one scalar download ID.  Compare both forms
-    so a dataset-level parent is not reported as an unlinked asset when the
-    participant crosswalk is already available on its file rows.
+    so a dataset-level parent is not reported as unlinked when participant
+    evidence is available on file rows or conservative participant groups.
     """
     before = conn.total_changes
     conn.execute(
@@ -6535,7 +6736,7 @@ def mark_downloads_with_linked_file_grain(conn: sqlite3.Connection) -> int:
               WHERE f.dataset_type = d.dataset_type
                 AND f.short_title = d.short_title
                 AND f.file_format = d.file_format
-                AND f.asset_granularity = 'file'
+                AND f.asset_granularity IN ('file', 'participant_file_group')
                 AND (
                     COALESCE(f.download_id, '') = COALESCE(d.download_id, '')
                     OR EXISTS (
@@ -6881,6 +7082,8 @@ def build_database(
             "pathology_package_assets": ingest_pathology_packages(conn, pathology_db) if pathology_db else 0,
             "pathdb_file_assets": ingest_pathdb(conn, snapshot_db, include_pathdb_files),
         }
+        duke_nrrd = ingest_duke_nrrd_participant_groups(conn)
+        counts.update({f"duke_nrrd_{key}": value for key, value in duke_nrrd.items()})
         codex_crosswalk = apply_cptac_gbm_codex_workbook_crosswalk(
             conn, clinical_db, require_pathdb=include_pathdb_files
         )
@@ -7438,6 +7641,75 @@ def validate_database(path: Path) -> dict[str, Any]:
                 if remind_counts[name] != expected:
                     errors.append(
                         f"ReMIND NRRD coverage regression: {name}={remind_counts[name]} != {expected}"
+                    )
+            duke_nrrd_counts = {
+                "duke_nrrd_download_assets": conn.execute(
+                    "SELECT COUNT(*) FROM public_non_dicom_assets "
+                    "WHERE short_title = ? AND file_format = 'NRRD' "
+                    "AND asset_granularity = 'download'",
+                    (DUKE_BREAST_MRI_SHORT_TITLE,),
+                ).fetchone()[0],
+                "duke_nrrd_participant_group_assets": conn.execute(
+                    "SELECT COUNT(*) FROM public_non_dicom_assets "
+                    "WHERE short_title = ? AND file_format = 'NRRD' "
+                    "AND asset_granularity = 'participant_file_group'",
+                    (DUKE_BREAST_MRI_SHORT_TITLE,),
+                ).fetchone()[0],
+                "duke_nrrd_participants": conn.execute(
+                    "SELECT COUNT(DISTINCT ap.subject_id) "
+                    "FROM public_non_dicom_asset_participants ap "
+                    "JOIN public_non_dicom_assets a USING(asset_id) "
+                    "WHERE a.short_title = ? AND a.file_format = 'NRRD' "
+                    "AND a.asset_granularity = 'participant_file_group'",
+                    (DUKE_BREAST_MRI_SHORT_TITLE,),
+                ).fetchone()[0],
+                "duke_nrrd_2d_participants": conn.execute(
+                    "SELECT COUNT(DISTINCT ap.subject_id) "
+                    "FROM public_non_dicom_asset_participants ap "
+                    "JOIN public_non_dicom_assets a USING(asset_id) "
+                    "WHERE a.short_title = ? AND a.download_id = '42203' "
+                    "AND a.asset_granularity = 'participant_file_group'",
+                    (DUKE_BREAST_MRI_SHORT_TITLE,),
+                ).fetchone()[0],
+                "duke_nrrd_3d_participants": conn.execute(
+                    "SELECT COUNT(DISTINCT ap.subject_id) "
+                    "FROM public_non_dicom_asset_participants ap "
+                    "JOIN public_non_dicom_assets a USING(asset_id) "
+                    "WHERE a.short_title = ? AND a.download_id = '42217' "
+                    "AND a.asset_granularity = 'participant_file_group'",
+                    (DUKE_BREAST_MRI_SHORT_TITLE,),
+                ).fetchone()[0],
+                "duke_nrrd_participant_links": conn.execute(
+                    "SELECT COUNT(*) FROM public_non_dicom_asset_participants ap "
+                    "JOIN public_non_dicom_assets a USING(asset_id) "
+                    "WHERE a.short_title = ? AND a.file_format = 'NRRD' "
+                    "AND a.asset_granularity = 'participant_file_group'",
+                    (DUKE_BREAST_MRI_SHORT_TITLE,),
+                ).fetchone()[0],
+                "duke_nrrd_unasserted_file_paths": conn.execute(
+                    "SELECT COUNT(*) FROM public_non_dicom_assets "
+                    "WHERE short_title = ? AND file_format = 'NRRD' "
+                    "AND asset_granularity = 'participant_file_group' "
+                    "AND file_name = '' AND package_path = '' "
+                    "AND represented_file_count IS NULL",
+                    (DUKE_BREAST_MRI_SHORT_TITLE,),
+                ).fetchone()[0],
+                "duke_nrrd_geometry_unset": conn.execute(
+                    "SELECT COUNT(*) FROM public_non_dicom_assets "
+                    "WHERE short_title = ? AND file_format = 'NRRD' "
+                    "AND asset_granularity = 'participant_file_group' "
+                    "AND geometry_status IS NULL",
+                    (DUKE_BREAST_MRI_SHORT_TITLE,),
+                ).fetchone()[0],
+            }
+            counts.update(duke_nrrd_counts)
+            for name, expected in correction_assertions[
+                "duke_breast_mri_nrrd"
+            ]["expected"].items():
+                if duke_nrrd_counts[name] != expected:
+                    errors.append(
+                        "Duke-Breast-Cancer-MRI NRRD coverage regression: "
+                        f"{name}={duke_nrrd_counts[name]} != {expected}"
                     )
             tcga_lgg_mask_counts = {
                 "tcga_lgg_mask_files": conn.execute(

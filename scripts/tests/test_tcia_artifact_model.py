@@ -35,6 +35,10 @@ class VocabularyTests(unittest.TestCase):
             assertions["reviewed_analysis_result_participants"]["expected"]["LIDC-annot-NLST501"],
             501,
         )
+        self.assertEqual(
+            assertions["duke_breast_mri_nrrd"]["expected"]["duke_nrrd_participants"],
+            127,
+        )
         self.assertTrue(
             all(item["evidence"] and item["expected"] for item in assertions.values())
         )
@@ -917,6 +921,97 @@ class BuilderTests(unittest.TestCase):
             "crosswalk_available_at_file_grain",
         )
         conn.close()
+
+    def test_duke_nrrd_participant_groups_are_reviewed_and_file_conservative(self):
+        import sqlite3
+
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.executescript(public.SCHEMA)
+        public.insert_vocab(conn)
+        common = {
+            "dataset_type": "Collection",
+            "short_title": "Duke-Breast-Cancer-MRI",
+            "subject_id": "",
+            "subject_id_namespace": "",
+            "participant_link_status": "dataset_only",
+            "asset_granularity": "download",
+            "file_name": "",
+            "package_path": "",
+            "file_format": "NRRD",
+            "container_format": "",
+            "media_kind": "image_volume",
+            "spatial_dimensionality": "unknown",
+            "temporal_dimensionality": "unknown",
+            "imaging_domain": "imaging_annotation",
+            "modality": "",
+            "object_role": "segmentation",
+            "representation_provenance_class": "submitted_original",
+            "source_system": "tcia_aspera",
+            "raw_values_json": "{}",
+            "provenance_json": "{}",
+            "quality_flag_json": "{}",
+        }
+        for download_id, label in (
+            ("42203", "2D Breast and FGT MRI Segmentations"),
+            ("42217", "3D Breast and FGT MRI Segmentations"),
+        ):
+            public.insert_asset(conn, {
+                **common,
+                "asset_id": f"download-{download_id}",
+                "download_id": download_id,
+                "asset_name": label,
+                "source_record_id": download_id,
+                "source_url": f"https://example.test/{download_id}",
+            })
+
+        counts = public.ingest_duke_nrrd_participant_groups(conn)
+        self.assertEqual(counts, {"assets": 227, "participants": 127, "links": 227})
+        self.assertEqual(
+            dict(conn.execute(
+                "SELECT download_id, COUNT(*) AS n FROM public_non_dicom_assets "
+                "WHERE asset_granularity='participant_file_group' GROUP BY download_id"
+            ).fetchall()),
+            {"42203": 127, "42217": 100},
+        )
+        self.assertEqual(
+            conn.execute(
+                "SELECT COUNT(DISTINCT subject_id) FROM public_non_dicom_asset_participants"
+            ).fetchone()[0],
+            127,
+        )
+        self.assertEqual(
+            conn.execute(
+                "SELECT COUNT(*) FROM public_non_dicom_assets "
+                "WHERE asset_granularity='participant_file_group' "
+                "AND file_name='' AND package_path='' AND represented_file_count IS NULL "
+                "AND geometry_status IS NULL"
+            ).fetchone()[0],
+            227,
+        )
+        self.assertEqual(
+            conn.execute("SELECT COUNT(*) FROM public_non_dicom_crosswalk_evidence").fetchone()[0],
+            227,
+        )
+        self.assertEqual(public.mark_downloads_with_linked_file_grain(conn), 2)
+        self.assertEqual(
+            conn.execute(
+                "SELECT COUNT(*) FROM public_non_dicom_assets "
+                "WHERE asset_granularity='download' "
+                "AND participant_link_status='crosswalk_available_at_file_grain'"
+            ).fetchone()[0],
+            2,
+        )
+        conn.close()
+
+    def test_duke_nrrd_reference_rejects_digest_mismatch(self):
+        reference = json.loads(public.DEFAULT_DUKE_NRRD_PARTICIPANTS.read_text())
+        reference["source_files"]["train"]["normalized_sha256"] = "0" * 64
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "duke.json"
+            path.write_text(json.dumps(reference))
+            with self.assertRaisesRegex(RuntimeError, "digest mismatch"):
+                public.load_duke_nrrd_participants(path)
 
     def test_yale_workbook_enriches_matching_nifti_asset(self):
         import sqlite3
