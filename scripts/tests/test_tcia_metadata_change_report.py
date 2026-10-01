@@ -223,6 +223,38 @@ class MetadataChangeReportTest(unittest.TestCase):
                 baseline_digest,
             )
 
+            timestamp_only = root / "changed-case-timestamps.sqlite"
+            timestamp_report = root / "changed-case-timestamps.json"
+            shutil.copyfile(new, timestamp_only)
+            with sqlite3.connect(timestamp_only) as conn:
+                conn.execute(
+                    "UPDATE correction_cases SET first_observed_at=?, last_observed_at=?",
+                    ("2026-09-13T00:00:00Z", "2026-09-14T00:00:00Z"),
+                )
+                conn.commit()
+            timestamp_result = subprocess.run(
+                [
+                    sys.executable, str(SCRIPT),
+                    "--correction-new", str(timestamp_only),
+                    "--correction-old", str(new),
+                    "--json-out", str(timestamp_report),
+                    "--fail-on-unexplained-high",
+                ],
+                text=True, capture_output=True,
+            )
+            self.assertEqual(
+                timestamp_result.returncode,
+                0,
+                timestamp_result.stdout + timestamp_result.stderr,
+            )
+            timestamp_payload = json.loads(timestamp_report.read_text())
+            case_comparison = next(
+                row for row in timestamp_payload["comparisons"]
+                if row["asset"] == "correction"
+                and row["table"] == "correction_cases"
+            )
+            self.assertEqual(case_comparison["modified"], 0)
+
             for column, value in (("status", "failed"), ("evidence_sha256", "f" * 64)):
                 with self.subTest(column=column):
                     changed = root / f"changed-{column}.sqlite"

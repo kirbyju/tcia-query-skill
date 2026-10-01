@@ -17,6 +17,14 @@ python3 scripts/tcia_v2_bundle.py prune
 
 Use `scripts/tcia_participant_inventory.py`, `scripts/tcia_public_non_dicom_metadata.py`, `scripts/tcia_controlled_access_metadata.py`, `scripts/tcia_clinical_metadata.py`, and `scripts/tcia_correction_registry.py` to build or audit their focused components. The authoritative bundle manifest carries component hashes, decompressed SQLite hashes, schemas, profiles, fingerprints, and provenance. The source workflow imports a prior correction registry only after validating it against both the prior top manifest and immutable GitHub release, then packages a deterministic gzip from the exact staged snapshot. The new registry does not link to the top manifest being built; only previously published immutable releases may be linked, avoiding a fingerprint cycle.
 
+Controlled-access public source downloads are streamed to a temporary file and
+atomically installed only after completion. The producer allows 30 seconds of
+socket inactivity, 300 seconds total across retries, and 1 GiB per artifact;
+the complete build step has a 30-minute Actions timeout. Progress logs identify
+the dataset, route, role, status, byte count, and elapsed time without printing
+the source URL. A timeout, oversize response, or partial transfer is recorded as
+a source error and remains blocked by `--require-complete-sources`.
+
 ### Local resumable verification
 
 The stable public release is one atomic, fingerprinted bundle. Do not publish a

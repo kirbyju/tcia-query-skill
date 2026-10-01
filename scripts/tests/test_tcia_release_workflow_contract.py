@@ -125,6 +125,16 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
         block = source[source.index(marker):source.index("Prepare previous clinical metadata")]
         self.assertIn("--require-complete-sources", block)
 
+    def test_controlled_source_build_has_bounded_runtime(self) -> None:
+        source = SOURCE_WORKFLOW.read_text(encoding="utf-8")
+        start = source.index("Build controlled-access metadata")
+        end = source.index("Validate controlled-access metadata")
+        block = source[start:end]
+        self.assertIn("timeout-minutes: 30", block)
+        self.assertIn("--artifact-socket-timeout-seconds 30", block)
+        self.assertIn("--artifact-total-timeout-seconds 300", block)
+        self.assertIn("--artifact-max-bytes 1073741824", block)
+
     def test_workflow_run_uses_one_triggering_producer_sha_everywhere(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
         self.assertIn(

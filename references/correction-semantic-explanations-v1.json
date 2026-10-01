@@ -70,6 +70,48 @@
       "change_kind_counts": {"added": 99, "removed": 60},
       "changes_sha256": "340a07e3080f91d5b1ffbfc2abed950ccd7a9aa68085a574d04e01e4e1b5422e",
       "negative_scope": ["no asset reassignment outside the exact migration", "no unrelated relationship changes", "no blanket participant approval"]
+    },
+    {
+      "batch_id": "wordpress-curated-taxonomy-clinical-facts-2026-10-01",
+      "reviewer": "Justin Kirby (TCIA artifact maintainer)",
+      "approved_at": "2026-10-01T19:12:34Z",
+      "rationale": "The TCIA artifact maintainer confirmed that staff intentionally applied the complete WordPress cancer-type and cancer-location taxonomy migration from a previously curated list and approved the migration as a whole without piecemeal term review. This approval is limited to the exact clinical fact additions, removals, and modifications recorded by source run 36804668560.",
+      "evidence_id": "github-actions:run:36804668560:metadata_change_report",
+      "evidence": "Run 36804668560 recorded the exact clinical fact identities and before/after digests produced by the curated WordPress taxonomy migration; the TCIA artifact maintainer approved that full migration on 2026-10-01.",
+      "artifact": "clinical",
+      "entity_table": "clinical_facts",
+      "change_count": 71375,
+      "change_kind_counts": {"added": 34731, "removed": 34731, "modified": 1913},
+      "changes_sha256": "4a92fa5359d73b43c15a0b54cd6ce8c5ddc8f7802270579c3e8052c3a405154f",
+      "negative_scope": ["no approval for a different change count or digest", "no non-taxonomy clinical fact changes", "no correction-registry changes"]
+    },
+    {
+      "batch_id": "wordpress-curated-taxonomy-clinical-subjects-2026-10-01",
+      "reviewer": "Justin Kirby (TCIA artifact maintainer)",
+      "approved_at": "2026-10-01T19:12:34Z",
+      "rationale": "The approved WordPress cancer-type and cancer-location taxonomy migration deterministically updates the affected subject summaries. This approval covers only the exact subject-row modifications recorded by source run 36804668560 and is bound to their aggregate digest.",
+      "evidence_id": "github-actions:run:36804668560:metadata_change_report",
+      "evidence": "Run 36804668560 recorded the exact clinical subject identities and before/after digests produced by the curated WordPress taxonomy migration; the TCIA artifact maintainer approved that full migration on 2026-10-01.",
+      "artifact": "clinical",
+      "entity_table": "clinical_subjects",
+      "change_count": 4930,
+      "change_kind_counts": {"modified": 4930},
+      "changes_sha256": "294bb499894795b2ecc0697590b22f9a4c2f9d727561fc41db9c197584950863",
+      "negative_scope": ["no approval for a different change count or digest", "no subject identity additions or removals", "no correction-registry changes"]
+    },
+    {
+      "batch_id": "healthy-total-body-cts-nifti-filename-correction-2026-10-01",
+      "reviewer": "Justin Kirby (TCIA artifact maintainer)",
+      "approved_at": "2026-10-01T22:26:02Z",
+      "rationale": "The curator intentionally corrected the NIfTI segmentation filenames. A read-only audit of the current official TCIA files confirmed exact equality of all 30 patient identifiers across the controlled DICOM manifest, DICOM metadata workbook, clinical workbook, and corrected NIfTI basenames, with no missing, extra, malformed, or duplicate NIfTI identifiers.",
+      "evidence_id": "wordpress:collection:healthy-total-body-cts:download:42741:id-alignment-2026-10-01",
+      "evidence": "Current TCIA download 42741 states that the NIfTI segmentation filenames were corrected. The audited official artifacts were GC_manifest_Healthy-Total-Body-CTs_20260326.csv (SHA-256 d6d32509a6639e30fdedf854348c00ae9274ebd6da88fc2adad576339c5a603f), Healthy-Total-Body-Cts_v02_20240927-nbia-digest.xlsx (SHA-256 0d994642e7b3eedc0ccc113aa0751cd2a08474c9f2d741d277f5a438545c3f8c), Healthy-Total-Body-CTs_v02_20240927.xlsx (SHA-256 a46d50f8549553717a3783884da367f26a728b74795790761378d324a9c10b35), and Healthy-Total-Body-Cts_20260923.zip (SHA-256 f3daa9c5e9740c8d68688bd800f5d3107236099d3e319bbef04076aa4719b13f).",
+      "artifact": "correction_registry",
+      "entity_table": "correction_cases",
+      "change_count": 1,
+      "change_kind_counts": {"added": 1},
+      "changes_sha256": "cf8ad44932dd96218c6faa09c2f8786e3e248bc8f144308cac85f17bd71e9e40",
+      "negative_scope": ["no approval for a different correction case or semantic digest", "no derived metadata effect or source-value rewrite", "the observed case remains proposal-only and needs-review in the source registry"]
     }
   ],
   "explanation_batches": [

@@ -36,6 +36,65 @@ class ControlledAccessSourceHealthTests(unittest.TestCase):
             self.assertEqual(urlopen.call_count, 2)
             sleep.assert_called_once_with(1)
 
+    def test_fetch_artifact_rejects_declared_oversize_without_partial_file(self) -> None:
+        class Response(io.BytesIO):
+            headers = {"Content-Length": "9"}
+
+        with tempfile.TemporaryDirectory() as directory:
+            with mock.patch.object(
+                CONTROLLED.urllib.request, "urlopen", return_value=Response(b"oversize")
+            ):
+                path, status, error = CONTROLLED.fetch_artifact(
+                    "https://example.test/manifest.csv",
+                    Path(directory),
+                    no_network=False,
+                    attempts=1,
+                    max_bytes=8,
+                )
+
+            self.assertIsNone(path)
+            self.assertEqual(status, "error")
+            self.assertIn("Content-Length 9 exceeds 8-byte limit", error)
+            self.assertEqual(list(Path(directory).iterdir()), [])
+
+    def test_fetch_artifact_rejects_stream_over_limit_and_cleans_partial_file(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            with mock.patch.object(
+                CONTROLLED.urllib.request, "urlopen", return_value=io.BytesIO(b"123456789")
+            ):
+                path, status, error = CONTROLLED.fetch_artifact(
+                    "https://example.test/manifest.csv",
+                    Path(directory),
+                    no_network=False,
+                    attempts=1,
+                    max_bytes=8,
+                )
+
+            self.assertIsNone(path)
+            self.assertEqual(status, "error")
+            self.assertIn("exceeded 8-byte download limit", error)
+            self.assertEqual(list(Path(directory).iterdir()), [])
+
+    def test_fetch_artifact_enforces_total_deadline(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            with mock.patch.object(
+                CONTROLLED.urllib.request, "urlopen", return_value=io.BytesIO(b"manifest")
+            ), mock.patch.object(
+                CONTROLLED.time, "monotonic", side_effect=[0, 0, 0, 6]
+            ):
+                path, status, error = CONTROLLED.fetch_artifact(
+                    "https://example.test/manifest.csv",
+                    Path(directory),
+                    no_network=False,
+                    attempts=1,
+                    total_timeout_seconds=5,
+                )
+
+            self.assertIsNone(path)
+            self.assertEqual(status, "error")
+            self.assertIn("exceeded 5s total deadline", error)
+            self.assertEqual(list(Path(directory).iterdir()), [])
+
     def test_validation_reports_failed_source_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "controlled.sqlite"

@@ -99,6 +99,7 @@ jobs:
             --exports-dir dist
 
       - name: Build controlled-access metadata
+        timeout-minutes: 30
         run: |
           python scripts/tcia_controlled_access_metadata.py build \
             --snapshot-db dist/tcia_snapshot.sqlite \
@@ -106,6 +107,9 @@ jobs:
             --artifact-dir dist/controlled_access_source_artifacts \
             --gzip-out dist/controlled_access_metadata.sqlite.gz \
             --manifest-out dist/controlled_access_metadata_manifest.json \
+            --artifact-socket-timeout-seconds 30 \
+            --artifact-total-timeout-seconds 300 \
+            --artifact-max-bytes 1073741824 \
             --replace
 
       - name: Validate controlled-access metadata

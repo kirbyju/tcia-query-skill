@@ -40,6 +40,10 @@ DEFAULT_OUT = SKILL_ROOT / "cache" / "controlled_access_metadata.sqlite"
 DEFAULT_ARTIFACT_DIR = SKILL_ROOT / "cache" / "controlled_access_source_artifacts"
 DEFAULT_MANIFEST = SKILL_ROOT / "cache" / CONTROLLED_MANIFEST_ASSET
 DEFAULT_GZIP = SKILL_ROOT / "cache" / CONTROLLED_ASSET
+DEFAULT_ARTIFACT_SOCKET_TIMEOUT_SECONDS = 30
+DEFAULT_ARTIFACT_TOTAL_TIMEOUT_SECONDS = 300
+DEFAULT_ARTIFACT_MAX_BYTES = 1024 * 1024 * 1024
+ARTIFACT_READ_CHUNK_BYTES = 1024 * 1024
 
 CONTROLLED_POLICY_URL = (
     "https://www.cancerimagingarchive.net/nih-controlled-data-access-policy/"
@@ -1005,6 +1009,9 @@ def fetch_artifact(
     no_network: bool,
     *,
     attempts: int = 3,
+    socket_timeout_seconds: float = DEFAULT_ARTIFACT_SOCKET_TIMEOUT_SECONDS,
+    total_timeout_seconds: float = DEFAULT_ARTIFACT_TOTAL_TIMEOUT_SECONDS,
+    max_bytes: int = DEFAULT_ARTIFACT_MAX_BYTES,
 ) -> tuple[Path | None, str, str]:
     if not url:
         return None, "missing", "blank URL"
@@ -1016,10 +1023,50 @@ def fetch_artifact(
         return None, "skipped", "network disabled and artifact is not cached"
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     error = ""
+    started_at = time.monotonic()
+    deadline = started_at + max(total_timeout_seconds, 0)
     for attempt in range(1, max(attempts, 1) + 1):
+        partial_path: Path | None = None
         try:
-            with urllib.request.urlopen(request, timeout=120) as response:
-                out_path.write_bytes(response.read())
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError(
+                    f"artifact fetch exceeded {total_timeout_seconds:g}s total deadline"
+                )
+            request_timeout = max(0.1, min(socket_timeout_seconds, remaining))
+            with urllib.request.urlopen(request, timeout=request_timeout) as response:
+                headers = getattr(response, "headers", None)
+                content_length = headers.get("Content-Length") if headers else None
+                if content_length:
+                    try:
+                        declared_bytes = int(content_length)
+                    except ValueError:
+                        declared_bytes = 0
+                    if declared_bytes > max_bytes:
+                        raise ValueError(
+                            f"artifact Content-Length {declared_bytes} exceeds "
+                            f"{max_bytes}-byte limit"
+                        )
+                with tempfile.NamedTemporaryFile(
+                    dir=out_dir, prefix=f".{out_path.name}.", suffix=".part", delete=False
+                ) as partial:
+                    partial_path = Path(partial.name)
+                    downloaded = 0
+                    while True:
+                        if time.monotonic() >= deadline:
+                            raise TimeoutError(
+                                f"artifact fetch exceeded {total_timeout_seconds:g}s total deadline"
+                            )
+                        chunk = response.read(ARTIFACT_READ_CHUNK_BYTES)
+                        if not chunk:
+                            break
+                        downloaded += len(chunk)
+                        if downloaded > max_bytes:
+                            raise ValueError(
+                                f"artifact exceeded {max_bytes}-byte download limit"
+                            )
+                        partial.write(chunk)
+            partial_path.replace(out_path)
             return out_path, "fetched", ""
         except urllib.error.HTTPError as exc:
             error = str(exc)
@@ -1030,7 +1077,13 @@ def fetch_artifact(
         except Exception as exc:  # noqa: BLE001 - stored as artifact exception.
             error = str(exc)
             break
+        finally:
+            if partial_path is not None and partial_path.exists():
+                partial_path.unlink()
         if attempt < max(attempts, 1):
+            if time.monotonic() >= deadline:
+                error = f"artifact fetch exceeded {total_timeout_seconds:g}s total deadline"
+                break
             time.sleep(attempt)
     return None, "error", error
 
@@ -1410,7 +1463,15 @@ def normalize_metadata_row(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def ingest_artifacts(conn: sqlite3.Connection, artifact_dir: Path, no_network: bool) -> dict[str, int]:
+def ingest_artifacts(
+    conn: sqlite3.Connection,
+    artifact_dir: Path,
+    no_network: bool,
+    *,
+    socket_timeout_seconds: float = DEFAULT_ARTIFACT_SOCKET_TIMEOUT_SECONDS,
+    total_timeout_seconds: float = DEFAULT_ARTIFACT_TOTAL_TIMEOUT_SECONDS,
+    max_bytes: int = DEFAULT_ARTIFACT_MAX_BYTES,
+) -> dict[str, int]:
     fetched_at = utc_now()
     counts = {
         "download_artifacts": 0,
@@ -1420,15 +1481,31 @@ def ingest_artifacts(conn: sqlite3.Connection, artifact_dir: Path, no_network: b
         "artifact_errors": 0,
     }
     downloads = rows_as_dicts(conn, "SELECT * FROM controlled_downloads ORDER BY download_row_id")
+    artifact_total = sum(
+        bool(clean_value(download.get(url_key)))
+        for download in downloads
+        for url_key in ("download_url", "download_metadata")
+    )
+    artifact_index = 0
     for download in downloads:
         for role, url_key in (("download_url", "download_url"), ("download_metadata", "download_metadata")):
             url = clean_value(download.get(url_key))
             if not url:
                 continue
+            artifact_index += 1
+            fetch_started_at = time.monotonic()
+            print(
+                f"controlled artifact {artifact_index}/{artifact_total} start: "
+                f"{download['short_title']} {download['route_system']} {role}",
+                flush=True,
+            )
             path, status, error = fetch_artifact(
                 url,
                 artifact_dir / download["route_system"] / role,
                 no_network=no_network,
+                socket_timeout_seconds=socket_timeout_seconds,
+                total_timeout_seconds=total_timeout_seconds,
+                max_bytes=max_bytes,
             )
             if path is None and download["route_system"] == "ctdc":
                 fallback = local_ctdc_fallback(url)
@@ -1436,6 +1513,13 @@ def ingest_artifacts(conn: sqlite3.Connection, artifact_dir: Path, no_network: b
                     path = fallback
                     status = "local_fallback"
                     error = ""
+            elapsed = time.monotonic() - fetch_started_at
+            fetched_bytes = path.stat().st_size if path is not None and path.exists() else 0
+            print(
+                f"controlled artifact {artifact_index}/{artifact_total} done: "
+                f"status={status} bytes={fetched_bytes} elapsed_seconds={elapsed:.1f}",
+                flush=True,
+            )
             artifact_id = insert_artifact(
                 conn, download, role, url, path, status, error, fetched_at
             )
@@ -2482,7 +2566,14 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
     created_at = utc_now()
     downloads = seed_downloads(conn, include_legacy=args.include_legacy)
     wordpress_counts = seed_wordpress_download_metadata(conn)
-    artifact_counts = ingest_artifacts(conn, artifact_dir, no_network=args.no_network)
+    artifact_counts = ingest_artifacts(
+        conn,
+        artifact_dir,
+        no_network=args.no_network,
+        socket_timeout_seconds=args.artifact_socket_timeout_seconds,
+        total_timeout_seconds=args.artifact_total_timeout_seconds,
+        max_bytes=args.artifact_max_bytes,
+    )
     controlled_files = populate_controlled_files(conn)
     index_counts = populate_normalized_indexes(conn)
     exceptions = seed_exceptions(conn)
@@ -2537,6 +2628,11 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
         "wordpress_counts": wordpress_counts,
         "controlled_files_inserted": controlled_files,
         "artifact_counts": artifact_counts,
+        "artifact_fetch_limits": {
+            "socket_timeout_seconds": args.artifact_socket_timeout_seconds,
+            "total_timeout_seconds": args.artifact_total_timeout_seconds,
+            "max_bytes": args.artifact_max_bytes,
+        },
         "index_counts": index_counts,
         "exception_count": exceptions,
         "table_counts": counts,
@@ -2585,6 +2681,24 @@ def main(argv: list[str] | None = None) -> int:
         "--include-legacy",
         action="store_true",
         help="Also ingest controlled legacy .tcia downloads with metadata spreadsheets.",
+    )
+    build_parser.add_argument(
+        "--artifact-socket-timeout-seconds",
+        type=float,
+        default=DEFAULT_ARTIFACT_SOCKET_TIMEOUT_SECONDS,
+        help="Per-read network inactivity timeout for each public source artifact.",
+    )
+    build_parser.add_argument(
+        "--artifact-total-timeout-seconds",
+        type=float,
+        default=DEFAULT_ARTIFACT_TOTAL_TIMEOUT_SECONDS,
+        help="Total deadline across all retries for each public source artifact.",
+    )
+    build_parser.add_argument(
+        "--artifact-max-bytes",
+        type=int,
+        default=DEFAULT_ARTIFACT_MAX_BYTES,
+        help="Maximum bytes accepted for one public source artifact.",
     )
 
     manifest = subparsers.add_parser(
