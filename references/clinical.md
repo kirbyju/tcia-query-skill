@@ -65,7 +65,11 @@ order therefore does not re-key unchanged facts. During the one-time migration
 from encounter-order identities, the release change report pairs equal CDA fact
 payloads as nonsemantic identity migrations and reports only unmatched value
 changes as clinical additions or removals. Duplicate equal payloads are treated
-as multisets, so a count imbalance remains a semantic change.
+as multisets, so a count imbalance remains a semantic change. When those CDA
+facts feed a reviewed Analysis Result inheritance relationship, an otherwise
+identical inherited fact whose only changes are opaque source-row/fact
+identifiers is classified the same way; value, source, subject, and
+relationship changes remain gated.
 
 The reviewed QC rules:
 

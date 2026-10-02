@@ -591,7 +591,13 @@ def compare_keyed_rows(
             old_key, old_digest, old_scope = removed_row
             new_key, new_digest, new_scope = added_row
             is_cda_identity_migration = old_scope == new_scope == "cda"
-            if is_cda_identity_migration:
+            is_inherited_identity_migration = (
+                old_scope == new_scope == "tcia_collection_subject_inheritance"
+            )
+            is_nonsemantic_identity_migration = (
+                is_cda_identity_migration or is_inherited_identity_migration
+            )
+            if is_nonsemantic_identity_migration:
                 nongating_added.add(new_key)
                 nongating_removed.add(old_key)
             migrations.append({
@@ -607,7 +613,11 @@ def compare_keyed_rows(
                 "gate_status": (
                     "nonsemantic_cda_identity_migration"
                     if is_cda_identity_migration
-                    else "review_required"
+                    else (
+                        "nonsemantic_inherited_identity_migration"
+                        if is_inherited_identity_migration
+                        else "review_required"
+                    )
                 ),
             })
     if nongating_added or nongating_removed:
@@ -1188,8 +1198,10 @@ def build_report(args: argparse.Namespace) -> tuple[str, list[str], dict[str, ob
     if primary_key_migrations:
         lines.extend([
             "", "### One-to-one primary-key migrations", "",
-            "Rows are paired only when every non-primary-key value is identical; "
-            "these pairs remain gated semantic changes.", "",
+            "Rows are paired only when their semantic non-key payload is "
+            "identical. Opaque CDA and inherited-fact identity migrations are "
+            "reported here but excluded from the semantic gate; all other "
+            "pairs remain gated.", "",
         ])
         for migration in primary_key_migrations[:args.max_items]:
             old_key = format_key(value for _, value in migration["old_primary_key"])

@@ -725,6 +725,47 @@ class MetadataChangeReportTest(unittest.TestCase):
             self.assertEqual(facts["modified"], 0)
             self.assertEqual(payload["semantic_changes"], [])
 
+    def test_inherited_fact_identity_migration_is_nonsemantic(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            old = root / "old.sqlite"
+            new = root / "new.sqlite"
+            report = root / "report.json"
+            for path, fact_id, source_row_id in (
+                (old, "legacy-inherited", "legacy-row"),
+                (new, "stable-inherited", "stable-row"),
+            ):
+                with sqlite3.connect(path) as conn:
+                    conn.execute(
+                        """CREATE TABLE clinical_facts (
+                           fact_id TEXT PRIMARY KEY, source_row_id TEXT,
+                           source_kind TEXT, source_id TEXT, short_title TEXT,
+                           subject_id TEXT, concept TEXT, value_text TEXT,
+                           provenance_json TEXT)"""
+                    )
+                    conn.execute(
+                        """INSERT INTO clinical_facts VALUES
+                           (?, ?, 'tcia_collection_subject_inheritance',
+                            'tcia-inheritance:result:source', 'RESULT', 'P-1',
+                            'stage', 'Stage I', '{}')""",
+                        (fact_id, source_row_id),
+                    )
+            result = subprocess.run(
+                [
+                    sys.executable, str(SCRIPT), "--clinical-new", str(new),
+                    "--clinical-old", str(old), "--json-out", str(report),
+                    "--fail-on-unexplained-high",
+                ],
+                text=True, capture_output=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = json.loads(report.read_text())
+            self.assertEqual(payload["semantic_changes"], [])
+            self.assertEqual(
+                payload["primary_key_migrations"][0]["gate_status"],
+                "nonsemantic_inherited_identity_migration",
+            )
+
     def test_strict_gate_requires_exact_single_use_pk_kind_and_digests(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
