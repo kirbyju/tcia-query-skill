@@ -2588,6 +2588,59 @@ def copy_source_from_previous(
     return True
 
 
+def reuse_linked_source_from_previous(
+    conn: sqlite3.Connection,
+    previous_db: Path,
+    source_id: str,
+    *,
+    short_title: str,
+    live_status: str,
+) -> bool:
+    """Preserve a verified linked source when its live refresh is unavailable."""
+    if not copy_source_from_previous(conn, previous_db, source_id):
+        return False
+    previous = sqlite3.connect(previous_db)
+    previous.row_factory = sqlite3.Row
+    try:
+        download = previous.execute(
+            "SELECT * FROM clinical_downloads WHERE source_id = ?", (source_id,)
+        ).fetchone()
+    except sqlite3.Error:
+        download = None
+    finally:
+        previous.close()
+    if download:
+        conn.execute(
+            """INSERT OR REPLACE INTO clinical_downloads
+               (source_id, short_title, dataset_type, dataset_title, download_id,
+                download_title, download_url, date_updated, file_types,
+                download_types, data_types, access_level, controlled_access,
+                source_signature, ingest_status, rows_loaded, subjects_loaded,
+                error_text)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'reused',
+                       ?, ?, ?)""",
+            (
+                download["source_id"], download["short_title"],
+                download["dataset_type"], download["dataset_title"],
+                download["download_id"], download["download_title"],
+                download["download_url"], download["date_updated"],
+                download["file_types"], download["download_types"],
+                download["data_types"], download["access_level"],
+                download["controlled_access"], download["source_signature"],
+                download["rows_loaded"], download["subjects_loaded"],
+                f"live refresh status={live_status}; reused verified prior source",
+            ),
+        )
+    warning(
+        conn,
+        "linked_source_reused_after_refresh_unavailable",
+        f"live refresh status={live_status}; reused verified prior source",
+        source_id=source_id,
+        short_title=short_title,
+    )
+    return True
+
+
 def copy_nonofficial_previous(
     conn: sqlite3.Connection,
     previous_db: Path,
@@ -8179,6 +8232,20 @@ def build(args: argparse.Namespace) -> None:
         timeout=args.timeout,
         max_bytes=args.max_artifact_bytes,
     )
+    if (
+        ivygap_result.get("status") != "loaded"
+        and previous_db
+        and previous_schema_compatible
+        and reuse_linked_source_from_previous(
+            conn,
+            previous_db,
+            "tcia-linked-external:ivygap:allen-tumor-details",
+            short_title="IvyGAP",
+            live_status=str(ivygap_result.get("status") or "unknown"),
+        )
+    ):
+        ivygap_result["live_status"] = ivygap_result.get("status")
+        ivygap_result["status"] = "reused_previous"
     insert_meta(conn, "ivygap_allen_clinical_result", ivygap_result)
     conn.commit()
 

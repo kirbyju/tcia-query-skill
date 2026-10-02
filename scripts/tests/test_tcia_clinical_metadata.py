@@ -2675,6 +2675,73 @@ class ClinicalMetadataTest(unittest.TestCase):
             self.assertEqual(tuple(fact), ("patient", 0))
             conn.close()
 
+    def test_linked_source_reuses_verified_previous_rows_when_refresh_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            previous_path = root / "previous.sqlite"
+            previous = CLINICAL.init_db(previous_path, replace=True)
+            source_id = "tcia-linked-external:ivygap:allen-tumor-details"
+            CLINICAL.insert_source(
+                previous,
+                source_id=source_id,
+                source_kind="tcia_linked_external_clinical",
+                short_title="IvyGAP",
+                source_signature_value="verified-signature",
+                source_lineage="tcia-linked-external:ivygap:allen-institute",
+            )
+            CLINICAL.insert_row_and_facts(
+                previous,
+                source_id=source_id,
+                source_kind="tcia_linked_external_clinical",
+                short_title="IvyGAP",
+                subject_id="W1",
+                table_name="allen.tumor_details",
+                row_number=1,
+                row={"tumor_name": "W1-1-1"},
+                facts=[("primary_diagnosis", "Glioblastoma", "tumor_name", None)],
+            )
+            previous.execute(
+                """INSERT INTO clinical_downloads
+                   (source_id, short_title, source_signature, ingest_status,
+                    rows_loaded, subjects_loaded)
+                   VALUES (?, 'IvyGAP', 'verified-signature', 'loaded', 1, 1)""",
+                (source_id,),
+            )
+            previous.commit()
+            previous.close()
+
+            current = CLINICAL.init_db(root / "current.sqlite", replace=True)
+            self.assertTrue(
+                CLINICAL.reuse_linked_source_from_previous(
+                    current,
+                    previous_path,
+                    source_id,
+                    short_title="IvyGAP",
+                    live_status="failed",
+                )
+            )
+            self.assertEqual(
+                current.execute(
+                    "SELECT COUNT(*) FROM clinical_facts WHERE source_id = ?",
+                    (source_id,),
+                ).fetchone()[0],
+                1,
+            )
+            self.assertEqual(
+                current.execute(
+                    "SELECT ingest_status FROM clinical_downloads WHERE source_id = ?",
+                    (source_id,),
+                ).fetchone()[0],
+                "reused",
+            )
+            self.assertEqual(
+                current.execute(
+                    "SELECT warning_type FROM clinical_build_warnings"
+                ).fetchone()[0],
+                "linked_source_reused_after_refresh_unavailable",
+            )
+            current.close()
+
     def test_wordpress_single_label_fallback_is_explicit_and_non_overwriting(
         self,
     ) -> None:
