@@ -1888,6 +1888,7 @@ def insert_row_and_facts(
     evidence_scope: str = "patient",
     is_inferred: bool = False,
     fact_provenance: dict[str, Any] | None = None,
+    row_identity: str | None = None,
 ) -> bool:
     subject_id = clean_value(subject_id)
     if not subject_id:
@@ -1895,7 +1896,11 @@ def insert_row_and_facts(
     subject_key = f"{normalize_name(short_title)}:{normalize_subject(subject_id)}"
     cleaned_row = {str(key): clean_value(value) for key, value in row.items()}
     row_json = json_dumps(cleaned_row)
-    source_row_id = stable_id(source_id, table_name, row_number, subject_key, row_json)
+    source_row_id = (
+        stable_id(source_id, table_name, subject_key, row_identity)
+        if row_identity is not None
+        else stable_id(source_id, table_name, row_number, subject_key, row_json)
+    )
     conn.execute(
         """INSERT OR IGNORE INTO clinical_rows
            (source_row_id, source_id, short_title, subject_id, subject_key,
@@ -1948,13 +1953,15 @@ def insert_row_and_facts(
                 int(is_inferred),
                 0,
                 "accepted",
-                json_dumps(
-                    {
-                        "table_name": table_name,
-                        "row_number": row_number,
-                        **(fact_provenance or {}),
-                    }
-                ),
+                json_dumps({
+                    "table_name": table_name,
+                    **(
+                        {"row_identity": row_identity}
+                        if row_identity is not None
+                        else {"row_number": row_number}
+                    ),
+                    **(fact_provenance or {}),
+                }),
             ),
         )
     return True
@@ -5937,24 +5944,41 @@ def probe_cda(client: Any | None = None, subject_id: str = "TCGA-BP-4161") -> di
     }
 
 
-def tcga_cda_identity_map(
+def cda_identity_map(
     conn: sqlite3.Connection,
 ) -> dict[str, list[tuple[str, str]]]:
-    """Return globally stable TCGA barcodes already tied to TCIA imaging."""
+    """Return reviewed-program upstream IDs already tied to TCIA imaging.
+
+    Exact upstream-ID matching is limited to programs whose participant IDs
+    are established by TCIA/IDC metadata and expected in CDA: TCGA, CPTAC,
+    and Cancer Moonshot Biobank (CMB). The returned targets remain
+    dataset-scoped even when one upstream identifier occurs in more than one
+    TCIA dataset.
+    """
     result: dict[str, list[tuple[str, str]]] = {}
     for row in conn.execute(
         """SELECT DISTINCT short_title, subject_id
            FROM clinical_imaging_subjects
-           WHERE upper(subject_id) GLOB 'TCGA-??-????'
+           WHERE short_title LIKE 'TCGA-%'
+              OR short_title LIKE 'CPTAC-%'
+              OR short_title LIKE 'CMB-%'
            ORDER BY short_title, subject_id"""
     ):
+        short_title = clean_value(row["short_title"])
         subject_id = clean_value(row["subject_id"]).upper()
-        if not re.fullmatch(r"TCGA-[A-Z0-9]{2}-[A-Z0-9]{4}", subject_id):
+        if not subject_id:
             continue
         result.setdefault(normalize_subject(subject_id), []).append(
-            (clean_value(row["short_title"]), subject_id)
+            (short_title, subject_id)
         )
     return result
+
+
+def tcga_cda_identity_map(
+    conn: sqlite3.Connection,
+) -> dict[str, list[tuple[str, str]]]:
+    """Backward-compatible alias for the broadened exact-ID candidate map."""
+    return cda_identity_map(conn)
 
 
 def cda_result_subject_id(row: dict[str, Any]) -> str:
@@ -5975,7 +5999,34 @@ def expanded_cda_records(
     return frame_records(expanded)
 
 
-def harvest_cda_tcga_clinical(
+def stable_cda_rows(
+    rows: Iterable[dict[str, Any]], table_name: str,
+) -> list[tuple[dict[str, Any], str]]:
+    """Return CDA rows with deterministic identities independent of API order."""
+    ordered: list[tuple[str, dict[str, Any]]] = []
+    for row in rows:
+        cleaned = {str(key): clean_value(value) for key, value in row.items()}
+        content = json_dumps(cleaned)
+        ordered.append((content, row))
+    ordered.sort(key=lambda item: item[0])
+    occurrences: dict[str, int] = {}
+    result: list[tuple[dict[str, Any], str]] = []
+    for content, row in ordered:
+        occurrences[content] = occurrences.get(content, 0) + 1
+        result.append((
+            row,
+            stable_id(
+                "cda-row",
+                table_name,
+                cda_result_subject_id(row),
+                content,
+                occurrences[content],
+            ),
+        ))
+    return result
+
+
+def harvest_cda_clinical(
     conn: sqlite3.Connection,
     *,
     client: Any,
@@ -5983,8 +6034,8 @@ def harvest_cda_tcga_clinical(
     release_fingerprint: str,
     batch_size: int,
 ) -> dict[str, Any]:
-    """Harvest CDA rows for exact TCGA barcodes already linked to TCIA imaging."""
-    identities = tcga_cda_identity_map(conn)
+    """Harvest CDA rows for exact TCGA, CPTAC, and CMB upstream IDs."""
+    identities = cda_identity_map(conn)
     result: dict[str, Any] = {
         "status": "pending",
         "candidate_subjects": len(identities),
@@ -6037,7 +6088,9 @@ def harvest_cda_tcga_clinical(
                         "input_column": "subject_id",
                         "cda_column_to_match": "upstream_id",
                     },
-                    add_columns=["observation.*", "treatment.*"],
+                    add_columns=[
+                        "upstream_identifiers.*", "observation.*", "treatment.*"
+                    ],
                     collate_results=True,
                     return_data_as="dataframe",
                 ),
@@ -6046,11 +6099,12 @@ def harvest_cda_tcga_clinical(
             if temp_path and temp_path.exists():
                 temp_path.unlink()
         if frame is None:
-            raise RuntimeError("CDA returned no result object for a TCGA batch")
+            raise RuntimeError("CDA returned no result object for an identifier batch")
 
         subject_rows = frame_records(frame)
         observations_by_subject: dict[str, list[dict[str, Any]]] = {}
         treatments_by_subject: dict[str, list[dict[str, Any]]] = {}
+        requested_ids_by_subject: dict[str, set[str]] = {}
         for values in expanded_cda_records(client, frame, "observation_data"):
             observations_by_subject.setdefault(
                 cda_result_subject_id(values), []
@@ -6059,10 +6113,26 @@ def harvest_cda_tcga_clinical(
             treatments_by_subject.setdefault(
                 cda_result_subject_id(values), []
             ).append(values)
+        for values in expanded_cda_records(
+            client, frame, "upstream_identifiers_data"
+        ):
+            upstream_id = normalize_subject(clean_value(values.get("upstream_id")))
+            if upstream_id in identities:
+                requested_ids_by_subject.setdefault(
+                    cda_result_subject_id(values), set()
+                ).add(upstream_id)
 
         for subject_row in subject_rows:
             cda_subject_id = cda_result_subject_id(subject_row)
-            targets = identities.get(normalize_subject(cda_subject_id), [])
+            matched_ids = requested_ids_by_subject.get(cda_subject_id, set())
+            direct_id = normalize_subject(cda_subject_id)
+            if direct_id in identities:
+                matched_ids.add(direct_id)
+            targets = sorted({
+                target
+                for matched_id in matched_ids
+                for target in identities.get(matched_id, [])
+            })
             if not targets:
                 continue
             matched_cda_ids.add(cda_subject_id)
@@ -6084,7 +6154,7 @@ def harvest_cda_tcga_clinical(
                         provenance={
                             "release_fingerprint": release_fingerprint,
                             "release_summary": cda_release_summary(release_rows),
-                            "identity_match": "exact_tcga_upstream_id",
+                            "identity_match": "exact_tcia_imaging_upstream_id",
                         },
                     )
                     created_sources.add(source_id)
@@ -6113,10 +6183,14 @@ def harvest_cda_tcga_clinical(
                         "cda_subject_id": clean_value(subject_row.get("subject_id")),
                         "cda_data_source": json_safe(subject_row.get("data_source")),
                     },
+                    row_identity=stable_id("cda-subject", cda_subject_id),
                 )
                 result["subject_rows"] += 1
 
-                for observation in observations_by_subject.get(cda_subject_id, []):
+                for observation, row_identity in stable_cda_rows(
+                    observations_by_subject.get(cda_subject_id, []),
+                    "cda.observation",
+                ):
                     facts = [
                         ("age_at_observation", observation.get("age_at_observation"), "age_at_observation", None),
                         ("primary_diagnosis", observation.get("diagnosis"), "diagnosis", None),
@@ -6145,10 +6219,14 @@ def harvest_cda_tcga_clinical(
                             "cda_subject_id": clean_value(subject_row.get("subject_id")),
                             "cda_data_source": clean_value(observation.get("data_source")),
                         },
+                        row_identity=row_identity,
                     )
                     result["observation_rows"] += 1
 
-                for treatment in treatments_by_subject.get(cda_subject_id, []):
+                for treatment, row_identity in stable_cda_rows(
+                    treatments_by_subject.get(cda_subject_id, []),
+                    "cda.treatment",
+                ):
                     facts = [
                         ("therapeutic_agent", treatment.get("therapeutic_agent"), "therapeutic_agent", None),
                         ("treatment_anatomic_site", treatment.get("treatment_anatomic_site"), "treatment_anatomic_site", None),
@@ -6170,6 +6248,7 @@ def harvest_cda_tcga_clinical(
                             "cda_subject_id": clean_value(subject_row.get("subject_id")),
                             "cda_data_source": clean_value(treatment.get("data_source")),
                         },
+                        row_identity=row_identity,
                     )
                     result["treatment_rows"] += 1
 
@@ -6256,7 +6335,7 @@ def ingest_cda_clinical(
         conn.execute("SAVEPOINT cda_refresh")
         harvest_savepoint = True
         result.update(
-            harvest_cda_tcga_clinical(
+            harvest_cda_clinical(
                 conn,
                 client=client,
                 release_rows=release_rows,
@@ -7024,7 +7103,9 @@ def materialize_subjects(conn: sqlite3.Connection) -> None:
            JOIN clinical_rows r USING (source_row_id)
            WHERE f.qc_excluded = 0
            ORDER BY f.subject_key, f.concept, f.source_priority DESC,
-                    COALESCE(s.source_date, '') DESC, f.source_id, f.fact_id"""
+                    COALESCE(s.source_date, '') DESC, f.source_id,
+                    f.value_normalized, f.value_resolved, f.value_text,
+                    f.original_column, f.fact_id"""
     )
 
     def write_subject(facts: list[sqlite3.Row]) -> None:
@@ -7050,6 +7131,10 @@ def materialize_subjects(conn: sqlite3.Connection) -> None:
                         fact["value_number"]
                         if fact["value_number"] is not None
                         else float("inf"),
+                        fact["value_normalized"],
+                        fact["value_resolved"],
+                        fact["value_text"],
+                        fact["original_column"],
                         fact["fact_id"],
                     ),
                 )
@@ -7089,7 +7174,8 @@ def materialize_subjects(conn: sqlite3.Connection) -> None:
             key=lambda fact: (
                 -fact["source_priority"],
                 fact["source_id"],
-                fact["fact_id"],
+                fact["short_title"],
+                fact["subject_id"],
             ),
         )[0]
         column_values = [resolved.get(column) for column in RESOLVED_COLUMNS]
@@ -8638,7 +8724,10 @@ def parse_args() -> argparse.Namespace:
         "--cda-batch-size",
         type=int,
         default=100,
-        help="Maximum exact TCGA subject identifiers sent in each CDA query batch.",
+        help=(
+            "Maximum exact TCGA, CPTAC, or CMB subject identifiers sent in "
+            "each CDA query batch."
+        ),
     )
     build_parser.add_argument("--limit", type=int)
     build_parser.add_argument("--timeout", type=int, default=120)

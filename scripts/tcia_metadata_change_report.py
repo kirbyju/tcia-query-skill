@@ -20,6 +20,7 @@ class TableSpec:
     severity: str = "review"
     where: str = ""
     nonsemantic_columns: tuple[str, ...] = ()
+    migration_nonsemantic_columns: tuple[str, ...] = ()
 
 
 PROFILES = {
@@ -48,7 +49,10 @@ PROFILES = {
         TableSpec("clinical_idc_tables", ("collection_id", "table_name")),
         TableSpec("clinical_imaging_subjects"),
         TableSpec("clinical_rows"),
-        TableSpec("clinical_facts", ("fact_id",), "high"),
+        TableSpec(
+            "clinical_facts", ("fact_id",), "high",
+            migration_nonsemantic_columns=("source_row_id", "provenance_json"),
+        ),
         TableSpec("clinical_subjects", ("subject_key",), "high"),
         TableSpec(
             "clinical_dataset_inferences", ("short_title", "concept")
@@ -427,6 +431,32 @@ def canonical_value(value: object) -> object:
     return value
 
 
+def without_opaque_provenance_ids(value: object) -> object:
+    """Remove derived row/fact identifiers while preserving provenance content."""
+    if isinstance(value, dict):
+        return {
+            key: without_opaque_provenance_ids(item)
+            for key, item in value.items()
+            if key != "source_row_id" and not key.endswith("fact_id")
+        }
+    if isinstance(value, list):
+        return [without_opaque_provenance_ids(item) for item in value]
+    return value
+
+
+def comparison_value(spec: TableSpec, column: str, value: object) -> object:
+    canonical = canonical_value(value)
+    if spec.name != "clinical_facts" or column != "provenance_json":
+        return canonical
+    if not isinstance(canonical, str):
+        return canonical
+    try:
+        parsed = json.loads(canonical)
+    except json.JSONDecodeError:
+        return canonical
+    return without_opaque_provenance_ids(parsed)
+
+
 def keyed_row_digests(
     conn: sqlite3.Connection, spec: TableSpec
 ) -> Iterable[tuple[tuple[str, ...], str]]:
@@ -456,7 +486,7 @@ def keyed_row_digests(
 
 def keyed_row_records(
     conn: sqlite3.Connection, spec: TableSpec
-) -> Iterable[tuple[tuple[str, ...], str, str]]:
+) -> Iterable[tuple[tuple[str, ...], str, str, str]]:
     """Stream key, full-row digest, and key-independent content digest."""
     columns = [
         str(row[1])
@@ -475,10 +505,12 @@ def keyed_row_records(
         values = dict(zip(columns, row))
         key = tuple("" if values[name] is None else str(values[name]) for name in spec.keys)
         full_payload = {
-            name: canonical_value(values[name]) for name in columns
+            name: comparison_value(spec, name, values[name]) for name in columns
         }
         content_payload = {
-            name: value for name, value in full_payload.items() if name not in spec.keys
+            name: value for name, value in full_payload.items()
+            if name not in spec.keys
+            and name not in spec.migration_nonsemantic_columns
         }
         yield (
             key,
@@ -488,6 +520,7 @@ def keyed_row_records(
             hashlib.sha256(json.dumps(
                 content_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
             ).encode("utf-8")).hexdigest(),
+            str(values.get("source_kind") or ""),
         )
 
 
@@ -505,22 +538,26 @@ def compare_keyed_rows(
     added = removed = modified = 0
     examples: list[tuple[str, tuple[str, ...]]] = []
     changes: list[tuple[str, tuple[str, ...], str, str]] = []
-    added_by_content: dict[str, list[tuple[tuple[str, ...], str]]] = {}
-    removed_by_content: dict[str, list[tuple[tuple[str, ...], str]]] = {}
+    added_by_content: dict[str, list[tuple[tuple[str, ...], str, str]]] = {}
+    removed_by_content: dict[str, list[tuple[tuple[str, ...], str, str]]] = {}
     while new_item is not None or old_item is not None:
         if old_item is None or (new_item is not None and new_item[0] < old_item[0]):
             added += 1
             if len(examples) < max_items:
                 examples.append(("added", new_item[0]))
             changes.append(("added", new_item[0], "", new_item[1]))
-            added_by_content.setdefault(new_item[2], []).append((new_item[0], new_item[1]))
+            added_by_content.setdefault(new_item[2], []).append(
+                (new_item[0], new_item[1], new_item[3])
+            )
             new_item = next(new_rows, None)
         elif new_item is None or old_item[0] < new_item[0]:
             removed += 1
             if len(examples) < max_items:
                 examples.append(("removed", old_item[0]))
             changes.append(("removed", old_item[0], old_item[1], ""))
-            removed_by_content.setdefault(old_item[2], []).append((old_item[0], old_item[1]))
+            removed_by_content.setdefault(old_item[2], []).append(
+                (old_item[0], old_item[1], old_item[3])
+            )
             old_item = next(old_rows, None)
         else:
             if new_item[1] != old_item[1]:
@@ -531,25 +568,65 @@ def compare_keyed_rows(
             new_item = next(new_rows, None)
             old_item = next(old_rows, None)
     migrations: list[dict[str, object]] = []
+    nongating_added: set[tuple[str, ...]] = set()
+    nongating_removed: set[tuple[str, ...]] = set()
     for content_sha in sorted(set(added_by_content).intersection(removed_by_content)):
         added_rows = added_by_content[content_sha]
         removed_rows = removed_by_content[content_sha]
-        # Ambiguous duplicate payloads are deliberately not paired.
-        if len(added_rows) != 1 or len(removed_rows) != 1:
+        all_cda = all(
+            scope == "cda"
+            for _, _, scope in added_rows + removed_rows
+        )
+        # Equal CDA fact payloads form a multiset. Pair them deterministically
+        # even when repeated; any count imbalance remains a real add/remove.
+        # Other tables retain the stricter one-to-one rule because identical
+        # payloads may not be interchangeable there.
+        if all_cda:
+            pairs = zip(sorted(removed_rows), sorted(added_rows))
+        elif len(added_rows) == len(removed_rows) == 1:
+            pairs = zip(removed_rows, added_rows)
+        else:
             continue
-        old_key, old_digest = removed_rows[0]
-        new_key, new_digest = added_rows[0]
-        migrations.append({
-            "old_primary_key": [
-                [column, value] for column, value in zip(spec.keys, old_key)
-            ],
-            "new_primary_key": [
-                [column, value] for column, value in zip(spec.keys, new_key)
-            ],
-            "old_row_sha256": old_digest,
-            "new_row_sha256": new_digest,
-            "non_primary_key_content_sha256": content_sha,
-        })
+        for removed_row, added_row in pairs:
+            old_key, old_digest, old_scope = removed_row
+            new_key, new_digest, new_scope = added_row
+            is_cda_identity_migration = old_scope == new_scope == "cda"
+            if is_cda_identity_migration:
+                nongating_added.add(new_key)
+                nongating_removed.add(old_key)
+            migrations.append({
+                "old_primary_key": [
+                    [column, value] for column, value in zip(spec.keys, old_key)
+                ],
+                "new_primary_key": [
+                    [column, value] for column, value in zip(spec.keys, new_key)
+                ],
+                "old_row_sha256": old_digest,
+                "new_row_sha256": new_digest,
+                "non_primary_key_content_sha256": content_sha,
+                "gate_status": (
+                    "nonsemantic_cda_identity_migration"
+                    if is_cda_identity_migration
+                    else "review_required"
+                ),
+            })
+    if nongating_added or nongating_removed:
+        added -= len(nongating_added)
+        removed -= len(nongating_removed)
+        changes = [
+            change for change in changes
+            if not (
+                (change[0] == "added" and change[1] in nongating_added)
+                or (change[0] == "removed" and change[1] in nongating_removed)
+            )
+        ]
+        examples = [
+            example for example in examples
+            if not (
+                (example[0] == "added" and example[1] in nongating_added)
+                or (example[0] == "removed" and example[1] in nongating_removed)
+            )
+        ]
     return added, removed, modified, examples, changes, migrations
 
 

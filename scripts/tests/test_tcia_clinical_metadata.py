@@ -1163,6 +1163,50 @@ class ClinicalMetadataTest(unittest.TestCase):
             self.assertEqual(facts["therapeutic_agent"], "Sunitinib")
             conn.close()
 
+    def test_cda_identity_map_is_bounded_to_tcga_cptac_and_cmb(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            conn = CLINICAL.init_db(
+                Path(directory) / "clinical.sqlite", replace=True
+            )
+            conn.executemany(
+                "INSERT INTO clinical_imaging_subjects VALUES (?, ?, ?, 'idc_index')",
+                [
+                    ("tcga:one", "TCGA-KIRC", "TCGA-BP-4161"),
+                    ("cptac:one", "CPTAC-GBM", "C3L-00016"),
+                    ("cmb:one", "CMB-AML", "MSB-01723"),
+                    ("other:one", "OTHER", "PATIENT-1"),
+                ],
+            )
+            identities = CLINICAL.cda_identity_map(conn)
+            self.assertEqual(
+                set(identities),
+                {"tcga-bp-4161", "c3l-00016", "msb-01723"},
+            )
+            self.assertEqual(
+                identities["c3l-00016"], [("CPTAC-GBM", "C3L-00016")]
+            )
+            conn.close()
+
+    def test_cda_row_identity_is_independent_of_api_order(self) -> None:
+        rows = [
+            {
+                "subject_id": "TCIA-RADIOLOGY.C3L-00016",
+                "data_source": "IDC",
+                "diagnosis": "Glioblastoma",
+            },
+            {
+                "subject_id": "TCIA-RADIOLOGY.C3L-00016",
+                "data_source": "GC",
+                "diagnosis": "Glioblastoma",
+            },
+        ]
+        forward = CLINICAL.stable_cda_rows(rows, "cda.observation")
+        reverse = CLINICAL.stable_cda_rows(reversed(rows), "cda.observation")
+        self.assertEqual(
+            [(row["data_source"], identity) for row, identity in forward],
+            [(row["data_source"], identity) for row, identity in reverse],
+        )
+
     def test_nlst_harmonizes_no_cancer_and_icdo_codes_without_losing_raw_values(
         self,
     ) -> None:

@@ -59,6 +59,14 @@ evidence are available in the `audit_support` correction registry; the
 service. Consumers that persisted those hashes must migrate them from that
 release-bound audit record.
 
+CDA rows use deterministic identities derived from dataset-scoped TCIA
+identity plus canonically ordered CDA row content. A change in CDA API return
+order therefore does not re-key unchanged facts. During the one-time migration
+from encounter-order identities, the release change report pairs equal CDA fact
+payloads as nonsemantic identity migrations and reports only unmatched value
+changes as clinical additions or removals. Duplicate equal payloads are treated
+as multisets, so a count imbalance remains a semantic change.
+
 The reviewed QC rules:
 
 - convert the official `Crowds-Cure-2017` TCGA-style

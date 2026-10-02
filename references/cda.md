@@ -123,7 +123,7 @@ If a TCIA/IDC subject list does not match CDA `subject_id` directly:
 3. Use `match_from_file` with `cda_column_to_match` set to the relevant upstream identifier column.
 4. Return both the CDA `subject_id` and source-specific upstream IDs so the user can route follow-up work.
 
-For TCGA, CPTAC, and other major NCI programs, CDA may have multiple source systems linked to the same subject. Use `data_source` filters only when the user asks for a specific commons; otherwise keep all data sources and report the observed combinations.
+For TCGA, CPTAC, and other major NCI programs, CDA may have multiple source systems linked to the same subject. Use `data_source` filters only when the user asks for a specific commons; otherwise keep all data sources and report the observed combinations. The clinical release builder limits its automatic CDA candidate set to exact upstream identifiers already established in TCIA/IDC imaging metadata for `TCGA-*`, `CPTAC-*`, and Cancer Moonshot Biobank `CMB-*` datasets. It maps each exact match back to its dataset-scoped TCIA identity; it does not treat a bare identifier as authority to join arbitrary datasets.
 
 Valid `data_source` filters documented by `cdapython` include `GDC`, `IDC`, `PDC`, `GC`, and `ICDC`.
 
