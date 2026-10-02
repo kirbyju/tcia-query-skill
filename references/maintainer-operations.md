@@ -144,6 +144,21 @@ artifact in a public repository. The normal source artifact and downstream
 release remain blocked. Reviewers must use the JSON record's exact artifact,
 table, complete ordered primary key, change kind, and before/after digests.
 
+The same workflow also writes `release_review_queue.json` and
+`release_review_queue.csv`. These files group otherwise-unexplained public
+non-DICOM and Participant Inventory changes only when every row resolves to one
+exact `(dataset_type, short_title)` scope. Clinical, correction-registry,
+cross-dataset, ambiguous, and unresolvable changes remain in the blocking list.
+Queue membership is not an approval and does not alter a release candidate.
+Each entry carries an exact change count and digest so a maintainer can review,
+approve, or explicitly hold back one dataset without granting a blanket waiver.
+
+A future dataset holdback must restore the complete verified prior dataset
+scope before artifact packaging, regenerate all dependent Participant Inventory
+rows and manifests, and rerun the ordinary semantic gate. Never publish the
+changed rows while merely labeling them queued, and never auto-hold an
+ambiguous or cross-dataset change.
+
 The one-time correction-registry migration is permitted only when the immediately
 prior published bundle is a digest-verified schema-2 release that has no
 correction asset, component, decision-set summary, or profile selection. The

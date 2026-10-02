@@ -1257,6 +1257,7 @@ def build_report(args: argparse.Namespace) -> tuple[str, list[str], dict[str, ob
         "comparisons": comparison_rows,
         "warnings": warnings,
         "unexplained_high_severity": unexplained_high,
+        "unexplained_high_severity_changes": unexplained_changes,
         "semantic_changes": high_changes,
         "accepted_geometry_refreshes": geometry_refreshes,
         "primary_key_migrations": primary_key_migrations,
@@ -1330,6 +1331,7 @@ def main() -> int:
                 + "/".join(str(value) for _, value in item["primary_key"])
                 for item in unexplained
             ]
+            summary["unexplained_high_severity_changes"] = unexplained
             summary["semantic_explanations"] = {
                 "consumed_effect_ids": consumed,
                 "duplicate_matches": duplicates,
@@ -1339,7 +1341,8 @@ def main() -> int:
             semantic_payload = {
                 key: summary[key] for key in (
                     "schema_version", "comparisons", "warnings",
-                    "unexplained_high_severity", "semantic_changes",
+                    "unexplained_high_severity",
+                    "unexplained_high_severity_changes", "semantic_changes",
                     "accepted_geometry_refreshes", "primary_key_migrations",
                     "baseline_modes", "semantic_explanations",
                 )

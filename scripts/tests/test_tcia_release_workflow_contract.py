@@ -244,6 +244,19 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
             semantic_block.index("rm -f cache/public_non_dicom_baseline.sqlite"),
         )
 
+    def test_unexplained_changes_are_exported_as_dataset_review_queue(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        queue_step = workflow.index("Build dataset-scoped release review queue")
+        gate_step = workflow.index(
+            "Enforce exact semantic change explanations by replay", queue_step
+        )
+        queue_block = workflow[queue_step:gate_step]
+        self.assertIn("scripts/tcia_release_review_queue.py", queue_block)
+        self.assertIn("--public-old cache/public_non_dicom_baseline.sqlite", queue_block)
+        self.assertIn("--participant-old cache/participant_inventory_baseline.sqlite", queue_block)
+        self.assertIn("cache/reports/release_review_queue.json", workflow)
+        self.assertIn("cache/reports/release_review_queue.csv", workflow)
+
     def test_geometry_refresh_is_atomic_and_strictly_scoped_at_gate(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
         build_step = workflow.index("Build public non-DICOM metadata")

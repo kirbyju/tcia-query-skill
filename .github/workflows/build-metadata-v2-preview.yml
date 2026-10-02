@@ -344,6 +344,17 @@ jobs:
             --markdown-out cache/reports/metadata_change_report_final.md \
             --json-out cache/reports/metadata_change_report_final.json
 
+      - name: Build dataset-scoped release review queue
+        run: |
+          python scripts/tcia_release_review_queue.py \
+            --report cache/reports/metadata_change_report_final.json \
+            --public-new cache/public_non_dicom_metadata.sqlite \
+            --public-old cache/public_non_dicom_baseline.sqlite \
+            --participant-new cache/participant_inventory.sqlite \
+            --participant-old cache/participant_inventory_baseline.sqlite \
+            --json-out cache/reports/release_review_queue.json \
+            --csv-out cache/reports/release_review_queue.csv
+
       # Preserve the expensive build before the late semantic gate. Maintainers
       # can iterate on exact explanation declarations by replaying the retained
       # report, without rebuilding either multi-gigabyte SQLite artifact.
@@ -356,6 +367,8 @@ jobs:
             cache/tcia_correction_registry.sqlite
             cache/reports/metadata_change_report_final.md
             cache/reports/metadata_change_report_final.json
+            cache/reports/release_review_queue.json
+            cache/reports/release_review_queue.csv
           if-no-files-found: error
           retention-days: 7
           compression-level: 0
@@ -403,6 +416,8 @@ jobs:
             cache/reports/tcia_v2_compact_audit_reconstruction.json
             cache/reports/metadata_change_report_final.md
             cache/reports/metadata_change_report_final.json
+            cache/reports/release_review_queue.json
+            cache/reports/release_review_queue.csv
             dist/metadata_change_report.md
             dist/metadata_change_report.json
           if-no-files-found: ignore
