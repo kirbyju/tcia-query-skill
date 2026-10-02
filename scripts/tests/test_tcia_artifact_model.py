@@ -989,6 +989,17 @@ class BuilderTests(unittest.TestCase):
             ).fetchone()[0],
             227,
         )
+        self.assertEqual(public.initialize_geometry_statuses(conn), 229)
+        self.assertEqual(
+            conn.execute(
+                "SELECT COUNT(*) FROM public_non_dicom_assets "
+                "WHERE asset_granularity='participant_file_group' "
+                "AND geometry_status='not_checked' "
+                "AND geometry_assessment_method='not_assessed' "
+                "AND COALESCE(geometry_assessment_source, '')=''"
+            ).fetchone()[0],
+            227,
+        )
         self.assertEqual(
             conn.execute("SELECT COUNT(*) FROM public_non_dicom_crosswalk_evidence").fetchone()[0],
             227,

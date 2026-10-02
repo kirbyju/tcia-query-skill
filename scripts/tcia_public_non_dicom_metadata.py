@@ -7694,11 +7694,13 @@ def validate_database(path: Path) -> dict[str, Any]:
                     "AND represented_file_count IS NULL",
                     (DUKE_BREAST_MRI_SHORT_TITLE,),
                 ).fetchone()[0],
-                "duke_nrrd_geometry_unset": conn.execute(
+                "duke_nrrd_geometry_not_checked": conn.execute(
                     "SELECT COUNT(*) FROM public_non_dicom_assets "
                     "WHERE short_title = ? AND file_format = 'NRRD' "
                     "AND asset_granularity = 'participant_file_group' "
-                    "AND geometry_status IS NULL",
+                    "AND geometry_status = 'not_checked' "
+                    "AND geometry_assessment_method = 'not_assessed' "
+                    "AND COALESCE(geometry_assessment_source, '') = ''",
                     (DUKE_BREAST_MRI_SHORT_TITLE,),
                 ).fetchone()[0],
             }

@@ -65,7 +65,7 @@
         "duke_nrrd_3d_participants": 100,
         "duke_nrrd_participant_links": 227,
         "duke_nrrd_unasserted_file_paths": 227,
-        "duke_nrrd_geometry_unset": 227
+        "duke_nrrd_geometry_not_checked": 227
       }
     },
     "tcga_lgg_mask": {
