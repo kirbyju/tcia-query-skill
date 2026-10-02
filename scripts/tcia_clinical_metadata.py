@@ -2397,6 +2397,9 @@ def apply_wordpress_dataset_inferences(
                     ),
                     "screening_review_evidence": review_evidence or None,
                 },
+                row_identity=stable_id(
+                    "wordpress-dataset-inference", subject["subject_key"]
+                ),
             )
             results["subjects_applied"] += 1
 
@@ -7878,6 +7881,13 @@ def inherit_analysis_result_clinical_facts(
                             "original_source": original_source,
                             "original_facts": original_facts,
                         },
+                        row_identity=stable_id(
+                            "tcia-collection-subject-inheritance",
+                            target,
+                            source,
+                            normalized_id,
+                            concept,
+                        ),
                     )
                     inherited_facts += 1
         status = (

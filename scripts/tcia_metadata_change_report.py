@@ -594,8 +594,13 @@ def compare_keyed_rows(
             is_inherited_identity_migration = (
                 old_scope == new_scope == "tcia_collection_subject_inheritance"
             )
+            is_wordpress_identity_migration = (
+                old_scope == new_scope == "wordpress_dataset_inference"
+            )
             is_nonsemantic_identity_migration = (
-                is_cda_identity_migration or is_inherited_identity_migration
+                is_cda_identity_migration
+                or is_inherited_identity_migration
+                or is_wordpress_identity_migration
             )
             if is_nonsemantic_identity_migration:
                 nongating_added.add(new_key)
@@ -616,7 +621,11 @@ def compare_keyed_rows(
                     else (
                         "nonsemantic_inherited_identity_migration"
                         if is_inherited_identity_migration
-                        else "review_required"
+                        else (
+                            "nonsemantic_wordpress_identity_migration"
+                            if is_wordpress_identity_migration
+                            else "review_required"
+                        )
                     )
                 ),
             })
