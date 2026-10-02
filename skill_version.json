@@ -86,7 +86,7 @@
     "scripts/pathdb_metadata.py": "b148a8d2cd4f9f9f16f6edc7286192bbbe0787864e50bbbf3f9806e15ca56113",
     "scripts/tcia_artifact_model.py": "cb4eea89af7b679558aa13e93fbafafec4b615f28d85cc261f76a792ae294553",
     "scripts/tcia_aspera_gap_inventory.py": "534d0bceb774ecfe586c6ad0bcfdb83bd19e8fc574663febb1ef9c44cff3317c",
-    "scripts/tcia_clinical_metadata.py": "42d5ff83cbeb86f9a55ab063520545ee30a86bfe14e147c6dd34940aeacfb938",
+    "scripts/tcia_clinical_metadata.py": "71cdc1af980b52ac71218eae5b8f469581ba46ab1e1e398ace805c2cbab8e3f9",
     "scripts/tcia_controlled_access_metadata.py": "8ba93bb5d5d6b060ef82e25457f3069a180f46bf5cf3edcebe4c85405406b9c7",
     "scripts/tcia_correction_registry.py": "8675e3d741b07f06ec40f507d038e65f1108945f235e9853358b5821d966063d",
     "scripts/tcia_create_data_retriever_csv.py": "ff351223974fba146ab2e6434b12891c7019c78eefed0d602b0d600f97ebe426",
@@ -140,6 +140,6 @@
     "scripts/tests/test_tcia_v2_staging.py": "dda82d5c65b8e03b543fc80c44f30acf47a6c29861b1565104e96c568399ec25"
   },
   "schema_version": 1,
-  "skill_version": "2026.10.02.4",
-  "updated_at_utc": "2026-10-02T14:57:57.588267+00:00"
+  "skill_version": "2026.10.02.5",
+  "updated_at_utc": "2026-10-02T15:00:37.549021+00:00"
 }

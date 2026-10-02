@@ -7159,9 +7159,7 @@ def materialize_subjects(conn: sqlite3.Connection) -> None:
            JOIN clinical_rows r USING (source_row_id)
            WHERE f.qc_excluded = 0
            ORDER BY f.subject_key, f.concept, f.source_priority DESC,
-                    COALESCE(s.source_date, '') DESC, f.source_id,
-                    f.value_normalized, f.value_resolved, f.value_text,
-                    f.original_column, f.fact_id"""
+                    COALESCE(s.source_date, '') DESC, f.source_id, f.fact_id"""
     )
 
     def write_subject(facts: list[sqlite3.Row]) -> None:
