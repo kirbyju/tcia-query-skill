@@ -412,28 +412,93 @@ def load_wordpress_versions_from_snapshot(path: Path) -> list[dict[str, Any]]:
     return sort_wordpress_records([json.loads(row["raw_json"]) for row in rows])
 
 
-def datacite_url(page: int, page_size: int, prefix: str = DEFAULT_TCIA_PREFIX) -> str:
+def datacite_url(cursor: str, page_size: int, prefix: str = DEFAULT_TCIA_PREFIX) -> str:
     params = {
         "prefix": prefix,
-        "page[number]": str(page),
+        "page[cursor]": cursor,
         "page[size]": str(page_size),
+        "disable-facets": "true",
     }
     return f"{DATACITE_DOIS_URL}?{urllib.parse.urlencode(params)}"
 
 
+def validate_datacite_next_url(url: str, prefix: str) -> str:
+    expected = urllib.parse.urlsplit(DATACITE_DOIS_URL)
+    candidate = urllib.parse.urlsplit(url)
+    query = urllib.parse.parse_qs(candidate.query)
+    if (
+        candidate.scheme != expected.scheme
+        or candidate.netloc != expected.netloc
+        or candidate.path != expected.path
+        or query.get("prefix") != [prefix]
+    ):
+        raise RuntimeError(f"DataCite pagination returned an unexpected next URL: {url}")
+    return url
+
+
+def validate_datacite_records(
+    records: list[dict[str, Any]],
+    *,
+    expected_total: int | None = None,
+) -> list[dict[str, Any]]:
+    if expected_total is not None and len(records) != expected_total:
+        raise RuntimeError(
+            "DataCite pagination returned "
+            f"{len(records)} rows but advertised {expected_total} total records"
+        )
+
+    seen: dict[str, str] = {}
+    duplicates: set[str] = set()
+    for record in records:
+        doi = datacite_doi(record).strip()
+        if not doi:
+            raise RuntimeError("DataCite pagination returned a record without a DOI")
+        key = doi.casefold()
+        if key in seen:
+            duplicates.add(seen[key])
+        else:
+            seen[key] = doi
+    if duplicates:
+        duplicate_list = ", ".join(sorted(duplicates, key=str.casefold))
+        raise RuntimeError(
+            f"DataCite pagination returned duplicate DOI records: {duplicate_list}"
+        )
+
+    return sorted(records, key=lambda record: datacite_doi(record).lower())
+
+
 def fetch_datacite_prefix(prefix: str = DEFAULT_TCIA_PREFIX) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
-    page = 1
-    page_size = 100
-    while True:
-        payload, _ = fetch_json(datacite_url(page, page_size, prefix))
+    page_size = 1000
+    next_url: str | None = datacite_url("1", page_size, prefix)
+    expected_total: int | None = None
+    visited_urls: set[str] = set()
+    while next_url:
+        if next_url in visited_urls:
+            raise RuntimeError(f"DataCite pagination repeated a cursor URL: {next_url}")
+        visited_urls.add(next_url)
+        payload, _ = fetch_json(next_url)
+        if not isinstance(payload, dict):
+            raise RuntimeError("DataCite pagination returned a non-object response")
         page_records = payload.get("data") or []
+        if not isinstance(page_records, list):
+            raise RuntimeError("DataCite pagination returned a non-list data field")
         records.extend(page_records)
         total = int((payload.get("meta") or {}).get("total") or 0)
-        if not page_records or len(records) >= total:
-            break
-        page += 1
-    return sorted(records, key=lambda record: datacite_doi(record).lower())
+        if expected_total is None:
+            expected_total = total
+        elif total != expected_total:
+            raise RuntimeError(
+                "DataCite pagination changed its advertised total from "
+                f"{expected_total} to {total} during one harvest"
+            )
+        raw_next = (payload.get("links") or {}).get("next")
+        if raw_next and not isinstance(raw_next, str):
+            raise RuntimeError("DataCite pagination returned a non-string next URL")
+        if raw_next and not page_records:
+            raise RuntimeError("DataCite pagination returned an empty page with a next URL")
+        next_url = validate_datacite_next_url(raw_next, prefix) if raw_next else None
+    return validate_datacite_records(records, expected_total=expected_total)
 
 
 def load_datacite_records_from_snapshot(path: Path) -> list[dict[str, Any]]:
@@ -445,7 +510,8 @@ def load_datacite_records_from_snapshot(path: Path) -> list[dict[str, Any]]:
             rows = conn.execute("SELECT raw_json FROM datacite_dois").fetchall()
     except sqlite3.Error as exc:
         raise RuntimeError(f"Could not read DataCite records from fallback snapshot {path}: {exc}") from exc
-    return sorted((json.loads(row["raw_json"]) for row in rows), key=lambda record: datacite_doi(record).lower())
+    records = [json.loads(row["raw_json"]) for row in rows]
+    return validate_datacite_records(records)
 
 
 def fetch_pathdb_rows(url: str = PATHDB_CSV_URL) -> list[dict[str, str]]:
@@ -1014,7 +1080,7 @@ def create_schema(conn: sqlite3.Connection) -> None:
         );
 
         CREATE TABLE datacite_dois (
-            doi TEXT,
+            doi TEXT COLLATE NOCASE PRIMARY KEY,
             tcia_short_name TEXT,
             title TEXT,
             publisher TEXT,
@@ -1653,7 +1719,6 @@ def add_indexes(conn: sqlite3.Connection) -> None:
         CREATE INDEX idx_pathdb_collection ON pathdb_rows(collection);
         CREATE INDEX idx_pathdb_patient ON pathdb_rows(patient_id);
         CREATE INDEX idx_pathdb_slide ON pathdb_rows(slide_id);
-        CREATE INDEX idx_datacite_doi ON datacite_dois(doi);
         CREATE INDEX idx_datacite_short_name ON datacite_dois(tcia_short_name);
         """
     )

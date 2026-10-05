@@ -109,7 +109,7 @@
     "scripts/tcia_publications.py": "fcd1aa1e5abd48d0f556165bbee85af7d30030ba4ece1af573c8a441b720659a",
     "scripts/tcia_release_review_queue.py": "b5d9738c52435cfc27c403e220d8fe880d795cdb8174eab145de15b1a17b4265",
     "scripts/tcia_skill_version.py": "0906debce4bd061f404ae473eaaf8adbaa44f89e17d4603788616beec526484b",
-    "scripts/tcia_snapshot.py": "7e9cc04cb023d2e00fcd1ef9285da0a98b27f7e2302ef6f0d0cbf515ace7bddc",
+    "scripts/tcia_snapshot.py": "3658058f63dd21e693db990b1d049d934b653a486130943f19d671ca5d798fa5",
     "scripts/tcia_v2_audit.py": "b1a3420792ac8eab69e4ddb3348ddc5efb73cd3fb2393bcef9f24eca8fde2095",
     "scripts/tcia_v2_bundle.py": "33ffed1c02015b89553992f865b2365eebf9fdbb6e8edc77e15419fd8d2de378",
     "scripts/tcia_v2_checkpoint.py": "a25c2e0b7c88aa44d227fe11523bf16a822f8ac52259703fd4483b1efa375bda",
@@ -134,7 +134,7 @@
     "scripts/tests/test_tcia_release_review_queue.py": "b1784c4c8f04e130736c9324c2dbc4d7f6c340be646d2d9ae7a63d6c2817e53b",
     "scripts/tests/test_tcia_release_workflow_contract.py": "e0604903a8bccca2d0692d5e638301a6c075c36bb08a1eea5a15bcd58f7807b5",
     "scripts/tests/test_tcia_skill_version.py": "4e3deee4d08f065f67805d5fe782b1ffce22d5688be269e8a0492c3a42bb6b7f",
-    "scripts/tests/test_tcia_snapshot.py": "2ee4511bca2551b6d666e8e378facb42df53485b1f935939c00d6b959c209e84",
+    "scripts/tests/test_tcia_snapshot.py": "d0de5785f03ec0dd88db37be21921c0d644d3a733eed9eb537e8487ae133e095",
     "scripts/tests/test_tcia_v2_audit.py": "08dc97de6aee10c31da25499388c400025d3df96ddf1f1d6993b5414402af6ea",
     "scripts/tests/test_tcia_v2_bundle.py": "fca72df2471115ae4a75ede504b9b1b3a5c6317d5a49304b188f7af33d11a6d8",
     "scripts/tests/test_tcia_v2_checkpoint.py": "4553d2bb4688966bdc8af5cc05aac654a4687a79d8e1f2c1a9e5c64748fc7d28",
@@ -142,6 +142,6 @@
     "scripts/tests/test_tcia_v2_staging.py": "dda82d5c65b8e03b543fc80c44f30acf47a6c29861b1565104e96c568399ec25"
   },
   "schema_version": 1,
-  "skill_version": "2026.10.02.9",
-  "updated_at_utc": "2026-10-02T19:53:02.670257+00:00"
+  "skill_version": "2026.10.05.1",
+  "updated_at_utc": "2026-10-05T17:56:56.572405+00:00"
 }
