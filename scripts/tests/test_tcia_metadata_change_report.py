@@ -31,6 +31,38 @@ REGISTRY_SPEC.loader.exec_module(registry)
 
 
 class MetadataChangeReportTest(unittest.TestCase):
+    def test_public_download_row_ordinal_is_nonsemantic(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            old = root / "old.sqlite"
+            new = root / "new.sqlite"
+            for path, row_id in ((old, 10), (new, 15)):
+                with sqlite3.connect(path) as conn:
+                    conn.execute(
+                        "CREATE TABLE public_non_dicom_assets ("
+                        "asset_id TEXT PRIMARY KEY, download_row_id INTEGER, "
+                        "source_url TEXT)"
+                    )
+                    conn.execute(
+                        "INSERT INTO public_non_dicom_assets VALUES ('a', ?, 'same')",
+                        (row_id,),
+                    )
+            spec = change_report.PROFILES["public"][0]
+            with sqlite3.connect(new) as new_conn, sqlite3.connect(old) as old_conn:
+                added, removed, modified, *_ = change_report.compare_keyed_rows(
+                    new_conn, old_conn, spec, max_items=10
+                )
+            self.assertEqual((added, removed, modified), (0, 0, 0))
+            with sqlite3.connect(new) as conn:
+                conn.execute(
+                    "UPDATE public_non_dicom_assets SET source_url='changed'"
+                )
+            with sqlite3.connect(new) as new_conn, sqlite3.connect(old) as old_conn:
+                added, removed, modified, *_ = change_report.compare_keyed_rows(
+                    new_conn, old_conn, spec, max_items=10
+                )
+            self.assertEqual((added, removed, modified), (0, 0, 1))
+
     def test_safe_geometry_invalidation_requires_exact_changed_scope(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

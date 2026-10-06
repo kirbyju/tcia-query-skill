@@ -99,6 +99,62 @@ class VocabularyTests(unittest.TestCase):
             )
             conn.close()
 
+    def test_wordpress_download_identity_survives_snapshot_row_renumbering(self):
+        import sqlite3
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            artifact = root / "public.sqlite"
+            snapshot = root / "snapshot.sqlite"
+            conn = public.connect(artifact)
+            conn.executescript(public.SCHEMA)
+            public.insert_vocab(conn)
+            required = (
+                "asset_id,dataset_type,short_title,download_row_id,download_id,"
+                "participant_link_status,asset_granularity,file_format,media_kind,"
+                "spatial_dimensionality,temporal_dimensionality,imaging_domain,"
+                "object_role,representation_provenance_class,source_system,"
+                "source_record_id,source_url,provenance_json"
+            )
+            conn.execute(
+                f"INSERT INTO public_non_dicom_assets ({required}) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    "published-asset-id", "Collection", "Demo", 10, "42",
+                    "dataset_only", "download", "NIFTI", "image_volume",
+                    "unknown", "unknown", "radiology", "source_image",
+                    "submitted_original", "tcia_wordpress", "10",
+                    "https://example.test/demo.zip", '{"download_row_id":10}',
+                ),
+            )
+            self.assertEqual(public.capture_wordpress_download_identities(conn), 1)
+            self.assertEqual(public.delete_refreshable_assets(conn), 1)
+            with sqlite3.connect(snapshot) as source:
+                source.execute(
+                    """CREATE TABLE agent_current_downloads (
+                       download_row_id INTEGER, dataset_type TEXT, short_title TEXT,
+                       download_id TEXT, download_title TEXT, title TEXT,
+                       download_url TEXT, download_size TEXT, download_size_unit TEXT,
+                       download_types TEXT, data_types TEXT, file_types TEXT,
+                       hidden INTEGER, controlled_access INTEGER, subjects INTEGER,
+                       images INTEGER)"""
+                )
+                source.execute(
+                    "INSERT INTO agent_current_downloads VALUES "
+                    "(15,'Collection','Demo','42','Demo NIfTI','Demo',"
+                    "'https://example.test/demo.zip','1','gb','[\"Radiology Images\"]',"
+                    "'[\"MR\"]','[\"NIFTI\"]',0,0,1,1)"
+                )
+            self.assertEqual(public.ingest_wordpress(conn, snapshot), 1)
+            row = conn.execute(
+                "SELECT asset_id,download_row_id,source_record_id,provenance_json "
+                "FROM public_non_dicom_assets"
+            ).fetchone()
+            self.assertEqual(tuple(row), (
+                "published-asset-id", 15, "10", '{"download_row_id":10}'
+            ))
+            conn.close()
+
     def test_explicit_reviewed_mapping_generates_reproducible_crosswalk_row(self):
         rows = crosswalks.explicit_mapping_rows({
             "decisions": [{

@@ -1855,6 +1855,39 @@ def refresh_wordpress_aggregate_counts(
     return conn.total_changes - before
 
 
+def capture_wordpress_download_identities(conn: sqlite3.Connection) -> int:
+    """Retain durable aggregate identities before refreshing a copied baseline.
+
+    ``download_row_id`` is a snapshot-local ordinal. Inserting a newly
+    published download can renumber every later row, so it must not mint a new
+    durable asset identity for an already-published download.
+    """
+    conn.execute("DROP TABLE IF EXISTS temp.baseline_wordpress_download_identities")
+    conn.execute(
+        """
+        CREATE TEMP TABLE baseline_wordpress_download_identities AS
+        SELECT dataset_type, short_title, COALESCE(download_id, '') AS download_id,
+               file_format, asset_id, source_record_id, provenance_json
+        FROM public_non_dicom_assets
+        WHERE source_system IN ('tcia_wordpress', 'tcia_aspera')
+          AND asset_granularity = 'download'
+        """
+    )
+    conn.execute(
+        """
+        CREATE UNIQUE INDEX temp.idx_baseline_wordpress_download_identity
+        ON baseline_wordpress_download_identities(
+            dataset_type, short_title, download_id, file_format
+        )
+        """
+    )
+    return int(
+        conn.execute(
+            "SELECT COUNT(*) FROM baseline_wordpress_download_identities"
+        ).fetchone()[0]
+    )
+
+
 def ingest_wordpress(conn: sqlite3.Connection, snapshot_db: Path) -> int:
     count = 0
     with closing(connect(snapshot_db)) as source:
@@ -1873,12 +1906,50 @@ def ingest_wordpress(conn: sqlite3.Connection, snapshot_db: Path) -> int:
             data_types = parse_list(row["data_types"])
             containers = sorted(set(file_types) & CONTAINER_FORMATS)
             for file_format in imaging_formats:
-                asset_id = stable_id(
-                    "asset", "wordpress_download", row["dataset_type"], row["short_title"],
-                    row["download_row_id"], file_format,
+                baseline = None
+                if conn.execute(
+                    "SELECT 1 FROM sqlite_temp_master WHERE type='table' "
+                    "AND name='baseline_wordpress_download_identities'"
+                ).fetchone():
+                    baseline = conn.execute(
+                        """
+                        SELECT asset_id, source_record_id, provenance_json
+                        FROM baseline_wordpress_download_identities
+                        WHERE dataset_type = ? AND short_title = ?
+                          AND download_id = ? AND file_format = ?
+                        """,
+                        (
+                            row["dataset_type"], row["short_title"],
+                            str(row["download_id"] or ""), file_format,
+                        ),
+                    ).fetchone()
+                stable_download_key = str(
+                    row["download_id"] or row["download_url"] or row["download_title"]
+                )
+                asset_id = (
+                    str(baseline["asset_id"])
+                    if baseline
+                    else stable_id(
+                        "asset", "wordpress_download", row["dataset_type"],
+                        row["short_title"], stable_download_key, file_format,
+                    )
                 )
                 system = managed_system_for_url(row["download_url"])
                 representation = default_representation_class(system)
+                source_record_id = (
+                    str(baseline["source_record_id"])
+                    if baseline
+                    else f"wordpress-download:{stable_download_key}:{file_format}"
+                )
+                provenance_json = (
+                    str(baseline["provenance_json"])
+                    if baseline
+                    else json_dumps({
+                        "source_table": "agent_current_downloads",
+                        "download_id": str(row["download_id"] or ""),
+                        "classification": "current visible public non-DICOM imaging download",
+                    })
+                )
                 insert_asset(
                     conn,
                     {
@@ -1910,7 +1981,7 @@ def ingest_wordpress(conn: sqlite3.Connection, snapshot_db: Path) -> int:
                         "checksum_algorithm": "",
                         "representation_provenance_class": representation,
                         "source_system": system,
-                        "source_record_id": str(row["download_row_id"]),
+                        "source_record_id": source_record_id,
                         "source_url": row["download_url"],
                         "raw_values_json": json_dumps({
                             "download_types": download_types,
@@ -1919,11 +1990,7 @@ def ingest_wordpress(conn: sqlite3.Connection, snapshot_db: Path) -> int:
                             "published_subject_count": row["subjects"],
                             "published_image_count": row["images"],
                         }),
-                        "provenance_json": json_dumps({
-                            "source_table": "agent_current_downloads",
-                            "download_row_id": row["download_row_id"],
-                            "classification": "current visible public non-DICOM imaging download",
-                        }),
+                        "provenance_json": provenance_json,
                         "quality_flag_json": json_dumps({"participant_inventory": "not_available_at_download_grain"}),
                     },
                 )
@@ -7052,6 +7119,7 @@ def build_database(
                 raise RuntimeError("V2 baseline schema does not match the current builder")
             ensure_geometry_schema(conn)
             conn.execute("DELETE FROM artifact_meta")
+            baseline_wordpress_identities = capture_wordpress_download_identities(conn)
             refreshed_assets = delete_refreshable_assets(conn)
             public_dicom_assets_removed = delete_public_dicom_assets(conn)
             conn.execute("DELETE FROM public_non_dicom_crosswalk_decisions")
@@ -7063,9 +7131,11 @@ def build_database(
             conn.executescript(SCHEMA)
             insert_vocab(conn)
             ensure_geometry_schema(conn)
+            baseline_wordpress_identities = 0
             refreshed_assets = 0
             public_dicom_assets_removed = 0
         counts = {
+            "baseline_wordpress_download_identities": baseline_wordpress_identities,
             "baseline_refreshable_assets_removed": refreshed_assets,
             "public_dicom_assets_removed": public_dicom_assets_removed,
             "wordpress_download_assets": ingest_wordpress(conn, snapshot_db),

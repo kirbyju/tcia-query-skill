@@ -97,7 +97,7 @@
     "scripts/tcia_idc_participant_projection.py": "f00a3f6223c37874a830db960b3682add03c2c724426550b44cf8efb352394dd",
     "scripts/tcia_local_build_cache.py": "41bd7fcecf99aec57fb6403a687e2149bac709083265d823b4ad498bf441549d",
     "scripts/tcia_manifest_series_uids.py": "2899cd84ec7f2e057e909db1ca39d43a1f89e0e29287acb4069bcc2d6d1dd9e5",
-    "scripts/tcia_metadata_change_report.py": "aa025dddf6d08d079348561177fa1a71a2b6d0c74c1bde90f150eaab3346b625",
+    "scripts/tcia_metadata_change_report.py": "48ad1950db8dded8c8122f2305f7b582246453bfc88e5dd79cf688c44f03f5a6",
     "scripts/tcia_nifti_metadata.py": "1416b6f1dc899c6d47b06a1def5621e4fd72724aee689462a38699478ea2b42d",
     "scripts/tcia_nifti_metadata_harvest.py": "9cdf60b2a00c0e0419dee7e5d202e1af6d73d6b700bf8225d5d9f165e3e323b0",
     "scripts/tcia_participant_inventory.py": "01f9e5801a1d48145a9a35e297f4f41689dbc12199202168d9f7cc43e40d838c",
@@ -105,7 +105,7 @@
     "scripts/tcia_pathology_metadata.py": "91cb19a373d74bc4d8345afcbeccb37b4cede2b2b5c7d1c4c9dfac51d5328c98",
     "scripts/tcia_public_non_dicom_crosswalk_discovery.py": "36e168ec159c43baa8cd9b16e89becd843481d6720f3f0fa644fb7d4829d7795",
     "scripts/tcia_public_non_dicom_crosswalks.py": "c7ddc5964ae60a6bfad4dcb6dd660224947bcad4e625b1e6d708e3eb5c37870c",
-    "scripts/tcia_public_non_dicom_metadata.py": "a32196fe007e5e978d74630c17f20a99ee1bcb72b4b685aa2f01516d6b32af7d",
+    "scripts/tcia_public_non_dicom_metadata.py": "a1cec6714d86f100a602b089fa46cabb5ee648264d25b09f5cbecb5c01d0ad38",
     "scripts/tcia_publications.py": "fcd1aa1e5abd48d0f556165bbee85af7d30030ba4ece1af573c8a441b720659a",
     "scripts/tcia_release_review_queue.py": "b5d9738c52435cfc27c403e220d8fe880d795cdb8174eab145de15b1a17b4265",
     "scripts/tcia_skill_version.py": "0906debce4bd061f404ae473eaaf8adbaa44f89e17d4603788616beec526484b",
@@ -117,7 +117,7 @@
     "scripts/tcia_v2_staging.py": "23956a5bc09c3d7ee6ec7d74f88b458c59f716a80b6ca16ce6026ba66480bfc2",
     "scripts/tcia_wordpress_search.py": "b58dc8c3c4d68d19b9e46e943399fcb0051038587058ad7090a15b1390c88dbe",
     "scripts/tests/test_skill_eval_contract.py": "d4884aed3eb65262dc52723dcbab624bcd71a804435c46d27a6edca7d479775c",
-    "scripts/tests/test_tcia_artifact_model.py": "4d8aec16df853dd4d19319a59388da01e73f6eb9f4d58ca05f0febea06d753b7",
+    "scripts/tests/test_tcia_artifact_model.py": "8ead09edd37c6ee2facd9929fe9ea9adfdf5ecd07b38c6e700a82eb3939f290f",
     "scripts/tests/test_tcia_clinical_metadata.py": "f10677321c9beeb2ec92ab8cb1549acfcbd9f41ac269326e8862f1874f6a31e0",
     "scripts/tests/test_tcia_controlled_access_metadata.py": "9fd9f8b1ff732d7f2ce02eaf30480e052f4b80b9217f435bdc012adfb2a137f2",
     "scripts/tests/test_tcia_correction_registry.py": "b547ecd24650b8d8637541061994ad5dc485619482580e2bebdef090427db883",
@@ -128,7 +128,7 @@
     "scripts/tests/test_tcia_geometry_seed.py": "0e9e00d77ff27262534dc3d18ab5b9316b5ac875971b1fb41994cd887a60dfc9",
     "scripts/tests/test_tcia_idc_participant_projection.py": "c79da139ac03148386f98dee822272f6c6093540c6b135926f802be4d7683634",
     "scripts/tests/test_tcia_local_build_cache.py": "712bc1aeb42486e9e6dad2ad135a1b445c37dfc5bedd139f06d7b9af0bd61c2f",
-    "scripts/tests/test_tcia_metadata_change_report.py": "7a651a6ae5d601c3eb720051945c78ab173952334441044acae5ec160126a1b4",
+    "scripts/tests/test_tcia_metadata_change_report.py": "29729221f8e942e402c261359b516d26000d011f827d6584d01495622aece346",
     "scripts/tests/test_tcia_nifti_metadata_harvest.py": "50c4ad58e86cdd736893f4264731e095246d47ed4781eae32ae30136b27c2bed",
     "scripts/tests/test_tcia_pathology_aspera_inventory.py": "80fb2fd90b2fbeaff8ecc40b089e86fd64a4842e3e657850c9e0a12873e9d3a7",
     "scripts/tests/test_tcia_release_review_queue.py": "b1784c4c8f04e130736c9324c2dbc4d7f6c340be646d2d9ae7a63d6c2817e53b",
@@ -142,6 +142,6 @@
     "scripts/tests/test_tcia_v2_staging.py": "dda82d5c65b8e03b543fc80c44f30acf47a6c29861b1565104e96c568399ec25"
   },
   "schema_version": 1,
-  "skill_version": "2026.10.06.1",
-  "updated_at_utc": "2026-10-06T15:15:18.739045+00:00"
+  "skill_version": "2026.10.06.2",
+  "updated_at_utc": "2026-10-06T17:16:55.490489+00:00"
 }

@@ -69,7 +69,12 @@ PROFILES = {
         TableSpec("pathology_disparities"),
     ),
     "public": (
-        TableSpec("public_non_dicom_assets", ("asset_id",), "high"),
+        # Snapshot row ordinals are current-build locators, not durable content.
+        # Stable download IDs and asset IDs carry release identity.
+        TableSpec(
+            "public_non_dicom_assets", ("asset_id",), "high",
+            nonsemantic_columns=("download_row_id",),
+        ),
         TableSpec("public_non_dicom_asset_participants", ("asset_participant_id",), "high"),
         TableSpec("public_non_dicom_crosswalk_decisions", ("decision_id",), "high"),
         TableSpec("public_non_dicom_crosswalk_evidence", ("crosswalk_id",), "high"),
