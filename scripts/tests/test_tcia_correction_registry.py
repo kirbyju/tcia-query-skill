@@ -318,8 +318,8 @@ class CorrectionIdentityTests(unittest.TestCase):
         payload = json.loads(source.read_text())
         batches = payload["aggregate_explanation_batches"]
         self.assertEqual(payload["schema_version"], 4)
-        self.assertEqual(len(batches), 20)
-        self.assertEqual(sum(batch["change_count"] for batch in batches), 650763)
+        self.assertEqual(len(batches), 24)
+        self.assertEqual(sum(batch["change_count"] for batch in batches), 651664)
         by_id = {batch["batch_id"]: batch for batch in batches}
         self.assertEqual(
             by_id["cda-september-2026-stable-clinical-facts-2026-10-02"]["change_count"],
@@ -349,6 +349,22 @@ class CorrectionIdentityTests(unittest.TestCase):
             by_id["ucsd-bmets-longitudinal-proposal-only-review-cases-2026-10-06"]["change_kind_counts"],
             {"added": 3},
         )
+        self.assertEqual(
+            by_id["ucsd-bmets-longitudinal-public-nifti-asset-2026-10-06"]["changes_sha256"],
+            "1866f82d2da40f485420d0b7cf18d1caff6c998738e7a44ca5e6d1a337fdb38b",
+        )
+        self.assertEqual(
+            by_id["ucsd-bmets-longitudinal-participants-2026-10-06"]["change_kind_counts"],
+            {"added": 300},
+        )
+        self.assertEqual(
+            by_id["ucsd-bmets-longitudinal-participant-identifiers-2026-10-06"]["changes_sha256"],
+            "98ade9c41fc155389f22f8af69ffef423950fbd9ee80b6096fa69e01fe736e83",
+        )
+        self.assertEqual(
+            by_id["ucsd-bmets-longitudinal-participant-assets-2026-10-06"]["changes_sha256"],
+            "3d90ee8d4c2b80a35d08155b318f28f71e8e7787f00f4881a23775d2f5463824",
+        )
         filename_batch = by_id[
             "healthy-total-body-cts-nifti-filename-correction-2026-10-01"
         ]
@@ -365,7 +381,7 @@ class CorrectionIdentityTests(unittest.TestCase):
                          JOIN correction_decisions d USING(revision_id)
                         WHERE d.policy_version='semantic-aggregate-explanations-v1'"""
                 ).fetchall()
-            self.assertEqual(len(effects), 20)
+            self.assertEqual(len(effects), 24)
             self.assertTrue(all(row[1] == "added" for row in effects))
             self.assertTrue(all(row[2] and row[3] == "approved" for row in effects))
 

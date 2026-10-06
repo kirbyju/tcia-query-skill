@@ -282,6 +282,62 @@
       "change_kind_counts": {"added": 3},
       "changes_sha256": "0db3ee2259c99906648897597293701962724d402c7962a6b619a969436a0e1a",
       "negative_scope": ["no approval for a different change count or digest", "no derived metadata correction or source-value rewrite", "the three cases remain proposal-only and needs-review", "no approval of any future correction effect"]
+    },
+    {
+      "batch_id": "ucsd-bmets-longitudinal-public-nifti-asset-2026-10-06",
+      "reviewer": "Justin Kirby (TCIA artifact maintainer)",
+      "approved_at": "2026-10-06T19:15:51Z",
+      "rationale": "The TCIA artifact maintainer approved publication of the exact new public NIfTI download asset for UCSD-BMETS-Longitudinal after confirming the official clinical TSV is authoritative for the dataset cohort. The asset is released with geometry not yet checked so that its dataset-filtered geometry job can be run after publication.",
+      "evidence_id": "github-actions:run:37506107580:metadata_change_report_final",
+      "evidence": "Run 37506107580 passed the stabilized public non-DICOM and Participant Inventory builds and produced a single dataset-scoped review entry for UCSD-BMETS-Longitudinal. The queue contained 901 changes with digest 9ee2777cab648596f82746dc48032330e3237f5e70e29f01b9effe6198db6f83 and zero blocking unscoped changes.",
+      "artifact": "public_non_dicom",
+      "entity_table": "public_non_dicom_assets",
+      "change_count": 1,
+      "change_kind_counts": {"added": 1},
+      "changes_sha256": "1866f82d2da40f485420d0b7cf18d1caff6c998738e7a44ca5e6d1a337fdb38b",
+      "negative_scope": ["no approval for a different change count or digest", "no public asset outside UCSD-BMETS-Longitudinal", "no assertion that geometry has already been checked", "no unrelated public metadata change"]
+    },
+    {
+      "batch_id": "ucsd-bmets-longitudinal-participants-2026-10-06",
+      "reviewer": "Justin Kirby (TCIA artifact maintainer)",
+      "approved_at": "2026-10-06T19:15:51Z",
+      "rationale": "The approved official UCSD-BMETS-Longitudinal TSV establishes exactly 300 dataset-scoped participants, BMETS0001 through BMETS0300, for the new public NIfTI asset without cross-dataset identity inference.",
+      "evidence_id": "github-actions:run:37506107580:metadata_change_report_final",
+      "evidence": "Run 37506107580 recorded exactly 300 added Participant Inventory participant rows in the sole dataset-scoped UCSD-BMETS-Longitudinal review entry.",
+      "artifact": "participant_inventory",
+      "entity_table": "participants",
+      "change_count": 300,
+      "change_kind_counts": {"added": 300},
+      "changes_sha256": "f4c8017d9fe7745a1d206cde93806b4a5511534146f2c4cb4fddca87ff694b63",
+      "negative_scope": ["no approval for a different change count or digest", "no participant outside BMETS0001 through BMETS0300", "no cross-dataset participant merge", "no inferred identity beyond the authoritative TSV"]
+    },
+    {
+      "batch_id": "ucsd-bmets-longitudinal-participant-identifiers-2026-10-06",
+      "reviewer": "Justin Kirby (TCIA artifact maintainer)",
+      "approved_at": "2026-10-06T19:15:51Z",
+      "rationale": "The approved UCSD-BMETS-Longitudinal participant cohort deterministically adds one exact dataset-scoped identifier row for each of BMETS0001 through BMETS0300.",
+      "evidence_id": "github-actions:run:37506107580:metadata_change_report_final",
+      "evidence": "Run 37506107580 recorded exactly 300 added Participant Inventory identifier rows in the sole dataset-scoped UCSD-BMETS-Longitudinal review entry.",
+      "artifact": "participant_inventory",
+      "entity_table": "participant_identifiers",
+      "change_count": 300,
+      "change_kind_counts": {"added": 300},
+      "changes_sha256": "98ade9c41fc155389f22f8af69ffef423950fbd9ee80b6096fa69e01fe736e83",
+      "negative_scope": ["no approval for a different change count or digest", "no identifier outside UCSD-BMETS-Longitudinal", "no identifier normalization across datasets", "no loss or replacement of raw source identifiers"]
+    },
+    {
+      "batch_id": "ucsd-bmets-longitudinal-participant-assets-2026-10-06",
+      "reviewer": "Justin Kirby (TCIA artifact maintainer)",
+      "approved_at": "2026-10-06T19:15:51Z",
+      "rationale": "The approved UCSD-BMETS-Longitudinal participant cohort and public NIfTI download deterministically add the exact 300 dataset-scoped participant-to-asset summary rows.",
+      "evidence_id": "github-actions:run:37506107580:metadata_change_report_final",
+      "evidence": "Run 37506107580 recorded exactly 300 added Participant Inventory asset rows in the sole dataset-scoped UCSD-BMETS-Longitudinal review entry.",
+      "artifact": "participant_inventory",
+      "entity_table": "participant_assets",
+      "change_count": 300,
+      "change_kind_counts": {"added": 300},
+      "changes_sha256": "3d90ee8d4c2b80a35d08155b318f28f71e8e7787f00f4881a23775d2f5463824",
+      "negative_scope": ["no approval for a different change count or digest", "no participant-asset row outside UCSD-BMETS-Longitudinal", "no cross-dataset asset reassignment", "no assertion that geometry has already been checked"]
     }
   ],
   "explanation_batches": [
