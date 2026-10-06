@@ -240,6 +240,48 @@
       "change_kind_counts": {"removed": 2446},
       "changes_sha256": "1c888dd7488a21e71b21cbb82764639bee1ff61ba204008db2209f307bf8fc19",
       "negative_scope": ["no approval for a different change count or digest", "no participant or identifier removal", "no weakening of dataset-scoped case-insensitive linkage"]
+    },
+    {
+      "batch_id": "ucsd-bmets-longitudinal-official-clinical-facts-2026-10-06",
+      "reviewer": "Justin Kirby (TCIA artifact maintainer)",
+      "approved_at": "2026-10-06T15:11:03Z",
+      "rationale": "The maintainer confirmed that the official UCSD-BMETS-Longitudinal clinical TSV is authoritative when its patient-level values differ from the narrative Collection summary. This exact batch adds 895 direct patient demographic facts for BMETS0001 through BMETS0300: 300 sex-at-birth values, 299 race values, and 296 ethnicity values. The TSV contains 167 Female and 133 Male records; the Collection-page summary will be corrected separately by the curator.",
+      "evidence_id": "github-actions:run:37463311173:metadata_change_report",
+      "evidence": "Run 37463311173 recorded this exact added-fact batch. Independent read-only review of TCIA download 55866 found 300 nonblank unique Case ID values spanning BMETS0001 through BMETS0300 with no missing identifiers. The official clinical TSV SHA-256 is d701179cba86124d833de30bed496337c19f054c49e48d6ebc25137542daf0a2 and its dictionary SHA-256 is 77fd461369f8b0e1f9bc762e79d6346d0a0f733cc5e4923ddbe8de17b65cb3a1.",
+      "artifact": "clinical",
+      "entity_table": "clinical_facts",
+      "change_count": 895,
+      "change_kind_counts": {"added": 895},
+      "changes_sha256": "ac7525434dce26bb7563c39ac20e811e2fedfd3219533d91c4b887b0b66ed08c",
+      "negative_scope": ["no approval for a different change count or digest", "no facts outside UCSD-BMETS-Longitudinal or outside sex at birth, race, and ethnicity", "no cross-dataset subject identity inference", "no approval of the conflicting Collection-page sex-count summary"]
+    },
+    {
+      "batch_id": "ucsd-bmets-longitudinal-official-clinical-subjects-2026-10-06",
+      "reviewer": "Justin Kirby (TCIA artifact maintainer)",
+      "approved_at": "2026-10-06T15:11:03Z",
+      "rationale": "The official UCSD-BMETS-Longitudinal clinical TSV establishes exactly 300 dataset-scoped subjects, BMETS0001 through BMETS0300. These additions summarize the separately approved direct demographic facts without merging identities across datasets.",
+      "evidence_id": "github-actions:run:37463311173:metadata_change_report",
+      "evidence": "Run 37463311173 recorded this exact subject batch. Independent review found 300 nonblank unique Case ID values, no gaps in BMETS0001 through BMETS0300, and no subject-summary conflicts in an isolated rebuild from the official TSV.",
+      "artifact": "clinical",
+      "entity_table": "clinical_subjects",
+      "change_count": 300,
+      "change_kind_counts": {"added": 300},
+      "changes_sha256": "8c9dac96e994d991c88f58cf396fbf5fc35b282b6765a7fe714e347bc0df7cd9",
+      "negative_scope": ["no approval for a different change count or digest", "no subject outside BMETS0001 through BMETS0300", "no cross-dataset subject merge", "no inferred patient identity from filename proximity"]
+    },
+    {
+      "batch_id": "ucsd-bmets-longitudinal-proposal-only-review-cases-2026-10-06",
+      "reviewer": "Justin Kirby (TCIA artifact maintainer)",
+      "approved_at": "2026-10-06T15:11:03Z",
+      "rationale": "The newly published UCSD-BMETS-Longitudinal Collection text legitimately creates three proposal-only review cases for its BMETSXXXX_YY identifier convention, its 300-patient and 1,065-timepoint count statement, and its same-native-space geometry statement. Accepting these registry additions preserves the review evidence but authorizes no derived correction.",
+      "evidence_id": "github-actions:run:37463311173:metadata_change_report",
+      "evidence": "Run 37463311173 recorded exactly three added correction cases: case_21bbcf8527af7d1a3fe8ca00, case_c85b95a5d72e715eb9ca02b3, and case_e3c2c1432fd6c3a8428c6b83. A reproduced registry build confirmed that all three remain proposal-only, automation-ineligible, and needs-review.",
+      "artifact": "correction_registry",
+      "entity_table": "correction_cases",
+      "change_count": 3,
+      "change_kind_counts": {"added": 3},
+      "changes_sha256": "0db3ee2259c99906648897597293701962724d402c7962a6b619a969436a0e1a",
+      "negative_scope": ["no approval for a different change count or digest", "no derived metadata correction or source-value rewrite", "the three cases remain proposal-only and needs-review", "no approval of any future correction effect"]
     }
   ],
   "explanation_batches": [

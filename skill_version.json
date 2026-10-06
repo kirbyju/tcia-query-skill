@@ -34,7 +34,7 @@
     "references/correction-assertions-v1.json": "bc18f600242fcecb8e046930fad6418db294d96871ed67450eee2cb8c6b758ba",
     "references/correction-lifecycle.md": "f7e454242b0e07302ae090d6790b39bd79278b3443a222ef80ca9409aedf014a",
     "references/correction-registry-v1.schema.json": "c9c3b967a3c90a99f7aaf828590a87678744a110aef95b762ef72464b59f91af",
-    "references/correction-semantic-explanations-v1.json": "6cc825c79e37e0430daf37082dc7d501d1fe9e82b7fed89707f17d056e2605ef",
+    "references/correction-semantic-explanations-v1.json": "ad8ebcaef24c20e9ac9ad337f96589a16fc5b5463ea45e41f931f7c9d32c7d16",
     "references/cptac_gbm_codex_inventory_v1.csv": "650f0c09da49a17ba58f10d861a0b80519e5aeeeaf745186f542e80ea19ada4d",
     "references/cptac_gbm_codex_inventory_v1.json": "6515bf199d8e84e28d48e6bf7b2ee0bceeeee66d41e719bf31d02c6befe94c00",
     "references/datacite-doi-relationships.md": "f6a1d34630621db282216e10b6bf0d5ec71eb9124a4be0c045b1880d306b8076",
@@ -120,7 +120,7 @@
     "scripts/tests/test_tcia_artifact_model.py": "4d8aec16df853dd4d19319a59388da01e73f6eb9f4d58ca05f0febea06d753b7",
     "scripts/tests/test_tcia_clinical_metadata.py": "f10677321c9beeb2ec92ab8cb1549acfcbd9f41ac269326e8862f1874f6a31e0",
     "scripts/tests/test_tcia_controlled_access_metadata.py": "9fd9f8b1ff732d7f2ce02eaf30480e052f4b80b9217f435bdc012adfb2a137f2",
-    "scripts/tests/test_tcia_correction_registry.py": "8a86cae950fa1538095ae32956299e556102c194ec59db0a21b06b95a6439ebf",
+    "scripts/tests/test_tcia_correction_registry.py": "b547ecd24650b8d8637541061994ad5dc485619482580e2bebdef090427db883",
     "scripts/tests/test_tcia_diagnostic_status.py": "a00104b045e32288b56d43139f3ec9f9bb89926eac677dd356b07f97436397f5",
     "scripts/tests/test_tcia_freshness.py": "fc2d6988581e5cacc2531e648258d352196803d6d7012bf79e6c8ddac4cfce9c",
     "scripts/tests/test_tcia_geometry_artifact_integration.py": "c63be8b16a5b4995dac0a362cf1f5b339cfcc22fbf1f89a2688403fb3d241141",
@@ -142,6 +142,6 @@
     "scripts/tests/test_tcia_v2_staging.py": "dda82d5c65b8e03b543fc80c44f30acf47a6c29861b1565104e96c568399ec25"
   },
   "schema_version": 1,
-  "skill_version": "2026.10.05.1",
-  "updated_at_utc": "2026-10-05T17:56:56.572405+00:00"
+  "skill_version": "2026.10.06.1",
+  "updated_at_utc": "2026-10-06T15:15:18.739045+00:00"
 }

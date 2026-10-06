@@ -318,8 +318,8 @@ class CorrectionIdentityTests(unittest.TestCase):
         payload = json.loads(source.read_text())
         batches = payload["aggregate_explanation_batches"]
         self.assertEqual(payload["schema_version"], 4)
-        self.assertEqual(len(batches), 17)
-        self.assertEqual(sum(batch["change_count"] for batch in batches), 649565)
+        self.assertEqual(len(batches), 20)
+        self.assertEqual(sum(batch["change_count"] for batch in batches), 650763)
         by_id = {batch["batch_id"]: batch for batch in batches}
         self.assertEqual(
             by_id["cda-september-2026-stable-clinical-facts-2026-10-02"]["change_count"],
@@ -337,6 +337,18 @@ class CorrectionIdentityTests(unittest.TestCase):
             by_id["public-non-dicom-duke-her2-icdc-assets-2026-10-02"]["changes_sha256"],
             "8bf964b0b14ce0d1a58bbeaeab563fae35d0261a0da54ad033417056e592329c",
         )
+        self.assertEqual(
+            by_id["ucsd-bmets-longitudinal-official-clinical-facts-2026-10-06"]["change_kind_counts"],
+            {"added": 895},
+        )
+        self.assertEqual(
+            by_id["ucsd-bmets-longitudinal-official-clinical-subjects-2026-10-06"]["changes_sha256"],
+            "8c9dac96e994d991c88f58cf396fbf5fc35b282b6765a7fe714e347bc0df7cd9",
+        )
+        self.assertEqual(
+            by_id["ucsd-bmets-longitudinal-proposal-only-review-cases-2026-10-06"]["change_kind_counts"],
+            {"added": 3},
+        )
         filename_batch = by_id[
             "healthy-total-body-cts-nifti-filename-correction-2026-10-01"
         ]
@@ -353,7 +365,7 @@ class CorrectionIdentityTests(unittest.TestCase):
                          JOIN correction_decisions d USING(revision_id)
                         WHERE d.policy_version='semantic-aggregate-explanations-v1'"""
                 ).fetchall()
-            self.assertEqual(len(effects), 17)
+            self.assertEqual(len(effects), 20)
             self.assertTrue(all(row[1] == "added" for row in effects))
             self.assertTrue(all(row[2] and row[3] == "approved" for row in effects))
 
