@@ -174,7 +174,7 @@ def accepted_geometry_refreshes(
     assets: list[tuple[str, Path, Path | None]],
     report_path: Path | None,
 ) -> list[dict[str, object]]:
-    """Recognize only safe geometry invalidations for explicitly changed scopes."""
+    """Recognize safe geometry invalidations and verified seed promotions."""
     if report_path is None:
         return []
     payload = json.loads(report_path.read_text(encoding="utf-8"))
@@ -190,8 +190,18 @@ def accepted_geometry_refreshes(
         for item in records
         if isinstance(item, dict) and item.get("status") in {"new", "changed"}
     }
+    unchanged_scopes = {
+        (
+            str(item.get("dataset_type") or ""),
+            str(item.get("short_title") or ""),
+            canonical_download_id(item.get("download_id")),
+        )
+        for item in records
+        if isinstance(item, dict) and item.get("status") == "unchanged"
+    }
     public_asset = next((item for item in assets if item[0] == "public"), None)
-    if not changed_scopes or public_asset is None or public_asset[2] is None:
+    relevant_scopes = changed_scopes | unchanged_scopes
+    if not relevant_scopes or public_asset is None or public_asset[2] is None:
         return []
     _, new_path, old_path = public_asset
     if not old_path.exists():
@@ -205,7 +215,7 @@ def accepted_geometry_refreshes(
         selected = ", ".join(quote_identifier(name) for name in columns)
         new_rows: dict[str, dict[str, object]] = {}
         old_rows: dict[str, dict[str, object]] = {}
-        for scope in changed_scopes:
+        for scope in relevant_scopes:
             parameters = tuple(scope[:2])
             for row in new.execute(
                 f"SELECT {selected} FROM public_non_dicom_assets "
@@ -259,7 +269,25 @@ def accepted_geometry_refreshes(
                 and after.get("geometry_assessed_at_utc") is None
                 and after.get("geometry_details_json") == "{}"
             )
+            safe_before = (
+                before.get("geometry_status") == "not_checked"
+                and before.get("geometry_assessment_method") == "not_assessed"
+                and (before.get("geometry_assessment_source") or "") == ""
+                and before.get("geometry_assessed_at_utc") is None
+                and before.get("geometry_details_json") == "{}"
+            )
             assessed_before = str(before.get("geometry_status") or "").startswith("checked_") or before.get("geometry_status") == "mixed"
+            assessed_after = (
+                (
+                    str(after.get("geometry_status") or "").startswith("checked_")
+                    or after.get("geometry_status") == "mixed"
+                )
+                and str(after.get("geometry_assessment_method") or "")
+                not in {"", "not_assessed"}
+                and bool(after.get("geometry_assessment_source"))
+                and after.get("geometry_assessed_at_utc") is not None
+                and after.get("geometry_details_json") != "{}"
+            )
             if (
                 scope in changed_scopes
                 and changed_columns
@@ -273,8 +301,22 @@ def accepted_geometry_refreshes(
                     "changed_columns": sorted(changed_columns),
                     "reason": "changed geometry scope safely invalidated pending HPC refresh",
                 })
+            elif (
+                scope in unchanged_scopes
+                and changed_columns
+                and changed_columns.issubset(GEOMETRY_SUMMARY_COLUMNS)
+                and safe_before
+                and assessed_after
+            ):
+                accepted.append({
+                    **change,
+                    "scope": list(scope),
+                    "changed_columns": sorted(changed_columns),
+                    "reason": "unchanged geometry scope promoted from verified seed evidence",
+                })
     participant_asset = next((item for item in assets if item[0] == "participant"), None)
     changed_datasets = {(scope[0], scope[1]) for scope in changed_scopes}
+    unchanged_datasets = {(scope[0], scope[1]) for scope in unchanged_scopes}
     if participant_asset is not None and participant_asset[2] is not None:
         _, new_path, old_path = participant_asset
         if old_path.exists():
@@ -323,7 +365,18 @@ def accepted_geometry_refreshes(
                         and int(after.get("geometry_not_regular_count") or 0) == 0
                         and int(after.get("geometry_not_checked_count") or 0) > 0
                     )
+                    safe_before = (
+                        before.get("geometry_status") == "not_checked"
+                        and int(before.get("geometry_checked_count") or 0) == 0
+                        and int(before.get("geometry_regular_count") or 0) == 0
+                        and int(before.get("geometry_not_regular_count") or 0) == 0
+                        and int(before.get("geometry_not_checked_count") or 0) > 0
+                    )
                     assessed_before = int(before.get("geometry_checked_count") or 0) > 0
+                    assessed_after = (
+                        after.get("geometry_status") != "not_checked"
+                        and int(after.get("geometry_checked_count") or 0) > 0
+                    )
                     dataset = (
                         str(after.get("dataset_type") or ""),
                         str(after.get("short_title") or ""),
@@ -340,6 +393,19 @@ def accepted_geometry_refreshes(
                             "scope": [*dataset, "*"],
                             "changed_columns": sorted(changed_columns),
                             "reason": "participant geometry summary safely invalidated by changed public scope",
+                        })
+                    elif (
+                        dataset in unchanged_datasets
+                        and changed_columns
+                        and changed_columns.issubset(PARTICIPANT_GEOMETRY_SUMMARY_COLUMNS)
+                        and safe_before
+                        and assessed_after
+                    ):
+                        accepted.append({
+                            **change,
+                            "scope": [*dataset, "*"],
+                            "changed_columns": sorted(changed_columns),
+                            "reason": "participant geometry summary promoted by verified public seed evidence",
                         })
     return accepted
 
@@ -1238,7 +1304,7 @@ def build_report(args: argparse.Namespace) -> tuple[str, list[str], dict[str, ob
         lines.extend(["", "### Unexplained high-severity semantic changes", ""])
         lines.extend(f"- `{item}`" for item in unexplained_high)
     if geometry_refreshes:
-        lines.extend(["", "### Accepted geometry refresh invalidations", ""])
+        lines.extend(["", "### Accepted geometry refresh changes", ""])
         public_refreshes = sum(
             item.get("artifact") == "public_non_dicom"
             for item in geometry_refreshes
@@ -1250,7 +1316,7 @@ def build_report(args: argparse.Namespace) -> tuple[str, list[str], dict[str, ob
         lines.append(
             f"- {public_refreshes:,} public asset rows and "
             f"{participant_refreshes:,} derived participant summary rows were "
-            "safely reset in explicitly changed geometry scopes."
+            "accepted as verified geometry-only scope transitions."
         )
     if malformed_explanations or duplicates or unused:
         lines.extend(["", "### Invalid or unused semantic explanations", ""])
