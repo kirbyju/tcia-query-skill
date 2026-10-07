@@ -42,7 +42,7 @@
     "references/duke_breast_cancer_mri_nrrd_test_ids_v1.csv": "b58fe90e61a6a93e2aa1893c27bcd3901f41b872e3405a4c7089e7f223d7dcc9",
     "references/duke_breast_cancer_mri_nrrd_train_ids_v1.csv": "095de7febcc37a8665a51ff60c5266a54454055b6a2d8d76ab96a7cfdafd76db",
     "references/general-commons-graphql.md": "b2c3c931816bb3245f0b59a4dde1e3001959bd51838b1e3bc23bc1be9e6f6407",
-    "references/geometry-batch-slurm.md": "5a4c299afc700becd66c5faea69b7d328563a10b102fa50cb2c63ffb02cc3357",
+    "references/geometry-batch-slurm.md": "e911e6e1de46cd564d918a9cc9ef8f411e39cc28c6ee1af9021fc43da23cf7d0",
     "references/idc-public-dicom.md": "2c82815b34adfc1750d97addef6920d6fb56102a79de685268094cd601b56c42",
     "references/maintainer-operations.md": "ba59ff794f9905d844f38327f1c4a9c9ff76f6cf7e3b0312122dab11c6836af9",
     "references/nbia-public-dicom-fallback.md": "530de4e4e6f0cf804cf5dbdd460483aedc5b3a8f9c294736afa63ff3ee2dcdd6",
@@ -97,7 +97,7 @@
     "scripts/tcia_idc_participant_projection.py": "f00a3f6223c37874a830db960b3682add03c2c724426550b44cf8efb352394dd",
     "scripts/tcia_local_build_cache.py": "41bd7fcecf99aec57fb6403a687e2149bac709083265d823b4ad498bf441549d",
     "scripts/tcia_manifest_series_uids.py": "2899cd84ec7f2e057e909db1ca39d43a1f89e0e29287acb4069bcc2d6d1dd9e5",
-    "scripts/tcia_metadata_change_report.py": "83f0073267aafb06db560a1a095c92dcc36ab6e73cce4af7a6a90bc2662b127a",
+    "scripts/tcia_metadata_change_report.py": "b89c638ca041da09c13c118201bea810a93eda2ae41f95e35a1edb5bcd189924",
     "scripts/tcia_nifti_metadata.py": "1416b6f1dc899c6d47b06a1def5621e4fd72724aee689462a38699478ea2b42d",
     "scripts/tcia_nifti_metadata_harvest.py": "9cdf60b2a00c0e0419dee7e5d202e1af6d73d6b700bf8225d5d9f165e3e323b0",
     "scripts/tcia_participant_inventory.py": "01f9e5801a1d48145a9a35e297f4f41689dbc12199202168d9f7cc43e40d838c",
@@ -128,7 +128,7 @@
     "scripts/tests/test_tcia_geometry_seed.py": "0e9e00d77ff27262534dc3d18ab5b9316b5ac875971b1fb41994cd887a60dfc9",
     "scripts/tests/test_tcia_idc_participant_projection.py": "c79da139ac03148386f98dee822272f6c6093540c6b135926f802be4d7683634",
     "scripts/tests/test_tcia_local_build_cache.py": "712bc1aeb42486e9e6dad2ad135a1b445c37dfc5bedd139f06d7b9af0bd61c2f",
-    "scripts/tests/test_tcia_metadata_change_report.py": "98b7691d8219c41d10e01e3dcd0f158d23e9a21c8fe5d96de87164b80fe97c92",
+    "scripts/tests/test_tcia_metadata_change_report.py": "6b667f4b07d38998eefc417d5c7a52a801bbcea214709d1f996b97b9306d80d6",
     "scripts/tests/test_tcia_nifti_metadata_harvest.py": "50c4ad58e86cdd736893f4264731e095246d47ed4781eae32ae30136b27c2bed",
     "scripts/tests/test_tcia_pathology_aspera_inventory.py": "80fb2fd90b2fbeaff8ecc40b089e86fd64a4842e3e657850c9e0a12873e9d3a7",
     "scripts/tests/test_tcia_release_review_queue.py": "b1784c4c8f04e130736c9324c2dbc4d7f6c340be646d2d9ae7a63d6c2817e53b",
@@ -142,6 +142,6 @@
     "scripts/tests/test_tcia_v2_staging.py": "dda82d5c65b8e03b543fc80c44f30acf47a6c29861b1565104e96c568399ec25"
   },
   "schema_version": 1,
-  "skill_version": "2026.10.07.2",
-  "updated_at_utc": "2026-10-07T20:08:29.408763+00:00"
+  "skill_version": "2026.10.07.3",
+  "updated_at_utc": "2026-10-07T22:09:25.000000+00:00"
 }

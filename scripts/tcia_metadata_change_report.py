@@ -286,7 +286,6 @@ def accepted_geometry_refreshes(
                 not in {"", "not_assessed"}
                 and bool(after.get("geometry_assessment_source"))
                 and after.get("geometry_assessed_at_utc") is not None
-                and after.get("geometry_details_json") != "{}"
             )
             if (
                 scope in changed_scopes

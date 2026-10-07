@@ -237,7 +237,9 @@ download scopes with the seed ledger.
 - the semantic gate accepts only geometry-summary-only transitions tied to the
   exact refresh report: safe resets to `not_checked` for `new` or `changed`
   scopes, and promotions from safe `not_checked` defaults to verified seed
-  evidence for `unchanged` scopes;
+  evidence for `unchanged` scopes. Verified promotions require a checked status,
+  analyzer identity, source-database hash, and assessment timestamp; the optional
+  asset-level details summary may remain `{}`;
 - a missing, corrupt, or structurally invalid seed stops the release;
 - public DICOM is excluded and belongs in IDC/idc-index.
 

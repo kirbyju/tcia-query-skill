@@ -220,7 +220,7 @@ class MetadataChangeReportTest(unittest.TestCase):
                         "asset-a", "Collection", "Demo", '["1"]', "same",
                         "checked_grid_geometry", "tcia_geometry_batch@1",
                         "geometry_seed:job-a", "2026-10-07T00:00:00Z",
-                        '{"assessment_count":1,"geometry_statuses":["checked_grid_geometry"]}',
+                        "{}",
                     ),
                 )
             report.write_text(json.dumps({"records": [{
