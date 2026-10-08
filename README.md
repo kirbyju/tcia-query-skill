@@ -5,7 +5,7 @@ published by [The Cancer Imaging Archive
 (TCIA)](https://www.cancerimagingarchive.net/about-the-cancer-imaging-archive-tcia/).
 
 It uses TCIA's WordPress Collection Manager as the publication authority,
-TCIA's Publications EndNote XML as the verified bibliography of papers about
+TCIA's Publications EndNote XML as the verified record of papers that analyzed
 TCIA data, and a release-backed SQLite snapshot as its normal discovery layer.
 It then routes users to the appropriate data system, such as IDC, CTDC,
 General Commons, PathDB, DataCite, TCIA Data Retriever, or Aspera.
@@ -17,7 +17,8 @@ General Commons, PathDB, DataCite, TCIA Data Retriever, or Aspera.
 - Distinguish newly published datasets from datasets updated recently.
 - Find current downloads, clinical metadata, annotations, segmentations,
   pathology slides, NIfTI files, and related Analysis Results.
-- Search TCIA's verified publication library for papers about TCIA datasets.
+- Search TCIA's verified analytical-use library for papers that analyzed TCIA datasets.
+- Retrieve DataCite DOI metadata, author lists, event metrics, and formatted dataset citations.
 - Route public DICOM through IDC and create viewer links or portable TCIA Data
   Retriever manifests.
 - Explain controlled-access requirements without treating a public metadata

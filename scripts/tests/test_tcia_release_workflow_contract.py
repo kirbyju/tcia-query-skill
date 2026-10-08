@@ -135,6 +135,48 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
         self.assertIn("--artifact-total-timeout-seconds 300", block)
         self.assertIn("--artifact-max-bytes 1073741824", block)
 
+    def test_selective_release_is_projection_bound_and_fail_closed(self) -> None:
+        source = SOURCE_WORKFLOW.read_text(encoding="utf-8")
+        downstream = WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn("fetch-depth: 0", source)
+        self.assertIn("scripts/tcia_selective_release.py plan", source)
+        self.assertIn("force_full_build:", source)
+        self.assertIn('cron: "17 7 * * *"', source)
+        self.assertIn('cron: "17 19 * * *"', source)
+        self.assertIn("daily authoritative-source refresh floor", source)
+        self.assertIn("--force-full-reason \"operator requested all clinical downloads\"", source)
+        self.assertIn("dist/tcia_selective_release_plan.json", source)
+        self.assertIn("validate-selection", source)
+        self.assertIn("Carry forward verified source sidecars for fast release", source)
+        self.assertIn("materialize-reuse-manifests", source)
+        self.assertIn("if: steps.selective.outputs.mode == 'fast'", source)
+        for marker in (
+            "Build controlled-access metadata",
+            "Prepare previous clinical metadata",
+            "Build patient-level clinical metadata",
+        ):
+            block = source[source.index(marker):]
+            self.assertIn("if: steps.selective.outputs.mode != 'fast'", block[:300])
+
+        self.assertIn("scripts/tcia_selective_release.py verify", downstream)
+        self.assertIn("previous-fast/tcia_metadata_v2_bundle_manifest.json", downstream)
+        self.assertIn("Carry forward verified expensive components for fast release", downstream)
+        self.assertIn("materialize-reuse-manifests", downstream)
+        for marker in (
+            "Download and verify the canonical non-DICOM geometry seed",
+            "Materialize the lossless unified V2 assembly and checkpoint",
+            "Build the direct IDC participant projection",
+            "Build the runner-local V2 staging ledger",
+            "Build public non-DICOM metadata",
+            "Build Participant Inventory",
+            "Generate exact semantic change report",
+            "Build dataset-scoped release review queue",
+            "Retain resumable V2 candidate before semantic gate",
+            "Enforce exact semantic change explanations by replay",
+        ):
+            block = downstream[downstream.index(marker):]
+            self.assertIn("if: steps.selective.outputs.mode != 'fast'", block[:300])
+
     def test_workflow_run_uses_one_triggering_producer_sha_everywhere(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
         self.assertIn(

@@ -55,6 +55,8 @@ class McpToolSurfaceTests(unittest.IsolatedAsyncioTestCase):
             "get_participant_assets",
             "find_public_non_dicom_assets",
             "get_dataset_v1_releases",
+            "search_datacite_dois",
+            "search_verified_publications",
         ):
             self.assertIn("cursor", by_name[name].input_schema["properties"])
 

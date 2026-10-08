@@ -24,7 +24,10 @@ from .models import (
     ControlledDatasetsResponse,
     ControlledFilesResponse,
     CoverageResponse,
+    DataCiteDetailResponse,
+    DataCiteSearchResponse,
     DatasetDetailResponse,
+    DatasetImpactResponse,
     DatasetSearchResponse,
     DatasetVersionsResponse,
     DicomAnnotationsResponse,
@@ -35,6 +38,7 @@ from .models import (
     ParticipantsResponse,
     ProblemDetail,
     V1ReleasesResponse,
+    VerifiedPublicationsResponse,
 )
 from .service import TciaQueryService, TciaServiceError
 
@@ -285,6 +289,57 @@ def create_app(service: TciaQueryService | None = None) -> FastAPI:
     )
     def v2_get_dataset(short_title: str) -> dict[str, Any]:
         return S().get_dataset(short_title=short_title)
+
+    @app.get(f"{V2_API_PREFIX}/datacite/dois", response_model=DataCiteSearchResponse)
+    def v2_search_datacite_dois(
+        query: str | None = None,
+        dois: Annotated[list[str] | None, Query()] = None,
+        short_titles: Annotated[list[str] | None, Query()] = None,
+        sort_by: str = "doi",
+        cursor: str | None = None,
+        limit: int = Query(default=25, ge=1, le=200),
+    ) -> dict[str, Any]:
+        return S().search_datacite_dois(
+            query=query,
+            dois=dois,
+            short_titles=short_titles,
+            sort_by=sort_by,
+            cursor=cursor,
+            limit=limit,
+        )
+
+    @app.get(f"{V2_API_PREFIX}/datacite/dois/{{doi:path}}", response_model=DataCiteDetailResponse)
+    def v2_get_datacite_doi(doi: str, citation_style: str = "apa") -> dict[str, Any]:
+        return S().get_datacite_doi(doi=doi, citation_style=citation_style)
+
+    @app.get(f"{V2_API_PREFIX}/publications/verified-use", response_model=VerifiedPublicationsResponse)
+    def v2_search_verified_publications(
+        query: str | None = None,
+        dataset_dois: Annotated[list[str] | None, Query()] = None,
+        short_titles: Annotated[list[str] | None, Query()] = None,
+        from_year: int | None = None,
+        to_year: int | None = None,
+        cursor: str | None = None,
+        limit: int = Query(default=25, ge=1, le=200),
+    ) -> dict[str, Any]:
+        return S().search_verified_publications(
+            query=query,
+            dataset_dois=dataset_dois,
+            short_titles=short_titles,
+            from_year=from_year,
+            to_year=to_year,
+            cursor=cursor,
+            limit=limit,
+        )
+
+    @app.get(f"{V2_API_PREFIX}/datasets/{{short_title}}/impact", response_model=DatasetImpactResponse)
+    def v2_get_dataset_impact(
+        short_title: str,
+        publication_limit: int = Query(default=25, ge=1, le=200),
+    ) -> dict[str, Any]:
+        return S().get_dataset_impact(
+            short_title=short_title, publication_limit=publication_limit
+        )
 
     @app.get(f"{V2_API_PREFIX}/participant-link-issues", response_model=LinkIssuesResponse)
     def v2_find_participant_link_issues(

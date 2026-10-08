@@ -31,6 +31,43 @@ REGISTRY_SPEC.loader.exec_module(registry)
 
 
 class MetadataChangeReportTest(unittest.TestCase):
+    def test_datacite_event_metrics_are_preserved_but_nonsemantic_for_release_review(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            old = Path(directory) / "old.sqlite"
+            new = Path(directory) / "new.sqlite"
+            for path, count in ((old, 1), (new, 9)):
+                with sqlite3.connect(path) as conn:
+                    conn.execute(
+                        """CREATE TABLE agent_datacite_dois (
+                           doi TEXT PRIMARY KEY, title TEXT, citation_count INTEGER,
+                           view_count INTEGER, download_count INTEGER, reference_count INTEGER,
+                           normalized_json TEXT, raw_json TEXT)"""
+                    )
+                    conn.execute(
+                        "INSERT INTO agent_datacite_dois VALUES (?,?,?,?,?,?,?,?)",
+                        (
+                            "10.7937/test", "Dataset", count, count, count, count,
+                            json.dumps({"title": "Dataset", "citation_count": count}),
+                            json.dumps({"attributes": {"citationCount": count}}),
+                        ),
+                    )
+            spec = change_report.PROFILES["snapshot"][2]
+            with sqlite3.connect(new) as new_conn, sqlite3.connect(old) as old_conn:
+                added, removed, modified, *_ = change_report.compare_keyed_rows(
+                    new_conn, old_conn, spec, max_items=10
+                )
+            self.assertEqual((added, removed, modified), (0, 0, 0))
+            with sqlite3.connect(new) as conn:
+                conn.execute(
+                    "UPDATE agent_datacite_dois SET normalized_json=?",
+                    (json.dumps({"title": "Renamed", "citation_count": 9}),),
+                )
+            with sqlite3.connect(new) as new_conn, sqlite3.connect(old) as old_conn:
+                added, removed, modified, *_ = change_report.compare_keyed_rows(
+                    new_conn, old_conn, spec, max_items=10
+                )
+            self.assertEqual((added, removed, modified), (0, 0, 1))
+
     def test_public_download_row_ordinal_is_nonsemantic(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

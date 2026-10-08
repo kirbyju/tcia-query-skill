@@ -23,7 +23,10 @@ from mcp_server.tcia_query_mcp.models import (
     ControlledDatasetsResponse,
     ControlledFilesResponse,
     CoverageResponse,
+    DataCiteDetailResponse,
+    DataCiteSearchResponse,
     DatasetDetailResponse,
+    DatasetImpactResponse,
     DatasetSearchResponse,
     DatasetVersionsResponse,
     DicomAnnotationsResponse,
@@ -32,6 +35,7 @@ from mcp_server.tcia_query_mcp.models import (
     ParticipantDetailResponse,
     ParticipantsResponse,
     V1ReleasesResponse,
+    VerifiedPublicationsResponse,
 )
 from mcp_server.tcia_query_mcp.service import (
     InvalidRequestError,
@@ -116,6 +120,28 @@ def create_base_snapshot(path: Path) -> None:
                 subjects INTEGER, hidden INTEGER, v1_release_date TEXT,
                 v1_release_date_source TEXT, version_id TEXT, version_slug TEXT,
                 version_post_title TEXT, version_related_short_title TEXT, match_method TEXT
+            );
+            CREATE TABLE agent_datacite_dois (
+                doi TEXT, tcia_short_name TEXT, title TEXT, creators TEXT, publisher TEXT,
+                publication_year TEXT, version TEXT, resource_type TEXT,
+                resource_type_general TEXT, state TEXT, created TEXT, updated TEXT, url TEXT,
+                citation_count INTEGER, view_count INTEGER, download_count INTEGER,
+                reference_count INTEGER, normalized_json TEXT, raw_json TEXT
+            );
+            CREATE TABLE agent_tcia_publications (
+                rec_number TEXT, ref_type TEXT, title TEXT, authors TEXT, first_author TEXT,
+                journal TEXT, year TEXT, doi TEXT, pmid TEXT, accession_num TEXT,
+                keywords TEXT, abstract TEXT, notes TEXT, linked_tcia_dataset_dois TEXT,
+                remote_database_name TEXT, raw_json TEXT
+            );
+            CREATE TABLE tcia_publication_dataset_dois (rec_number TEXT, dataset_doi TEXT);
+            CREATE TABLE agent_dataset_impact (
+                dataset_type TEXT, short_title TEXT, title TEXT, doi TEXT, tcia_page TEXT,
+                publisher TEXT, publication_year TEXT, version TEXT,
+                datacite_citation_count INTEGER, datacite_view_count INTEGER,
+                datacite_download_count INTEGER, datacite_reference_count INTEGER,
+                verified_analytical_publication_count INTEGER,
+                latest_verified_analytical_publication_year TEXT
             );
             """
         )
@@ -238,6 +264,44 @@ def create_base_snapshot(path: Path) -> None:
               'TCGA-BRCA Version 1', 'TCGA-BRCA', 'exact_short_title'
             )
             """
+        )
+        datacite_metadata = {
+            "doi": "10.7937/test",
+            "tcia_short_name": "TCGA-BRCA",
+            "title": "Breast cancer collection",
+            "creators": [{"name": "Doe, Jane", "nameType": "Personal"}],
+            "publisher": "The Cancer Imaging Archive",
+            "publication_year": "2025",
+            "version": "2",
+            "types": {"resourceType": "Collection", "resourceTypeGeneral": "Dataset"},
+            "url": "https://doi.org/10.7937/test",
+            "citation_count": 5,
+            "view_count": 10,
+            "download_count": 20,
+            "reference_count": 3,
+        }
+        conn.execute(
+            "INSERT INTO agent_datacite_dois VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                "10.7937/test", "TCGA-BRCA", "Breast cancer collection",
+                q(datacite_metadata["creators"]), "The Cancer Imaging Archive", "2025", "2",
+                "Collection", "Dataset", "findable", "2025-01-01", "2026-01-01",
+                "https://doi.org/10.7937/test", 5, 10, 20, 3,
+                q(datacite_metadata), q({"attributes": datacite_metadata}),
+            ),
+        )
+        conn.execute(
+            """INSERT INTO agent_tcia_publications VALUES
+               ('42','Journal Article','Analyzing TCIA','["Doe, Jane"]','Doe, Jane',
+                'Imaging Journal','2026','10.1000/article','123456','123456','["imaging"]',
+                'Methods','Verified use','["10.7937/test"]','10.7937/test','{}')"""
+        )
+        conn.execute("INSERT INTO tcia_publication_dataset_dois VALUES ('42','10.7937/test')")
+        conn.execute(
+            """INSERT INTO agent_dataset_impact VALUES
+               ('Collection','TCGA-BRCA','Breast cancer collection','10.7937/test',
+                'https://example.org/tcga-brca','The Cancer Imaging Archive','2025','2',
+                5,10,20,3,1,'2026')"""
         )
 
 
@@ -763,6 +827,29 @@ class TciaQueryServiceTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.tmp.cleanup()
+
+    def test_datacite_metadata_and_citation_formats_are_exposed(self) -> None:
+        search = DataCiteSearchResponse.model_validate(
+            self.service.search_datacite_dois(short_titles=["TCGA-BRCA"])
+        )
+        self.assertEqual(search.dois[0].citation_count, 5)
+        detail = DataCiteDetailResponse.model_validate(
+            self.service.get_datacite_doi("10.7937/TEST", citation_style="bibtex")
+        )
+        self.assertIn("@dataset{", detail.record.formatted_citation)
+        self.assertEqual(detail.record.creators[0]["name"], "Doe, Jane")
+
+    def test_verified_publications_and_dataset_impact_are_exposed(self) -> None:
+        publications = VerifiedPublicationsResponse.model_validate(
+            self.service.search_verified_publications(short_titles=["TCGA-BRCA"])
+        )
+        self.assertEqual(publications.count, 1)
+        self.assertEqual(publications.publications[0].rec_number, "42")
+        impact = DatasetImpactResponse.model_validate(
+            self.service.get_dataset_impact("TCGA-BRCA")
+        )
+        self.assertEqual(impact.impacts[0].verified_analytical_publication_count, 1)
+        self.assertEqual(impact.impacts[0].datacite_download_count, 20)
 
     def test_v2_configuration_does_not_fall_back_to_legacy_cache_databases(self) -> None:
         root = Path(self.tmp.name)

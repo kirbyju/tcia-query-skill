@@ -6,7 +6,11 @@ Use DataCite snapshot records first for DOI metadata, citations, and versions. U
 
 TCIA mints dataset DOIs through DataCite. The SQLite snapshot stores DataCite records under the TCIA DOI prefix `10.7937` in `agent_datacite_dois`.
 
-DataCite records include DOI, title, publisher, publication year, URL, version, rights, identifiers such as `TCIA Short Name`, and related identifiers. Use the TCIA snapshot after DataCite when the answer needs TCIA publication status, access/license status, or download routing.
+DataCite records include DOI, titles, creators, contributors, publisher, publication year, resource type, URL, version, rights, subjects, descriptions, dates, funding, identifiers such as `TCIA Short Name`, related identifiers, and source-specific event metrics. Use `get_datacite_doi` (MCP) or `/v2/datacite/dois/{doi}` (REST) for structured metadata plus APA, Vancouver, Chicago author-date, BibTeX, or RIS output. Use the TCIA snapshot's WordPress views afterward when the answer needs TCIA publication status, access/license status, or download routing.
+
+DataCite `citation_count`, `view_count`, `download_count`, and `reference_count` are observations supplied by DataCite. They are useful impact signals but are not TCIA download totals and are not a substitute for the EndNote-backed verified analytical-use records.
+
+The release change report preserves these counters in every snapshot but treats counter-only changes as nonsemantic review noise. Changes to DOI identity, title, creators, publisher, year, version, rights, and other normalized metadata remain reviewable.
 
 Bundled helper:
 

@@ -58,6 +58,9 @@ REQUIRED_PUBLIC_QUERY_OBJECTS = {
         "agent_current_downloads",
         "agent_dataset_versions",
         "agent_dataset_v1_releases",
+        "agent_datacite_dois",
+        "agent_tcia_publications",
+        "agent_dataset_impact",
     ),
     "participant_inventory.sqlite.gz": (
         "participants",
@@ -324,6 +327,111 @@ def compact_dataset(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
         "species": data.get("species"),
         "source_collections": data.get("source_collections"),
     }
+
+
+def compact_datacite(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
+    data = dict(row)
+    return {
+        "doi": str(data.get("doi") or ""),
+        "tcia_short_name": data.get("tcia_short_name"),
+        "title": data.get("title"),
+        "creators": parse_json_array(data.get("creators")),
+        "publisher": data.get("publisher"),
+        "publication_year": data.get("publication_year"),
+        "version": data.get("version"),
+        "resource_type": data.get("resource_type"),
+        "resource_type_general": data.get("resource_type_general"),
+        "url": data.get("url"),
+        "state": data.get("state"),
+        "created": data.get("created"),
+        "updated": data.get("updated"),
+        "citation_count": int(data.get("citation_count") or 0),
+        "view_count": int(data.get("view_count") or 0),
+        "download_count": int(data.get("download_count") or 0),
+        "reference_count": int(data.get("reference_count") or 0),
+    }
+
+
+def compact_publication(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
+    data = dict(row)
+    return {
+        "rec_number": str(data.get("rec_number") or ""),
+        "ref_type": data.get("ref_type"),
+        "title": data.get("title"),
+        "authors": parse_json_array(data.get("authors")),
+        "first_author": data.get("first_author"),
+        "journal": data.get("journal"),
+        "year": data.get("year"),
+        "doi": data.get("doi"),
+        "pmid": data.get("pmid"),
+        "accession_num": data.get("accession_num"),
+        "keywords": parse_json_array(data.get("keywords")),
+        "abstract": data.get("abstract"),
+        "notes": data.get("notes"),
+        "linked_tcia_dataset_dois": parse_json_array(data.get("linked_tcia_dataset_dois")),
+        "remote_database_name": data.get("remote_database_name"),
+    }
+
+
+def datacite_creator_names(metadata: dict[str, Any]) -> list[str]:
+    return [
+        str(creator.get("name") or "").strip()
+        for creator in metadata.get("creators") or []
+        if isinstance(creator, dict) and str(creator.get("name") or "").strip()
+    ]
+
+
+def format_datacite_citation(metadata: dict[str, Any], style: str) -> str:
+    requested = style.strip().lower().replace("_", "-")
+    aliases = {"chicago": "chicago-author-date", "bib": "bibtex"}
+    requested = aliases.get(requested, requested)
+    allowed = {"apa", "vancouver", "chicago-author-date", "bibtex", "ris"}
+    if requested not in allowed:
+        raise InvalidRequestError(
+            "citation_style must be one of: apa, vancouver, chicago-author-date, bibtex, ris"
+        )
+    creators = datacite_creator_names(metadata)
+    author_text = "; ".join(creators) if creators else str(metadata.get("publisher") or "TCIA")
+    title = str(metadata.get("title") or "Untitled TCIA dataset")
+    year = str(metadata.get("publication_year") or "n.d.")
+    publisher = str(metadata.get("publisher") or "The Cancer Imaging Archive")
+    version = str(metadata.get("version") or "").strip()
+    doi = str(metadata.get("doi") or "").strip()
+    doi_url = f"https://doi.org/{doi}" if doi else str(metadata.get("url") or "")
+    version_text = f" (Version {version})" if version else ""
+    if requested == "apa":
+        return f"{author_text}. ({year}). {title}{version_text} [Data set]. {publisher}. {doi_url}".strip()
+    if requested == "vancouver":
+        return f"{author_text}. {title}{version_text} [dataset]. {publisher}; {year}. {doi_url}".strip()
+    if requested == "chicago-author-date":
+        return f'{author_text}. {year}. "{title}."{version_text} {publisher}. {doi_url}'.strip()
+    if requested == "ris":
+        lines = ["TY  - DATA"]
+        lines.extend(f"AU  - {name}" for name in creators)
+        lines.extend([f"TI  - {title}", f"PY  - {year}", f"PB  - {publisher}"])
+        if version:
+            lines.append(f"ET  - {version}")
+        if doi:
+            lines.append(f"DO  - {doi}")
+        if doi_url:
+            lines.append(f"UR  - {doi_url}")
+        lines.append("ER  -")
+        return "\n".join(lines)
+    key_base = re.sub(r"[^A-Za-z0-9]+", "", (creators[0] if creators else "TCIA").split(",")[0])
+    cite_key = f"{key_base or 'TCIA'}{year}"
+    fields = [
+        f"  author = {{{' and '.join(creators)}}}",
+        f"  title = {{{title}}}",
+        f"  publisher = {{{publisher}}}",
+        f"  year = {{{year}}}",
+    ]
+    if version:
+        fields.append(f"  version = {{{version}}}")
+    if doi:
+        fields.append(f"  doi = {{{doi}}}")
+    if doi_url:
+        fields.append(f"  url = {{{doi_url}}}")
+    return "@dataset{" + cite_key + ",\n" + ",\n".join(fields) + "\n}"
 
 
 def full_dataset(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
@@ -1198,7 +1306,9 @@ class TciaQueryService:
             "bundle_manifest": self.bundle_manifest.exists(),
             "install_state": self.v2_install_state.exists(),
             "public_dicom_authority": "IDC",
-            "publication_authority": "TCIA WordPress snapshot",
+            "publication_authority": "TCIA WordPress snapshot; verified analytical use: TCIA EndNote library",
+            "datacite_metadata": "tcia_snapshot.sqlite.gz" in installed_assets,
+            "verified_analytical_publications": "tcia_snapshot.sqlite.gz" in installed_assets,
         }
         return info
 
@@ -1515,7 +1625,9 @@ class TciaQueryService:
             "bundle_manifest": self.bundle_manifest.exists(),
             "install_state": self.v2_install_state.exists(),
             "public_dicom_authority": "IDC",
-            "publication_authority": "TCIA WordPress snapshot",
+            "publication_authority": "TCIA WordPress snapshot; verified analytical use: TCIA EndNote library",
+            "datacite_metadata": self.snapshot_db.exists(),
+            "verified_analytical_publications": self.snapshot_db.exists(),
         }
         return info
 
@@ -1654,6 +1766,189 @@ class TciaQueryService:
             "caveats": [
                 "TCIA publication status is based on visible WordPress Collection and Analysis Result records.",
                 "Use download-level labels for modality, file type, and access routing decisions.",
+            ],
+        }
+
+    def search_datacite_dois(self, **filters: Any) -> dict[str, Any]:
+        limit = coerce_limit(filters.get("limit"))
+        cursor_filters = self._cursor_filters(filters, "tcia_snapshot.sqlite.gz")
+        offset = decode_cursor(filters.get("cursor"), cursor_filters)
+        query = str(filters.get("query") or "").strip().lower()
+        dois = [value.strip().lower() for value in as_list(filters.get("dois")) if value.strip()]
+        short_titles = [value.strip().lower() for value in as_list(filters.get("short_titles")) if value.strip()]
+        sort_by = str(filters.get("sort_by") or "doi").strip().lower()
+        sort_columns = {
+            "doi": "lower(doi)",
+            "citation_count": "citation_count DESC, lower(doi)",
+            "view_count": "view_count DESC, lower(doi)",
+            "download_count": "download_count DESC, lower(doi)",
+            "publication_year": "publication_year DESC, lower(doi)",
+        }
+        if sort_by not in sort_columns:
+            raise InvalidRequestError(
+                "sort_by must be one of: doi, citation_count, view_count, download_count, publication_year"
+            )
+        sql = "SELECT * FROM agent_datacite_dois WHERE 1 = 1"
+        params: list[Any] = []
+        if dois:
+            sql += f" AND lower(doi) IN ({','.join('?' for _ in dois)})"
+            params.extend(dois)
+        if short_titles:
+            sql += f" AND lower(tcia_short_name) IN ({','.join('?' for _ in short_titles)})"
+            params.extend(short_titles)
+        if query:
+            like = f"%{query}%"
+            sql += (
+                " AND (lower(COALESCE(doi, '')) LIKE ? OR lower(COALESCE(tcia_short_name, '')) LIKE ?"
+                " OR lower(COALESCE(title, '')) LIKE ? OR lower(COALESCE(publisher, '')) LIKE ?"
+                " OR lower(COALESCE(creators, '')) LIKE ?)"
+            )
+            params.extend([like] * 5)
+        sql += f" ORDER BY {sort_columns[sort_by]} LIMIT ? OFFSET ?"
+        params.extend([limit + 1, offset])
+        with self._connect_snapshot() as conn:
+            rows = [compact_datacite(row) for row in conn.execute(sql, params).fetchall()]
+        result = page_envelope(
+            "dois", rows, limit=limit, offset=offset, cursor_filters=cursor_filters
+        )
+        result["metrics_note"] = (
+            "citation_count, view_count, download_count, and reference_count are DataCite event "
+            "metrics observed in the release snapshot; they are not TCIA download totals."
+        )
+        return result
+
+    def get_datacite_doi(self, doi: str, citation_style: str = "apa") -> dict[str, Any]:
+        requested = doi.strip().lower()
+        if not requested:
+            raise InvalidRequestError("doi is required")
+        with self._connect_snapshot() as conn:
+            row = conn.execute(
+                "SELECT * FROM agent_datacite_dois WHERE lower(doi) = ?", (requested,)
+            ).fetchone()
+        if not row:
+            raise NotFoundError(f"No TCIA DataCite record found for DOI {doi!r}")
+        record = compact_datacite(row)
+        metadata = parse_json_object(row["normalized_json"])
+        normalized_style = citation_style.strip().lower().replace("_", "-")
+        if normalized_style == "chicago":
+            normalized_style = "chicago-author-date"
+        if normalized_style == "bib":
+            normalized_style = "bibtex"
+        record.update(
+            {
+                "citation_style": normalized_style,
+                "formatted_citation": format_datacite_citation(metadata, normalized_style),
+                "metadata": metadata,
+            }
+        )
+        return {
+            "record": record,
+            "provenance_note": (
+                "Metadata and event metrics come from DataCite in the installed immutable TCIA snapshot. "
+                "Confirm TCIA publication and access details through the matching WordPress dataset record."
+            ),
+        }
+
+    def search_verified_publications(self, **filters: Any) -> dict[str, Any]:
+        limit = coerce_limit(filters.get("limit"))
+        cursor_filters = self._cursor_filters(filters, "tcia_snapshot.sqlite.gz")
+        offset = decode_cursor(filters.get("cursor"), cursor_filters)
+        query = str(filters.get("query") or "").strip().lower()
+        dataset_dois = [value.strip().lower() for value in as_list(filters.get("dataset_dois")) if value.strip()]
+        short_titles = [value.strip().lower() for value in as_list(filters.get("short_titles")) if value.strip()]
+        from_year = filters.get("from_year")
+        to_year = filters.get("to_year")
+        sql = "SELECT DISTINCT p.* FROM agent_tcia_publications p"
+        params: list[Any] = []
+        if dataset_dois or short_titles:
+            sql += " JOIN tcia_publication_dataset_dois pd ON pd.rec_number = p.rec_number"
+        if short_titles:
+            sql += " JOIN agent_datasets d ON lower(d.doi) = lower(pd.dataset_doi)"
+        sql += " WHERE 1 = 1"
+        if dataset_dois:
+            sql += f" AND lower(pd.dataset_doi) IN ({','.join('?' for _ in dataset_dois)})"
+            params.extend(dataset_dois)
+        if short_titles:
+            sql += f" AND lower(d.short_title) IN ({','.join('?' for _ in short_titles)})"
+            params.extend(short_titles)
+        if query:
+            like = f"%{query}%"
+            sql += (
+                " AND (lower(COALESCE(p.title, '')) LIKE ? OR lower(COALESCE(p.authors, '')) LIKE ?"
+                " OR lower(COALESCE(p.journal, '')) LIKE ? OR lower(COALESCE(p.doi, '')) LIKE ?"
+                " OR lower(COALESCE(p.abstract, '')) LIKE ? OR lower(COALESCE(p.keywords, '')) LIKE ?)"
+            )
+            params.extend([like] * 6)
+        if from_year is not None:
+            try:
+                from_year_int = int(from_year)
+            except (TypeError, ValueError):
+                raise InvalidRequestError("from_year must be an integer") from None
+            sql += " AND CAST(p.year AS INTEGER) >= ?"
+            params.append(from_year_int)
+        if to_year is not None:
+            try:
+                to_year_int = int(to_year)
+            except (TypeError, ValueError):
+                raise InvalidRequestError("to_year must be an integer") from None
+            sql += " AND CAST(p.year AS INTEGER) <= ?"
+            params.append(to_year_int)
+        sql += " ORDER BY CAST(p.year AS INTEGER) DESC, lower(p.title), p.rec_number LIMIT ? OFFSET ?"
+        params.extend([limit + 1, offset])
+        with self._connect_snapshot() as conn:
+            rows = [compact_publication(row) for row in conn.execute(sql, params).fetchall()]
+        result = page_envelope(
+            "publications", rows, limit=limit, offset=offset, cursor_filters=cursor_filters
+        )
+        result["verification_note"] = (
+            "The TCIA-maintained EndNote library is treated as verified analytical use: the linked "
+            "TCIA dataset was analyzed in the listed publication."
+        )
+        return result
+
+    def get_dataset_impact(self, short_title: str, publication_limit: int = 25) -> dict[str, Any]:
+        title = short_title.strip().lower()
+        if not title:
+            raise InvalidRequestError("short_title is required")
+        limit = coerce_limit(publication_limit)
+        with self._connect_snapshot() as conn:
+            impact_rows = conn.execute(
+                "SELECT * FROM agent_dataset_impact WHERE lower(short_title) = ? ORDER BY dataset_type",
+                (title,),
+            ).fetchall()
+            if not impact_rows:
+                raise NotFoundError(f"No visible TCIA dataset found for short_title={short_title!r}")
+            publications = conn.execute(
+                """
+                SELECT DISTINCT p.*
+                FROM agent_tcia_publications p
+                JOIN tcia_publication_dataset_dois pd ON pd.rec_number = p.rec_number
+                JOIN agent_datasets d ON lower(d.doi) = lower(pd.dataset_doi)
+                WHERE lower(d.short_title) = ?
+                ORDER BY CAST(p.year AS INTEGER) DESC, lower(p.title), p.rec_number
+                LIMIT ?
+                """,
+                (title, limit),
+            ).fetchall()
+        impacts = []
+        for row in impact_rows:
+            data = dict(row)
+            for key in (
+                "datacite_citation_count",
+                "datacite_view_count",
+                "datacite_download_count",
+                "datacite_reference_count",
+                "verified_analytical_publication_count",
+            ):
+                data[key] = int(data.get(key) or 0)
+            impacts.append(data)
+        return {
+            "impacts": impacts,
+            "verified_publications": [compact_publication(row) for row in publications],
+            "publication_limit": limit,
+            "notes": [
+                "Verified analytical publication counts come from TCIA's maintained EndNote library.",
+                "DataCite event metrics are source-specific indicators and are not TCIA download totals.",
             ],
         }
 

@@ -628,6 +628,19 @@ degraded or unknown authoritative source health unless a reviewed
 reason, approver, and future expiry; expired waivers are rejected. The
 workflow does not deploy, restart, or reconfigure MCP/REST.
 
+Snapshot-only changes may use the same complete release contract without
+rebuilding expensive components. The source workflow hashes every snapshot
+schema object and row available to controlled-access, clinical, public
+non-DICOM, IDC projection, and Participant Inventory builders while excluding
+only the DataCite, verified-publication, and volatile snapshot-metadata objects.
+It also compares producer paths with the preceding bundle's exact commit. When
+that projection is identical and all changed paths are explicitly fast-safe,
+the workflows carry forward the preceding component assets only after checking
+their top-manifest and GitHub Release hashes and sizes. The final bundle build
+still validates compressed and decompressed hashes, SQLite integrity, component
+manifests, profiles, source health, and the newly generated top manifest. Any
+uncertain dependency or failed check restores the normal full-build boundary.
+
 One built-in stale-while-revalidate policy is narrower than a waiver: CDA
 clinical enrichment may reuse a validated prior clinical artifact for no more
 than seven days during a refresh failure. The component records the original

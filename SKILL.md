@@ -1,6 +1,6 @@
 ---
 name: tcia-query-skill
-description: Find and verify TCIA-published datasets and verified publications about TCIA data. Use for TCIA Collections or Analysis Results, participant and annotation availability, provenance, access and license questions, viewers, or official download routes.
+description: Find and verify TCIA-published datasets, citation metadata, and publications that verifiably analyzed TCIA data. Use for TCIA Collections or Analysis Results, participant and annotation availability, provenance, impact, access and license questions, viewers, or official download routes.
 license: Apache-2.0
 ---
 
@@ -10,7 +10,7 @@ license: Apache-2.0
 
 TCIA WordPress Collection and Analysis Result records decide whether a dataset is TCIA-published. Use the release-backed SQLite snapshot or snapshot-backed MCP/REST service for normal discovery. IDC, CDA, General Commons, CTDC, PathDB, DataCite, Zenodo, and Aspera may enrich or route access; they do not establish TCIA publication.
 
-For peer-reviewed papers about TCIA data, use TCIA's Publications EndNote export via `scripts/tcia_publications.py`; DataCite describes dataset DOI metadata, not the verified manuscript bibliography. For DOI-centered metadata, start with DataCite and confirm publication/access in WordPress.
+TCIA's Publications EndNote export is the authority for verified analytical use: a linked TCIA dataset was actually analyzed in the listed paper. DataCite is the authority for dataset DOI metadata and source-specific event metrics, not the verified-use bibliography or TCIA download totals. Both are included in the release-backed snapshot and exposed through MCP/REST; `scripts/tcia_publications.py` remains available for direct local XML work.
 
 ## Check Skill Guidance Freshness
 
@@ -62,11 +62,13 @@ rollback selects a retained verified generation and also requires a restart.
 
 1. Confirm the selected service or local bundle fingerprint and capabilities with `get_snapshot_info`, `/v2/bundle`, or the release manifest.
 2. Use `search_datasets` for compact discovery. Follow a candidate with `get_dataset` for narrative, current downloads, license/access details, and related Analysis Results.
-3. Use download-level labels for modality, file type, access, and route decisions. Split mixed datasets into open and controlled components.
-4. Check related Analysis Results before saying a Collection lacks annotations, segmentations, labels, or ground truth.
-5. Use `search_participants` for availability, `get_participant_assets` for drill-down, and `get_dataset_participant_coverage` before completeness claims. Participant identity is dataset-scoped; Collections and Analysis Results remain distinct.
-6. Follow `next_cursor` while `has_more` is true. Keep the same filters and limit because cursors are release/component/file-generation-local and query-bound; restart after any artifact change.
-7. Cite the TCIA page and DOI where available. State access/license caveats and distinguish verified, published, deployed, and unverified status.
+3. Use `search_datacite_dois` and `get_datacite_doi` for DOI metadata, creators, and citation output (`apa`, `vancouver`, `chicago-author-date`, `bibtex`, or `ris`).
+4. Use `search_verified_publications` or `get_dataset_impact` for EndNote-verified analytical use; do not reinterpret these as mere mentions.
+5. Use download-level labels for modality, file type, access, and route decisions. Split mixed datasets into open and controlled components.
+6. Check related Analysis Results before saying a Collection lacks annotations, segmentations, labels, or ground truth.
+7. Use `search_participants` for availability, `get_participant_assets` for drill-down, and `get_dataset_participant_coverage` before completeness claims. Participant identity is dataset-scoped; Collections and Analysis Results remain distinct.
+8. Follow `next_cursor` while `has_more` is true. Keep the same filters and limit because cursors are release/component/file-generation-local and query-bound; restart after any artifact change.
+9. Cite the TCIA page and DOI where available. State access/license caveats and distinguish verified, published, deployed, and unverified status.
 
 ## Route To The Right Reference
 
@@ -78,7 +80,7 @@ rollback selects a retained verified generation and also requires a restart.
 | MCP/REST tools, protocol, deployment, or compatibility | `mcp_server/README.md`, `references/api-upgrade-notes.md` |
 | Agent/server upgrade compatibility | `references/api-upgrade-notes.md` |
 | Maintainer builds, raw-source checks, operations | `references/maintainer-operations.md` |
-| Publications and verified manuscripts | `references/publications.md` |
+| Verified analytical use, publications, and impact | `references/publications.md` |
 | Public DICOM and annotations | `references/idc-public-dicom.md` |
 | Public DICOM missing from IDC or explicit NBIA request | `references/nbia-public-dicom-fallback.md` |
 | Participant-level clinical facts | `references/clinical.md` |

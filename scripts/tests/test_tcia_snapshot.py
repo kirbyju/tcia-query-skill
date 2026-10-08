@@ -106,6 +106,99 @@ class SnapshotNormalizationTests(unittest.TestCase):
             with self.assertRaises(sqlite3.IntegrityError):
                 SNAPSHOT.insert_datacite(conn, [self.datacite_record("10.7937/example")])
 
+    def test_datacite_normalization_preserves_creators_and_event_metrics(self):
+        record = self.datacite_record("10.7937/example")
+        record["attributes"].update(
+            {
+                "creators": [{"name": "Doe, Jane", "nameType": "Personal"}],
+                "publisher": "The Cancer Imaging Archive",
+                "publicationYear": 2025,
+                "types": {"resourceType": "Collection", "resourceTypeGeneral": "Dataset"},
+                "citationCount": 7,
+                "viewCount": 11,
+                "downloadCount": 13,
+                "referenceCount": 17,
+            }
+        )
+        normalized = SNAPSHOT.normalize_datacite(record)
+        self.assertEqual(normalized["creators"][0]["name"], "Doe, Jane")
+        self.assertEqual(normalized["citation_count"], 7)
+        self.assertEqual(normalized["download_count"], 13)
+
+    def test_publications_xml_is_verified_use_and_links_dataset_dois(self):
+        records = SNAPSHOT.parse_publications_xml(
+            b"""<?xml version='1.0' encoding='UTF-8'?>
+            <xml><records><record>
+              <rec-number>42</rec-number><ref-type name='Journal Article'/>
+              <contributors><authors><author>Doe, Jane</author></authors></contributors>
+              <titles><title>Analyzing TCIA</title><secondary-title>Imaging Journal</secondary-title></titles>
+              <dates><year>2026</year></dates><electronic-resource-num>10.1000/article</electronic-resource-num>
+              <accession-num>123456</accession-num>
+              <remote-database-name>TCIA dataset 10.7937/EXAMPLE.</remote-database-name>
+            </record></records></xml>"""
+        )
+        self.assertEqual(records[0]["authors"], ["Doe, Jane"])
+        self.assertEqual(records[0]["pmid"], "123456")
+        self.assertEqual(records[0]["linked_tcia_dataset_dois"], ["10.7937/example"])
+
+    def test_dataset_impact_view_combines_datacite_and_verified_use(self):
+        with sqlite3.connect(":memory:") as conn:
+            SNAPSHOT.create_schema(conn)
+            normalized = {"short_title": "EXAMPLE", "title": "Example"}
+            conn.execute(
+                """INSERT INTO wordpress_records
+                   (source,id,slug,short_title,short_title_key,doi,title,link,date_updated,
+                    hidden,normalized_json,raw_json,search_text)
+                   VALUES ('collections','1','example','EXAMPLE','example','10.7937/example',
+                           'Example','https://example.org','','0',?,'{}','example')""",
+                (json.dumps(normalized),),
+            )
+            record = self.datacite_record("10.7937/example")
+            record["attributes"].update({"citationCount": 3, "viewCount": 4})
+            SNAPSHOT.insert_datacite(conn, [record])
+            SNAPSHOT.insert_publications(
+                conn,
+                [{
+                    "rec_number": "1", "ref_type": "Journal Article", "title": "Study",
+                    "authors": ["Doe, Jane"], "first_author": "Doe, Jane", "journal": "J",
+                    "year": "2026", "doi": "10.1000/study", "pmid": "", "accession_num": "",
+                    "keywords": [], "abstract": "", "notes": "",
+                    "linked_tcia_dataset_dois": ["10.7937/example"],
+                    "remote_database_name": "10.7937/example",
+                }],
+            )
+            row = conn.execute("SELECT * FROM agent_dataset_impact").fetchone()
+            self.assertEqual(row[8], 3)
+            self.assertEqual(row[12], 1)
+
+    def test_snapshot_build_includes_datacite_and_verified_use_sources(self):
+        publication = {
+            "rec_number": "1", "ref_type": "Journal Article", "title": "Study",
+            "authors": ["Doe, Jane"], "first_author": "Doe, Jane", "journal": "J",
+            "year": "2026", "doi": "10.1000/study", "pmid": "", "accession_num": "",
+            "keywords": [], "abstract": "", "notes": "",
+            "linked_tcia_dataset_dois": ["10.7937/example"],
+            "remote_database_name": "10.7937/example",
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            db = Path(directory) / "snapshot.sqlite"
+            with (
+                mock.patch.object(SNAPSHOT, "fetch_wordpress_endpoint", return_value=[]),
+                mock.patch.object(SNAPSHOT, "fetch_pathdb_rows", return_value=[]),
+                mock.patch.object(
+                    SNAPSHOT, "fetch_datacite_prefix",
+                    return_value=[self.datacite_record("10.7937/example")],
+                ),
+                mock.patch.object(SNAPSHOT, "fetch_publication_records", return_value=[publication]),
+            ):
+                manifest = SNAPSHOT.build_snapshot(db, quiet=True)
+            self.assertEqual(manifest["schema_version"], 8)
+            self.assertEqual(manifest["counts"]["datacite_dois"], 1)
+            self.assertEqual(manifest["counts"]["tcia_verified_analytical_publications"], 1)
+            with sqlite3.connect(db) as conn:
+                self.assertEqual(conn.execute("PRAGMA integrity_check").fetchone()[0], "ok")
+                self.assertEqual(conn.execute("SELECT COUNT(*) FROM agent_tcia_publications").fetchone()[0], 1)
+
     def test_pathdb_whole_slide_modality_is_canonical(self):
         self.assertEqual(
             SNAPSHOT.canonical_pathdb_modality("Whole slide image"),

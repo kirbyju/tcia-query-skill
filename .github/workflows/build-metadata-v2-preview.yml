@@ -26,6 +26,7 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
 
       - name: Verify triggering producer identity
         run: |
@@ -84,6 +85,17 @@ jobs:
           python scripts/tcia_correction_registry.py validate \
             --db cache/tcia_correction_registry.sqlite
 
+      - name: Resolve selective component release plan
+        id: selective
+        run: |
+          set -euo pipefail
+          test -s dist/tcia_selective_release_plan.json
+          test "$(jq -r '.current_producer_commit' dist/tcia_selective_release_plan.json)" = "$PRODUCER_SHA"
+          mode="$(jq -r '.mode' dist/tcia_selective_release_plan.json)"
+          test "$mode" = "fast" || test "$mode" = "full"
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
+          echo "### Selective component release mode: $mode" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Reject unsafe source state before expensive downstream builds
         run: |
           set -euo pipefail
@@ -96,7 +108,59 @@ jobs:
             --release-channel stable \
             "${waiver_args[@]}"
 
+      - name: Carry forward verified expensive components for fast release
+        if: steps.selective.outputs.mode == 'fast'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="tcia-metadata-v2-latest"
+          mkdir -p previous-fast
+          gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" \
+            > previous-fast/release.json
+          assets=(
+            tcia_metadata_v2_bundle_manifest.json
+            public_non_dicom_metadata.sqlite.gz
+            public_non_dicom_audit.sqlite.gz
+            participant_inventory.sqlite.gz
+            participant_inventory_audit.sqlite.gz
+          )
+          for asset in "${assets[@]}"; do
+            gh release download "$tag" --pattern "$asset" --dir previous-fast --clobber
+          done
+          validation_args=()
+          for asset in "${assets[@]:1}"; do
+            validation_args+=(--asset "$asset")
+          done
+          python scripts/tcia_v2_bundle.py validate-selection \
+            --asset-dir previous-fast \
+            --manifest previous-fast/tcia_metadata_v2_bundle_manifest.json \
+            --source-release-json previous-fast/release.json \
+            "${validation_args[@]}"
+          python scripts/tcia_v2_bundle.py materialize-reuse-manifests \
+            --manifest previous-fast/tcia_metadata_v2_bundle_manifest.json \
+            --out-dir previous-fast \
+            --component public_non_dicom \
+            --component public_non_dicom_audit \
+            --component participant_inventory \
+            --component participant_inventory_audit
+          python scripts/tcia_selective_release.py verify \
+            --plan dist/tcia_selective_release_plan.json \
+            --current-db cache/tcia_snapshot.sqlite \
+            --previous-manifest previous-fast/tcia_metadata_v2_bundle_manifest.json \
+            --expected-producer-commit "$PRODUCER_SHA" \
+            --repository-root .
+          cp previous-fast/public_non_dicom_metadata.sqlite.gz \
+            previous-fast/public_non_dicom_metadata_manifest.json \
+            previous-fast/public_non_dicom_audit.sqlite.gz \
+            previous-fast/public_non_dicom_audit_manifest.json \
+            previous-fast/participant_inventory.sqlite.gz \
+            previous-fast/participant_inventory_manifest.json \
+            previous-fast/participant_inventory_audit.sqlite.gz \
+            previous-fast/participant_inventory_audit_manifest.json dist/
+
       - name: Download and verify the canonical non-DICOM geometry seed
+        if: steps.selective.outputs.mode != 'fast'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -115,6 +179,7 @@ jobs:
             --out cache/public_non_dicom_geometry_seed.sqlite
 
       - name: Capture and validate the unified V2 build baseline
+        if: steps.selective.outputs.mode != 'fast'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -150,6 +215,7 @@ jobs:
             > cache/public_non_dicom_audit_baseline_manifest.json
 
       - name: Materialize the lossless unified V2 assembly and checkpoint
+        if: steps.selective.outputs.mode != 'fast'
         run: |
           python scripts/tcia_v2_audit.py materialize-assembly \
             --artifact public_non_dicom \
@@ -165,6 +231,7 @@ jobs:
             --db cache/tcia_v2_legacy_detail_checkpoint.sqlite
 
       - name: Build the direct IDC participant projection
+        if: steps.selective.outputs.mode != 'fast'
         run: |
           python scripts/tcia_idc_participant_projection.py build \
             --snapshot-db cache/tcia_snapshot.sqlite \
@@ -179,6 +246,7 @@ jobs:
             --min-analysis-results 11
 
       - name: Build the runner-local V2 staging ledger
+        if: steps.selective.outputs.mode != 'fast'
         run: |
           python scripts/tcia_v2_staging.py build \
             --snapshot-db cache/tcia_snapshot.sqlite \
@@ -207,6 +275,7 @@ jobs:
             --out-dir dist
 
       - name: Build public non-DICOM metadata
+        if: steps.selective.outputs.mode != 'fast'
         run: |
           set -euo pipefail
           pathdb_args=()
@@ -291,6 +360,7 @@ jobs:
             --db cache/public_non_dicom_audit.sqlite
 
       - name: Build Participant Inventory
+        if: steps.selective.outputs.mode != 'fast'
         run: |
           python scripts/tcia_participant_inventory.py build \
             --staging-db cache/tcia_metadata_v2_staging.sqlite \
@@ -332,6 +402,7 @@ jobs:
             --db cache/participant_inventory_audit.sqlite
 
       - name: Generate exact semantic change report
+        if: steps.selective.outputs.mode != 'fast'
         run: |
           python scripts/tcia_metadata_change_report.py \
             --public-new cache/public_non_dicom_metadata.sqlite \
@@ -345,6 +416,7 @@ jobs:
             --json-out cache/reports/metadata_change_report_final.json
 
       - name: Build dataset-scoped release review queue
+        if: steps.selective.outputs.mode != 'fast'
         run: |
           python scripts/tcia_release_review_queue.py \
             --report cache/reports/metadata_change_report_final.json \
@@ -359,6 +431,7 @@ jobs:
       # can iterate on exact explanation declarations by replaying the retained
       # report, without rebuilding either multi-gigabyte SQLite artifact.
       - name: Retain resumable V2 candidate before semantic gate
+        if: steps.selective.outputs.mode != 'fast'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: tcia-metadata-v2-candidate
@@ -374,6 +447,7 @@ jobs:
           compression-level: 0
 
       - name: Enforce exact semantic change explanations by replay
+        if: steps.selective.outputs.mode != 'fast'
         run: |
           python scripts/tcia_metadata_change_report.py \
             --existing-report cache/reports/metadata_change_report_final.json \

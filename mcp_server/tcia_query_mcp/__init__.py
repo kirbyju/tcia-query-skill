@@ -1,3 +1,3 @@
 """Snapshot-backed MCP server helpers for the TCIA query skill."""
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"

@@ -32,6 +32,52 @@ clinical, public non-DICOM, or Participant Inventory replacement independently
 under the moving stable tag: the component manifests and cross-component
 identity checks describe one input generation.
 
+### Selective component release
+
+The scheduled source workflow always refreshes and validates the base snapshot.
+It then runs `scripts/tcia_selective_release.py plan` against the immediately
+preceding verified release. A fast release is permitted only when both of these
+conditions hold:
+
+1. the canonical schema-and-row fingerprint of every snapshot object visible to
+   the expensive builders is unchanged; and
+2. every producer path changed since the preceding bundle's exact producer
+   commit is explicitly classified as unable to affect an expensive component.
+
+DataCite DOI metadata and TCIA EndNote verified-use tables are snapshot-only and
+are excluded from the downstream projection fingerprint. `snapshot_meta` is
+also excluded because source timestamps do not drive derived content. All other
+snapshot schema and data are included. Changes to WordPress, PathDB, clinical,
+controlled-access, public non-DICOM, participant, dependency-lock, or non-Markdown
+curation inputs therefore select the full build. An unavailable prior release,
+unknown code path, missing Git history, malformed plan, unequal fingerprint, or
+failed verification also selects or fails into the full path; none may silently
+authorize carry-forward.
+
+On an eligible fast release, the source workflow downloads the preceding
+clinical and controlled-access artifacts and the downstream workflow downloads
+the preceding public non-DICOM, Participant Inventory, and audit artifacts.
+Every selected file is checked against both the preceding top manifest and the
+captured GitHub Release digest and size. The complete bundle builder then
+decompresses each database, verifies its component manifest, SQLite hash,
+integrity, profiles, and source health, regenerates the web exports, and builds
+a new top-level manifest bound to the triggering producer commit. The result is
+still one complete atomic release; it is not a partial snapshot publication.
+
+The run-scoped `tcia_selective_release_plan.json` records the current and prior
+projection fingerprints, producer commits, changed paths, disqualifying paths,
+mode, and reasons. It is provenance for workflow routing, not a public release
+asset. The downstream workflow re-verifies it against the downloaded snapshot,
+producer SHA, and preceding release fingerprint before skipping any expensive
+step.
+
+Selective reuse never replaces periodic source observation. The 07:17
+America/New_York scheduled run forces the full workflow every day; the 19:17
+run may select the fast path. Manual dispatches may set `force_full_build=true`,
+and any explicit clinical refresh input also forces the full path. This prevents
+unchanged WordPress/PathDB projections from carrying independent controlled or
+clinical sources forward indefinitely.
+
 Before starting an expensive local rebuild, exercise both CDA endpoints used by
 the clinical builder:
 

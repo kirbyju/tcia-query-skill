@@ -3,6 +3,14 @@ name: Build TCIA metadata V2 source inputs
 on:
   workflow_dispatch:
     inputs:
+      force_full_build:
+        description: "Rebuild every V2 component even when selective carry-forward is safe"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
       refresh_all_clinical_downloads:
         description: "Re-fetch every public official clinical artifact instead of reusing unchanged rows"
         required: false
@@ -28,7 +36,9 @@ on:
           - "false"
           - "true"
   schedule:
-    - cron: "17 7,19 * * *"
+    - cron: "17 7 * * *"
+      timezone: "America/New_York"
+    - cron: "17 19 * * *"
       timezone: "America/New_York"
 
 permissions:
@@ -44,6 +54,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
 
       - name: Initialize diagnostics-only status
         run: |
@@ -60,22 +72,37 @@ jobs:
       - name: Install pinned metadata dependencies
         run: python -m pip install --require-hashes --requirement requirements-build.lock
 
-      - name: Prepare previous snapshot fallback
+      - name: Prepare verified previous release baseline
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           tag="tcia-metadata-v2-latest"
           mkdir -p previous
-          if gh release download "$tag" --pattern tcia_snapshot.sqlite.gz --dir previous >/dev/null 2>&1; then
-            if gzip -dc previous/tcia_snapshot.sqlite.gz > previous/tcia_snapshot.sqlite; then
-              echo "Previous snapshot is available for source fallback."
-            else
-              echo "::warning::Previous snapshot could not be decompressed; source fallback disabled."
-              rm -f previous/tcia_snapshot.sqlite previous/tcia_snapshot.sqlite.gz
-            fi
+          if gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" \
+               > previous/release.json 2>/dev/null && \
+             gh release download "$tag" \
+               --pattern tcia_metadata_v2_bundle_manifest.json \
+               --dir previous --clobber >/dev/null 2>&1 && \
+             gh release download "$tag" \
+               --pattern tcia_snapshot.sqlite.gz \
+               --dir previous --clobber >/dev/null 2>&1 && \
+             python scripts/tcia_v2_bundle.py validate-selection \
+               --asset-dir previous \
+               --manifest previous/tcia_metadata_v2_bundle_manifest.json \
+               --source-release-json previous/release.json \
+               --asset tcia_snapshot.sqlite.gz >/dev/null && \
+             gzip -dc previous/tcia_snapshot.sqlite.gz \
+               > previous/tcia_snapshot.sqlite; then
+            touch previous/release_verified
+            echo "Verified previous snapshot is available for source fallback and selective planning."
           else
-            echo "No previous snapshot release found; source fallback disabled."
+            echo "::warning::A verified previous release baseline is unavailable; selective release is disabled."
+            rm -f previous/release.json \
+              previous/tcia_metadata_v2_bundle_manifest.json \
+              previous/tcia_snapshot.sqlite \
+              previous/tcia_snapshot.sqlite.gz \
+              previous/release_verified
           fi
 
       - name: Build snapshot
@@ -98,7 +125,91 @@ jobs:
             --db dist/tcia_snapshot.sqlite \
             --exports-dir dist
 
+      - name: Plan selective component release
+        id: selective
+        run: |
+          set -euo pipefail
+          previous_args=()
+          force_args=()
+          if [ -f previous/release_verified ]; then
+            previous_args+=(
+              --previous-db previous/tcia_snapshot.sqlite
+              --previous-manifest previous/tcia_metadata_v2_bundle_manifest.json
+            )
+          fi
+          if [ "${{ inputs.force_full_build || 'false' }}" = "true" ]; then
+            force_args+=(--force-full-reason "operator requested a full build")
+          fi
+          if [ "${{ github.event_name }}" = "schedule" ] && \
+             [ "${{ github.event.schedule }}" = "17 7 * * *" ]; then
+            force_args+=(--force-full-reason "daily authoritative-source refresh floor")
+          fi
+          if [ "${{ inputs.refresh_all_clinical_downloads || 'false' }}" = "true" ]; then
+            force_args+=(--force-full-reason "operator requested all clinical downloads")
+          fi
+          if [ "${{ inputs.refresh_idc_clinical || 'false' }}" = "true" ]; then
+            force_args+=(--force-full-reason "operator requested IDC clinical refresh")
+          fi
+          if [ "${{ inputs.refresh_cda || 'false' }}" = "true" ]; then
+            force_args+=(--force-full-reason "operator requested CDA refresh")
+          fi
+          python scripts/tcia_selective_release.py plan \
+            --current-db dist/tcia_snapshot.sqlite \
+            --repository-root . \
+            --current-commit "$GITHUB_SHA" \
+            --out dist/tcia_selective_release_plan.json \
+            "${previous_args[@]}" \
+            "${force_args[@]}"
+          mode="$(jq -r '.mode' dist/tcia_selective_release_plan.json)"
+          test "$mode" = "fast" || test "$mode" = "full"
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Selective component release plan"
+            echo "- Mode: $mode"
+            jq -r '.reasons[] | "- Reason: " + .' dist/tcia_selective_release_plan.json
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Carry forward verified source sidecars for fast release
+        if: steps.selective.outputs.mode == 'fast'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="tcia-metadata-v2-latest"
+          assets=(
+            controlled_access_metadata.sqlite.gz
+            clinical_metadata.sqlite.gz
+          )
+          for asset in "${assets[@]}"; do
+            gh release download "$tag" --pattern "$asset" --dir previous --clobber
+          done
+          validation_args=()
+          for asset in "${assets[@]}"; do
+            validation_args+=(--asset "$asset")
+          done
+          python scripts/tcia_v2_bundle.py validate-selection \
+            --asset-dir previous \
+            --manifest previous/tcia_metadata_v2_bundle_manifest.json \
+            --source-release-json previous/release.json \
+            "${validation_args[@]}"
+          python scripts/tcia_v2_bundle.py materialize-reuse-manifests \
+            --manifest previous/tcia_metadata_v2_bundle_manifest.json \
+            --out-dir previous \
+            --component controlled_access \
+            --component clinical
+          cp previous/controlled_access_metadata.sqlite.gz \
+            previous/controlled_access_metadata_manifest.json \
+            previous/clinical_metadata.sqlite.gz \
+            previous/clinical_metadata_manifest.json dist/
+          gzip -dc dist/controlled_access_metadata.sqlite.gz \
+            > dist/controlled_access_metadata.sqlite
+          gzip -dc dist/clinical_metadata.sqlite.gz \
+            > dist/clinical_metadata.sqlite
+          cp dist/controlled_access_metadata.sqlite previous/controlled_access_metadata.sqlite
+          cp dist/clinical_metadata.sqlite previous/clinical_metadata.sqlite
+
       - name: Build controlled-access metadata
+        if: steps.selective.outputs.mode != 'fast'
         timeout-minutes: 30
         run: |
           python scripts/tcia_controlled_access_metadata.py build \
@@ -119,6 +230,7 @@ jobs:
             --require-complete-sources
 
       - name: Prepare previous clinical metadata
+        if: steps.selective.outputs.mode != 'fast'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -137,6 +249,7 @@ jobs:
           fi
 
       - name: Build patient-level clinical metadata
+        if: steps.selective.outputs.mode != 'fast'
         run: |
           set -euo pipefail
           clinical_args=()
@@ -245,6 +358,7 @@ jobs:
             | tee dist/tcia_correction_registry_validation.json
 
       - name: Prepare previous sidecars for change reporting
+        if: steps.selective.outputs.mode != 'fast'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -374,6 +488,7 @@ jobs:
             dist/metadata_diagnostic_status.json
             dist/metadata_change_report.md
             dist/metadata_change_report.json
+            dist/tcia_selective_release_plan.json
             dist/tcia_correction_registry_bootstrap_evidence.json
             dist/tcia_correction_registry_validation.json
           if-no-files-found: error

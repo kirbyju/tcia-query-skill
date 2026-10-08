@@ -32,7 +32,10 @@ from .models import (
     ClinicalSubjectsResponse,
     ControlledDatasetsResponse,
     ControlledFilesResponse,
+    DataCiteDetailResponse,
+    DataCiteSearchResponse,
     DatasetDetailResponse,
+    DatasetImpactResponse,
     DatasetSearchResponse,
     DatasetVersionsResponse,
     DicomAnnotationsResponse,
@@ -42,6 +45,7 @@ from .models import (
     ParticipantsResponse,
     CoverageResponse,
     V1ReleasesResponse,
+    VerifiedPublicationsResponse,
 )
 from .service import CONTROLLED_ACCESS_POLICY_URL, TciaQueryService, TciaServiceError
 
@@ -80,15 +84,20 @@ Recommended workflow:
    routes for controlled-access data.
 5. Use `get_dataset_versions` and `get_dataset_v1_releases` for release-history
    questions when the loaded base snapshot includes those views.
-6. Use `search_participants`, `get_participant`, and `get_participant_assets`
+6. Use `search_datacite_dois` and `get_datacite_doi` for DOI metadata and
+   citation-ready output. DataCite event metrics are not TCIA download totals.
+7. Use `search_verified_publications` and `get_dataset_impact` for verified
+   analytical use. TCIA's maintained EndNote library means the linked dataset
+   was analyzed in the listed publication.
+8. Use `search_participants`, `get_participant`, and `get_participant_assets`
    for dataset-scoped participant discovery and holdings. Use
    `get_dataset_participant_coverage` before asserting complete linkage.
-7. Use `get_controlled_access_files` only for public file-grain metadata about
+9. Use `get_controlled_access_files` only for public file-grain metadata about
    controlled-access records. It does not grant authorization.
-8. Use the clinical tools for patient-level resolved values, sourced facts, and
+10. Use the clinical tools for patient-level resolved values, sourced facts, and
    conflicts. Subject identity is scoped by `(short_title, subject_id)`; retain
    source provenance and distinguish dataset-scope inferred values.
-9. Use `find_public_non_dicom_assets` for V2 NIfTI, pathology, and other
+11. Use `find_public_non_dicom_assets` for V2 NIfTI, pathology, and other
    non-DICOM detail. Retired standalone NIfTI/pathology tools cannot be enabled
    on the public MCP server.
 """
@@ -103,6 +112,10 @@ PUBLIC_V2_TOOL_NAMES = (
     "find_public_non_dicom_assets",
     "search_datasets",
     "get_dataset",
+    "search_datacite_dois",
+    "get_datacite_doi",
+    "search_verified_publications",
+    "get_dataset_impact",
     "get_dataset_versions",
     "get_dataset_v1_releases",
     "get_current_downloads",
@@ -415,6 +428,66 @@ def get_dataset(short_title: str) -> DatasetDetailResponse:
     """Return one TCIA dataset by short title, including access, current downloads, and related results."""
 
     return service().get_dataset(short_title=short_title)
+
+
+@mcp.tool(annotations=QUERY_ANNOTATIONS, meta={"snapshot_local": True}, structured_output=True)
+@guard
+def search_datacite_dois(
+    query: str | None = None,
+    dois: list[str] | None = None,
+    short_titles: list[str] | None = None,
+    sort_by: str = "doi",
+    cursor: str | None = None,
+    limit: int = 25,
+) -> DataCiteSearchResponse:
+    """Search TCIA DataCite DOI metadata and source-specific event metrics."""
+    return service().search_datacite_dois(
+        query=query,
+        dois=dois,
+        short_titles=short_titles,
+        sort_by=sort_by,
+        cursor=cursor,
+        limit=limit,
+    )
+
+
+@mcp.tool(annotations=QUERY_ANNOTATIONS, meta={"snapshot_local": True}, structured_output=True)
+@guard
+def get_datacite_doi(doi: str, citation_style: str = "apa") -> DataCiteDetailResponse:
+    """Return complete basic DataCite metadata plus a citation in the requested style."""
+    return service().get_datacite_doi(doi=doi, citation_style=citation_style)
+
+
+@mcp.tool(annotations=QUERY_ANNOTATIONS, meta={"snapshot_local": True}, structured_output=True)
+@guard
+def search_verified_publications(
+    query: str | None = None,
+    dataset_dois: list[str] | None = None,
+    short_titles: list[str] | None = None,
+    from_year: int | None = None,
+    to_year: int | None = None,
+    cursor: str | None = None,
+    limit: int = 25,
+) -> VerifiedPublicationsResponse:
+    """Search TCIA's EndNote-backed records of verified dataset analytical use."""
+    return service().search_verified_publications(
+        query=query,
+        dataset_dois=dataset_dois,
+        short_titles=short_titles,
+        from_year=from_year,
+        to_year=to_year,
+        cursor=cursor,
+        limit=limit,
+    )
+
+
+@mcp.tool(annotations=QUERY_ANNOTATIONS, meta={"snapshot_local": True}, structured_output=True)
+@guard
+def get_dataset_impact(short_title: str, publication_limit: int = 25) -> DatasetImpactResponse:
+    """Combine DataCite event metrics with EndNote-verified analytical publications."""
+    return service().get_dataset_impact(
+        short_title=short_title, publication_limit=publication_limit
+    )
 
 
 @mcp.tool(annotations=QUERY_ANNOTATIONS, meta={"snapshot_local": True}, structured_output=True)

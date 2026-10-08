@@ -11,6 +11,16 @@ This protocol revision is independent of the TCIA V2 metadata bundle version and
 release fingerprint. MCP negotiation describes how a client talks to the server;
 `get_snapshot_info` describes which TCIA metadata generation the server queries.
 
+## Server 0.4.0
+
+This release adds citation and research-impact discovery to the immutable public snapshot.
+
+- `search_datacite_dois` and `get_datacite_doi` expose basic DataCite metadata, creators, source-specific event metrics, and APA, Vancouver, Chicago author-date, BibTeX, or RIS citation output.
+- `search_verified_publications` exposes TCIA's EndNote-backed records of verified analytical use. A linked TCIA dataset was analyzed in the listed publication; this is stronger than a mention or bibliographic citation.
+- `get_dataset_impact` combines those signals while preserving their separate provenance. DataCite counts are not TCIA download totals.
+- REST equivalents are `/v2/datacite/dois`, `/v2/datacite/dois/{doi}`, `/v2/publications/verified-use`, and `/v2/datasets/{short_title}/impact`.
+- The base snapshot schema is version 8 and now requires `agent_datacite_dois`, `agent_tcia_publications`, and `agent_dataset_impact`.
+
 ## Server 0.3.0
 
 This release intentionally narrows and types the public agent/API contract.

@@ -208,7 +208,7 @@ python scripts/pathdb_metadata.py --collection CPTAC-STAD --summary
 python scripts/datacite_tcia_dois.py --query lung
 ```
 
-For direct SQL, prefer the views documented in `references/schema.md`: `agent_datasets`, `agent_current_downloads`, `agent_dataset_access_summary`, `agent_pathdb_slides`, and `agent_datacite_dois`.
+For direct SQL, prefer the views documented in `references/schema.md`: `agent_datasets`, `agent_current_downloads`, `agent_dataset_access_summary`, `agent_pathdb_slides`, `agent_datacite_dois`, `agent_tcia_publications`, and `agent_dataset_impact`.
 
 ## Web-Friendly Release Exports
 

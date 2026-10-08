@@ -21,12 +21,13 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import xml.etree.ElementTree as ET
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any, Callable, Optional
 
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 DEFAULT_REPO = "kirbyju/tcia-query-skill"
 SNAPSHOT_ASSET = "tcia_snapshot.sqlite.gz"
 MANIFEST_ASSET = "tcia_snapshot_manifest.json"
@@ -56,6 +57,8 @@ REQUIRED_AGENT_VIEWS = [
     "agent_dataset_v1_releases",
     "agent_pathdb_slides",
     "agent_datacite_dois",
+    "agent_tcia_publications",
+    "agent_dataset_impact",
 ]
 SKILL_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DB_PATH = SKILL_ROOT / "cache" / "tcia_snapshot.sqlite"
@@ -66,7 +69,9 @@ DEFAULT_V2_MANIFEST_PATH = DEFAULT_V2_ROOT / MANIFEST_ASSET
 
 BASE_WORDPRESS_URL = "https://cancerimagingarchive.net/api/v2"
 DATACITE_DOIS_URL = "https://api.datacite.org/dois"
+PUBLICATIONS_URL = "https://cancerimagingarchive.net/endnote/Pubs_basedon_TCIA.xml"
 DEFAULT_TCIA_PREFIX = "10.7937"
+DOI_RE = re.compile(r"10\.\d{4,9}/[^\s;,]+", re.IGNORECASE)
 PATHDB_CSV_URL = (
     "https://pathdb.cancerimagingarchive.net/system/files/collectionmetadata/202401/"
     "cohort_builder_v1_01-16-2024.csv"
@@ -514,6 +519,102 @@ def load_datacite_records_from_snapshot(path: Path) -> list[dict[str, Any]]:
     return validate_datacite_records(records)
 
 
+def publication_element_text(element: ET.Element | None) -> str:
+    if element is None:
+        return ""
+    return " ".join("".join(element.itertext()).split())
+
+
+def publication_first_text(record: ET.Element, *paths: str) -> str:
+    for path in paths:
+        value = publication_element_text(record.find(path))
+        if value:
+            return value
+    return ""
+
+
+def publication_all_text(record: ET.Element, path: str) -> list[str]:
+    return [
+        value
+        for value in (publication_element_text(element) for element in record.findall(path))
+        if value
+    ]
+
+
+def normalize_doi(value: str) -> str:
+    return value.strip().rstrip(".").lower()
+
+
+def extract_dois(value: str) -> list[str]:
+    return unique_list([normalize_doi(match) for match in DOI_RE.findall(value or "")])
+
+
+def normalize_publication_record(record: ET.Element) -> dict[str, Any]:
+    remote_database_name = publication_first_text(record, "remote-database-name")
+    authors = publication_all_text(record, "contributors/authors/author")
+    accession_num = publication_first_text(record, "accession-num")
+    ref_type = record.find("ref-type")
+    return {
+        "rec_number": publication_first_text(record, "rec-number"),
+        "ref_type": ref_type.get("name", "") if ref_type is not None else "",
+        "title": publication_first_text(record, "titles/title"),
+        "authors": authors,
+        "first_author": authors[0] if authors else "",
+        "journal": publication_first_text(record, "titles/secondary-title", "periodical/full-title"),
+        "year": publication_first_text(record, "dates/year"),
+        "doi": normalize_doi(publication_first_text(record, "electronic-resource-num")),
+        "pmid": accession_num if accession_num.isdigit() else "",
+        "accession_num": accession_num,
+        "keywords": publication_all_text(record, "keywords/keyword"),
+        "abstract": publication_first_text(record, "abstract"),
+        "notes": publication_first_text(record, "notes"),
+        "linked_tcia_dataset_dois": extract_dois(remote_database_name),
+        "remote_database_name": remote_database_name,
+    }
+
+
+def validate_publication_records(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    seen: set[str] = set()
+    for record in records:
+        rec_number = str(record.get("rec_number") or "").strip()
+        if not rec_number:
+            raise RuntimeError("TCIA EndNote library returned a record without rec-number")
+        if rec_number in seen:
+            raise RuntimeError(f"TCIA EndNote library returned duplicate rec-number {rec_number}")
+        seen.add(rec_number)
+    return sorted(records, key=lambda row: (str(row.get("rec_number") or ""), str(row.get("title") or "")))
+
+
+def parse_publications_xml(body: bytes) -> list[dict[str, Any]]:
+    root = ET.fromstring(body)
+    records = [normalize_publication_record(record) for record in root.findall("./records/record")]
+    return validate_publication_records(records)
+
+
+def fetch_publication_records() -> list[dict[str, Any]]:
+    body, _ = fetch_bytes(PUBLICATIONS_URL, timeout=120)
+    return parse_publications_xml(body)
+
+
+def load_publication_records_from_snapshot(path: Path) -> list[dict[str, Any]]:
+    if not path.exists() or path.stat().st_size == 0:
+        return []
+    try:
+        with sqlite3.connect(path) as conn:
+            conn.row_factory = sqlite3.Row
+            exists = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'tcia_publications'"
+            ).fetchone()
+            if not exists:
+                return []
+            rows = conn.execute("SELECT raw_json FROM tcia_publications").fetchall()
+    except sqlite3.Error as exc:
+        raise RuntimeError(
+            f"Could not read TCIA publication records from fallback snapshot {path}: {exc}"
+        ) from exc
+    return validate_publication_records([json.loads(row["raw_json"]) for row in rows])
+
+
 def fetch_pathdb_rows(url: str = PATHDB_CSV_URL) -> list[dict[str, str]]:
     body, _ = fetch_bytes(url)
     text = body.decode("utf-8-sig", errors="replace")
@@ -901,15 +1002,35 @@ def normalize_datacite(work: dict[str, Any]) -> dict[str, Any]:
         "doi": datacite_doi(work),
         "tcia_short_name": datacite_short_name(attrs),
         "title": first_title(attrs) or attrs.get("title") or first_title(attrs, "AlternativeTitle"),
+        "titles": attrs.get("titles") or [],
+        "creators": attrs.get("creators") or [],
+        "contributors": attrs.get("contributors") or [],
         "publisher": attrs.get("publisher", ""),
         "publication_year": attrs.get("publicationYear", ""),
         "version": attrs.get("version", ""),
+        "language": attrs.get("language", ""),
+        "types": attrs.get("types") or {},
+        "subjects": attrs.get("subjects") or [],
+        "dates": attrs.get("dates") or [],
+        "descriptions": attrs.get("descriptions") or [],
+        "formats": attrs.get("formats") or [],
+        "sizes": attrs.get("sizes") or [],
+        "schema_version": attrs.get("schemaVersion", ""),
         "url": attrs.get("url", ""),
         "state": attrs.get("state", ""),
         "created": attrs.get("created", ""),
+        "registered": attrs.get("registered", ""),
+        "published": attrs.get("published", ""),
         "updated": attrs.get("updated", ""),
         "rights": attrs.get("rightsList") or [],
         "related_identifiers": attrs.get("relatedIdentifiers") or [],
+        "identifiers": attrs.get("identifiers") or [],
+        "geo_locations": attrs.get("geoLocations") or [],
+        "funding_references": attrs.get("fundingReferences") or [],
+        "citation_count": int(attrs.get("citationCount") or 0),
+        "view_count": int(attrs.get("viewCount") or 0),
+        "download_count": int(attrs.get("downloadCount") or 0),
+        "reference_count": int(attrs.get("referenceCount") or 0),
     }
 
 
@@ -954,6 +1075,7 @@ def canonical_content_hash(
     wordpress_sources: dict[str, list[dict[str, Any]]],
     pathdb_rows: list[dict[str, str]],
     datacite_records: list[dict[str, Any]],
+    publication_records: list[dict[str, Any]] | None = None,
 ) -> str:
     digest = hashlib.sha256()
     for label in sorted(wordpress_sources):
@@ -967,6 +1089,10 @@ def canonical_content_hash(
         digest.update(b"\n")
     digest.update(b"datacite\n")
     for record in datacite_records:
+        digest.update(json_dumps(record).encode("utf-8"))
+        digest.update(b"\n")
+    digest.update(b"tcia_publications\n")
+    for record in publication_records or []:
         digest.update(json_dumps(record).encode("utf-8"))
         digest.update(b"\n")
     return digest.hexdigest()
@@ -1083,16 +1209,50 @@ def create_schema(conn: sqlite3.Connection) -> None:
             doi TEXT COLLATE NOCASE PRIMARY KEY,
             tcia_short_name TEXT,
             title TEXT,
+            creators_json TEXT NOT NULL,
             publisher TEXT,
             publication_year TEXT,
             version TEXT,
+            resource_type TEXT,
+            resource_type_general TEXT,
             state TEXT,
             created TEXT,
             updated TEXT,
             url TEXT,
+            citation_count INTEGER NOT NULL DEFAULT 0,
+            view_count INTEGER NOT NULL DEFAULT 0,
+            download_count INTEGER NOT NULL DEFAULT 0,
+            reference_count INTEGER NOT NULL DEFAULT 0,
             normalized_json TEXT NOT NULL,
             raw_json TEXT NOT NULL,
             search_text TEXT NOT NULL
+        );
+
+        CREATE TABLE tcia_publications (
+            rec_number TEXT PRIMARY KEY,
+            ref_type TEXT,
+            title TEXT,
+            authors_json TEXT NOT NULL,
+            first_author TEXT,
+            journal TEXT,
+            year TEXT,
+            doi TEXT COLLATE NOCASE,
+            pmid TEXT,
+            accession_num TEXT,
+            keywords_json TEXT NOT NULL,
+            abstract TEXT,
+            notes TEXT,
+            linked_tcia_dataset_dois_json TEXT NOT NULL,
+            remote_database_name TEXT,
+            raw_json TEXT NOT NULL,
+            search_text TEXT NOT NULL
+        );
+
+        CREATE TABLE tcia_publication_dataset_dois (
+            rec_number TEXT NOT NULL,
+            dataset_doi TEXT COLLATE NOCASE NOT NULL,
+            PRIMARY KEY (rec_number, dataset_doi),
+            FOREIGN KEY (rec_number) REFERENCES tcia_publications(rec_number)
         );
 
         CREATE VIEW agent_datasets AS
@@ -1370,16 +1530,67 @@ def create_schema(conn: sqlite3.Connection) -> None:
             doi,
             tcia_short_name,
             title,
+            creators_json AS creators,
             publisher,
             publication_year,
             version,
+            resource_type,
+            resource_type_general,
             state,
             created,
             updated,
             url,
+            citation_count,
+            view_count,
+            download_count,
+            reference_count,
             normalized_json,
             raw_json
         FROM datacite_dois;
+
+        CREATE VIEW agent_tcia_publications AS
+        SELECT
+            rec_number,
+            ref_type,
+            title,
+            authors_json AS authors,
+            first_author,
+            journal,
+            year,
+            doi,
+            pmid,
+            accession_num,
+            keywords_json AS keywords,
+            abstract,
+            notes,
+            linked_tcia_dataset_dois_json AS linked_tcia_dataset_dois,
+            remote_database_name,
+            raw_json
+        FROM tcia_publications;
+
+        CREATE VIEW agent_dataset_impact AS
+        SELECT
+            d.dataset_type,
+            d.short_title,
+            d.title,
+            d.doi,
+            d.link AS tcia_page,
+            dc.publisher,
+            dc.publication_year,
+            dc.version,
+            dc.citation_count AS datacite_citation_count,
+            dc.view_count AS datacite_view_count,
+            dc.download_count AS datacite_download_count,
+            dc.reference_count AS datacite_reference_count,
+            COUNT(DISTINCT p.rec_number) AS verified_analytical_publication_count,
+            MAX(p.year) AS latest_verified_analytical_publication_year
+        FROM agent_datasets d
+        LEFT JOIN datacite_dois dc ON lower(dc.doi) = lower(d.doi)
+        LEFT JOIN tcia_publication_dataset_dois pd ON lower(pd.dataset_doi) = lower(d.doi)
+        LEFT JOIN tcia_publications p ON p.rec_number = pd.rec_number
+        GROUP BY d.dataset_type, d.short_title, d.title, d.doi, d.link,
+                 dc.publisher, dc.publication_year, dc.version,
+                 dc.citation_count, dc.view_count, dc.download_count, dc.reference_count;
         """
     )
 
@@ -1676,26 +1887,81 @@ def insert_datacite(conn: sqlite3.Connection, records: list[dict[str, Any]]) -> 
                 normalized.get("doi", ""),
                 normalized.get("tcia_short_name", ""),
                 normalized.get("title", ""),
+                json_dumps(normalized.get("creators") or []),
                 normalized.get("publisher", ""),
                 str(normalized.get("publication_year", "")),
                 normalized.get("version", ""),
+                (normalized.get("types") or {}).get("resourceType", ""),
+                (normalized.get("types") or {}).get("resourceTypeGeneral", ""),
                 normalized.get("state", ""),
                 normalized.get("created", ""),
                 normalized.get("updated", ""),
                 normalized.get("url", ""),
+                normalized.get("citation_count", 0),
+                normalized.get("view_count", 0),
+                normalized.get("download_count", 0),
+                normalized.get("reference_count", 0),
                 json_dumps(normalized),
                 json_dumps(record),
-                " ".join(str(value) for value in normalized.values()).lower(),
+                json_dumps(normalized).lower(),
             )
         )
     conn.executemany(
         """
         INSERT INTO datacite_dois
-        (doi, tcia_short_name, title, publisher, publication_year, version,
-         state, created, updated, url, normalized_json, raw_json, search_text)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (doi, tcia_short_name, title, creators_json, publisher, publication_year, version,
+         resource_type, resource_type_general, state, created, updated, url,
+         citation_count, view_count, download_count, reference_count,
+         normalized_json, raw_json, search_text)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         rows,
+    )
+
+
+def insert_publications(conn: sqlite3.Connection, records: list[dict[str, Any]]) -> None:
+    rows: list[tuple[Any, ...]] = []
+    links: list[tuple[str, str]] = []
+    for record in records:
+        rec_number = str(record.get("rec_number") or "")
+        authors = record.get("authors") or []
+        keywords = record.get("keywords") or []
+        linked_dois = record.get("linked_tcia_dataset_dois") or []
+        rows.append(
+            (
+                rec_number,
+                record.get("ref_type", ""),
+                record.get("title", ""),
+                json_dumps(authors),
+                record.get("first_author", ""),
+                record.get("journal", ""),
+                str(record.get("year", "")),
+                record.get("doi", ""),
+                record.get("pmid", ""),
+                record.get("accession_num", ""),
+                json_dumps(keywords),
+                record.get("abstract", ""),
+                record.get("notes", ""),
+                json_dumps(linked_dois),
+                record.get("remote_database_name", ""),
+                json_dumps(record),
+                json_dumps(record).lower(),
+            )
+        )
+        links.extend((rec_number, normalize_doi(doi)) for doi in linked_dois)
+    conn.executemany(
+        """
+        INSERT INTO tcia_publications
+        (rec_number, ref_type, title, authors_json, first_author, journal, year, doi,
+         pmid, accession_num, keywords_json, abstract, notes,
+         linked_tcia_dataset_dois_json, remote_database_name, raw_json, search_text)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        rows,
+    )
+    conn.executemany(
+        "INSERT INTO tcia_publication_dataset_dois (rec_number, dataset_doi) VALUES (?, ?)",
+        sorted(set(links)),
     )
 
 
@@ -1720,6 +1986,10 @@ def add_indexes(conn: sqlite3.Connection) -> None:
         CREATE INDEX idx_pathdb_patient ON pathdb_rows(patient_id);
         CREATE INDEX idx_pathdb_slide ON pathdb_rows(slide_id);
         CREATE INDEX idx_datacite_short_name ON datacite_dois(tcia_short_name);
+        CREATE INDEX idx_datacite_impact ON datacite_dois(citation_count, view_count, download_count);
+        CREATE INDEX idx_tcia_publications_year ON tcia_publications(year);
+        CREATE INDEX idx_tcia_publications_doi ON tcia_publications(doi);
+        CREATE INDEX idx_tcia_publication_dataset_doi ON tcia_publication_dataset_dois(dataset_doi);
         """
     )
 
@@ -1872,6 +2142,19 @@ def build_snapshot(
     warnings.extend(source_warnings)
     log(f"  {len(datacite_records)} records")
 
+    log("Fetching TCIA verified analytical-use publications...")
+    publication_records, source_status["tcia_publications"], source_warnings = fetch_rows_for_build(
+        "tcia_publications",
+        "TCIA EndNote verified-use library",
+        "TCIA publication records",
+        fetch_publication_records,
+        load_publication_records_from_snapshot,
+        fallback_db,
+        log,
+    )
+    warnings.extend(source_warnings)
+    log(f"  {len(publication_records)} records")
+
     wordpress_sources = {
         "collections": collections,
         "analysis-results": analysis_results,
@@ -1879,7 +2162,9 @@ def build_snapshot(
         "versions": versions,
     }
     download_title_by_id = endpoint_download_title_lookup(downloads)
-    content_sha256 = canonical_content_hash(wordpress_sources, pathdb_rows, datacite_records)
+    content_sha256 = canonical_content_hash(
+        wordpress_sources, pathdb_rows, datacite_records, publication_records
+    )
     current_collection_downloads = sum(
         len(collection.get("collection_downloads") or []) for collection in collections
     )
@@ -1898,6 +2183,7 @@ def build_snapshot(
         "wordpress_versions": len(versions),
         "pathdb_rows": len(pathdb_rows),
         "datacite_dois": len(datacite_records),
+        "tcia_verified_analytical_publications": len(publication_records),
     }
 
     conn = sqlite3.connect(out_path)
@@ -1913,6 +2199,7 @@ def build_snapshot(
         insert_wordpress_versions(conn, versions)
         insert_pathdb(conn, pathdb_rows)
         insert_datacite(conn, datacite_records)
+        insert_publications(conn, publication_records)
         add_indexes(conn)
         insert_meta(
             conn,
@@ -1924,6 +2211,7 @@ def build_snapshot(
                 "wordpress_versions_endpoint": f"{BASE_WORDPRESS_URL}/versions",
                 "pathdb_csv_url": PATHDB_CSV_URL,
                 "datacite_prefix": DEFAULT_TCIA_PREFIX,
+                "tcia_publications_url": PUBLICATIONS_URL,
                 "counts": counts,
             },
         )
@@ -1946,6 +2234,7 @@ def build_snapshot(
             "wordpress_versions_endpoint": f"{BASE_WORDPRESS_URL}/versions",
             "pathdb_csv_url": PATHDB_CSV_URL,
             "datacite_prefix": DEFAULT_TCIA_PREFIX,
+            "tcia_publications_url": PUBLICATIONS_URL,
         },
         "source_status": source_status,
         "elapsed_seconds": round(time.time() - started, 3),

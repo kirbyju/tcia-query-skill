@@ -4,24 +4,35 @@ Use this reference when a user asks about peer-reviewed manuscripts, papers, res
 
 ## Authority
 
-TCIA's verified bibliography of manuscripts written about TCIA data is the Publications page and its EndNote XML export:
+TCIA's verified record of manuscripts that analytically used TCIA data is the Publications page and its EndNote XML export. A dataset DOI linked in this library means the dataset was analyzed in the publication; it is not merely a citation or mention:
 
 - `https://www.cancerimagingarchive.net/publications/`
 - `https://cancerimagingarchive.net/endnote/Pubs_basedon_TCIA.xml`
 
-Use the EndNote XML as the source of truth for publication-mining tasks. The local SQLite snapshot and DataCite tables are useful for dataset metadata, dataset DOI metadata, visibility, access/license, and download routing, but they are not the verified manuscript bibliography.
+Use the EndNote records as the source of truth for verified analytical-use tasks. They are included in release-backed SQLite snapshots and exposed through MCP/REST. DataCite remains useful for dataset metadata, citation metadata, and source-specific event metrics, but it is not the verified analytical-use bibliography.
 
 ## When To Use This Source
 
 Start from the EndNote XML when the user asks for:
 
-- papers or manuscripts written about TCIA data
+- papers or manuscripts that analyzed TCIA data
 - publications using a specific TCIA collection, DOI, or short title
 - hypotheses or methods studied in TCIA-based papers
 - publication counts, years, journals, PMIDs, or manuscript DOIs
 - literature mining by topic, modality, disease, biomarker, model type, or endpoint
 
-Start from DataCite only when the user asks about TCIA dataset DOI metadata, versions, citation metadata for a dataset DOI, or DOI relationship provenance. After finding dataset DOIs in the EndNote XML, use TCIA snapshot records if you need TCIA page links, short titles, access/license status, or download routes.
+Start from DataCite when the user asks about TCIA dataset DOI metadata, versions, creators, formatted citations, source-specific event metrics, or DOI relationship provenance. After finding dataset DOIs in the verified-use records, use TCIA snapshot records if you need TCIA page links, short titles, access/license status, or download routes.
+
+## MCP And REST
+
+Preferred snapshot-backed operations:
+
+- MCP `search_verified_publications` / REST `GET /v2/publications/verified-use`
+- MCP `get_dataset_impact` / REST `GET /v2/datasets/{short_title}/impact`
+- MCP `search_datacite_dois` / REST `GET /v2/datacite/dois`
+- MCP `get_datacite_doi` / REST `GET /v2/datacite/dois/{doi}`
+
+`get_dataset_impact` deliberately keeps two signals distinct: verified analytical-publication counts from the TCIA EndNote library and event metrics observed in DataCite. DataCite view/download counts are not TCIA download totals.
 
 ## Helper Script
 

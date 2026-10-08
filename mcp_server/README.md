@@ -13,7 +13,7 @@ tcia_query_mcp/rest.py     # FastAPI routes for scripts, checks, and apps
 The server defaults to the manifest-pinned research core and optional detail
 profiles:
 
-- `tcia_snapshot.sqlite`: required TCIA WordPress/DataCite/PathDB snapshot.
+- `tcia_snapshot.sqlite`: required TCIA WordPress/DataCite/PathDB snapshot, including TCIA's EndNote-backed verified analytical-use records.
 - `participant_inventory.sqlite`: required dataset-scoped participant availability.
 - `public_non_dicom_metadata.sqlite`: optional public non-DICOM file-grain detail.
 - `controlled_access_metadata.sqlite`: optional controlled-access file-grain public metadata.
@@ -33,6 +33,10 @@ Core MCP tools:
 - `get_snapshot_info`
 - `search_datasets`
 - `get_dataset`
+- `search_datacite_dois`
+- `get_datacite_doi`
+- `search_verified_publications`
+- `get_dataset_impact`
 - `get_dataset_versions`
 - `get_dataset_v1_releases`
 - `get_current_downloads`
@@ -54,7 +58,7 @@ Optional detail tools:
 - `get_clinical_facts`
 - `get_clinical_conflicts`
 
-The default public MCP surface contains these 20 supported tools. NIfTI,
+The default public MCP surface contains these 24 supported tools. NIfTI,
 pathology, and other public non-DICOM discovery uses
 `find_public_non_dicom_assets`. Set `requires_annotations=true` to select
 non-DICOM `segmentation`, `annotation`, and `annotation_snapshot` roles. This
@@ -71,7 +75,8 @@ file-grain geometry review.
 
 The default REST documentation is under `/v2/docs`. The REST routes cover dataset and
 release history, participants, public non-DICOM detail, controlled-access public
-metadata, clinical detail, and TCIA DICOM annotation-download signals. Public
+metadata, clinical detail, DataCite DOI metadata/citations, verified analytical
+publications, dataset impact, and TCIA DICOM annotation-download signals. Public
 DICOM series relationships remain an IDC/idc-index concern. Retired specialized
 NIfTI and pathology tools are not available on the MCP surface. Their retired
 standalone REST paths remain under `/v1/` only as stable `410 Gone` migration
@@ -101,7 +106,7 @@ responses; use `/v2/public-non-dicom/assets`.
   All return `Deprecation`, `Sunset`, and migration `Link` headers.
 
 See [API upgrade notes](../references/api-upgrade-notes.md) for intentional
-client-visible changes in server 0.3.0.
+client-visible changes in server 0.4.0.
 
 MCP resources:
 

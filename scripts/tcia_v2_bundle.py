@@ -276,6 +276,9 @@ def component_source_health(
 ) -> dict[str, Any]:
     """Summarize source acquisition health without copying local paths."""
     at = at or dt.datetime.now(dt.timezone.utc)
+    carried = manifest.get("carried_source_health")
+    if carried is not None:
+        return validate_carried_component_health(component, carried, at=at)
     sources: dict[str, dict[str, Any]] = {}
     warnings: list[dict[str, str]] = []
 
@@ -348,6 +351,107 @@ def component_source_health(
         "warning_count": len(warnings),
         "warnings": warnings[:50],
         "warning_summary": manifest.get("warning_summary") or {},
+    }
+
+
+def validate_carried_component_health(
+    component: str,
+    health: Any,
+    *,
+    at: dt.datetime | None = None,
+) -> dict[str, Any]:
+    """Validate a component-health receipt copied from a verified top manifest."""
+    at = at or dt.datetime.now(dt.timezone.utc)
+    if not isinstance(health, dict):
+        raise RuntimeError(f"Carried source health is invalid: {component}")
+    sources = health.get("sources")
+    if not isinstance(sources, dict) or not sources:
+        raise RuntimeError(f"Carried source health has no sources: {component}")
+    degraded: list[str] = []
+    unknown: list[str] = []
+    for name, details in sources.items():
+        if not isinstance(name, str) or not name.startswith(f"{component}."):
+            raise RuntimeError(f"Carried source health has an invalid source: {component}")
+        if not isinstance(details, dict):
+            unknown.append(name)
+            continue
+        status = details.get("status")
+        if status == "degraded":
+            degraded.append(name)
+        elif status != "healthy":
+            unknown.append(name)
+        if details.get("freshness") == "verified_stale":
+            try:
+                observed = parse_utc(str(details.get("last_successful_at_utc") or ""))
+                max_age = int(details.get("max_age_seconds"))
+            except (TypeError, ValueError) as exc:
+                raise RuntimeError(
+                    f"Carried verified-stale source evidence is malformed: {name}"
+                ) from exc
+            age_seconds = int((at - observed).total_seconds())
+            if age_seconds < 0 or age_seconds > max_age:
+                raise RuntimeError(f"Carried verified-stale source evidence expired: {name}")
+    degraded.sort()
+    unknown.sort()
+    if health.get("degraded_sources") != degraded:
+        raise RuntimeError(f"Carried degraded sources disagree: {component}")
+    if health.get("unknown_sources") != unknown:
+        raise RuntimeError(f"Carried unknown sources disagree: {component}")
+    expected_status = "degraded" if degraded else ("unknown" if unknown else "healthy")
+    if health.get("status") != expected_status:
+        raise RuntimeError(f"Carried component health status disagrees: {component}")
+    warnings = health.get("warnings")
+    warning_count = health.get("warning_count")
+    if not isinstance(warnings, list) or not isinstance(warning_count, int):
+        raise RuntimeError(f"Carried warning summary is invalid: {component}")
+    return json.loads(canonical_json(health))
+
+
+def materialize_reuse_manifests(
+    bundle_manifest_path: Path,
+    out_dir: Path,
+    component_names: list[str],
+) -> dict[str, Any]:
+    """Recreate internal component receipts from a verified top manifest."""
+    bundle = json.loads(bundle_manifest_path.read_text(encoding="utf-8"))
+    errors = validate_manifest_contract(bundle)
+    if errors:
+        raise RuntimeError("Invalid reuse bundle manifest: " + "; ".join(errors))
+    components = bundle.get("components") or {}
+    health_components = (bundle.get("source_health") or {}).get("components") or {}
+    out_dir.mkdir(parents=True, exist_ok=True)
+    written: dict[str, str] = {}
+    for name in component_names:
+        if name not in COMPONENTS:
+            raise RuntimeError(f"Unknown reuse component: {name}")
+        details = components.get(name)
+        health = health_components.get(name)
+        if not isinstance(details, dict) or not isinstance(health, dict):
+            raise RuntimeError(f"Bundle has no reusable component receipt: {name}")
+        validate_carried_component_health(name, health)
+        expected_database = str(COMPONENTS[name]["database"])
+        if details.get("database_asset") != expected_database:
+            raise RuntimeError(f"Reusable component database disagrees: {name}")
+        payload = {
+            "artifact": name,
+            "schema_version": details.get("schema_version"),
+            "release_fingerprint": details.get("release_fingerprint"),
+            "sqlite_sha256": details.get("sqlite_sha256"),
+            "gzip_sha256": details.get("gzip_sha256"),
+            "provenance": details.get("provenance"),
+            "storage_contract": details.get("storage_contract"),
+            "carried_source_health": health,
+            "carried_from_bundle": {
+                "release_fingerprint": bundle.get("release_fingerprint"),
+                "producer": bundle.get("producer"),
+            },
+        }
+        target = out_dir / str(COMPONENTS[name]["manifest"])
+        target.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        written[name] = target.name
+    return {
+        "bundle_release_fingerprint": bundle.get("release_fingerprint"),
+        "components": written,
     }
 
 
@@ -2150,6 +2254,13 @@ def parser() -> argparse.ArgumentParser:
     selection.add_argument("--manifest", required=True)
     selection.add_argument("--source-release-json")
     selection.add_argument("--asset", action="append", required=True)
+    reuse = sub.add_parser(
+        "materialize-reuse-manifests",
+        help="Recreate internal component receipts from a verified top manifest.",
+    )
+    reuse.add_argument("--manifest", required=True)
+    reuse.add_argument("--out-dir", required=True)
+    reuse.add_argument("--component", action="append", required=True)
     exports = sub.add_parser("exports", help="Regenerate all web exports from the bundled snapshot.")
     exports.add_argument("--snapshot-db", required=True)
     exports.add_argument("--out-dir", required=True)
@@ -2263,6 +2374,12 @@ def main() -> int:
         )
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0 if result["ok"] else 1
+    if args.command == "materialize-reuse-manifests":
+        result = materialize_reuse_manifests(
+            Path(args.manifest), Path(args.out_dir), args.component
+        )
+        print(json.dumps(result, indent=2, sort_keys=True))
+        return 0
     if args.command == "exports":
         snapshot_db = Path(args.snapshot_db)
         out_dir = Path(args.out_dir)

@@ -257,6 +257,66 @@ class V2BundleTests(unittest.TestCase):
             manifest.write_text(json.dumps(payload))
             self.assertTrue(BUNDLE.validate_bundle(root, manifest)["ok"])
 
+    def test_reuse_manifests_are_reconstructed_from_verified_top_contract(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "source"
+            reused = root / "reused"
+            source.mkdir()
+            reused.mkdir()
+            self.create_bundle_files(source)
+            payload = BUNDLE.build_bundle_manifest(
+                source,
+                release_contract=BUNDLE.STREAMLINED_RELEASE_CONTRACT,
+            )
+            manifest = source / BUNDLE.BUNDLE_MANIFEST_ASSET
+            manifest.write_text(json.dumps(payload))
+            result = BUNDLE.materialize_reuse_manifests(
+                manifest,
+                reused,
+                ["controlled_access", "participant_inventory"],
+            )
+            self.assertEqual(
+                set(result["components"]), {"controlled_access", "participant_inventory"}
+            )
+            for component in result["components"]:
+                details = BUNDLE.COMPONENTS[component]
+                shutil.copy2(source / details["database"], reused / details["database"])
+            validated = BUNDLE.validate_component_assets(
+                reused,
+                ("controlled_access", "participant_inventory"),
+                validate_snapshot_exports=False,
+            )
+            self.assertEqual(set(validated), {"controlled_access", "participant_inventory"})
+            carried = json.loads(
+                (reused / BUNDLE.COMPONENTS["controlled_access"]["manifest"]).read_text()
+            )
+            self.assertEqual(
+                BUNDLE.component_source_health("controlled_access", carried),
+                payload["source_health"]["components"]["controlled_access"],
+            )
+
+    def test_expired_carried_source_health_is_rejected(self):
+        health = {
+            "status": "healthy",
+            "sources": {
+                "clinical.cda_clinical": {
+                    "status": "healthy",
+                    "mode": "reused_after_refresh_failure",
+                    "freshness": "verified_stale",
+                    "last_successful_at_utc": "2020-01-01T00:00:00+00:00",
+                    "max_age_seconds": 60,
+                }
+            },
+            "degraded_sources": [],
+            "unknown_sources": [],
+            "warning_count": 1,
+            "warnings": [{"source": "clinical.cda_clinical", "message": "offline"}],
+            "warning_summary": {},
+        }
+        with self.assertRaisesRegex(RuntimeError, "expired"):
+            BUNDLE.validate_carried_component_health("clinical", health)
+
     def test_stable_bundle_rejects_degraded_source_without_scoped_waiver(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

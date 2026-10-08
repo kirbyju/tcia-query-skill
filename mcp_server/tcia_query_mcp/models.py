@@ -47,6 +47,67 @@ class DatasetSummary(PublicModel):
     source_collections: TextValues = None
 
 
+class DataCiteDOISummary(PublicModel):
+    doi: str
+    tcia_short_name: str | None = None
+    title: str | None = None
+    creators: list[JsonObject] = Field(default_factory=list)
+    publisher: str | None = None
+    publication_year: str | None = None
+    version: str | None = None
+    resource_type: str | None = None
+    resource_type_general: str | None = None
+    url: str | None = None
+    state: str | None = None
+    created: str | None = None
+    updated: str | None = None
+    citation_count: int = Field(default=0, ge=0)
+    view_count: int = Field(default=0, ge=0)
+    download_count: int = Field(default=0, ge=0)
+    reference_count: int = Field(default=0, ge=0)
+
+
+class DataCiteDOIDetail(DataCiteDOISummary):
+    citation_style: str
+    formatted_citation: str
+    metadata: JsonObject
+
+
+class VerifiedPublication(PublicModel):
+    rec_number: str
+    ref_type: str | None = None
+    title: str | None = None
+    authors: list[str] = Field(default_factory=list)
+    first_author: str | None = None
+    journal: str | None = None
+    year: str | None = None
+    doi: str | None = None
+    pmid: str | None = None
+    accession_num: str | None = None
+    keywords: list[str] = Field(default_factory=list)
+    abstract: str | None = None
+    notes: str | None = None
+    linked_tcia_dataset_dois: list[str] = Field(default_factory=list)
+    remote_database_name: str | None = None
+
+
+class DatasetImpact(PublicModel):
+    dataset_type: str | None = None
+    short_title: str
+    title: str | None = None
+    doi: str | None = None
+    tcia_page: str | None = None
+    publisher: str | None = None
+    publication_year: str | None = None
+    version: str | None = None
+    datacite_citation_count: int = Field(default=0, ge=0)
+    datacite_view_count: int = Field(default=0, ge=0)
+    datacite_download_count: int = Field(default=0, ge=0)
+    datacite_reference_count: int = Field(default=0, ge=0)
+    verified_analytical_publication_count: int = Field(default=0, ge=0)
+    latest_verified_analytical_publication_year: str | None = None
+
+
 class DatasetDetail(DatasetSummary):
     hidden: bool | None = None
     licenses: TextValues = None
@@ -436,11 +497,35 @@ class Capabilities(PublicModel):
     install_state: bool
     public_dicom_authority: str
     publication_authority: str
+    datacite_metadata: bool
+    verified_analytical_publications: bool
 
 
 class DatasetSearchResponse(PageResponse):
     datasets: list[DatasetSummary]
     note: str
+
+
+class DataCiteSearchResponse(PageResponse):
+    dois: list[DataCiteDOISummary]
+    metrics_note: str
+
+
+class DataCiteDetailResponse(PublicModel):
+    record: DataCiteDOIDetail
+    provenance_note: str
+
+
+class VerifiedPublicationsResponse(PageResponse):
+    publications: list[VerifiedPublication]
+    verification_note: str
+
+
+class DatasetImpactResponse(PublicModel):
+    impacts: list[DatasetImpact]
+    verified_publications: list[VerifiedPublication]
+    publication_limit: int = Field(ge=1)
+    notes: list[str]
 
 
 class DatasetDetailResponse(PublicModel):

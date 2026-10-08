@@ -30,7 +30,14 @@ PROFILES = {
             "agent_current_downloads",
             ("dataset_type", "short_title", "download_id"),
         ),
-        TableSpec("agent_datacite_dois", ("doi",)),
+        TableSpec(
+            "agent_datacite_dois",
+            ("doi",),
+            nonsemantic_columns=(
+                "citation_count", "view_count", "download_count", "reference_count", "raw_json"
+            ),
+        ),
+        TableSpec("agent_tcia_publications", ("rec_number",)),
         TableSpec("agent_pathdb_slides"),
     ),
     "controlled": (
@@ -516,6 +523,17 @@ def without_opaque_provenance_ids(value: object) -> object:
 
 def comparison_value(spec: TableSpec, column: str, value: object) -> object:
     canonical = canonical_value(value)
+    if spec.name == "agent_datacite_dois" and column == "normalized_json":
+        if not isinstance(canonical, str):
+            return canonical
+        try:
+            parsed = json.loads(canonical)
+        except json.JSONDecodeError:
+            return canonical
+        if isinstance(parsed, dict):
+            for key in ("citation_count", "view_count", "download_count", "reference_count"):
+                parsed.pop(key, None)
+        return parsed
     if spec.name != "clinical_facts" or column != "provenance_json":
         return canonical
     if not isinstance(canonical, str):

@@ -28,6 +28,10 @@ class RestV2ContractTests(unittest.TestCase):
         self.assertIn("/v2/datasets/{short_title}/participant-coverage", paths)
         self.assertIn("/v2/public-non-dicom/assets", paths)
         self.assertIn("/v2/datasets/{short_title}/versions", paths)
+        self.assertIn("/v2/datacite/dois", paths)
+        self.assertIn("/v2/datacite/dois/{doi}", paths)
+        self.assertIn("/v2/publications/verified-use", paths)
+        self.assertIn("/v2/datasets/{short_title}/impact", paths)
         self.assertIn("/v2/release-history/v1-releases", paths)
         self.assertIn("/v2/controlled-access/datasets", paths)
         self.assertIn("/v2/controlled-access/{short_title}/files", paths)
@@ -88,6 +92,8 @@ class RestV2ContractTests(unittest.TestCase):
                         "install_state": True,
                         "public_dicom_authority": "IDC",
                         "publication_authority": "TCIA WordPress",
+                        "datacite_metadata": True,
+                        "verified_analytical_publications": True,
                     },
                 }
 

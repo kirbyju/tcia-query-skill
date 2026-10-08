@@ -268,7 +268,17 @@ One row per DataCite record under the TCIA DOI prefix `10.7937`.
 
 Key columns:
 
-- `doi`, `tcia_short_name`, `title`, `publisher`, `publication_year`, `version`, `state`, `url`.
+- `doi`, `tcia_short_name`, `title`, `creators`, `publisher`, `publication_year`, `version`, `resource_type`, `resource_type_general`, `state`, `url`.
+- DataCite event metrics: `citation_count`, `view_count`, `download_count`, `reference_count`. These are not TCIA download totals.
+- `normalized_json` preserves the broader basic DataCite metadata, including titles, creators, contributors, subjects, dates, descriptions, rights, related identifiers, funding references, formats, sizes, and geolocations.
+
+### `agent_tcia_publications`
+
+One row per entry in TCIA's maintained EndNote library of verified analytical use. Key columns include `rec_number`, manuscript `title`, `authors`, `journal`, `year`, manuscript `doi`, `pmid`, `keywords`, `abstract`, and `linked_tcia_dataset_dois`. A linked dataset DOI means that dataset was analyzed in the publication.
+
+### `agent_dataset_impact`
+
+One row per visible TCIA dataset, joining DataCite event metrics with the count and latest year of EndNote-verified analytical publications. Keep those two evidence types distinct when reporting impact.
 
 ## Related Analysis Result Checks
 
@@ -376,7 +386,9 @@ views; raw-source inspection is documented in `maintainer-operations.md`.
 - `wordpress_versions`: normalized `/api/v2/versions` rows, expanded to one row per related Collection or Analysis Result short title.
 - `pathdb_rows`: trimmed PathDB cohort-builder slide metadata.
 - `pathdb_collection_summary`: collection-level PathDB patient/slide summaries.
-- `datacite_dois`: TCIA DOI prefix records from DataCite.
+- `datacite_dois`: TCIA DOI prefix records from DataCite, including normalized basic metadata and event counters.
+- `tcia_publications`: TCIA EndNote records representing verified analytical use.
+- `tcia_publication_dataset_dois`: exact dataset-DOI links extracted from those EndNote records.
 
 ## Retained Pathology Audit Checkpoint
 

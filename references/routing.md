@@ -30,7 +30,7 @@ Downstream field mappings:
 
 For DOI, citation, or version questions, start with DataCite records exposed by the selected snapshot-backed surface, not WordPress records alone. In a local workflow, use `agent_datacite_dois` or `scripts/datacite_tcia_dois.py`, then use `agent_datasets` to confirm TCIA publication, access/license, and dataset pages.
 
-For peer-reviewed manuscripts written about TCIA data, start with TCIA's Publications EndNote XML export, not DataCite. Load `references/publications.md` and use `scripts/tcia_publications.py` to search title, abstract, keywords, journal, PMID, manuscript DOI, and linked TCIA dataset DOI values.
+For peer-reviewed manuscripts that verifiably analyzed TCIA data, start with the release-backed EndNote records, not DataCite. Prefer MCP `search_verified_publications` or REST `/v2/publications/verified-use`; use `scripts/tcia_publications.py` for direct local XML work.
 
 For ambiguous recency requests such as “newest,” “latest,” or “most recent,” ask whether the user wants newly published datasets, recently updated datasets, or both. Recommend both in separate sections. Do not ask when the user already names the date concept. If clarification is impossible, return both rather than silently choosing first-release dates.
 
@@ -133,8 +133,9 @@ DOI/citation:
 
 Peer-reviewed publications:
 
-- Start with TCIA Publications EndNote XML: `https://cancerimagingarchive.net/endnote/Pubs_basedon_TCIA.xml`.
-- Use `scripts/tcia_publications.py` for verified papers written about TCIA datasets.
+- Start with release-backed TCIA Publications EndNote records; the XML source is `https://cancerimagingarchive.net/endnote/Pubs_basedon_TCIA.xml`.
+- Treat linked records as verified analytical use of TCIA datasets, not mere mentions.
+- Prefer `search_verified_publications` or `/v2/publications/verified-use`; use `scripts/tcia_publications.py` for direct XML work.
 - Use linked TCIA dataset DOI values from `remote-database-name` to connect papers back to WordPress/DataCite dataset records when dataset metadata or access routes are needed.
 - Do not treat DataCite dataset DOI records as the bibliography of papers that used TCIA data.
 
@@ -200,5 +201,5 @@ For exact dataset questions, give a short prose summary first, then a table of a
 - For new Data Retriever CSV manifests, route by one preferred header only: `SeriesInstanceUID` for public DICOM, `imageUrl` for PathDB/direct public files, or `drs_uri` for controlled-access files when official WordPress, CTDC, or General Commons manifests provide DRS URIs. Avoid mixed-route manifests because Data Retriever applies header precedence.
 - WordPress download metadata may contain nested objects or media IDs. Prefer the snapshot views and `wordpress_downloads` tables for normal tasks; source API helper packages are maintainer/developer tools.
 - DataCite relationships are about DOI provenance. They do not automatically make an external Zenodo or IDC record a TCIA-published dataset. WordPress remains the publication/visibility authority after DataCite discovery.
-- TCIA Publications EndNote XML is the bibliography authority for manuscripts written about TCIA datasets. DataCite remains the dataset DOI authority.
+- TCIA Publications EndNote records are the authority for manuscripts that analytically used TCIA datasets. DataCite remains the dataset DOI metadata authority.
 - Controlled-access metadata can be public even when file access is restricted.
