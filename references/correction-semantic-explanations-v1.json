@@ -338,6 +338,48 @@
       "change_kind_counts": {"added": 300},
       "changes_sha256": "3d90ee8d4c2b80a35d08155b318f28f71e8e7787f00f4881a23775d2f5463824",
       "negative_scope": ["no approval for a different change count or digest", "no participant-asset row outside UCSD-BMETS-Longitudinal", "no cross-dataset asset reassignment", "no assertion that geometry has already been checked"]
+    },
+    {
+      "batch_id": "lidc-annot-nlst501-aspera-route-public-asset-2026-10-08",
+      "reviewer": "Justin Kirby (TCIA artifact maintainer)",
+      "approved_at": "2026-10-08T19:59:53Z",
+      "rationale": "The curator removed literal quote wrapping from the existing LIDC-annot-NLST501 Faspex URL. The same asset, download record, 2,004-file count, and 734,000,000-byte package are preserved; correct URL classification changes only the package route from tcia_wordpress to tcia_aspera and its provenance class from unknown to submitted_original.",
+      "evidence_id": "github-actions:run:37820968272:metadata_change_report_final",
+      "evidence": "Run 37820968272 recorded the single modified public_non_dicom_assets row for asset_f40f2f76a9c8918eecf2f581. Read-only comparison with the published baseline confirmed identical dataset identity, download identity, file count, size, and asset ID, with only removal of literal URL quotes and the deterministic route/provenance correction.",
+      "artifact": "public_non_dicom",
+      "entity_table": "public_non_dicom_assets",
+      "change_count": 1,
+      "change_kind_counts": {"modified": 1},
+      "changes_sha256": "1a30a08c9c4e3c813cf326b912964649b64bd5fbfdd05e500aea72676babe10c",
+      "negative_scope": ["no approval for a different change count or digest", "no public asset addition or removal", "no change to the package contents, file count, size, or download identity", "no unrelated public non-DICOM metadata change"]
+    },
+    {
+      "batch_id": "lidc-annot-nlst501-aspera-route-participant-identifiers-2026-10-08",
+      "reviewer": "Justin Kirby (TCIA artifact maintainer)",
+      "approved_at": "2026-10-08T19:59:53Z",
+      "rationale": "Correct classification of the existing LIDC-annot-NLST501 NIfTI package as Aspera deterministically adds one Aspera-scoped identifier row for each of the same 501 participant values. The 501 existing WordPress-scoped identifier rows remain, and exact display-ID set comparison found zero additions or removals.",
+      "evidence_id": "github-actions:run:37820968272:metadata_change_report_final",
+      "evidence": "Run 37820968272 recorded exactly 501 added participant_identifiers rows. Read-only baseline/candidate comparison confirmed 501 unique participant display IDs before and after with zero directional differences; only the additional tcia_aspera source scope and its deterministic identifier IDs are new.",
+      "artifact": "participant_inventory",
+      "entity_table": "participant_identifiers",
+      "change_count": 501,
+      "change_kind_counts": {"added": 501},
+      "changes_sha256": "516c6e0d369033f638c0211eb1d42db332adfc69d9dcaeeab65b578409a3d65d",
+      "negative_scope": ["no approval for a different change count or digest", "no participant display-ID addition or removal", "no replacement of the existing WordPress-scoped identifiers", "no identifier outside LIDC-annot-NLST501"]
+    },
+    {
+      "batch_id": "lidc-annot-nlst501-aspera-route-participant-assets-2026-10-08",
+      "reviewer": "Justin Kirby (TCIA artifact maintainer)",
+      "approved_at": "2026-10-08T19:59:53Z",
+      "rationale": "Correct classification of the existing LIDC-annot-NLST501 NIfTI package as Aspera deterministically replaces each participant's prior combined WordPress NIFTI-and-CSV summary row with one Aspera NIFTI segmentation row and one WordPress CSV tabular-data row. This is a route and representation split for the same 501 participants, not a patient-cohort change.",
+      "evidence_id": "github-actions:run:37820968272:metadata_change_report_final",
+      "evidence": "Run 37820968272 recorded exactly 501 removed and 1,002 added participant_assets rows. Five sampled subjects (100206, 100242, 100518, 100543, and 100581) each showed the same deterministic one-to-two routing split, while complete participant-set comparison confirmed all 501 IDs were unchanged.",
+      "artifact": "participant_inventory",
+      "entity_table": "participant_assets",
+      "change_count": 1503,
+      "change_kind_counts": {"added": 1002, "removed": 501},
+      "changes_sha256": "a62c96fa0d69c3bfcaec8d88def8e2439b952f0c60066ec9547dd9eb786e80c1",
+      "negative_scope": ["no approval for a different change count or digest", "no participant addition, removal, or cross-dataset reassignment", "no change to clinical or DICOM assets", "no participant asset outside LIDC-annot-NLST501"]
     }
   ],
   "explanation_batches": [
