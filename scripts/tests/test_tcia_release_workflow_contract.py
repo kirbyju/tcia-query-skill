@@ -146,6 +146,8 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
         self.assertIn("daily authoritative-source refresh floor", source)
         self.assertIn("--force-full-reason \"operator requested all clinical downloads\"", source)
         self.assertIn("dist/tcia_selective_release_plan.json", source)
+        source_upload = source[source.index("Upload validated V2 source inputs"):]
+        self.assertIn("dist/tcia_selective_release_plan.json", source_upload)
         self.assertIn("validate-selection", source)
         self.assertIn("Carry forward verified source sidecars for fast release", source)
         self.assertIn("materialize-reuse-manifests", source)

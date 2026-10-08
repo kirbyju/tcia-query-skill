@@ -133,7 +133,7 @@
     "scripts/tests/test_tcia_nifti_metadata_harvest.py": "50c4ad58e86cdd736893f4264731e095246d47ed4781eae32ae30136b27c2bed",
     "scripts/tests/test_tcia_pathology_aspera_inventory.py": "80fb2fd90b2fbeaff8ecc40b089e86fd64a4842e3e657850c9e0a12873e9d3a7",
     "scripts/tests/test_tcia_release_review_queue.py": "b1784c4c8f04e130736c9324c2dbc4d7f6c340be646d2d9ae7a63d6c2817e53b",
-    "scripts/tests/test_tcia_release_workflow_contract.py": "28c358e0c52d78e8f6bfee74246fb3d2a0992991207c5816ca2274099ef0edec",
+    "scripts/tests/test_tcia_release_workflow_contract.py": "af43af9f0110a18856967497d0565b8f4ac0abaec753891ba99b534c3374d28d",
     "scripts/tests/test_tcia_selective_release.py": "e63600d3ca42cb00f6b6dd8d4df8020f794afbd47d5264906a5db93dd78bc91e",
     "scripts/tests/test_tcia_skill_version.py": "4e3deee4d08f065f67805d5fe782b1ffce22d5688be269e8a0492c3a42bb6b7f",
     "scripts/tests/test_tcia_snapshot.py": "7f61ad89586407df14fcd0fa394cd41401fa667ec13d77fdfe3cc73ea2ed1766",
@@ -144,6 +144,6 @@
     "scripts/tests/test_tcia_v2_staging.py": "dda82d5c65b8e03b543fc80c44f30acf47a6c29861b1565104e96c568399ec25"
   },
   "schema_version": 1,
-  "skill_version": "2026.10.08.1",
-  "updated_at_utc": "2026-10-08T16:27:58.099153+00:00"
+  "skill_version": "2026.10.08.2",
+  "updated_at_utc": "2026-10-08T17:42:32.292348+00:00"
 }

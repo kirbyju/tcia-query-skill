@@ -509,6 +509,7 @@ jobs:
             dist/clinical_qc_manual_review.csv
             dist/tcia_correction_registry.sqlite.gz
             dist/tcia_correction_registry_manifest.json
+            dist/tcia_selective_release_plan.json
             dist/metadata_change_report.md
             dist/metadata_change_report.json
           compression-level: 0
