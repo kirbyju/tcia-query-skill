@@ -2,7 +2,7 @@
   "files": {
     ".agents/skills/tcia-release-verification/SKILL.md": "4813cd18d31e45cf2536f5e80fcd74e81f66dbbfae1a97b341b659f517bc208d",
     "AGENTS.md": "25af7a2157ae17686d34c85d4b6becf38d00d38a741baadc59cdfbcbf322e4a8",
-    "README.md": "744fa3b3e03f9e5c7f18d7af673d20d4ea76d12738669328dbaf08364edc7974",
+    "README.md": "5b61848eb8413ee0ea6e4dc606d06285973be3fa896e6ce129b4d2b280e22f32",
     "SKILL.md": "4f4c62b95243e6f161fb75228b3c3f0a02e1e31f0e60fe6324bebcf89aa13ac5",
     "agents/openai.yaml": "ea107d3e983d86fd1c397f8a347b4202193bb3c987cd74514c6c20c4100581f0",
     "evals/README.md": "d1d3a3212ee938b2dd4fc775eb21c434e1aa0335620d36a1d410a82b380f0704",
@@ -144,6 +144,6 @@
     "scripts/tests/test_tcia_v2_staging.py": "dda82d5c65b8e03b543fc80c44f30acf47a6c29861b1565104e96c568399ec25"
   },
   "schema_version": 1,
-  "skill_version": "2026.10.08.3",
-  "updated_at_utc": "2026-10-08T20:01:48.819468+00:00"
+  "skill_version": "2026.10.09.1",
+  "updated_at_utc": "2026-10-09T18:56:25.722250+00:00"
 }
