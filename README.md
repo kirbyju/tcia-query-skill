@@ -10,6 +10,13 @@ TCIA data, and a release-backed SQLite snapshot as its normal discovery layer.
 It then routes users to the appropriate data system, such as IDC, CTDC,
 General Commons, PathDB, DataCite, TCIA Data Retriever, or Aspera.
 
+![TCIA Query Skill architecture showing source systems flowing into a verified metadata bundle and consistent access options](./docs/images/tcia-query-skill-architecture.png)
+
+The skill brings metadata and provenance from authoritative source systems into
+a verified release bundle, then supports different use cases through skill
+guidance, MCP, REST, or local artifacts. The underlying imaging and supporting
+data remain with the systems responsible for them.
+
 ## What It Can Do
 
 - Find TCIA Collections and Analysis Results by disease, body site, modality,
