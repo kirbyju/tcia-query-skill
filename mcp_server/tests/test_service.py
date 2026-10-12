@@ -71,7 +71,7 @@ def create_base_snapshot(path: Path) -> None:
                 title TEXT, doi TEXT, link TEXT, date_updated TEXT, current_version_number TEXT,
                 hidden INTEGER, license_status TEXT, licenses TEXT, controlled_access INTEGER,
                 noncommercial_license INTEGER, access_level TEXT, controlled_access_policy_url TEXT,
-                subjects INTEGER, data_types TEXT, download_types TEXT, download_data_types TEXT,
+                subjects TEXT, data_types TEXT, download_types TEXT, download_data_types TEXT,
                 download_file_types TEXT, external_resources TEXT, external_resource_labels TEXT,
                 cancer_types TEXT, cancer_locations TEXT, species TEXT, program TEXT,
                 has_tcia_clinical_download INTEGER, has_external_clinical_resource INTEGER,
@@ -82,7 +82,7 @@ def create_base_snapshot(path: Path) -> None:
                 title TEXT, doi TEXT, link TEXT, date_updated TEXT, current_version_number TEXT,
                 hidden INTEGER, license_status TEXT, licenses TEXT, controlled_access INTEGER,
                 noncommercial_license INTEGER, access_level TEXT, controlled_access_policy_url TEXT,
-                subjects INTEGER, data_types TEXT, download_types TEXT, download_data_types TEXT,
+                subjects TEXT, data_types TEXT, download_types TEXT, download_data_types TEXT,
                 download_file_types TEXT, external_resources TEXT, external_resource_labels TEXT,
                 cancer_types TEXT, cancer_locations TEXT, species TEXT, program TEXT,
                 has_tcia_clinical_download INTEGER, has_external_clinical_resource INTEGER,
@@ -100,15 +100,15 @@ def create_base_snapshot(path: Path) -> None:
                 download_metadata TEXT, search_url TEXT, date_updated TEXT, collection_status TEXT,
                 description TEXT, license_label TEXT, license_url TEXT, requirements_label TEXT,
                 requirements_url TEXT, requirements_text TEXT, download_size TEXT,
-                download_size_unit TEXT, subjects INTEGER, studies INTEGER, series INTEGER,
-                images INTEGER, download_types TEXT, data_types TEXT, file_types TEXT,
+                download_size_unit TEXT, subjects TEXT, studies TEXT, series TEXT,
+                images TEXT, download_types TEXT, data_types TEXT, file_types TEXT,
                 external_resources TEXT, controlled_access INTEGER, noncommercial_license INTEGER,
                 access_level TEXT, controlled_access_policy_url TEXT, raw_json TEXT
             );
             CREATE TABLE agent_dataset_versions (
                 source TEXT, dataset_type TEXT, id TEXT, slug TEXT, short_title TEXT,
                 title TEXT, doi TEXT, link TEXT, date_updated TEXT, current_version_number TEXT,
-                subjects INTEGER, hidden INTEGER, version_row_id TEXT, version_id TEXT,
+                subjects TEXT, hidden INTEGER, version_row_id TEXT, version_id TEXT,
                 version_slug TEXT, version_post_title TEXT, version_number TEXT,
                 version_date TEXT, version_related_short_title TEXT, match_method TEXT,
                 version_downloads TEXT, version_text TEXT, version_normalized_json TEXT,
@@ -117,7 +117,7 @@ def create_base_snapshot(path: Path) -> None:
             CREATE TABLE agent_dataset_v1_releases (
                 source TEXT, dataset_type TEXT, id TEXT, slug TEXT, short_title TEXT,
                 title TEXT, doi TEXT, link TEXT, date_updated TEXT, current_version_number TEXT,
-                subjects INTEGER, hidden INTEGER, v1_release_date TEXT,
+                subjects TEXT, hidden INTEGER, v1_release_date TEXT,
                 v1_release_date_source TEXT, version_id TEXT, version_slug TEXT,
                 version_post_title TEXT, version_related_short_title TEXT, match_method TEXT
             );
@@ -943,6 +943,22 @@ class TciaQueryServiceTests(unittest.TestCase):
         self.assertEqual(result["datasets"][0]["external_resource_labels"], ["Clinical", "Genomics"])
         self.assertNotIn("summary", result["datasets"][0])
         self.assertNotIn("program", result["datasets"][0])
+
+    def test_wordpress_numeric_strings_are_normalized_for_strict_models(self) -> None:
+        search = DatasetSearchResponse.model_validate(self.service.search_datasets())
+        detail = DatasetDetailResponse.model_validate(
+            self.service.get_dataset("TCGA-BRCA")
+        )
+        downloads = DownloadsResponse.model_validate(
+            self.service.get_current_downloads("TCGA-BRCA")
+        )
+
+        self.assertEqual(search.datasets[0].subjects, 100)
+        self.assertEqual(detail.datasets[0].subjects, 100)
+        self.assertEqual(downloads.downloads[0].subjects, 100)
+        self.assertEqual(downloads.downloads[0].studies, 10)
+        self.assertEqual(downloads.downloads[0].series, 20)
+        self.assertEqual(downloads.downloads[0].images, 2000)
 
     def test_get_dataset_includes_downloads_and_related_fields(self) -> None:
         result = self.service.get_dataset("TCGA-BRCA")

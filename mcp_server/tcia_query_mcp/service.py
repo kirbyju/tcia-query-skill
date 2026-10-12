@@ -277,6 +277,16 @@ def parse_multi_values(value: Any) -> list[str]:
     )
 
 
+def parse_optional_int(value: Any) -> int | None:
+    """Normalize optional numeric source fields for strict public response models."""
+    if value in (None, ""):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def normalize_row(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
     output: dict[str, Any] = dict(row)
     for key in (
@@ -302,6 +312,18 @@ def normalize_row(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
     ):
         if key in output and output[key] in (0, 1):
             output[key] = bool(output[key])
+    for key in (
+        "subjects",
+        "studies",
+        "series",
+        "images",
+        "current_download_count",
+        "controlled_download_count",
+        "noncontrolled_download_count",
+        "open_noncommercial_download_count",
+    ):
+        if key in output:
+            output[key] = parse_optional_int(output[key])
     return output
 
 
