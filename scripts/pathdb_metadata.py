@@ -35,7 +35,7 @@ def print_table(records: list[dict[str, Any]], columns: list[str]) -> None:
     if not records:
         print(
             "No PathDB metadata rows matched. If you expected very recent metadata, "
-            "try again after the next 7:17 AM or 7:17 PM America/New_York snapshot "
+            "try again after the next 7:17 AM America/New_York snapshot "
             "run has finished, then reinstall the V2 research_core profile."
         )
         return

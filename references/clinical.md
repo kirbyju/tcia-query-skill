@@ -681,7 +681,7 @@ row JSON, normalized facts, indexes, and resolved subjects. The NLST-only v24
 validation produced about 388 MB uncompressed and 78 MB gzip-compressed in
 roughly 73 seconds; same-version IDC reuse plus CDA merge completed in about
 15 seconds. This remains practical for a GitHub release rebuild when IDC
-changes, but reinforces reusing the prior sidecar on twice-daily runs.
+changes, but reinforces reusing the prior sidecar on routine scheduled runs.
 
 The full visible-TCIA IDC build produced about 491 MB uncompressed and 92 MB
 gzip-compressed in roughly 88 seconds.
@@ -689,8 +689,8 @@ gzip-compressed in roughly 88 seconds.
 A complete CDA harvest is large and periodic rather than transactional. The
 existing prototype contains roughly 182,000 raw CDA rows and produces a
 hundreds-of-megabytes SQLite before normalization. Repeating that full query
-twice daily adds service load and failure modes without a corresponding
-freshness benefit.
+on every daily refresh adds service load and failure modes without a
+corresponding freshness benefit.
 
 Official TCIA clinical artifacts are roughly 130 current download records, but
 ZIP/XLS variation and occasionally unchanged URLs favor signature reuse plus

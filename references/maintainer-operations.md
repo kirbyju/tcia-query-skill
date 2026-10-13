@@ -71,12 +71,12 @@ asset. The downstream workflow re-verifies it against the downloaded snapshot,
 producer SHA, and preceding release fingerprint before skipping any expensive
 step.
 
-Selective reuse never replaces periodic source observation. The 07:17
-America/New_York scheduled run forces the full workflow every day; the 19:17
-run may select the fast path. Manual dispatches may set `force_full_build=true`,
-and any explicit clinical refresh input also forces the full path. This prevents
-unchanged WordPress/PathDB projections from carrying independent controlled or
-clinical sources forward indefinitely.
+Selective reuse never replaces periodic source observation. The single 07:17
+America/New_York scheduled run forces the full workflow every day. Manual
+dispatches may select the fast path when the projection and producer-path gates
+permit it, or set `force_full_build=true`; any explicit clinical refresh input
+also forces the full path. This prevents unchanged WordPress/PathDB projections
+from carrying independent controlled or clinical sources forward indefinitely.
 
 Before starting an expensive local rebuild, exercise both CDA endpoints used by
 the clinical builder:

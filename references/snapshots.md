@@ -21,8 +21,8 @@ The skill uses a local SQLite snapshot for routine TCIA discovery instead of que
 - DataCite records under the TCIA DOI prefix `10.7937`.
 
 Generated snapshot files are intentionally not committed to the repository.
-GitHub Actions builds them twice daily at 7:17 AM and 7:17 PM
-America/New_York and publishes changed content through the release bundle:
+GitHub Actions builds them once daily at 7:17 AM America/New_York and
+publishes changed content through the release bundle:
 
 - `tcia_snapshot.sqlite.gz`
 - `participant_inventory.sqlite.gz`
@@ -268,8 +268,8 @@ and no non-cancer designation are placed in the clinical review queue. Their
 Collection-level diagnosis and site fallbacks are suppressed, while any
 patient-level source facts continue through normal precedence.
 
-Do not perform the full CDA harvest twice daily. The release fingerprint is
-the normal gate; use `refresh_cda=true` only for a forced validation. See
+Do not perform the full CDA harvest on every daily run. The release fingerprint
+is the normal gate; use `refresh_cda=true` only for a forced validation. See
 `references/clinical.md`.
 
 ## Public Non-DICOM Detail And Audit SQLite
