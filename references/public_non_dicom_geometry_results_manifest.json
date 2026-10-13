@@ -1,5 +1,5 @@
 {
-  "assessment_rows": 125205,
+  "assessment_rows": 127209,
   "asset_name": "public_non_dicom_geometry_results.sqlite.gz",
   "component": "public_non_dicom_geometry_seed",
   "coverage": [
@@ -10,25 +10,25 @@
       "sha256": "3d6500df01bb70e01830d55d8b76708d2e218cd5d4259567fba3ddc1cb8324b7"
     }
   ],
-  "created_at_utc": "2026-10-07T17:54:24Z",
-  "datasets": 45,
+  "created_at_utc": "2026-10-13T18:17:50Z",
+  "datasets": 46,
   "file_format_counts": {
     "MHA": 272,
     "MHD": 506,
-    "NIFTI": 122964,
+    "NIFTI": 124968,
     "NRRD": 1463
   },
   "geometry_status_counts": {
-    "checked_grid_geometry": 122079,
+    "checked_grid_geometry": 124083,
     "checked_invalid_geometry": 3125,
     "read_error": 1
   },
-  "gzip_bytes": 11909083,
-  "gzip_sha256": "85ef4a94e64e1d11927c3dfec51a8b8655f99c61597e03df848488bd69f0683f",
-  "jobs": 55,
-  "release_tag": "tcia-geometry-results-2026.10.07.1",
+  "gzip_bytes": 11989340,
+  "gzip_sha256": "bb6f83ab67880a2a2bc3988140307e34aa244369b753e6de216beaf352eded71",
+  "jobs": 56,
+  "release_tag": "tcia-geometry-results-2026.10.13.1",
   "schema_version": 1,
-  "source_jobs_sha256": "c810977d94901329fd3fa65c90476d04af0e4605cd527ee4688e0a33d96f5f1f",
-  "sqlite_bytes": 104194048,
-  "sqlite_sha256": "e4c3924b916551d603c1941b430f8e38d308de8c23c89ae21614b465f567131a"
+  "source_jobs_sha256": "db311e4dc8a7ba37590dc12649604082e0b5199d085b995cd045c84cedd4798b",
+  "sqlite_bytes": 105668608,
+  "sqlite_sha256": "81da4aa4ac093e85b31b1ea3518f74125bd05e9e57d4417d215a41294c123fff"
 }

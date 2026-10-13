@@ -53,7 +53,7 @@
     "references/public_non_dicom_crosswalks_v1.csv": "88c013e8c4320c760f2bbaa19e2fba8c371fd217aa1906fb0b47125562a4073e",
     "references/public_non_dicom_crosswalks_v1_provenance.json": "5523aee6011cfd0218540e489a8584d6353cb1f07da43c53a76e5c2c556daad2",
     "references/public_non_dicom_geometry_coverage/job_252402d89e73c7f850bf.coverage.json": "3d6500df01bb70e01830d55d8b76708d2e218cd5d4259567fba3ddc1cb8324b7",
-    "references/public_non_dicom_geometry_results_manifest.json": "a426bab35e085558d49982935cf2126939e7304e5fdf603509f2d52dda04f093",
+    "references/public_non_dicom_geometry_results_manifest.json": "fd69051237eed45d8d1b9ba1595d92d70dc0a5fb17c2abfd6644178696528773",
     "references/public_non_dicom_image_metadata_v1.csv": "99b181382885cc1e6f3b828e3bb877eb9a1acca2eba66ab51a233744e48665f7",
     "references/publications.md": "efab94043f8b8eeb04d9d5609676db290e454d9a5272ef44ddb4b4382757d584",
     "references/remind_nrrd_inventory_v1.json": "c353fa040002663cd3048c61227c63b4e6b67f3daa99a6eee9c60e9676c9f381",
@@ -144,6 +144,6 @@
     "scripts/tests/test_tcia_v2_staging.py": "dda82d5c65b8e03b543fc80c44f30acf47a6c29861b1565104e96c568399ec25"
   },
   "schema_version": 1,
-  "skill_version": "2026.10.13.1",
-  "updated_at_utc": "2026-10-13T13:10:53.932023+00:00"
+  "skill_version": "2026.10.13.2",
+  "updated_at_utc": "2026-10-13T19:00:15.163945+00:00"
 }
