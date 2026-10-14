@@ -31,6 +31,69 @@ REGISTRY_SPEC.loader.exec_module(registry)
 
 
 class MetadataChangeReportTest(unittest.TestCase):
+    def test_json_serialization_order_is_nonsemantic_but_content_is_not(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            old = Path(directory) / "old.sqlite"
+            new = Path(directory) / "new.sqlite"
+            for path, raw in (
+                (old, '{"a":1,"nested":{"x":2,"y":3}}'),
+                (new, '{"nested":{"y":3,"x":2},"a":1}'),
+            ):
+                with sqlite3.connect(path) as conn:
+                    conn.execute(
+                        "CREATE TABLE agent_datasets (dataset_type TEXT, "
+                        "short_title TEXT, raw_json TEXT, "
+                        "PRIMARY KEY (dataset_type,short_title))"
+                    )
+                    conn.execute(
+                        "INSERT INTO agent_datasets VALUES ('Collection','DEMO',?)",
+                        (raw,),
+                    )
+            spec = change_report.PROFILES["snapshot"][0]
+            with sqlite3.connect(new) as new_conn, sqlite3.connect(old) as old_conn:
+                result = change_report.compare_keyed_rows(
+                    new_conn, old_conn, spec, max_items=10
+                )
+            self.assertEqual(result[:3], (0, 0, 0))
+            with sqlite3.connect(new) as conn:
+                conn.execute(
+                    "UPDATE agent_datasets SET raw_json=?",
+                    ('{"a":1,"nested":{"x":2,"y":4}}',),
+                )
+            with sqlite3.connect(new) as new_conn, sqlite3.connect(old) as old_conn:
+                result = change_report.compare_keyed_rows(
+                    new_conn, old_conn, spec, max_items=10
+                )
+            self.assertEqual(result[:3], (0, 0, 1))
+
+    def test_report_records_exact_baseline_fingerprint(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            snapshot = root / "snapshot.sqlite"
+            report = root / "report.json"
+            markdown = root / "report.md"
+            with sqlite3.connect(snapshot) as conn:
+                conn.execute(
+                    "CREATE TABLE agent_datasets (dataset_type TEXT, "
+                    "short_title TEXT, raw_json TEXT, "
+                    "PRIMARY KEY (dataset_type,short_title))"
+                )
+            fingerprint = "f" * 64
+            result = subprocess.run(
+                [
+                    sys.executable, str(SCRIPT), "--snapshot-new", str(snapshot),
+                    "--baseline-fingerprint", fingerprint,
+                    "--json-out", str(report), "--markdown-out", str(markdown),
+                ],
+                text=True, capture_output=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(
+                json.loads(report.read_text())["baseline_release_fingerprint"],
+                fingerprint,
+            )
+            self.assertIn(f"Baseline release fingerprint: `{fingerprint}`", markdown.read_text())
+
     def test_datacite_event_metrics_are_preserved_but_nonsemantic_for_release_review(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             old = Path(directory) / "old.sqlite"

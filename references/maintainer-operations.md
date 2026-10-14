@@ -177,6 +177,16 @@ approvals are excluded from the durable correction decision-set digest to avoid
 self-reference, but remain fully hash-pinned inside the published registry
 SQLite/gzip and therefore inside the top bundle fingerprint.
 
+Machine-extracted WordPress findings use a stable observation identity derived
+from the source record, field, normalized excerpt, detector, and clue class.
+Changing an unrelated field in the same WordPress record therefore does not
+create another observation or proposal. Exact raw-record hashes and source
+update times remain preserved in `correction_observation_versions`; this
+separates finding identity from version provenance without discarding evidence.
+Change reports canonicalize JSON values before comparison and record the exact
+prior bundle fingerprint, so serialization order and overlapping pipeline runs
+cannot be mistaken for new metadata changes.
+
 When that gate fails, the source workflow uploads a non-release, run-specific
 `tcia-metadata-v2-diagnostics-<run-id>-<run-attempt>` Actions artifact under
 `always()`, retained for 30 days. It contains the diagnostics-only status

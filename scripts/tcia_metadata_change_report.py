@@ -523,26 +523,26 @@ def without_opaque_provenance_ids(value: object) -> object:
 
 def comparison_value(spec: TableSpec, column: str, value: object) -> object:
     canonical = canonical_value(value)
-    if spec.name == "agent_datacite_dois" and column == "normalized_json":
-        if not isinstance(canonical, str):
-            return canonical
+    if (
+        isinstance(canonical, str)
+        and (
+            column in {"raw_json", "normalized_json"}
+            or column.endswith("_json")
+        )
+    ):
         try:
-            parsed = json.loads(canonical)
+            canonical = json.loads(canonical)
         except json.JSONDecodeError:
-            return canonical
+            pass
+    if spec.name == "agent_datacite_dois" and column == "normalized_json":
+        parsed = canonical
         if isinstance(parsed, dict):
             for key in ("citation_count", "view_count", "download_count", "reference_count"):
                 parsed.pop(key, None)
         return parsed
     if spec.name != "clinical_facts" or column != "provenance_json":
         return canonical
-    if not isinstance(canonical, str):
-        return canonical
-    try:
-        parsed = json.loads(canonical)
-    except json.JSONDecodeError:
-        return canonical
-    return without_opaque_provenance_ids(parsed)
+    return without_opaque_provenance_ids(canonical)
 
 
 def keyed_row_digests(
@@ -1244,6 +1244,9 @@ def build_report(args: argparse.Namespace) -> tuple[str, list[str], dict[str, ob
         "| Asset | Table/view | Previous | New | Added | Removed | Modified | Severity |",
         "| --- | --- | ---: | ---: | ---: | ---: | ---: | --- |",
     ]
+    baseline_fingerprint = str(getattr(args, "baseline_fingerprint", "") or "")
+    if baseline_fingerprint:
+        lines[3:3] = [f"Baseline release fingerprint: `{baseline_fingerprint}`.", ""]
     for row in comparison_rows:
         previous = "baseline" if row["old"] is None else f"{row['old']:,}"
         lines.append(
@@ -1342,6 +1345,7 @@ def build_report(args: argparse.Namespace) -> tuple[str, list[str], dict[str, ob
         lines.extend(f"- unused: `{item}`" for item in unused)
     semantic_payload: dict[str, object] = {
         "schema_version": 2,
+        "baseline_release_fingerprint": baseline_fingerprint,
         "comparisons": comparison_rows,
         "warnings": warnings,
         "unexplained_high_severity": unexplained_high,
@@ -1379,6 +1383,10 @@ def parse_args() -> argparse.Namespace:
         parser.add_argument(f"--{name}-old")
     parser.add_argument("--markdown-out")
     parser.add_argument("--json-out")
+    parser.add_argument(
+        "--baseline-fingerprint",
+        help="Exact prior published bundle fingerprint used for comparison.",
+    )
     parser.add_argument("--max-items", type=int, default=20)
     parser.add_argument("--github-actions", action="store_true")
     parser.add_argument(
@@ -1426,9 +1434,11 @@ def main() -> int:
                 "malformed_effects": sorted(malformed),
                 "unused_effect_ids": unused,
             }
+            summary.setdefault("baseline_release_fingerprint", "")
             semantic_payload = {
                 key: summary[key] for key in (
-                    "schema_version", "comparisons", "warnings",
+                    "schema_version", "baseline_release_fingerprint",
+                    "comparisons", "warnings",
                     "unexplained_high_severity",
                     "unexplained_high_severity_changes", "semantic_changes",
                     "accepted_geometry_refreshes", "primary_key_migrations",

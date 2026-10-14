@@ -407,6 +407,12 @@ jobs:
           if [ -s previous/tcia_correction_registry.sqlite ]; then
             report_args+=(--correction-old previous/tcia_correction_registry.sqlite)
           fi
+          if [ -s previous/tcia_metadata_v2_bundle_manifest.json ]; then
+            report_args+=(
+              --baseline-fingerprint
+              "$(jq -r '.release_fingerprint' previous/tcia_metadata_v2_bundle_manifest.json)"
+            )
+          fi
           set +e
           python scripts/tcia_metadata_change_report.py \
             "${report_args[@]}" \

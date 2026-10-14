@@ -404,6 +404,13 @@ jobs:
       - name: Generate exact semantic change report
         if: steps.selective.outputs.mode != 'fast'
         run: |
+          report_args=()
+          if [ -s previous-v2/tcia_metadata_v2_bundle_manifest.json ]; then
+            report_args+=(
+              --baseline-fingerprint
+              "$(jq -r '.release_fingerprint' previous-v2/tcia_metadata_v2_bundle_manifest.json)"
+            )
+          fi
           python scripts/tcia_metadata_change_report.py \
             --public-new cache/public_non_dicom_metadata.sqlite \
             --public-old cache/public_non_dicom_baseline.sqlite \
@@ -411,6 +418,7 @@ jobs:
             --participant-old cache/participant_inventory_baseline.sqlite \
             --explanations-db cache/tcia_correction_registry.sqlite \
             --geometry-refresh-report cache/reports/public_non_dicom_geometry_refresh.json \
+            "${report_args[@]}" \
             --github-actions \
             --markdown-out cache/reports/metadata_change_report_final.md \
             --json-out cache/reports/metadata_change_report_final.json

@@ -44,7 +44,7 @@
     "references/general-commons-graphql.md": "b2c3c931816bb3245f0b59a4dde1e3001959bd51838b1e3bc23bc1be9e6f6407",
     "references/geometry-batch-slurm.md": "e911e6e1de46cd564d918a9cc9ef8f411e39cc28c6ee1af9021fc43da23cf7d0",
     "references/idc-public-dicom.md": "2c82815b34adfc1750d97addef6920d6fb56102a79de685268094cd601b56c42",
-    "references/maintainer-operations.md": "86bb4c4cd4b30beb5bb36ede05d32fc6312cc2824691b899322793a761bd41d4",
+    "references/maintainer-operations.md": "380538a0e80428afb76e53b0773b1f1b7ad24f86d611fd64a3cf2b7c4ac87adf",
     "references/nbia-public-dicom-fallback.md": "530de4e4e6f0cf804cf5dbdd460483aedc5b3a8f9c294736afa63ff3ee2dcdd6",
     "references/nifti.md": "2b627fc7126f5c1bddda471ace284f6b85385449905ddf0f71cd7e7de27f0ac9",
     "references/pathdb-public-pathology.md": "b567536245fe0f060a312a92fc7b2668084e0fd75a39bf8f6a9a0b315595e195",
@@ -88,7 +88,7 @@
     "scripts/tcia_aspera_gap_inventory.py": "534d0bceb774ecfe586c6ad0bcfdb83bd19e8fc574663febb1ef9c44cff3317c",
     "scripts/tcia_clinical_metadata.py": "71cdc1af980b52ac71218eae5b8f469581ba46ab1e1e398ace805c2cbab8e3f9",
     "scripts/tcia_controlled_access_metadata.py": "8ba93bb5d5d6b060ef82e25457f3069a180f46bf5cf3edcebe4c85405406b9c7",
-    "scripts/tcia_correction_registry.py": "8675e3d741b07f06ec40f507d038e65f1108945f235e9853358b5821d966063d",
+    "scripts/tcia_correction_registry.py": "062086c939e694cf39b32074d95a96d1517444dbaa2ce31c451c9135359aa4bb",
     "scripts/tcia_create_data_retriever_csv.py": "ff351223974fba146ab2e6434b12891c7019c78eefed0d602b0d600f97ebe426",
     "scripts/tcia_diagnostic_status.py": "2fb5c296bc1a361814cc04d23e40553a10761fa8ff0fef7a45ccdec63f8c93c0",
     "scripts/tcia_freshness.py": "0e66ca570d60b7a14c33bcce9ae776b280b5bd295ff816416b895302b5ca0bef",
@@ -97,7 +97,7 @@
     "scripts/tcia_idc_participant_projection.py": "f00a3f6223c37874a830db960b3682add03c2c724426550b44cf8efb352394dd",
     "scripts/tcia_local_build_cache.py": "41bd7fcecf99aec57fb6403a687e2149bac709083265d823b4ad498bf441549d",
     "scripts/tcia_manifest_series_uids.py": "2899cd84ec7f2e057e909db1ca39d43a1f89e0e29287acb4069bcc2d6d1dd9e5",
-    "scripts/tcia_metadata_change_report.py": "6dd6b1273adf1fc6d54a35579f87aac22385c63da9a901eb09cb103a571794cb",
+    "scripts/tcia_metadata_change_report.py": "1799aaf7f686d639c7f370569264526297402ce1cb219bb76ea524831c7a8bca",
     "scripts/tcia_nifti_metadata.py": "1416b6f1dc899c6d47b06a1def5621e4fd72724aee689462a38699478ea2b42d",
     "scripts/tcia_nifti_metadata_harvest.py": "9cdf60b2a00c0e0419dee7e5d202e1af6d73d6b700bf8225d5d9f165e3e323b0",
     "scripts/tcia_participant_inventory.py": "01f9e5801a1d48145a9a35e297f4f41689dbc12199202168d9f7cc43e40d838c",
@@ -121,7 +121,7 @@
     "scripts/tests/test_tcia_artifact_model.py": "8ead09edd37c6ee2facd9929fe9ea9adfdf5ecd07b38c6e700a82eb3939f290f",
     "scripts/tests/test_tcia_clinical_metadata.py": "f10677321c9beeb2ec92ab8cb1549acfcbd9f41ac269326e8862f1874f6a31e0",
     "scripts/tests/test_tcia_controlled_access_metadata.py": "9fd9f8b1ff732d7f2ce02eaf30480e052f4b80b9217f435bdc012adfb2a137f2",
-    "scripts/tests/test_tcia_correction_registry.py": "5417104525dd5ddefd9a2abab7c903b3b3126380cf4d5883c07ceb3c3cc730bf",
+    "scripts/tests/test_tcia_correction_registry.py": "033461997584bb32b0a4b533c48739a545fa18e8aebc7e0f22c7e450c453341e",
     "scripts/tests/test_tcia_diagnostic_status.py": "a00104b045e32288b56d43139f3ec9f9bb89926eac677dd356b07f97436397f5",
     "scripts/tests/test_tcia_freshness.py": "fc2d6988581e5cacc2531e648258d352196803d6d7012bf79e6c8ddac4cfce9c",
     "scripts/tests/test_tcia_geometry_artifact_integration.py": "c63be8b16a5b4995dac0a362cf1f5b339cfcc22fbf1f89a2688403fb3d241141",
@@ -129,7 +129,7 @@
     "scripts/tests/test_tcia_geometry_seed.py": "0e9e00d77ff27262534dc3d18ab5b9316b5ac875971b1fb41994cd887a60dfc9",
     "scripts/tests/test_tcia_idc_participant_projection.py": "c79da139ac03148386f98dee822272f6c6093540c6b135926f802be4d7683634",
     "scripts/tests/test_tcia_local_build_cache.py": "712bc1aeb42486e9e6dad2ad135a1b445c37dfc5bedd139f06d7b9af0bd61c2f",
-    "scripts/tests/test_tcia_metadata_change_report.py": "fa4f8ae11412b6886f07c8d2e6004d974f5aae4a9c7445ee06b50ec24f4996ca",
+    "scripts/tests/test_tcia_metadata_change_report.py": "6a5ac91150a60c4a4fada3bd7fe125ff2fdc431dd1c25a94937be0668433dcbe",
     "scripts/tests/test_tcia_nifti_metadata_harvest.py": "50c4ad58e86cdd736893f4264731e095246d47ed4781eae32ae30136b27c2bed",
     "scripts/tests/test_tcia_pathology_aspera_inventory.py": "80fb2fd90b2fbeaff8ecc40b089e86fd64a4842e3e657850c9e0a12873e9d3a7",
     "scripts/tests/test_tcia_release_review_queue.py": "b1784c4c8f04e130736c9324c2dbc4d7f6c340be646d2d9ae7a63d6c2817e53b",
@@ -144,6 +144,6 @@
     "scripts/tests/test_tcia_v2_staging.py": "dda82d5c65b8e03b543fc80c44f30acf47a6c29861b1565104e96c568399ec25"
   },
   "schema_version": 1,
-  "skill_version": "2026.10.13.2",
-  "updated_at_utc": "2026-10-13T19:00:15.163945+00:00"
+  "skill_version": "2026.10.14.1",
+  "updated_at_utc": "2026-10-14T13:20:37.248678+00:00"
 }

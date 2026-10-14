@@ -828,6 +828,120 @@ class CorrectionIdentityTests(unittest.TestCase):
 
 
 class RegistryBuildTests(unittest.TestCase):
+    def test_observation_identity_is_stable_across_unrelated_record_versions(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "registry.sqlite"
+            with registry.create_database(path) as conn:
+                common = {
+                    "source_system": "tcia_wordpress",
+                    "dataset_type": "Collection",
+                    "short_title": "DEMO",
+                    "source_record_type": "dataset",
+                    "source_record_id": "17",
+                    "source_url": "https://example.test/demo",
+                    "source_field": "raw_json/usage_notes",
+                    "excerpt": "Folder name is the Patient ID.",
+                    "source_updated_at": "2026-10-14",
+                    "detector": "wordpress_field_clue",
+                    "detector_version": registry.DETECTOR_VERSION,
+                    "clue_class": "identifier_naming",
+                    "machine_confidence": "candidate",
+                    "payload": {"proposal_only": True},
+                }
+                first = registry.insert_observation(
+                    conn, **common, raw_record_sha256="a" * 64,
+                    observed_at="2026-10-14T10:00:00Z",
+                )
+                registry.upsert_machine_case_and_proposal(
+                    conn, observation_id=first, dataset_type="Collection",
+                    short_title="DEMO", clue_class="identifier_naming",
+                    observed_at="2026-10-14T10:00:00Z",
+                )
+                second = registry.insert_observation(
+                    conn, **common, raw_record_sha256="b" * 64,
+                    observed_at="2026-10-14T11:00:00Z",
+                )
+                registry.upsert_machine_case_and_proposal(
+                    conn, observation_id=second, dataset_type="Collection",
+                    short_title="DEMO", clue_class="identifier_naming",
+                    observed_at="2026-10-14T11:00:00Z",
+                )
+                self.assertEqual(first, second)
+                self.assertEqual(
+                    conn.execute("SELECT COUNT(*) FROM correction_observations").fetchone()[0],
+                    1,
+                )
+                self.assertEqual(
+                    conn.execute("SELECT COUNT(*) FROM correction_proposals").fetchone()[0],
+                    1,
+                )
+                self.assertEqual(
+                    conn.execute(
+                        "SELECT COUNT(*) FROM correction_observation_versions"
+                    ).fetchone()[0],
+                    2,
+                )
+                distinct_clue = registry.insert_observation(
+                    conn, **{**common, "clue_class": "patient_mapping"},
+                    raw_record_sha256="b" * 64,
+                    observed_at="2026-10-14T11:00:00Z",
+                )
+                self.assertNotEqual(first, distinct_clue)
+                self.assertEqual(
+                    conn.execute("SELECT COUNT(*) FROM correction_observations").fetchone()[0],
+                    2,
+                )
+
+    def test_schema1_observation_id_is_reused_and_backfilled(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            prior = root / "prior.sqlite"
+            staged = root / "staged.sqlite"
+            legacy_id = registry.stable_id(
+                "observation", "tcia_wordpress", "dataset", "17",
+                "raw_json/usage_notes", "legacy-excerpt", "a" * 64,
+                registry.DETECTOR_VERSION,
+            )
+            with registry.create_database(prior) as conn:
+                excerpt = "Folder name is the Patient ID."
+                excerpt_sha = registry.digest(excerpt.encode("utf-8"))
+                conn.execute(
+                    "INSERT INTO correction_observations VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (legacy_id, "tcia_wordpress", "Collection", "DEMO", "dataset",
+                     "17", "https://example.test/demo", "raw_json/usage_notes",
+                     excerpt, excerpt_sha, "a" * 64, "2026-10-13",
+                     "2026-10-13T10:00:00Z", "wordpress_field_clue",
+                     registry.DETECTOR_VERSION, "identifier_naming", "candidate",
+                     registry.canonical_json({"proposal_only": True})),
+                )
+                conn.execute("DROP TABLE correction_observation_versions")
+                conn.commit()
+            with registry.create_database(staged) as conn:
+                registry.copy_prior_registry(conn, prior)
+                reused = registry.insert_observation(
+                    conn, source_system="tcia_wordpress",
+                    dataset_type="Collection", short_title="DEMO",
+                    source_record_type="dataset", source_record_id="17",
+                    source_url="https://example.test/demo",
+                    source_field="raw_json/usage_notes", excerpt=excerpt,
+                    raw_record_sha256="b" * 64,
+                    source_updated_at="2026-10-14",
+                    observed_at="2026-10-14T10:00:00Z",
+                    detector="wordpress_field_clue",
+                    detector_version=registry.DETECTOR_VERSION,
+                    clue_class="identifier_naming", machine_confidence="candidate",
+                    payload={"proposal_only": True},
+                )
+                self.assertEqual(reused, legacy_id)
+                versions = conn.execute(
+                    "SELECT raw_record_sha256 FROM correction_observation_versions "
+                    "ORDER BY raw_record_sha256"
+                ).fetchall()
+                self.assertEqual(
+                    [tuple(row) for row in versions],
+                    [("a" * 64,), ("b" * 64,)],
+                )
+
     def test_staged_refresh_preserves_history_and_failed_build_preserves_file(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -1121,7 +1235,9 @@ class RegistryBuildTests(unittest.TestCase):
             self.assertTrue(waiver["ok"], waiver["errors"])
             with sqlite3.connect(out) as conn:
                 revision_id = conn.execute(
-                    "SELECT revision_id FROM agent_active_corrections ORDER BY revision_id LIMIT 1"
+                    "SELECT revision_id FROM agent_active_corrections "
+                    "WHERE source_kind!='semantic_change_explanation' "
+                    "ORDER BY revision_id LIMIT 1"
                 ).fetchone()[0]
                 health = conn.execute(
                     "SELECT source_health,change_report_sha256 FROM agent_release_evidence_health"

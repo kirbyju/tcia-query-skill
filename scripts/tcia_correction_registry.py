@@ -25,7 +25,7 @@ from typing import Any, Iterable
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 DETECTOR_VERSION = "wordpress-clues-v1"
 DEFAULT_CURATION = ROOT / "references/public-non-dicom-crosswalk-curation-v1.json"
 DEFAULT_SOURCE_LINKS = ROOT / "references/reviewed_analysis_result_source_collections_v1.csv"
@@ -193,6 +193,18 @@ CREATE TABLE correction_observations (
     payload_json TEXT NOT NULL DEFAULT '{}'
 );
 
+CREATE TABLE correction_observation_versions (
+    observation_version_id TEXT PRIMARY KEY,
+    observation_id TEXT NOT NULL,
+    raw_record_sha256 TEXT NOT NULL,
+    source_updated_at TEXT NOT NULL DEFAULT '',
+    source_url TEXT NOT NULL DEFAULT '',
+    first_observed_at TEXT NOT NULL,
+    last_observed_at TEXT NOT NULL,
+    UNIQUE (observation_id, raw_record_sha256, source_updated_at),
+    FOREIGN KEY (observation_id) REFERENCES correction_observations(observation_id)
+);
+
 CREATE TABLE correction_cases (
     case_id TEXT PRIMARY KEY,
     case_type TEXT NOT NULL,
@@ -328,6 +340,8 @@ CREATE TABLE correction_assertions (
 );
 
 CREATE INDEX idx_observations_dataset ON correction_observations(short_title, clue_class);
+CREATE INDEX idx_observation_versions_observation
+    ON correction_observation_versions(observation_id, last_observed_at);
 CREATE INDEX idx_cases_queue ON correction_cases(status, severity, stale_status);
 CREATE INDEX idx_decisions_logical ON correction_decisions(decision_id, reviewed_at);
 CREATE INDEX idx_effects_revision ON correction_effects(revision_id, artifact, entity_table);
@@ -546,6 +560,7 @@ def create_database(path: Path, *, replace: bool = False) -> sqlite3.Connection:
 HISTORY_TABLES = (
     "registry_meta",
     "correction_observations",
+    "correction_observation_versions",
     "correction_cases",
     "correction_proposals",
     "correction_decisions",
@@ -577,6 +592,21 @@ def copy_prior_registry(conn: sqlite3.Connection, prior_path: Path) -> None:
             conn.execute(
                 f'INSERT OR IGNORE INTO main."{table}" ({quoted}) '
                 f'SELECT {quoted} FROM prior."{table}"'
+            )
+        # Schema-1 registries stored one source version directly on each
+        # observation. Preserve it as version provenance while retaining the
+        # published observation ID for backward compatibility.
+        for row in conn.execute(
+            "SELECT observation_id,raw_record_sha256,source_updated_at,source_url,observed_at "
+            "FROM correction_observations"
+        ):
+            version_id = stable_id(
+                "observation_version", row[0], row[1], row[2]
+            )
+            conn.execute(
+                """INSERT OR IGNORE INTO correction_observation_versions
+                   VALUES (?,?,?,?,?,?,?)""",
+                (version_id, row[0], row[1], row[2], row[3], row[4], row[4]),
             )
         if "correction_releases" in prior_tables:
             conn.execute(
@@ -627,17 +657,66 @@ def insert_observation(
 ) -> str:
     excerpt = re.sub(r"\s+", " ", excerpt).strip()[:1200]
     excerpt_sha = digest(excerpt.encode("utf-8"))
-    observation_id = stable_id(
-        "observation", source_system, source_record_type, source_record_id,
-        source_field, excerpt_sha, raw_record_sha256, detector_version,
+    existing = conn.execute(
+        """SELECT observation_id FROM correction_observations
+           WHERE source_system=? AND source_record_type=? AND source_record_id=?
+             AND source_field=? AND excerpt_sha256=? AND detector=?
+             AND detector_version=? AND clue_class=?
+           ORDER BY observation_id LIMIT 1""",
+        (source_system, source_record_type, source_record_id, source_field,
+         excerpt_sha, detector, detector_version, clue_class),
+    ).fetchone()
+    if not existing:
+        # A schema-1 observation encoded the raw-record digest in its ID but
+        # not the clue class. Recognize that exact legacy identity so upgrades
+        # retain published IDs without merging distinct schema-2 findings.
+        candidates = conn.execute(
+            """SELECT observation_id,raw_record_sha256
+               FROM correction_observations
+               WHERE source_system=? AND source_record_type=? AND source_record_id=?
+                 AND source_field=? AND excerpt_sha256=? AND detector=?
+                 AND detector_version=?
+               ORDER BY observation_id""",
+            (source_system, source_record_type, source_record_id, source_field,
+             excerpt_sha, detector, detector_version),
+        ).fetchall()
+        for candidate in candidates:
+            legacy_id = stable_id(
+                "observation", source_system, source_record_type, source_record_id,
+                source_field, excerpt_sha, candidate[1], detector_version,
+            )
+            if str(candidate[0]) == legacy_id:
+                existing = candidate
+                break
+    if existing:
+        # Retain a published schema-1 ID or reuse an exact schema-2 finding.
+        observation_id = str(existing[0])
+    else:
+        observation_id = stable_id(
+            "observation", source_system, source_record_type, source_record_id,
+            source_field, excerpt_sha, detector, detector_version, clue_class,
+        )
+        conn.execute(
+            "INSERT INTO correction_observations VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (observation_id, source_system, dataset_type, short_title,
+             source_record_type, source_record_id, source_url, source_field,
+             excerpt, excerpt_sha, raw_record_sha256, source_updated_at,
+             observed_at, detector, detector_version, clue_class,
+             machine_confidence, canonical_json(payload or {})),
+        )
+    version_id = stable_id(
+        "observation_version", observation_id, raw_record_sha256, source_updated_at
     )
     conn.execute(
-        "INSERT OR IGNORE INTO correction_observations VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-        (observation_id, source_system, dataset_type, short_title,
-         source_record_type, source_record_id, source_url, source_field,
-         excerpt, excerpt_sha, raw_record_sha256, source_updated_at,
-         observed_at, detector, detector_version, clue_class,
-         machine_confidence, canonical_json(payload or {})),
+        """INSERT INTO correction_observation_versions VALUES (?,?,?,?,?,?,?)
+           ON CONFLICT(observation_version_id) DO UPDATE SET
+             source_url=excluded.source_url,
+             last_observed_at=MAX(
+                 correction_observation_versions.last_observed_at,
+                 excluded.last_observed_at
+             )""",
+        (version_id, observation_id, raw_record_sha256, source_updated_at,
+         source_url, observed_at, observed_at),
     )
     return observation_id
 
@@ -1682,7 +1761,8 @@ def validate_database(path: Path) -> dict[str, Any]:
             errors.append(f"foreign_key_check={len(foreign_key_errors)}")
         objects = {str(row[0]) for row in conn.execute("SELECT name FROM sqlite_master")}
         required = {
-            "correction_observations", "correction_cases", "correction_proposals",
+            "correction_observations", "correction_observation_versions",
+            "correction_cases", "correction_proposals",
             "correction_decisions", "correction_effects", "correction_validations",
             "correction_releases", "correction_release_revisions",
             "correction_waivers", "correction_assertions",
@@ -1695,6 +1775,16 @@ def validate_database(path: Path) -> dict[str, Any]:
             errors.append("missing registry objects: " + ", ".join(missing))
         for table in sorted(name for name in required if name.startswith("correction_") and name in objects):
             counts[table] = int(conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
+        if "correction_observation_versions" in objects:
+            missing_versions = int(conn.execute(
+                """SELECT COUNT(*) FROM correction_observations o
+                   LEFT JOIN correction_observation_versions v USING(observation_id)
+                   WHERE v.observation_id IS NULL"""
+            ).fetchone()[0])
+            if missing_versions:
+                errors.append(
+                    f"observations without source-version provenance: {missing_versions}"
+                )
         if "correction_decisions" in objects:
             for row in conn.execute("SELECT * FROM correction_decisions"):
                 record = {
