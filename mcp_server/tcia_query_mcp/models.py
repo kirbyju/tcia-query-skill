@@ -211,6 +211,7 @@ class Asset(PublicModel):
     dataset_type: str | None = None
     short_title: str | None = None
     download_id: str | None = None
+    download_row_id: int | None = None
     managed_system: str | None = None
     managed_systems: list[str] = Field(default_factory=list)
     source_system: str | None = None
@@ -228,11 +229,31 @@ class Asset(PublicModel):
     media_kind: str | None = None
     object_role: str | None = None
     geometry_status: str | None = None
+    geometry_checked_count: int | None = None
+    geometry_regular_count: int | None = None
+    geometry_not_regular_count: int | None = None
+    geometry_not_checked_count: int | None = None
+    geometry_source: str | None = None
+    geometry_assessment_method: str | None = None
+    geometry_assessment_source: str | None = None
+    geometry_assessed_at_utc: str | None = None
+    geometry_details_json: JsonObject | None = None
     file_name: str | None = None
     package_path: str | None = None
     asset_name: str | None = None
     asset_granularity: str | None = None
     subject_id: str | None = None
+    subject_id_namespace: str | None = None
+    participant_link_status: str | None = None
+    container_format: str | None = None
+    spatial_dimensionality: str | None = None
+    temporal_dimensionality: str | None = None
+    represented_file_count: int | None = None
+    size_bytes: int | None = None
+    checksum: str | None = None
+    checksum_algorithm: str | None = None
+    representation_provenance_class: str | None = None
+    source_record_id: str | None = None
     study_count: int | None = None
     series_count: int | None = None
     file_count: int | None = None
@@ -242,7 +263,9 @@ class Asset(PublicModel):
     has_file_level_metadata: int | None = None
     detail_pointer: str | None = None
     inventory_status: str | None = None
+    raw_values_json: JsonObject | None = None
     provenance_json: JsonObject = Field(default_factory=dict)
+    quality_flag_json: JsonObject | None = None
 
 
 class DatasetVersion(PublicModel):
@@ -392,6 +415,7 @@ class ClinicalSubject(PublicModel):
     age_at_diagnosis: str | None = None
     age_at_enrollment_years: str | None = None
     age_at_imaging_years: str | None = None
+    age_at_treatment_years: str | None = None
     primary_diagnosis: str | None = None
     primary_site: str | None = None
     stage: str | None = None
@@ -417,6 +441,7 @@ class ClinicalFact(PublicModel):
     subject_id: str
     concept: str
     value_text: str | None = None
+    value_resolved: str | None = None
     value_number: float | int | None = None
     unit: str | None = None
     source_kind: str | None = None
@@ -426,6 +451,8 @@ class ClinicalFact(PublicModel):
     original_column: str | None = None
     evidence_scope: str | None = None
     is_inferred: bool | None = None
+    qc_excluded: bool | None = None
+    qc_status: str | None = None
     provenance: JsonObject = Field(default_factory=dict)
 
 

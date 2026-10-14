@@ -1,25 +1,34 @@
 from __future__ import annotations
 
+import ast
+import asyncio
 import json
 import os
 import sqlite3
 import tempfile
 import unittest
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
 from pydantic import ValidationError
+from fastapi.testclient import TestClient
+
+from mcp_server.tcia_query_mcp.rest import create_app
+from mcp_server.tcia_query_mcp.server import mcp
 
 from mcp_server.tcia_query_mcp.models import (
     AccessSummaryResponse,
     AssetsResponse,
+    Asset,
     BundleResponse,
     ClinicalConflictsResponse,
     ClinicalDatasetsResponse,
     ClinicalFactsResponse,
+    ClinicalFact,
     ClinicalSubjectsResponse,
+    ClinicalSubject,
     ControlledDatasetsResponse,
     ControlledFilesResponse,
     CoverageResponse,
@@ -559,6 +568,9 @@ def create_clinical_db(path: Path) -> None:
                'Breast Cancer', 'Breast', NULL, NULL, NULL, NULL, NULL, NULL, NULL,
                NULL, NULL, NULL, NULL, 0, 0,
                '{"primary_diagnosis":"Breast Cancer"}', '{}', '{}');
+            ALTER TABLE agent_clinical_subjects ADD COLUMN age_at_treatment_years TEXT;
+            ALTER TABLE agent_clinical_all_subjects ADD COLUMN age_at_treatment_years TEXT;
+            UPDATE agent_clinical_subjects SET age_at_treatment_years='54';
 
             CREATE TABLE agent_clinical_facts (
               short_title TEXT, subject_id TEXT, concept TEXT, value_text TEXT,
@@ -573,6 +585,11 @@ def create_clinical_db(path: Path) -> None:
               ('TCGA-BRCA', 'BRCA-1', 'response', 'Yes', NULL, NULL,
                'idc_clinical', 300, 'https://example.org/idc', 'v24',
                'response', 'patient', 0, '{"row_number":2}');
+            ALTER TABLE agent_clinical_facts ADD COLUMN value_resolved TEXT;
+            ALTER TABLE agent_clinical_facts ADD COLUMN qc_excluded INTEGER;
+            ALTER TABLE agent_clinical_facts ADD COLUMN qc_status TEXT;
+            UPDATE agent_clinical_facts SET value_resolved=value_text,
+                qc_excluded=0, qc_status='accepted';
 
             CREATE TABLE agent_clinical_conflicts (
               short_title TEXT, subject_id TEXT, concept TEXT, distinct_values INTEGER,
@@ -677,6 +694,14 @@ def create_participant_db(path: Path) -> None:
                 1000, 1, 'idc', 'https://example.org/idc', 'known', 'v24', '{}',
                 'Collection', 'TCGA-BRCA', 'BRCA-1'
             );
+            ALTER TABLE agent_participant_assets ADD COLUMN geometry_checked_count INTEGER;
+            ALTER TABLE agent_participant_assets ADD COLUMN geometry_regular_count INTEGER;
+            ALTER TABLE agent_participant_assets ADD COLUMN geometry_not_regular_count INTEGER;
+            ALTER TABLE agent_participant_assets ADD COLUMN geometry_not_checked_count INTEGER;
+            ALTER TABLE agent_participant_assets ADD COLUMN geometry_source TEXT;
+            UPDATE agent_participant_assets SET geometry_checked_count=2,
+                geometry_regular_count=2, geometry_not_regular_count=0,
+                geometry_not_checked_count=0, geometry_source='v2_geometry';
             CREATE TABLE agent_dataset_assets_without_participant_crosswalk (
                 dataset_asset_id TEXT, dataset_type TEXT, short_title TEXT,
                 managed_system TEXT, access_level TEXT, data_domain TEXT, media_kind TEXT,
@@ -736,6 +761,34 @@ def create_public_non_dicom_db(path: Path) -> None:
                 'radiology', 'MR', 'segmentation', 'tcia_aspera',
                 'https://example.org/package', 1, 1, 'tcia_aspera'
             );
+            ALTER TABLE agent_public_non_dicom_assets ADD COLUMN download_row_id INTEGER;
+            ALTER TABLE agent_public_non_dicom_assets ADD COLUMN subject_id_namespace TEXT;
+            ALTER TABLE agent_public_non_dicom_assets ADD COLUMN participant_link_status TEXT;
+            ALTER TABLE agent_public_non_dicom_assets ADD COLUMN container_format TEXT;
+            ALTER TABLE agent_public_non_dicom_assets ADD COLUMN spatial_dimensionality TEXT;
+            ALTER TABLE agent_public_non_dicom_assets ADD COLUMN temporal_dimensionality TEXT;
+            ALTER TABLE agent_public_non_dicom_assets ADD COLUMN geometry_assessment_method TEXT;
+            ALTER TABLE agent_public_non_dicom_assets ADD COLUMN geometry_assessment_source TEXT;
+            ALTER TABLE agent_public_non_dicom_assets ADD COLUMN geometry_assessed_at_utc TEXT;
+            ALTER TABLE agent_public_non_dicom_assets ADD COLUMN geometry_details_json TEXT;
+            ALTER TABLE agent_public_non_dicom_assets ADD COLUMN represented_file_count INTEGER;
+            ALTER TABLE agent_public_non_dicom_assets ADD COLUMN size_bytes INTEGER;
+            ALTER TABLE agent_public_non_dicom_assets ADD COLUMN checksum TEXT;
+            ALTER TABLE agent_public_non_dicom_assets ADD COLUMN checksum_algorithm TEXT;
+            ALTER TABLE agent_public_non_dicom_assets ADD COLUMN representation_provenance_class TEXT;
+            ALTER TABLE agent_public_non_dicom_assets ADD COLUMN source_record_id TEXT;
+            ALTER TABLE agent_public_non_dicom_assets ADD COLUMN raw_values_json TEXT;
+            ALTER TABLE agent_public_non_dicom_assets ADD COLUMN quality_flag_json TEXT;
+            UPDATE agent_public_non_dicom_assets SET download_row_id=7,
+                subject_id_namespace='tcia_subject_id', participant_link_status='linked',
+                container_format='gzip', spatial_dimensionality='3d',
+                temporal_dimensionality='static', geometry_assessment_method='header',
+                geometry_assessment_source='v2_geometry',
+                geometry_assessed_at_utc='2026-10-14T00:00:00Z',
+                geometry_details_json='{}', represented_file_count=1,
+                size_bytes=100, checksum='abc', checksum_algorithm='sha256',
+                representation_provenance_class='submitted_original',
+                source_record_id='source-1', raw_values_json='{}', quality_flag_json='{}';
             CREATE TABLE agent_public_non_dicom_asset_participants (
                 asset_id TEXT, subject_id TEXT
             );
@@ -1281,11 +1334,6 @@ class TciaQueryServiceTests(unittest.TestCase):
                 ALTER TABLE agent_participant_assets ADD COLUMN data_category TEXT;
                 ALTER TABLE agent_participant_assets ADD COLUMN data_type TEXT;
                 ALTER TABLE agent_participant_assets ADD COLUMN geometry_status TEXT;
-                ALTER TABLE agent_participant_assets ADD COLUMN geometry_checked_count INTEGER;
-                ALTER TABLE agent_participant_assets ADD COLUMN geometry_regular_count INTEGER;
-                ALTER TABLE agent_participant_assets ADD COLUMN geometry_not_regular_count INTEGER;
-                ALTER TABLE agent_participant_assets ADD COLUMN geometry_not_checked_count INTEGER;
-                ALTER TABLE agent_participant_assets ADD COLUMN geometry_source TEXT;
                 UPDATE participant_assets
                 SET data_category='Radiology', data_type=modality,
                     geometry_status='not_checked', geometry_not_checked_count=1,
@@ -1581,6 +1629,67 @@ class TciaQueryServiceTests(unittest.TestCase):
         for model, payload in cases:
             with self.subTest(model=model.__name__):
                 model.model_validate(payload)
+
+    def test_asset_and_clinical_routes_preserve_current_schema_fields(self) -> None:
+        client = TestClient(create_app(self.service))
+        cases = (
+            ("/v2/participants/participant-1/assets?limit=1", "assets", "geometry_checked_count", 2),
+            ("/v2/public-non-dicom/assets?short_titles=TCGA-BRCA&limit=1", "assets", "representation_provenance_class", "submitted_original"),
+            ("/v2/clinical/TCGA-BRCA/subjects?limit=1", "subjects", "age_at_treatment_years", "54"),
+            ("/v2/clinical/TCGA-BRCA/facts?limit=1", "facts", "qc_status", "accepted"),
+        )
+        for path, collection, field, expected in cases:
+            with self.subTest(path=path):
+                response = client.get(path)
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.json()[collection][0][field], expected)
+
+        public = client.get("/v2/public-non-dicom/assets?limit=1").json()["assets"][0]
+        self.assertEqual(public["raw_values_json"], {})
+        self.assertEqual(public["quality_flag_json"], {})
+        fact = client.get("/v2/clinical/TCGA-BRCA/facts?limit=1").json()["facts"][0]
+        self.assertIs(fact["qc_excluded"], False)
+
+    def test_strict_models_cover_actual_producer_view_columns(self) -> None:
+        producer_views = (
+            ("scripts/tcia_participant_inventory.py", "SCHEMA", "agent_participant_assets", Asset, {}),
+            ("scripts/tcia_public_non_dicom_metadata.py", "SCHEMA", "agent_public_non_dicom_assets", Asset, {}),
+            ("scripts/tcia_clinical_metadata.py", "SCHEMA_SQL", "agent_clinical_subjects", ClinicalSubject,
+             {"resolved_values_json": "resolved_values", "resolved_sources_json": "resolved_sources", "conflicts_json": "conflicts"}),
+            ("scripts/tcia_clinical_metadata.py", "SCHEMA_SQL", "agent_clinical_facts", ClinicalFact,
+             {"provenance_json": "provenance"}),
+        )
+        root = Path(__file__).resolve().parents[2]
+        for source, constant, view, model, renamed in producer_views:
+            with self.subTest(view=view):
+                tree = ast.parse((root / source).read_text(encoding="utf-8"))
+                assignment = next(
+                    node for node in tree.body
+                    if isinstance(node, ast.Assign)
+                    and any(isinstance(target, ast.Name) and target.id == constant for target in node.targets)
+                )
+                schema = ast.literal_eval(assignment.value)
+                with closing(sqlite3.connect(":memory:")) as conn:
+                    conn.executescript(schema)
+                    columns = {row[1] for row in conn.execute(f"PRAGMA table_info({view})")}
+                exposed = {renamed.get(column, column) for column in columns}
+                self.assertEqual(exposed - set(model.model_fields), set())
+
+    def test_asset_and_clinical_mcp_tools_preserve_current_schema_fields(self) -> None:
+        cases = (
+            ("get_participant_assets", {"participant_key": "participant-1", "limit": 1}, "assets", "geometry_checked_count", 2),
+            ("find_public_non_dicom_assets", {"short_titles": ["TCGA-BRCA"], "limit": 1}, "assets", "representation_provenance_class", "submitted_original"),
+            ("get_clinical_subjects", {"short_title": "TCGA-BRCA", "limit": 1}, "subjects", "age_at_treatment_years", "54"),
+            ("get_clinical_facts", {"short_title": "TCGA-BRCA", "limit": 1}, "facts", "qc_status", "accepted"),
+        )
+        async def run():
+            with patch("mcp_server.tcia_query_mcp.server.service", return_value=self.service):
+                return [await mcp.call_tool(name, arguments) for name, arguments, *_ in cases]
+
+        for (name, _, collection, field, expected), result in zip(cases, asyncio.run(run())):
+            with self.subTest(tool=name):
+                self.assertFalse(result.is_error)
+                self.assertEqual(result.structured_content[collection][0][field], expected)
 
     def test_public_models_reject_unknown_and_malformed_fields(self) -> None:
         search = self.service.search_datasets()

@@ -845,8 +845,9 @@ def compact_clinical_fact(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
     data = dict(row)
     if "provenance_json" in data:
         data["provenance"] = parse_json_object(data.pop("provenance_json"))
-    if data.get("is_inferred") in (0, 1):
-        data["is_inferred"] = bool(data["is_inferred"])
+    for key in ("is_inferred", "qc_excluded"):
+        if data.get(key) in (0, 1):
+            data[key] = bool(data[key])
     return data
 
 
