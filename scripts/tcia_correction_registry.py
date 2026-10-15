@@ -1748,7 +1748,9 @@ def snapshot_source_health(manifest_path: Path | None) -> dict[str, Any]:
     }
 
 
-def validate_database(path: Path) -> dict[str, Any]:
+def validate_database(
+    path: Path, *, allow_legacy_schema: bool = False,
+) -> dict[str, Any]:
     errors: list[str] = []
     counts: dict[str, int] = {}
     with closing(sqlite3.connect(f"file:{path}?mode=ro", uri=True)) as conn:
@@ -1760,8 +1762,27 @@ def validate_database(path: Path) -> dict[str, Any]:
         if foreign_key_errors:
             errors.append(f"foreign_key_check={len(foreign_key_errors)}")
         objects = {str(row[0]) for row in conn.execute("SELECT name FROM sqlite_master")}
+        declared_schema_version: int | None = None
+        if "registry_meta" in objects:
+            schema_row = conn.execute(
+                "SELECT value FROM registry_meta WHERE key='schema_version'"
+            ).fetchone()
+            try:
+                declared_schema_version = int(schema_row[0]) if schema_row else None
+            except (TypeError, ValueError):
+                declared_schema_version = None
+        allowed_schema_versions = (
+            {1, SCHEMA_VERSION} if allow_legacy_schema else {SCHEMA_VERSION}
+        )
+        if declared_schema_version not in allowed_schema_versions:
+            errors.append(
+                "unsupported correction registry schema_version: "
+                f"{declared_schema_version!r}; expected "
+                + ", ".join(str(value) for value in sorted(allowed_schema_versions))
+            )
         required = {
-            "correction_observations", "correction_observation_versions",
+            "registry_meta", "correction_observations",
+            "correction_observation_versions",
             "correction_cases", "correction_proposals",
             "correction_decisions", "correction_effects", "correction_validations",
             "correction_releases", "correction_release_revisions",
@@ -1770,6 +1791,8 @@ def validate_database(path: Path) -> dict[str, Any]:
             "agent_field_resolution_trace", "agent_release_evidence_health",
             "agent_correction_changes_since_release",
         }
+        if allow_legacy_schema and declared_schema_version == 1:
+            required.remove("correction_observation_versions")
         missing = sorted(required - objects)
         if missing:
             errors.append("missing registry objects: " + ", ".join(missing))
@@ -1933,7 +1956,8 @@ def validate_database(path: Path) -> dict[str, Any]:
                 except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
                     errors.append(f"invalid initial-registry bootstrap evidence: {exc}")
     return {"ok": not errors, "errors": errors, "integrity_check": integrity,
-            "counts": counts, "active_decision_set_sha256": active_digest}
+            "schema_version": declared_schema_version, "counts": counts,
+            "active_decision_set_sha256": active_digest}
 
 
 def file_sha256(path: Path) -> str:
@@ -1942,6 +1966,42 @@ def file_sha256(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             value.update(chunk)
     return value.hexdigest()
+
+
+def stage_prior_registry(
+    prior: Path, out: Path, *, replace: bool = False,
+) -> dict[str, Any]:
+    """Upgrade a verified prior registry into the current schema without new inputs."""
+    prior_result = validate_database(prior, allow_legacy_schema=True)
+    if not prior_result["ok"]:
+        raise RuntimeError(
+            "Invalid prior correction registry: " + "; ".join(prior_result["errors"])
+        )
+    if out.exists() and not replace:
+        raise FileExistsError(f"Staged registry exists: {out}; pass --replace")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix=f".{out.name}.", dir=out.parent) as directory:
+        staged = Path(directory) / out.name
+        with closing(create_database(staged)) as conn:
+            copy_prior_registry(conn, prior)
+            conn.execute(
+                """INSERT INTO registry_meta VALUES ('schema_version', ?)
+                   ON CONFLICT(key) DO UPDATE SET value=excluded.value""",
+                (str(SCHEMA_VERSION),),
+            )
+            conn.commit()
+        result = validate_database(staged)
+        if not result["ok"]:
+            raise RuntimeError(
+                "Invalid staged correction registry: " + "; ".join(result["errors"])
+            )
+        os.replace(staged, out)
+    result.update({
+        "path": str(out),
+        "prior_schema_version": prior_result["schema_version"],
+        "prior_sqlite_sha256": file_sha256(prior),
+    })
+    return result
 
 
 def parse_utc(value: str) -> dt.datetime:
@@ -2390,6 +2450,10 @@ def parser() -> argparse.ArgumentParser:
     build.add_argument("--replace", action="store_true")
     validate = sub.add_parser("validate")
     validate.add_argument("--db", type=Path, required=True)
+    stage_prior = sub.add_parser("stage-prior")
+    stage_prior.add_argument("--prior", type=Path, required=True)
+    stage_prior.add_argument("--out", type=Path, required=True)
+    stage_prior.add_argument("--replace", action="store_true")
     package = sub.add_parser("package")
     package.add_argument("--db", type=Path, required=True)
     package.add_argument("--gzip-out", type=Path, required=True)
@@ -2452,6 +2516,10 @@ def main() -> int:
             )
         elif args.command == "validate":
             result = validate_database(args.db)
+        elif args.command == "stage-prior":
+            result = stage_prior_registry(
+                args.prior, args.out, replace=args.replace,
+            )
         elif args.command == "package":
             result = {
                 "ok": True,

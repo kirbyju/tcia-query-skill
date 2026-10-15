@@ -828,6 +828,81 @@ class CorrectionIdentityTests(unittest.TestCase):
 
 
 class RegistryBuildTests(unittest.TestCase):
+    def test_stage_prior_registry_upgrades_schema1_before_release_link_and_build(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            prior = root / "prior.sqlite"
+            staged = root / "staged.sqlite"
+            registry.build_registry(prior, observed_at="2026-10-13T21:03:53Z")
+            with sqlite3.connect(prior) as conn:
+                observation_count = int(conn.execute(
+                    "SELECT COUNT(*) FROM correction_observations"
+                ).fetchone()[0])
+                prior_decision_digest = registry.decision_set_digest(conn)
+                conn.execute("DROP TABLE correction_observation_versions")
+                conn.execute(
+                    "UPDATE registry_meta SET value='1' WHERE key='schema_version'"
+                )
+                conn.commit()
+
+            strict_prior = registry.validate_database(prior)
+            self.assertFalse(strict_prior["ok"])
+            self.assertIn(
+                "missing registry objects: correction_observation_versions",
+                strict_prior["errors"],
+            )
+            staged_result = registry.stage_prior_registry(prior, staged)
+            self.assertTrue(staged_result["ok"], staged_result["errors"])
+            self.assertEqual(staged_result["prior_schema_version"], 1)
+            self.assertEqual(staged_result["schema_version"], registry.SCHEMA_VERSION)
+            self.assertEqual(
+                staged_result["counts"]["correction_observation_versions"],
+                observation_count,
+            )
+            self.assertEqual(
+                staged_result["active_decision_set_sha256"], prior_decision_digest
+            )
+
+            linked = registry.link_release(
+                staged,
+                release_fingerprint="a" * 64,
+                release_tag="tcia-metadata-v2-2026.10.13-test",
+                source_health="verified_current",
+                observed_at="2026-10-13T21:03:53Z",
+            )
+            self.assertTrue(linked["ok"], linked["errors"])
+            refreshed = registry.build_registry(
+                staged, observed_at="2026-10-14T15:53:40Z", replace=True
+            )
+            self.assertTrue(refreshed["ok"], refreshed["errors"])
+            with sqlite3.connect(staged) as conn:
+                self.assertEqual(
+                    conn.execute(
+                        "SELECT decision_set_sha256 FROM correction_releases "
+                        "WHERE release_fingerprint=?",
+                        ("a" * 64,),
+                    ).fetchone()[0],
+                    prior_decision_digest,
+                )
+                self.assertEqual(
+                    conn.execute(
+                        "SELECT COUNT(*) FROM correction_observations o "
+                        "LEFT JOIN correction_observation_versions v "
+                        "USING(observation_id) WHERE v.observation_id IS NULL"
+                    ).fetchone()[0],
+                    0,
+                )
+            restaged = root / "restaged.sqlite"
+            restaged_result = registry.stage_prior_registry(staged, restaged)
+            self.assertTrue(restaged_result["ok"], restaged_result["errors"])
+            self.assertEqual(
+                restaged_result["prior_schema_version"], registry.SCHEMA_VERSION
+            )
+            self.assertEqual(
+                restaged_result["counts"]["correction_observation_versions"],
+                refreshed["counts"]["correction_observation_versions"],
+            )
+
     def test_observation_identity_is_stable_across_unrelated_record_versions(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "registry.sqlite"

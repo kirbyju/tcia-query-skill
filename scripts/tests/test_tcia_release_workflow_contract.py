@@ -70,6 +70,23 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
         self.assertIn("exit 1", block)
         self.assertNotIn("No prior V2 release exists", block)
 
+    def test_prior_registry_is_verified_upgraded_then_linked(self) -> None:
+        source = SOURCE_WORKFLOW.read_text(encoding="utf-8")
+        block = source[
+            source.index("Import only a verified prior correction registry"):
+            source.index("Build and package the correction registry")
+        ]
+        self.assertIn("tcia_correction_registry.py stage-prior", block)
+        self.assertIn("--prior previous/tcia_correction_registry.sqlite", block)
+        self.assertIn("--out dist/tcia_correction_registry.sqlite", block)
+        self.assertIn(
+            "tcia_correction_registry.py validate \\\n                --db dist/tcia_correction_registry.sqlite",
+            block,
+        )
+        self.assertNotIn("--db previous/tcia_correction_registry.sqlite", block)
+        self.assertLess(block.index("validate-published"), block.index("stage-prior"))
+        self.assertLess(block.index("stage-prior"), block.index("link-release"))
+
     def test_source_first_registry_bootstrap_is_explicit_and_narrow(self) -> None:
         source = SOURCE_WORKFLOW.read_text(encoding="utf-8")
         self.assertIn("record-initial-bootstrap", source)
