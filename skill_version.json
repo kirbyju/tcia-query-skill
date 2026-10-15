@@ -15,13 +15,13 @@
     "mcp_server/__main__.py": "1c4a072b5351c80fd38b3e76d558ed25ad75ccb17d13876e2c3c59ff5a851366",
     "mcp_server/requirements.txt": "a089e9661a8e555d00aaf9a7cb37122f3f4d83069274d0914247af0b4803f70f",
     "mcp_server/tcia_query_mcp/__init__.py": "e55d44704936d2d7507e200a79cc2fce0297c392a6a905c25a2377c4bcc6fea3",
-    "mcp_server/tcia_query_mcp/models.py": "29550c26892ce39d8df258518ccca1ca3021b5c18ce748a0bc8da0564ca264b0",
+    "mcp_server/tcia_query_mcp/models.py": "99b6af82866da71ef4b1a3a7dcafb46c29095bde02c8364d998af63917d12c6d",
     "mcp_server/tcia_query_mcp/rest.py": "495f813c018ff03212c907070ee8a65cd85cc0b07090dab6fa7856de65248cf4",
     "mcp_server/tcia_query_mcp/server.py": "6ceac9846e6bbe3a0886ca94a15a085c79ba4db0c70e85ad05b1ef964d7fbb72",
     "mcp_server/tcia_query_mcp/service.py": "7f5f623ff6139c2f04dc0d6a80e6cbb1cffc0b408eaec49add7f1f18e4825eec",
     "mcp_server/tests/test_rest.py": "9ea2229afc085b6688475af7f7572e1c7f0416b3016c81d15415a0426b5dd70a",
     "mcp_server/tests/test_server.py": "34e8b2ed06310e41cd307d65f2e6b833ec77edceb1b7408297b2cbe525c90fb7",
-    "mcp_server/tests/test_service.py": "36357af90f6e68dd1257ff0575c9f6b8896ace53b287ee112e6a61b8b2d8aedb",
+    "mcp_server/tests/test_service.py": "0a27ec2fb0472a2b983e14fa4b402a305fe5e3e8229945f1d9078b20ae36acba",
     "references/README.md": "eacd2b25548cc91c21946e0d20b41809d738bc08161d7b1d0b2700e39e8ae428",
     "references/api-upgrade-notes.md": "14d6db63eecaa43662abb46fafffd5301d09d69d55e9b491ef208ec9b5ee1e8a",
     "references/artifact-model.md": "524b13c409e84c10d63f796799d5668c9a850370f0b97ef35d43b63a95f8d41e",
@@ -144,6 +144,6 @@
     "scripts/tests/test_tcia_v2_staging.py": "dda82d5c65b8e03b543fc80c44f30acf47a6c29861b1565104e96c568399ec25"
   },
   "schema_version": 1,
-  "skill_version": "2026.10.15.2",
-  "updated_at_utc": "2026-10-15T12:43:42.956806+00:00"
+  "skill_version": "2026.10.15.3",
+  "updated_at_utc": "2026-10-15T12:57:15.899979+00:00"
 }

@@ -398,6 +398,21 @@ class ClinicalDataset(PublicModel):
 
 class ClinicalResolvedSource(PublicModel):
     source_kind: str | None = None
+    source_id: str | None = None
+    source_lineage: str | None = None
+    priority: int | None = None
+    evidence_scope: str | None = None
+    is_inferred: bool | None = None
+
+
+class ClinicalConflictValue(PublicModel):
+    """A competing value with the source evidence retained by the producer."""
+
+    value: str
+    source_value: str | None = None
+    source_kind: str | None = None
+    source_id: str | None = None
+    source_lineage: str | None = None
     priority: int | None = None
 
 
@@ -433,7 +448,7 @@ class ClinicalSubject(PublicModel):
     primary_site_is_inferred: bool | None = None
     resolved_values: dict[str, JsonScalar] = Field(default_factory=dict)
     resolved_sources: dict[str, ClinicalResolvedSource] = Field(default_factory=dict)
-    conflicts: dict[str, list[str]] = Field(default_factory=dict)
+    conflicts: dict[str, list[ClinicalConflictValue | str]] = Field(default_factory=dict)
 
 
 class ClinicalFact(PublicModel):

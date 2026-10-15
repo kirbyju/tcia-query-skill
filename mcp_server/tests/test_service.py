@@ -1650,6 +1650,68 @@ class TciaQueryServiceTests(unittest.TestCase):
         fact = client.get("/v2/clinical/TCGA-BRCA/facts?limit=1").json()["facts"][0]
         self.assertIs(fact["qc_excluded"], False)
 
+    def test_materialized_clinical_subject_nested_evidence_survives_rest_and_mcp(self) -> None:
+        from scripts import tcia_clinical_metadata as clinical
+
+        with closing(clinical.init_db(self.clinical, replace=True)) as conn:
+            clinical.insert_meta(conn, "schema_version", clinical.SCHEMA_VERSION)
+            cases = (
+                ("official", "tcia_clinical_download", "response", "pCR", "patient", False),
+                ("idc", "idc_clinical", "response", "Yes", "patient", False),
+                ("dataset", "wordpress_dataset_inference", "primary_diagnosis", "Breast Cancer", "dataset", True),
+            )
+            for source_id, kind, concept, value, scope, inferred in cases:
+                clinical.insert_source(
+                    conn, source_id=source_id, source_kind=kind, short_title="TCGA-BRCA",
+                    source_signature_value="synthetic", source_lineage=source_id,
+                )
+                clinical.insert_row_and_facts(
+                    conn, source_id=source_id, source_kind=kind, short_title="TCGA-BRCA",
+                    subject_id="BRCA-1", table_name="synthetic", row_number=1,
+                    row={concept: value}, facts=[(concept, value, concept, None)],
+                    has_imaging=True, evidence_scope=scope, is_inferred=inferred,
+                )
+            clinical.materialize_subjects(conn)
+            conn.commit()
+
+        client = TestClient(create_app(self.service))
+        response = client.get("/v2/clinical/TCGA-BRCA/subjects?limit=1")
+        self.assertEqual(response.status_code, 200)
+        subject = response.json()["subjects"][0]
+        self.assertEqual(subject["resolved_sources"]["primary_diagnosis"], {
+            "source_kind": "wordpress_dataset_inference", "source_id": "dataset",
+            "source_lineage": "dataset", "priority": 50,
+            "evidence_scope": "dataset", "is_inferred": True,
+        })
+        self.assertTrue(subject["primary_diagnosis_is_inferred"])
+        conflicts = subject["conflicts"]["response"]
+        self.assertEqual({row["value"] for row in conflicts}, {"pCR", "Yes"})
+        self.assertEqual({row["source_id"] for row in conflicts}, {"official", "idc"})
+        self.assertTrue(all("source_value" in row and "source_lineage" in row for row in conflicts))
+        self.assertEqual(client.get(
+            "/v2/clinical/TCGA-BRCA/subjects?include_inferred=false&limit=1"
+        ).json()["count"], 0)
+
+        async def run():
+            with patch("mcp_server.tcia_query_mcp.server.service", return_value=self.service):
+                return await mcp.call_tool("get_clinical_subjects", {
+                    "short_title": "TCGA-BRCA", "limit": 1,
+                })
+        result = asyncio.run(run())
+        self.assertFalse(result.is_error)
+        self.assertEqual(result.structured_content["subjects"][0], subject)
+
+    def test_nested_clinical_evidence_remains_strict(self) -> None:
+        subject = self.service.get_clinical_subjects("TCGA-BRCA")["subjects"][0]
+        malformed = (
+            {"resolved_sources": {"response": {"source_kind": "synthetic", "unexpected": True}}},
+            {"conflicts": {"response": [{"value": "pCR", "unexpected": True}]}},
+            {"conflicts": {"response": [{"value": "pCR", "priority": "400"}]}},
+        )
+        for changes in malformed:
+            with self.subTest(changes=changes), self.assertRaises(ValidationError):
+                ClinicalSubject.model_validate({**subject, **changes})
+
     def test_strict_models_cover_actual_producer_view_columns(self) -> None:
         producer_views = (
             ("scripts/tcia_participant_inventory.py", "SCHEMA", "agent_participant_assets", Asset, {}),
