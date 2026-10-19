@@ -1079,7 +1079,7 @@ def compare_asset(
                 changed_keys = [("added", item) for item in key_rows(new, spec, limit=max_items)]
                 added = new_count
                 if old is not None and spec.name == 'participant_equivalences':
-                    semantic_changes = [('added', key, '', digest) for key, digest in keyed_row_digests(new, spec)]
+                    semantic_changes = [('added', row[0], '', row[1]) for row in keyed_row_records(new, spec)]
             else:
                 (
                     added, removed, modified, changed_keys, semantic_changes,
