@@ -204,6 +204,10 @@ CONFIGS: dict[str, dict[str, Any]] = {
                 "participant_source_link_id",
                 {"evidence_json": "{}"},
             ),
+            "participant_equivalences": (
+                "participant_equivalence_id",
+                {"evidence_json": "{}"},
+            ),
         },
         "audit_tables": (),
     },

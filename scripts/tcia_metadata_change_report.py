@@ -97,6 +97,7 @@ PROFILES = {
         TableSpec("participant_link_issues", ("issue_id",)),
         TableSpec("participant_identity_evidence", ("identity_evidence_id",), "high"),
         TableSpec("participant_source_links", ("participant_source_link_id",), "high"),
+        TableSpec("participant_equivalences", ("participant_equivalence_id",), "high"),
     ),
     "correction": (
         TableSpec(
@@ -1077,6 +1078,8 @@ def compare_asset(
             if old is None or old_count is None:
                 changed_keys = [("added", item) for item in key_rows(new, spec, limit=max_items)]
                 added = new_count
+                if old is not None and spec.name == 'participant_equivalences':
+                    semantic_changes = [('added', key, '', digest) for key, digest in keyed_row_digests(new, spec)]
             else:
                 (
                     added, removed, modified, changed_keys, semantic_changes,

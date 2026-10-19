@@ -48,7 +48,7 @@ DEFAULT_RELEASE_TAG = "tcia-metadata-v2-latest"
 DEFAULT_REPOSITORY = "kirbyju/tcia-query-skill"
 DB_ASSET = "participant_inventory.sqlite.gz"
 MANIFEST_ASSET = "participant_inventory_manifest.json"
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 GEOMETRY_CAPABLE_FORMATS = {"DICOM", "NIFTI", "MHA", "MHD", "NRRD"}
 GEOMETRY_CHECKED_STATUSES = {
@@ -249,6 +249,22 @@ CREATE TABLE participant_source_links (
     FOREIGN KEY (source_collection_participant_key) REFERENCES participants(participant_key)
 );
 
+CREATE TABLE participant_equivalences (
+    participant_equivalence_id TEXT PRIMARY KEY,
+    left_participant_key TEXT NOT NULL REFERENCES participants(participant_key),
+    right_participant_key TEXT NOT NULL REFERENCES participants(participant_key),
+    resolution_method TEXT NOT NULL,
+    confidence TEXT NOT NULL,
+    evidence_source TEXT NOT NULL,
+    evidence_json TEXT NOT NULL
+);
+CREATE VIEW agent_participant_equivalences AS
+SELECT e.*, l.short_title AS left_short_title, l.display_participant_id AS left_identifier,
+       r.short_title AS right_short_title, r.display_participant_id AS right_identifier
+FROM participant_equivalences e
+JOIN participants l ON l.participant_key=e.left_participant_key
+JOIN participants r ON r.participant_key=e.right_participant_key;
+
 CREATE INDEX idx_pi_participants_dataset ON participants(short_title, display_participant_id);
 CREATE INDEX idx_pi_participants_short_title_nocase ON participants(short_title COLLATE NOCASE);
 CREATE INDEX idx_pi_participants_display_id_nocase ON participants(display_participant_id COLLATE NOCASE);
@@ -261,6 +277,7 @@ CREATE INDEX idx_pi_assets_access ON participant_assets(access_level, data_domai
 CREATE INDEX idx_pi_clinical_participant ON participant_clinical_values(participant_key, concept);
 CREATE INDEX idx_pi_source_links_result ON participant_source_links(analysis_result_participant_key);
 CREATE INDEX idx_pi_source_links_source ON participant_source_links(source_collection_short_title, source_participant_id);
+CREATE INDEX idx_pi_identity_evidence_participant ON participant_identity_evidence(participant_key);
 
 CREATE VIEW agent_participants AS
 SELECT
@@ -2219,6 +2236,8 @@ def build_database(
         counts["authoritative_dataset_identities"] = (
             require_authoritative_dataset_identities(conn, dataset_types)
         )
+        import sys
+        from tcia_reviewed_identity import apply as apply_reviewed_identity
         clinical_alias_counts = apply_clinical_participant_aliases(conn, clinical_db)
         counts.update(clinical_alias_counts)
         counts["display_identifiers_selected"] = select_display_participant_ids(conn)
@@ -2228,6 +2247,8 @@ def build_database(
             sum(resolution_counts.values())
             + clinical_alias_counts["ispy2_clinical_aliases"]
         )
+        counts['reviewed_identity_aliases'] = apply_reviewed_identity(
+            conn, aliases=True, api=sys.modules[__name__])
         source_links = apply_analysis_result_source_collection_links(
             conn,
             snapshot_db=snapshot_db,
@@ -2238,6 +2259,12 @@ def build_database(
         counts.update({f"source_links_{key}": value for key, value in source_links.items()})
         brats_links = apply_brats_source_collection_links(conn)
         counts.update({f"brats_{key}": value for key, value in brats_links.items()})
+        counts['reviewed_identity_links'] = apply_reviewed_identity(
+            conn, aliases=False, api=sys.modules[__name__])
+        from tcia_reviewed_identity import DEFAULT_REFERENCE
+        record_source(conn, 'reviewed_participant_identity', DEFAULT_REFERENCE, True,
+                      counts['reviewed_identity_links']['source_links'] + counts['reviewed_identity_links']['collection_equivalences'],
+                      'Finite reviewed source links, Collection equivalences, and within-dataset aliases; raw identities retained.')
         metadata = {
             "schema_version": SCHEMA_VERSION,
             "artifact_model_schema_version": MODEL_SCHEMA_VERSION,
@@ -2309,6 +2336,18 @@ def validate_database(
         missing = sorted(required - objects)
         if missing:
             errors.append("missing objects: " + ", ".join(missing))
+        if 'participant_equivalences' in objects:
+            invalid_equivalences = conn.execute('''SELECT COUNT(*) FROM participant_equivalences e
+                JOIN participants l ON l.participant_key=e.left_participant_key
+                JOIN participants r ON r.participant_key=e.right_participant_key
+                WHERE l.dataset_type<>'Collection' OR r.dataset_type<>'Collection'
+                   OR l.short_title=r.short_title OR e.confidence<>'high'
+                   OR e.evidence_source='' OR e.participant_equivalence_id=''
+                   OR e.resolution_method NOT IN (
+                     'official_collection_overlap_declaration_and_exact_shared_namespace',
+                     'official_brats_peds_source_mapping_and_reviewed_dfci_finite_padding_alias')''').fetchone()[0]
+            if invalid_equivalences:
+                errors.append(f'invalid reviewed Collection equivalences: {invalid_equivalences}')
         cross_dataset = conn.execute(
             """
             SELECT COUNT(*) FROM participants p
@@ -2381,7 +2420,10 @@ def validate_database(
                 SELECT 1 FROM participant_identity_evidence e
                 WHERE e.participant_key = p.participant_key
                   AND e.resolution_scope = 'within_dataset'
-                  AND e.resolution_method = 'official_clinical_identifier_crosswalk'
+                  AND e.resolution_method IN (
+                    'official_clinical_identifier_crosswalk',
+                    'official_brats_workbook_ucsf_metadata_and_documented_followup_correction',
+                    'official_pseudo_phi_patient_uid_crosswalk_and_digest_reconciliation')
                   AND e.status = 'resolved'
               )
             """
@@ -2496,12 +2538,12 @@ def validate_database(
             }
             counts.update(brats_counts)
             expected_brats = {
-                "brats_participants": 1470,
-                "brats_source_display_ids": 1066,
+                "brats_participants": 1468,
+                "brats_source_display_ids": 1064,
                 "brats_challenge_display_ids": 404,
                 "brats_alternate_challenge_aliases": 1066,
-                "brats_linked_source_collection": 1060,
-                "brats_source_participant_not_current": 6,
+                "brats_linked_source_collection": 1063,
+                "brats_source_participant_not_current": 1,
             }
             for name, expected in expected_brats.items():
                 if brats_counts[name] != expected:
