@@ -4,7 +4,7 @@
     {
       "batch_id": "reviewed-noncancer-phantom-label-inference-removals-2026-10-19",
       "reviewer": "Codex, under requester-authorized release review",
-      "approved_at": "2026-10-19T18:50:00Z",
+      "approved_at": "2026-10-19T18:46:00Z",
       "rationale": "All 6447 removed facts were verified in the hash-matched prior clinical artifact as inferred WordPress dataset diagnosis/site assertions, never patient-observed values. Retained official Collection responses explain every removal through newly non-singleton disease labels or Not Applicable labels; site inference is suppressed without eligible diagnosis context. Preserving obsolete single-diagnosis inference would overstate the current source evidence.",
       "evidence_id": "github-actions:39294400191:metadata_change_report",
       "evidence": "Exact baseline a74b80068740d823657379be97e704e6db5229424a731de47397aa534213ff29; 22 dataset scopes checked against retained 2026-10-19 official WordPress responses. Local transition review SHA256 a8af4d3dd5c2e890d7d103a43233fcc4417bf075e6efab15774abc283b8c7755. Every removed fact is is_inferred=1 and source_kind=wordpress_dataset_inference.",
@@ -18,7 +18,7 @@
     {
       "batch_id": "reviewed-noncancer-phantom-inference-summary-transition-2026-10-19",
       "reviewer": "Codex, under requester-authorized release review",
-      "approved_at": "2026-10-19T18:50:00Z",
+      "approved_at": "2026-10-19T18:46:00Z",
       "rationale": "The exact 3033 removed and 326 modified summaries were independently reproduced by deleting only the reviewed 6447 inferred facts from a copy of the validated prior artifact and running the ordinary subject materializer. All before/after semantic row hashes matched; patient-observed facts were preserved.",
       "evidence_id": "github-actions:39294400191:metadata_change_report",
       "evidence": "Local transition review SHA256 a8af4d3dd5c2e890d7d103a43233fcc4417bf075e6efab15774abc283b8c7755; exact prior baseline a74b80068740d823657379be97e704e6db5229424a731de47397aa534213ff29. Summary absence means no remaining clinical fact, not disappearance of an imaging participant.",
@@ -32,7 +32,7 @@
     {
       "batch_id": "verified-prior-release-link-a74b80068740-2026-10-19",
       "reviewer": "Codex, under requester-authorized release review",
-      "approved_at": "2026-10-19T18:50:00Z",
+      "approved_at": "2026-10-19T18:46:00Z",
       "rationale": "Record the normal correction-registry linkage to the exact previously published, digest-verified immutable bundle. Only the addition naming the current prior release is authorized.",
       "evidence_id": "github-actions:39294400191:metadata_change_report",
       "evidence": "Validated prior bundle fingerprint a74b80068740d823657379be97e704e6db5229424a731de47397aa534213ff29; every added key names this exact release. Prior registry import and immutable asset validation passed before linking.",
@@ -46,7 +46,7 @@
     {
       "batch_id": "verified-prior-release-revisions-a74b80068740-2026-10-19",
       "reviewer": "Codex, under requester-authorized release review",
-      "approved_at": "2026-10-19T18:50:00Z",
+      "approved_at": "2026-10-19T18:46:00Z",
       "rationale": "Bind 269 already-existing correction revisions to the digest-verified prior immutable release. These are provenance junction additions, not new or changed correction decisions.",
       "evidence_id": "github-actions:39294400191:metadata_change_report",
       "evidence": "Every added primary key was checked to name prior bundle a74b80068740d823657379be97e704e6db5229424a731de47397aa534213ff29. Exact revision IDs and row hashes are bound by the batch digest.",
@@ -60,7 +60,7 @@
     {
       "batch_id": "verified-prior-release-health-a74b80068740-2026-10-19",
       "reviewer": "Codex, under requester-authorized release review",
-      "approved_at": "2026-10-19T18:50:00Z",
+      "approved_at": "2026-10-19T18:46:00Z",
       "rationale": "Expose the health projection for the exact verified prior release linkage and existing decision revisions. This authorizes no metadata mutation.",
       "evidence_id": "github-actions:39294400191:metadata_change_report",
       "evidence": "The sole added health key names a74b80068740d823657379be97e704e6db5229424a731de47397aa534213ff29; all underlying prior-release links were verified.",
