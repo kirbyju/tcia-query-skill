@@ -46,6 +46,12 @@ approvals, consumes matched effects once, validates the full bundle, and reruns
 the original producer's V2 contract tests before publishing. This is not a
 source-health waiver or permission to change retained payload components.
 
+For a `workflow_run` action, GitHub's run-level `head_sha` identifies the
+default-branch workflow revision, not necessarily the checked-out source
+producer. Recovery verifies the producer against the retained source plan's
+`current_producer_commit`, which the original downstream action also checked.
+The workflow revision and source producer are recorded separately.
+
 ### Selective component release
 
 The scheduled source workflow always refreshes and validates the base snapshot.

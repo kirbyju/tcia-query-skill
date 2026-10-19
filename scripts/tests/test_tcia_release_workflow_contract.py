@@ -13,7 +13,9 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
     def test_resume_review_is_append_only_and_cannot_change_producer_inputs(self):
         text = RESUME_WORKFLOW.read_text()
         for marker in (
-            "run['head_sha'] == os.environ['PRODUCER_SHA']",
+            "plan['current_producer_commit'] == os.environ['PRODUCER_SHA']",
+            "plan['mode'] == 'full'",
+            "run['event'] == 'workflow_run'",
             "run['path'] == '.github/workflows/build-metadata-v2-preview.yml'",
             "run['conclusion'] == 'failure'",
             'git merge-base --is-ancestor "$PRODUCER_SHA" "$REVIEW_COMMIT"',
@@ -28,6 +30,8 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
         ):
             self.assertIn(marker, text)
         self.assertLess(text.index('Verify retained candidate producer'), text.index('Download retained V2 candidate'))
+        self.assertLess(text.index('Download retained V2 candidate'), text.index('Verify candidate source producer'))
+        self.assertLess(text.index('Verify candidate source producer'), text.index('Import optional append-only'))
         self.assertLess(text.index('Import optional append-only'), text.index('Replay and consume'))
         self.assertLess(text.index('Run V2 contract tests'), text.index('Publish immutable'))
         whitelist = text[text.index('allowed = {'):text.index('changed = set')]
