@@ -11,6 +11,11 @@ on:
         description: Exact producer commit recorded by the candidate
         required: true
         type: string
+      semantic_review_commit:
+        description: Optional descendant commit containing append-only exact semantic explanations
+        required: false
+        default: ""
+        type: string
 
 permissions:
   actions: read
@@ -32,16 +37,36 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           ref: ${{ inputs.producer_sha }}
+          fetch-depth: 0
 
       - name: Verify producer identity
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$PRODUCER_SHA"
 
+      - name: Verify retained candidate producer and workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+        run: |
+          set -euo pipefail
+          [[ "$CANDIDATE_RUN_ID" =~ ^[0-9]+$ ]]
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${CANDIDATE_RUN_ID}" > candidate-run.json
+          python - <<'PY'
+          import json, os
+          run = json.load(open('candidate-run.json'))
+          assert run['head_sha'] == os.environ['PRODUCER_SHA'], 'Candidate producer mismatch'
+          assert run['path'] == '.github/workflows/build-metadata-v2-preview.yml', 'Wrong candidate workflow'
+          assert run['conclusion'] == 'failure', 'Only failed retained candidates may be resumed'
+          PY
+
       - name: Set up Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
+
+      - name: Install pinned producer dependencies
+        run: python -m pip install --require-hashes --requirement requirements-build.lock
 
       - name: Download retained V2 candidate
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
@@ -49,6 +74,58 @@ jobs:
           name: tcia-metadata-v2-candidate
           run-id: ${{ inputs.candidate_run_id }}
           github-token: ${{ github.token }}
+
+      - name: Import optional append-only exact semantic review
+        if: inputs.semantic_review_commit != ''
+        env:
+          REVIEW_COMMIT: ${{ inputs.semantic_review_commit }}
+        run: |
+          set -euo pipefail
+          [[ "$REVIEW_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          git fetch origin "$REVIEW_COMMIT"
+          git merge-base --is-ancestor "$PRODUCER_SHA" "$REVIEW_COMMIT"
+          git diff --name-only "$PRODUCER_SHA" "$REVIEW_COMMIT" > review-paths.txt
+          python - <<'PY'
+          from pathlib import Path
+          allowed = {
+              'references/correction-semantic-explanations-v1.json',
+              'scripts/tests/test_tcia_correction_registry.py',
+              'scripts/tests/test_tcia_release_workflow_contract.py',
+              'skill_version.json',
+              '.github/workflows/resume-metadata-v2-release.yml',
+              'references/maintainer-operations.md',
+          }
+          changed = set(Path('review-paths.txt').read_text().splitlines())
+          assert changed <= allowed, f'Review changes producer code or inputs: {sorted(changed - allowed)}'
+          PY
+          git show "$REVIEW_COMMIT:references/correction-semantic-explanations-v1.json" > reviewed-explanations.json
+          PYTHONPATH=scripts python - <<'PY'
+          import hashlib, json, os, sqlite3
+          from pathlib import Path
+          import tcia_correction_registry as registry
+          path = Path('reviewed-explanations.json')
+          old = json.load(open('references/correction-semantic-explanations-v1.json'))
+          new = json.loads(path.read_text())
+          assert set(old) == set(new) and old['schema_version'] == new['schema_version']
+          for key, values in old.items():
+              if not isinstance(values, list):
+                  assert values == new[key]
+              elif key not in {'explanations', 'explanation_batches', 'aggregate_explanation_batches'}:
+                  assert values == new[key], 'Non-semantic declarations changed'
+              else:
+                  encoded = {registry.canonical_json(item) for item in new[key]}
+                  assert all(registry.canonical_json(item) in encoded for item in values), 'Review edits or removes an existing approval'
+          with sqlite3.connect('cache/tcia_correction_registry.sqlite') as conn:
+              conn.row_factory = sqlite3.Row
+              registry.migrate_semantic_explanations(conn, path)
+              for key, value in {
+                  'semantic_review_commit': os.environ['REVIEW_COMMIT'],
+                  'semantic_review_input_sha256': hashlib.sha256(path.read_bytes()).hexdigest(),
+                  'candidate_producer_commit': os.environ['PRODUCER_SHA'],
+              }.items():
+                  conn.execute('INSERT OR REPLACE INTO registry_meta VALUES (?,?)', (key, value))
+          PY
+          python scripts/tcia_correction_registry.py validate --db cache/tcia_correction_registry.sqlite
 
       - name: Replay and consume exact semantic explanations
         run: |
@@ -90,6 +167,17 @@ jobs:
           release_date="$(python -c 'import json; print(json.load(open("release-dist/tcia_metadata_v2_bundle_manifest.json"))["generated_at_utc"][:10].replace("-", "."))')"
           echo "fingerprint=$fingerprint" >> "$GITHUB_OUTPUT"
           echo "immutable_tag=tcia-metadata-v2-${release_date}-${fingerprint:0:12}" >> "$GITHUB_OUTPUT"
+
+      - name: Run V2 contract tests on the original producer
+        run: |
+          python -m unittest \
+            scripts.tests.test_tcia_idc_participant_projection \
+            scripts.tests.test_tcia_artifact_model \
+            scripts.tests.test_tcia_v2_audit \
+            scripts.tests.test_tcia_v2_checkpoint \
+            scripts.tests.test_tcia_v2_parity \
+            scripts.tests.test_tcia_v2_staging \
+            scripts.tests.test_tcia_v2_bundle
 
       - name: Attest resumed validated V2 bundle provenance
         uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3

@@ -32,6 +32,20 @@ clinical, public non-DICOM, or Participant Inventory replacement independently
 under the moving stable tag: the component manifests and cross-component
 identity checks describe one input generation.
 
+The resume workflow accepts an optional `semantic_review_commit` after the
+retained full candidate fails its late semantic gate. It verifies the candidate
+run's producer, workflow, and failed conclusion, and permits only a descendant
+review commit whose changed paths are the exact-explanation file, its count
+test, skill manifest, this runbook, and the resume workflow. Existing approvals
+must remain byte-equivalent JSON declarations; only exact semantic declarations
+may be appended. Producer code and all other data inputs remain unchanged.
+The review commit and explanation-file SHA-256 are recorded inside the registry.
+The original producer remains the bundle's producer; the supplemental review is
+separately attributable. Replay still rejects unmatched, duplicate, or unused
+approvals, consumes matched effects once, validates the full bundle, and reruns
+the original producer's V2 contract tests before publishing. This is not a
+source-health waiver or permission to change retained payload components.
+
 ### Selective component release
 
 The scheduled source workflow always refreshes and validates the base snapshot.

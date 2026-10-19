@@ -10,6 +10,30 @@ RESUME_WORKFLOW = ROOT / ".github" / "workflows" / "resume-metadata-v2-release.y
 
 
 class ReleaseWorkflowContractTests(unittest.TestCase):
+    def test_resume_review_is_append_only_and_cannot_change_producer_inputs(self):
+        text = RESUME_WORKFLOW.read_text()
+        for marker in (
+            "run['head_sha'] == os.environ['PRODUCER_SHA']",
+            "run['path'] == '.github/workflows/build-metadata-v2-preview.yml'",
+            "run['conclusion'] == 'failure'",
+            'git merge-base --is-ancestor "$PRODUCER_SHA" "$REVIEW_COMMIT"',
+            'assert changed <= allowed',
+            'Review edits or removes an existing approval',
+            'Non-semantic declarations changed',
+            'semantic_review_input_sha256',
+            'semantic_review_commit',
+            'candidate_producer_commit',
+            '--fail-on-unexplained-high',
+            'Run V2 contract tests on the original producer',
+        ):
+            self.assertIn(marker, text)
+        self.assertLess(text.index('Verify retained candidate producer'), text.index('Download retained V2 candidate'))
+        self.assertLess(text.index('Import optional append-only'), text.index('Replay and consume'))
+        self.assertLess(text.index('Run V2 contract tests'), text.index('Publish immutable'))
+        whitelist = text[text.index('allowed = {'):text.index('changed = set')]
+        self.assertNotIn('scripts/tcia_participant_inventory.py', whitelist)
+        self.assertNotIn('references/reviewed_participant_identity_v1.json', whitelist)
+
     def test_correction_registry_is_verified_built_and_strictly_consumed(self) -> None:
         source = SOURCE_WORKFLOW.read_text(encoding="utf-8")
         downstream = WORKFLOW.read_text(encoding="utf-8")
