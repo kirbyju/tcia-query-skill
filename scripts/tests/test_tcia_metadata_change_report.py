@@ -1061,6 +1061,97 @@ class MetadataChangeReportTest(unittest.TestCase):
                 "nonsemantic_wordpress_identity_migration",
             )
 
+    def test_official_clinical_fact_identity_migration_is_nonsemantic(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            old = root / "old.sqlite"
+            new = root / "new.sqlite"
+            report = root / "report.json"
+            for path, fact_id, source_row_id in (
+                (old, "legacy-official", "legacy-row"),
+                (new, "stable-official", "stable-row"),
+            ):
+                with sqlite3.connect(path) as conn:
+                    conn.execute(
+                        """CREATE TABLE clinical_facts (
+                           fact_id TEXT PRIMARY KEY, source_row_id TEXT,
+                           source_kind TEXT, source_id TEXT, short_title TEXT,
+                           subject_id TEXT, concept TEXT, value_text TEXT,
+                           provenance_json TEXT)"""
+                    )
+                    conn.execute(
+                        """INSERT INTO clinical_facts VALUES
+                           (?, ?, 'tcia_clinical_download',
+                            'tcia-download:burdenkogbmprogression:41637',
+                            'Burdenko-GBM-Progression', 'Burdenko-GBM-001',
+                            'sex_at_birth', 'F', ?)""",
+                        (
+                            fact_id,
+                            source_row_id,
+                            json.dumps({"source_row_id": source_row_id}),
+                        ),
+                    )
+            result = subprocess.run(
+                [
+                    sys.executable, str(SCRIPT), "--clinical-new", str(new),
+                    "--clinical-old", str(old), "--json-out", str(report),
+                    "--fail-on-unexplained-high",
+                ],
+                text=True, capture_output=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = json.loads(report.read_text())
+            facts = next(
+                row for row in payload["comparisons"]
+                if row["table"] == "clinical_facts"
+            )
+            self.assertEqual(
+                (facts["added"], facts["removed"], facts["modified"]),
+                (0, 0, 0),
+            )
+            self.assertEqual(payload["semantic_changes"], [])
+            self.assertEqual(
+                payload["primary_key_migrations"][0]["gate_status"],
+                "nonsemantic_official_clinical_identity_migration",
+            )
+
+    def test_official_clinical_fact_value_change_remains_gated(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            old = root / "old.sqlite"
+            new = root / "new.sqlite"
+            report = root / "report.json"
+            for path, fact_id, source_row_id, value in (
+                (old, "legacy-official", "legacy-row", "F"),
+                (new, "stable-official", "stable-row", "M"),
+            ):
+                with sqlite3.connect(path) as conn:
+                    conn.execute(
+                        """CREATE TABLE clinical_facts (
+                           fact_id TEXT PRIMARY KEY, source_row_id TEXT,
+                           source_kind TEXT, source_id TEXT, short_title TEXT,
+                           subject_id TEXT, concept TEXT, value_text TEXT,
+                           provenance_json TEXT)"""
+                    )
+                    conn.execute(
+                        """INSERT INTO clinical_facts VALUES
+                           (?, ?, 'tcia_clinical_download', 'source', 'DATASET',
+                            'P-1', 'sex_at_birth', ?, '{}')""",
+                        (fact_id, source_row_id, value),
+                    )
+            result = subprocess.run(
+                [
+                    sys.executable, str(SCRIPT), "--clinical-new", str(new),
+                    "--clinical-old", str(old), "--json-out", str(report),
+                    "--fail-on-unexplained-high",
+                ],
+                text=True, capture_output=True,
+            )
+            self.assertEqual(result.returncode, 2)
+            payload = json.loads(report.read_text())
+            self.assertEqual(len(payload["unexplained_high_severity"]), 2)
+            self.assertEqual(payload["primary_key_migrations"], [])
+
     def test_strict_gate_requires_exact_single_use_pk_kind_and_digests(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -1230,6 +1321,68 @@ class MetadataChangeReportTest(unittest.TestCase):
             )
             self.assertEqual(degraded.returncode, 2)
             self.assertIn("correction_registry.registry_meta", degraded.stdout)
+
+    def test_exact_healthy_predecessor_link_is_nonblocking(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            old = root / "old.sqlite"
+            new = root / "new.sqlite"
+            report = root / "report.json"
+            fingerprint = "a" * 64
+            registry.build_registry(old, observed_at="2026-10-19T00:00:00Z")
+            shutil.copy2(old, new)
+            registry.link_release(
+                new,
+                release_fingerprint=fingerprint,
+                release_tag=f"tcia-metadata-v2-2026.10.19-{fingerprint[:12]}",
+                source_health="verified_current",
+                observed_at="2026-10-20T00:00:00Z",
+                change_report_sha256="b" * 64,
+            )
+            result = subprocess.run(
+                [
+                    sys.executable, str(SCRIPT),
+                    "--correction-new", str(new),
+                    "--correction-old", str(old),
+                    "--baseline-fingerprint", fingerprint,
+                    "--json-out", str(report),
+                    "--fail-on-unexplained-high",
+                ],
+                text=True, capture_output=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            payload = json.loads(report.read_text())
+            self.assertEqual(payload["unexplained_high_severity"], [])
+            self.assertEqual(len(payload["accepted_predecessor_links"]), 1)
+            accepted = payload["accepted_predecessor_links"][0]
+            self.assertEqual(accepted["release_fingerprint"], fingerprint)
+            self.assertEqual(
+                accepted["accepted_change_count"],
+                accepted["active_revision_count"] + 2,
+            )
+
+            with sqlite3.connect(new) as conn:
+                conn.execute(
+                    "UPDATE correction_releases SET source_health='degraded' "
+                    "WHERE release_fingerprint=?",
+                    (fingerprint,),
+                )
+                conn.commit()
+            rejected = subprocess.run(
+                [
+                    sys.executable, str(SCRIPT),
+                    "--correction-new", str(new),
+                    "--correction-old", str(old),
+                    "--baseline-fingerprint", fingerprint,
+                    "--json-out", str(report),
+                    "--fail-on-unexplained-high",
+                ],
+                text=True, capture_output=True,
+            )
+            self.assertEqual(rejected.returncode, 2)
+            payload = json.loads(report.read_text())
+            self.assertEqual(payload["accepted_predecessor_links"], [])
+            self.assertTrue(payload["unexplained_high_severity"])
 
     @staticmethod
     def _public(path: Path, rows: list[tuple[str, str, str]]) -> None:

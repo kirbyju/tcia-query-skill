@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -417,6 +418,130 @@ def accepted_geometry_refreshes(
     return accepted
 
 
+def accepted_predecessor_link_changes(
+    high_changes: list[dict[str, object]],
+    assets: list[tuple[str, Path, Path | None]],
+    baseline_fingerprint: str,
+) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    """Accept one exact, healthy, append-only link to the compared release."""
+    if not re.fullmatch(r"[0-9a-f]{64}", baseline_fingerprint):
+        return [], []
+    correction = next((item for item in assets if item[0] == "correction"), None)
+    if correction is None or correction[2] is None or not correction[2].exists():
+        return [], []
+    _, new_path, old_path = correction
+    relevant_tables = {
+        "correction_releases",
+        "correction_release_revisions",
+        "agent_release_evidence_health",
+    }
+    candidates = [
+        change for change in high_changes
+        if change.get("artifact") == "correction_registry"
+        and change.get("table") in relevant_tables
+        and dict(change.get("primary_key") or []).get("release_fingerprint")
+        == baseline_fingerprint
+    ]
+    release_changes = [
+        change for change in candidates
+        if change.get("table") == "correction_releases"
+    ]
+    health_changes = [
+        change for change in candidates
+        if change.get("table") == "agent_release_evidence_health"
+    ]
+    revision_changes = [
+        change for change in candidates
+        if change.get("table") == "correction_release_revisions"
+    ]
+    if (
+        len(release_changes) != 1
+        or len(health_changes) != 1
+        or not revision_changes
+        or any(change.get("change_kind") != "added" for change in candidates)
+    ):
+        return [], []
+    try:
+        with sqlite3.connect(new_path) as new, sqlite3.connect(old_path) as old:
+            if old.execute(
+                "SELECT 1 FROM correction_releases WHERE release_fingerprint=?",
+                (baseline_fingerprint,),
+            ).fetchone():
+                return [], []
+            release = new.execute(
+                """SELECT release_tag,first_seen_at,last_seen_at,
+                          decision_set_sha256,source_health,change_report_sha256
+                   FROM correction_releases WHERE release_fingerprint=?""",
+                (baseline_fingerprint,),
+            ).fetchall()
+            if len(release) != 1:
+                return [], []
+            (
+                release_tag, first_seen_at, last_seen_at, decision_set_sha256,
+                source_health, change_report_sha256,
+            ) = map(str, release[0])
+            if (
+                source_health != "verified_current"
+                or first_seen_at != last_seen_at
+                or not release_tag.endswith(f"-{baseline_fingerprint[:12]}")
+                or not re.fullmatch(r"[0-9a-f]{64}", change_report_sha256)
+            ):
+                return [], []
+            old_active = [
+                str(row[0]) for row in old.execute(
+                    """SELECT revision_id FROM agent_active_corrections
+                       WHERE source_kind!='semantic_change_explanation'
+                       ORDER BY revision_id"""
+                )
+            ]
+            new_members = [
+                str(row[0]) for row in new.execute(
+                    """SELECT revision_id FROM correction_release_revisions
+                       WHERE release_fingerprint=? ORDER BY revision_id""",
+                    (baseline_fingerprint,),
+                )
+            ]
+            expected_digest = hashlib.sha256(
+                json.dumps(
+                    old_active, ensure_ascii=False, sort_keys=True,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            ).hexdigest()
+            if new_members != old_active or decision_set_sha256 != expected_digest:
+                return [], []
+            candidate_revision_ids = sorted(
+                dict(change["primary_key"])["revision_id"]
+                for change in revision_changes
+            )
+            if candidate_revision_ids != new_members:
+                return [], []
+            health = new.execute(
+                """SELECT source_health,decision_set_sha256,
+                          active_revision_count,stale_revision_count
+                   FROM agent_release_evidence_health
+                   WHERE release_fingerprint=?""",
+                (baseline_fingerprint,),
+            ).fetchall()
+            if len(health) != 1 or tuple(health[0]) != (
+                "verified_current", decision_set_sha256, len(new_members), 0,
+            ):
+                return [], []
+    except (KeyError, TypeError, ValueError, sqlite3.Error):
+        return [], []
+    expected_count = 2 + len(revision_changes)
+    if len(candidates) != expected_count:
+        return [], []
+    return candidates, [{
+        "release_fingerprint": baseline_fingerprint,
+        "release_tag": release_tag,
+        "source_health": source_health,
+        "active_revision_count": len(revision_changes),
+        "accepted_change_count": expected_count,
+        "decision_set_sha256": decision_set_sha256,
+        "change_report_sha256": change_report_sha256,
+    }]
+
+
 def quote_identifier(value: str) -> str:
     return '"' + value.replace('"', '""') + '"'
 
@@ -686,10 +811,14 @@ def compare_keyed_rows(
             is_wordpress_identity_migration = (
                 old_scope == new_scope == "wordpress_dataset_inference"
             )
+            is_official_clinical_identity_migration = (
+                old_scope == new_scope == "tcia_clinical_download"
+            )
             is_nonsemantic_identity_migration = (
                 is_cda_identity_migration
                 or is_inherited_identity_migration
                 or is_wordpress_identity_migration
+                or is_official_clinical_identity_migration
             )
             if is_nonsemantic_identity_migration:
                 nongating_added.add(new_key)
@@ -713,7 +842,11 @@ def compare_keyed_rows(
                         else (
                             "nonsemantic_wordpress_identity_migration"
                             if is_wordpress_identity_migration
-                            else "review_required"
+                            else (
+                                "nonsemantic_official_clinical_identity_migration"
+                                if is_official_clinical_identity_migration
+                                else "review_required"
+                            )
                         )
                     )
                 ),
@@ -1156,6 +1289,7 @@ def build_report(args: argparse.Namespace) -> tuple[str, list[str], dict[str, ob
             )
     if not assets:
         raise RuntimeError("Pass at least one --<asset>-new SQLite path")
+    baseline_fingerprint = str(getattr(args, "baseline_fingerprint", "") or "")
 
     comparison_rows: list[dict[str, object]] = []
     detail_blocks: list[str] = []
@@ -1192,9 +1326,17 @@ def build_report(args: argparse.Namespace) -> tuple[str, list[str], dict[str, ob
     accepted_geometry_identities = {
         explanation_identity(item) for item in geometry_refreshes
     }
+    predecessor_changes, predecessor_links = accepted_predecessor_link_changes(
+        high_changes, assets, baseline_fingerprint
+    )
+    accepted_predecessor_identities = {
+        explanation_identity(item) for item in predecessor_changes
+    }
     consumed, duplicates, unexplained_changes, unused = match_semantic_explanations(
         high_changes, explanations, aggregate_explanations,
-        accepted_identities=accepted_geometry_identities,
+        accepted_identities=(
+            accepted_geometry_identities | accepted_predecessor_identities
+        ),
     )
     unexplained_high = [
         f"{item['artifact']}.{item['table']}: {item['change_kind']} "
@@ -1247,7 +1389,6 @@ def build_report(args: argparse.Namespace) -> tuple[str, list[str], dict[str, ob
         "| Asset | Table/view | Previous | New | Added | Removed | Modified | Severity |",
         "| --- | --- | ---: | ---: | ---: | ---: | ---: | --- |",
     ]
-    baseline_fingerprint = str(getattr(args, "baseline_fingerprint", "") or "")
     if baseline_fingerprint:
         lines[3:3] = [f"Baseline release fingerprint: `{baseline_fingerprint}`.", ""]
     for row in comparison_rows:
@@ -1302,9 +1443,9 @@ def build_report(args: argparse.Namespace) -> tuple[str, list[str], dict[str, ob
         lines.extend([
             "", "### One-to-one primary-key migrations", "",
             "Rows are paired only when their semantic non-key payload is "
-            "identical. Opaque CDA and inherited-fact identity migrations are "
-            "reported here but excluded from the semantic gate; all other "
-            "pairs remain gated.", "",
+            "identical. Opaque CDA, inherited-fact, WordPress-inference, and "
+            "official-clinical identity migrations are reported here but "
+            "excluded from the semantic gate; all other pairs remain gated.", "",
         ])
         for migration in primary_key_migrations[:args.max_items]:
             old_key = format_key(value for _, value in migration["old_primary_key"])
@@ -1341,6 +1482,15 @@ def build_report(args: argparse.Namespace) -> tuple[str, list[str], dict[str, ob
             f"{participant_refreshes:,} derived participant summary rows were "
             "accepted as verified geometry-only scope transitions."
         )
+    if predecessor_links:
+        lines.extend(["", "### Accepted predecessor release links", ""])
+        for link in predecessor_links:
+            lines.append(
+                f"- `{link['release_tag']}` / "
+                f"`{link['release_fingerprint']}`: "
+                f"{link['active_revision_count']:,} exact active revisions; "
+                f"source health `{link['source_health']}`."
+            )
     if malformed_explanations or duplicates or unused:
         lines.extend(["", "### Invalid or unused semantic explanations", ""])
         lines.extend(f"- malformed: `{item}`" for item in malformed_explanations)
@@ -1355,6 +1505,8 @@ def build_report(args: argparse.Namespace) -> tuple[str, list[str], dict[str, ob
         "unexplained_high_severity_changes": unexplained_changes,
         "semantic_changes": high_changes,
         "accepted_geometry_refreshes": geometry_refreshes,
+        "accepted_predecessor_links": predecessor_links,
+        "accepted_predecessor_link_changes": predecessor_changes,
         "primary_key_migrations": primary_key_migrations,
         "baseline_modes": baseline_modes,
         "semantic_explanations": {
@@ -1421,6 +1573,10 @@ def main() -> int:
                 explanation_identity(item)
                 for item in (summary.get("accepted_geometry_refreshes") or [])
             }
+            accepted.update(
+                explanation_identity(item)
+                for item in (summary.get("accepted_predecessor_link_changes") or [])
+            )
             consumed, duplicates, unexplained, unused = match_semantic_explanations(
                 high_changes, explanations, aggregate_explanations,
                 accepted_identities=accepted,
@@ -1438,13 +1594,16 @@ def main() -> int:
                 "unused_effect_ids": unused,
             }
             summary.setdefault("baseline_release_fingerprint", "")
+            summary.setdefault("accepted_predecessor_links", [])
+            summary.setdefault("accepted_predecessor_link_changes", [])
             semantic_payload = {
                 key: summary[key] for key in (
                     "schema_version", "baseline_release_fingerprint",
                     "comparisons", "warnings",
                     "unexplained_high_severity",
                     "unexplained_high_severity_changes", "semantic_changes",
-                    "accepted_geometry_refreshes", "primary_key_migrations",
+                    "accepted_geometry_refreshes", "accepted_predecessor_links",
+                    "accepted_predecessor_link_changes", "primary_key_migrations",
                     "baseline_modes", "semantic_explanations",
                 )
             }

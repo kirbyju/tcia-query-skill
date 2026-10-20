@@ -44,7 +44,7 @@
     "references/general-commons-graphql.md": "b2c3c931816bb3245f0b59a4dde1e3001959bd51838b1e3bc23bc1be9e6f6407",
     "references/geometry-batch-slurm.md": "e911e6e1de46cd564d918a9cc9ef8f411e39cc28c6ee1af9021fc43da23cf7d0",
     "references/idc-public-dicom.md": "2c82815b34adfc1750d97addef6920d6fb56102a79de685268094cd601b56c42",
-    "references/maintainer-operations.md": "99fed8b09f4dcbec571b91179f8aa94500e0b7ad227cb401b0ccc9e8e46cb68e",
+    "references/maintainer-operations.md": "5e6ac75df2af460aa94c8cf5a50f88e2e8fe7db6b664218b15ff09016aaeccb1",
     "references/nbia-public-dicom-fallback.md": "530de4e4e6f0cf804cf5dbdd460483aedc5b3a8f9c294736afa63ff3ee2dcdd6",
     "references/nifti.md": "2b627fc7126f5c1bddda471ace284f6b85385449905ddf0f71cd7e7de27f0ac9",
     "references/participant-identity-methods.md": "5a14360768125b50f6c3781148d5e31048bbe661efa3ca154c9fa496e1e52267",
@@ -99,7 +99,7 @@
     "scripts/tcia_idc_participant_projection.py": "f00a3f6223c37874a830db960b3682add03c2c724426550b44cf8efb352394dd",
     "scripts/tcia_local_build_cache.py": "41bd7fcecf99aec57fb6403a687e2149bac709083265d823b4ad498bf441549d",
     "scripts/tcia_manifest_series_uids.py": "2899cd84ec7f2e057e909db1ca39d43a1f89e0e29287acb4069bcc2d6d1dd9e5",
-    "scripts/tcia_metadata_change_report.py": "f59e6e369d6f2f9e2645cdcadff77c873bdcd55dd960b88fa958d14cbb723fa2",
+    "scripts/tcia_metadata_change_report.py": "fe640347200060dca019939a37517638abf1784bc2ef31b7054e9d85696ecb60",
     "scripts/tcia_nifti_metadata.py": "1416b6f1dc899c6d47b06a1def5621e4fd72724aee689462a38699478ea2b42d",
     "scripts/tcia_nifti_metadata_harvest.py": "9cdf60b2a00c0e0419dee7e5d202e1af6d73d6b700bf8225d5d9f165e3e323b0",
     "scripts/tcia_participant_inventory.py": "8ccc7ac81b9fd9e115066da84fe341c3d1af4e668b84d163f5b254343b1660e3",
@@ -132,7 +132,7 @@
     "scripts/tests/test_tcia_geometry_seed.py": "0e9e00d77ff27262534dc3d18ab5b9316b5ac875971b1fb41994cd887a60dfc9",
     "scripts/tests/test_tcia_idc_participant_projection.py": "c79da139ac03148386f98dee822272f6c6093540c6b135926f802be4d7683634",
     "scripts/tests/test_tcia_local_build_cache.py": "712bc1aeb42486e9e6dad2ad135a1b445c37dfc5bedd139f06d7b9af0bd61c2f",
-    "scripts/tests/test_tcia_metadata_change_report.py": "6a5ac91150a60c4a4fada3bd7fe125ff2fdc431dd1c25a94937be0668433dcbe",
+    "scripts/tests/test_tcia_metadata_change_report.py": "a1752425b4f9f7d16d55890f45e55cbf673936b6750e75a47812b79479624ba7",
     "scripts/tests/test_tcia_nifti_metadata_harvest.py": "50c4ad58e86cdd736893f4264731e095246d47ed4781eae32ae30136b27c2bed",
     "scripts/tests/test_tcia_pathology_aspera_inventory.py": "80fb2fd90b2fbeaff8ecc40b089e86fd64a4842e3e657850c9e0a12873e9d3a7",
     "scripts/tests/test_tcia_release_review_queue.py": "b1784c4c8f04e130736c9324c2dbc4d7f6c340be646d2d9ae7a63d6c2817e53b",
@@ -148,6 +148,6 @@
     "scripts/tests/test_tcia_v2_staging.py": "dda82d5c65b8e03b543fc80c44f30acf47a6c29861b1565104e96c568399ec25"
   },
   "schema_version": 1,
-  "skill_version": "2026.10.19.6",
-  "updated_at_utc": "2026-10-19T19:48:01.382115+00:00"
+  "skill_version": "2026.10.20.1",
+  "updated_at_utc": "2026-10-20T18:14:40.317199+00:00"
 }

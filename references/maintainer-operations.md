@@ -248,9 +248,22 @@ to run again.
 The reviewed HCC-TACE-Seg identifier migration is represented as one decision
 containing 105 exact old-to-new aliases and 210 independently matched removal
 and addition effects. The change report may pair equal-count key substitutions
-when every non-key value is byte-identical, but pairing is explanatory only: it
-does not remove either event from the semantic gate. Each exact effect must
-still match and be consumed once.
+when every semantic non-key value is identical. One-to-one fact-ID migrations
+from CDA, Collection inheritance, WordPress dataset inference, or an official
+TCIA clinical download are nonblocking because only opaque row/fact identity
+changed. A changed concept, subject, value, source, or other semantic payload
+still fails closed. Other source kinds remain gated, including the reviewed
+HCC-TACE-Seg migration; each of those exact effects must still match and be
+consumed once.
+
+Linking the immediately preceding published release into the correction
+registry is also nonblocking only when the change report proves one append-only
+link for its exact baseline fingerprint: the release tag must end in that
+fingerprint prefix, source health must be `verified_current`, the linked
+revision set must exactly equal the prior registry's active non-semantic
+decision set and digest, and the evidence-health view must report zero stale
+revisions. Modified, removed, degraded, unverified, mismatched, or unrelated
+release-history rows remain blocking.
 
 This release intentionally changes 105 previously published
 `clinical_facts.fact_id` values. Those hashes are derived, opaque row identities,
