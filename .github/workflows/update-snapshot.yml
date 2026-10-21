@@ -492,6 +492,7 @@ jobs:
           name: tcia-metadata-v2-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             dist/metadata_diagnostic_status.json
+            dist/dicom_source_scope_diagnostics.json
             dist/metadata_change_report.md
             dist/metadata_change_report.json
             dist/tcia_selective_release_plan.json

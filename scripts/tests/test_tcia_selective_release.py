@@ -147,6 +147,31 @@ class SelectiveReleaseTests(unittest.TestCase):
             )
             self.assertEqual(plan["mode"], "full")
             self.assertIn("operator requested clinical refresh", plan["reasons"])
+            self.assertEqual(plan["previous_release_fingerprint"], "a" * 64)
+            self.assertEqual(plan["previous_producer_commit"], "b" * 40)
+
+    def test_same_url_cannot_skip_mutable_manifest_refresh(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            current, previous = root / "current.sqlite", root / "previous.sqlite"
+            manifest, plan_path = root / "manifest.json", root / "plan.json"
+            for path in (current, previous):
+                build_snapshot(path)
+                with sqlite3.connect(path) as conn:
+                    conn.executescript("""
+                        CREATE TABLE agent_current_downloads
+                            (parent_source TEXT, hidden INTEGER, download_url TEXT);
+                        INSERT INTO agent_current_downloads VALUES
+                            ('analysis-results',0,'https://example.test/unchanged.tcia');
+                    """)
+            manifest.write_text(json.dumps(reusable_manifest()))
+            plan = SELECTIVE.build_plan(current, previous, manifest, root, "c" * 40, changed_paths=[])
+            self.assertEqual(plan["mode"], "full")
+            self.assertIn("external DICOM manifest content requires fresh source resolution", plan["reasons"])
+            plan.update(mode="fast", eligible=True)
+            plan_path.write_text(json.dumps(plan))
+            with self.assertRaisesRegex(RuntimeError, "external DICOM manifests"):
+                SELECTIVE.verify_plan(plan_path, current, manifest, "c" * 40, root, changed_paths=[])
 
     def test_verify_rejects_tampered_changed_paths(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

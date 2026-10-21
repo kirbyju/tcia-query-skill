@@ -487,7 +487,13 @@ def accepted_predecessor_link_changes(
                 source_health != "verified_current"
                 or first_seen_at != last_seen_at
                 or not release_tag.endswith(f"-{baseline_fingerprint[:12]}")
-                or not re.fullmatch(r"[0-9a-f]{64}", change_report_sha256)
+                # link-release permits an absent report hash, and the source
+                # workflow links verified immutable predecessors without one.
+                # A supplied hash must still be well formed; release identity
+                # remains bound to the baseline and exact prior decision set.
+                or (change_report_sha256 != "" and not re.fullmatch(
+                    r"[0-9a-f]{64}", change_report_sha256
+                ))
             ):
                 return [], []
             old_active = [

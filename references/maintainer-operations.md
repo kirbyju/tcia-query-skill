@@ -265,6 +265,12 @@ decision set and digest, and the evidence-health view must report zero stale
 revisions. Modified, removed, degraded, unverified, mismatched, or unrelated
 release-history rows remain blocking.
 
+The predecessor's `change_report_sha256` is optional, matching `link-release`
+and the scheduled source producer. An absent hash does not bypass the baseline
+fingerprint, exact decision-set membership/digest, tag, or health checks. A
+supplied hash must be a valid SHA-256 value. Published historical bundles do
+not necessarily include a semantic report asset; do not invent a report hash.
+
 This release intentionally changes 105 previously published
 `clinical_facts.fact_id` values. Those hashes are derived, opaque row identities,
 not a stable public identifier contract. The complete evidence-bound old-to-new
@@ -272,6 +278,48 @@ mapping is published only in the `audit_support` correction registry decision;
 `research_detail` remains unchanged and does not include it. Consumers that
 persisted these fact IDs must install `audit_support` for this release and apply
 that exact mapping. MCP and REST do not promise an alias lookup for fact IDs.
+
+## DICOM source relationships during viewer-link migration
+
+Analysis Result clinical inheritance resolves each public TCIA-hosted `.tcia`
+download manifest against the pinned IDC series index. Both NBIA search links
+and IDC dataset-filter/shared-cart links use the same manifest selection;
+viewer URL strings and cart names do not establish patient identity. The
+crosswalk records the WordPress download ID, original manifest SHA-256,
+canonical series-set SHA-256, IDC data/package version, source Collection, and
+the patients belonging to that Collection's selected series. Source Collections
+must map uniquely to visible WordPress Collection identities. Inheritance is
+restricted to each source's resolved patients, including multi-Collection
+downloads; bare PatientIDs never authorize a join across Collections. If the
+pinned IDC index lacks a migrated download's series, the resolver requests
+public TCIA NBIA metadata for those exact UIDs in bounded batches. Its mapping
+hash binds only UID, Collection, and PatientID; raw NBIA response hashes are
+retained in component audit metadata. This records index lag without claiming
+that the series are currently available through IDC. Conflicting IDC mappings
+cannot be overwritten by this fallback.
+
+An incomplete, ambiguous, unavailable, or unsupported manifest for an
+IDC-routed DICOM download blocks the source build. A target PatientID that
+would collapse multiple source-Collection namespaces also blocks the build.
+`dicom_source_scope_diagnostics.json` records affected download IDs and coverage
+without patient identifiers or source URLs, and is uploaded on workflow
+failure. Legacy NBIA downloads lacking complete series metadata coverage retain their
+existing explicit WordPress relationship path and appear in these diagnostics;
+they do not acquire a partial manifest-derived relationship. Successful scope
+diagnostics are included in the clinical component metadata. Clinical source
+signatures bind the new manifest-backed relationship evidence, so a changed
+manifest rebuilds inherited facts even when a shared-cart URL is unchanged.
+Offline clinical builds cannot silently bypass unresolved IDC-routed downloads.
+
+The selective planner also forces a full rebuild when visible Analysis Result
+DICOM manifests exist. An unchanged WordPress URL does not prove unchanged
+external manifest bytes. Fast carry-forward stays disabled for these snapshots
+until the planner can verify the external content hashes before routing. Forced
+full plans retain the verified prior release fingerprint and producer commit.
+
+Changing provenance or cohort coverage still runs through the ordinary exact
+semantic gate. A passing fixture test does not authorize changed release rows;
+review the fresh candidate and its source evidence before publication.
 
 ## Raw Hidden-State Investigation
 

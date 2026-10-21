@@ -7741,10 +7741,43 @@ def inherit_analysis_result_clinical_facts(
     conn: sqlite3.Connection,
     snapshot_db: Path,
     reviewed_participants_csv: Path | None = REVIEWED_ANALYSIS_RESULT_PARTICIPANTS_CSV,
+    manifest_scope: dict[str, Any] | None = None,
 ) -> dict[str, int]:
     """Inherit source-Collection facts after relationship and ID validation."""
     conn.execute("DELETE FROM clinical_dataset_relationships")
     relationships = wordpress_analysis_result_relationships(snapshot_db)
+    manifest_subjects: dict[str, list[str]] = {}
+    if manifest_scope is not None:
+        if manifest_scope.get("blocked"):
+            raise RuntimeError("IDC-routed manifest scope is incomplete; clinical inheritance blocked")
+        scopes = manifest_scope.get("relationships", [])
+        targets = {scope["target_short_title"] for scope in scopes}
+        # Exact series evidence replaces broad URL/text evidence for this target.
+        relationships = [r for r in relationships if r["target_short_title"] not in targets]
+        with sqlite3.connect(snapshot_db) as snapshot:
+            snapshot.row_factory = sqlite3.Row
+            datasets = {
+                row["short_title"]: dict(row) for row in snapshot.execute(
+                    "SELECT short_title,title,link FROM agent_datasets WHERE hidden=0"
+                )
+            }
+        for scope in scopes:
+            target, source = scope["target_short_title"], scope["source_short_title"]
+            relationship_id = stable_id(target, source)
+            manifest_subjects[relationship_id] = scope["participant_ids"]
+            relationships.append({
+                "relationship_id": relationship_id,
+                "target_short_title": target, "target_title": datasets[target]["title"],
+                "target_url": datasets[target]["link"],
+                "source_short_title": source, "source_title": datasets[source]["title"],
+                "source_url": datasets[source]["link"],
+                "relationship_source": "tcia_manifest_series_crosswalk",
+                "relationship_evidence": json_dumps({
+                    "policy_version": manifest_scope["policy_version"],
+                    "idc_version": manifest_scope["idc_version"],
+                    "downloads": scope["downloads"],
+                }),
+            })
     reviewed_participants = reviewed_analysis_result_participant_ids(
         reviewed_participants_csv
     )
@@ -7800,6 +7833,14 @@ def inherit_analysis_result_clinical_facts(
                 existing[0] if existing else participant_id,
                 True,
             )
+        if relationship["relationship_id"] in manifest_subjects:
+            # Collection namespaces are kept separate even when PatientIDs
+            # collide. Only patients resolved for this source may inherit.
+            target_subjects = {
+                normalize_subject(patient_id): (patient_id, True)
+                for patient_id in manifest_subjects[relationship["relationship_id"]]
+            }
+            reviewed_target_subjects = {}
         relationship_provenance = dict(relationship)
         if reviewed_target_subjects:
             totals["relationships_using_reviewed_participants"] += 1
@@ -8082,12 +8123,41 @@ def build(args: argparse.Namespace) -> None:
     conn = init_db(out, replace=args.replace)
     allowed_short_titles = visible_tcia_short_titles(snapshot_db)
     previous_db = Path(args.previous_db) if args.previous_db else None
+    from tcia_dicom_source_scope import download_candidates, resolve_scopes, diagnostics_only, fetch_nbia_series
+    scope_candidates, _ = download_candidates(snapshot_db)
+    idc_client = None
+    manifest_scope = None
+    if scope_candidates:
+        if args.no_fetch_idc_clinical or args.no_fetch_official:
+            if any(row["idc_routed"] for row in scope_candidates):
+                raise RuntimeError("IDC-routed DICOM manifests require live series-scope resolution")
+        else:
+            from idc_index import IDCClient
+            idc_client = IDCClient()
+            manifest_scope = resolve_scopes(
+                snapshot_db, index_frame=idc_client.index,
+                idc_version=get_idc_version(idc_client),
+                fetch_manifest=lambda url: fetch_url(
+                    url, timeout=args.timeout, max_bytes=args.max_artifact_bytes,
+                ),
+                fetch_missing_series=lambda uids: fetch_nbia_series(
+                    uids, timeout=args.timeout, max_bytes=args.max_artifact_bytes,
+                ),
+            )
+            scope_diagnostics = diagnostics_only(manifest_scope)
+            out.with_name("dicom_source_scope_diagnostics.json").write_text(
+                json.dumps(scope_diagnostics, indent=2, sort_keys=True) + "\n"
+            )
+            if manifest_scope["blocked"]:
+                raise RuntimeError("IDC-routed manifest scope is unresolved; see dicom_source_scope_diagnostics.json")
+            insert_meta(conn, "dicom_source_scope", scope_diagnostics)
     idc_result = ingest_idc_clinical(
         conn,
         allowed_short_titles=allowed_short_titles,
         previous_db=previous_db,
         refresh=args.refresh_idc_clinical,
         no_fetch=args.no_fetch_idc_clinical,
+        client=idc_client,
         timeout=args.timeout,
         max_bytes=args.max_artifact_bytes,
     )
@@ -8367,7 +8437,7 @@ def build(args: argparse.Namespace) -> None:
     materialize_clinical_qc(conn)
     materialize_subjects(conn)
     inheritance_result = inherit_analysis_result_clinical_facts(
-        conn, snapshot_db
+        conn, snapshot_db, manifest_scope=manifest_scope
     )
     qc_result = materialize_clinical_qc(conn)
     materialize_subjects(conn)
@@ -8436,6 +8506,11 @@ def build(args: argparse.Namespace) -> None:
                     source_fingerprints,
                     download_fingerprints,
                     inference_fingerprints,
+                    ({
+                        "policy_version": manifest_scope["policy_version"],
+                        "idc_version": manifest_scope["idc_version"],
+                        "relationships": manifest_scope["relationships"],
+                    } if manifest_scope is not None else None),
                 ]
             )
         ),

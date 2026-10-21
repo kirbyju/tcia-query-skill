@@ -1322,6 +1322,50 @@ class MetadataChangeReportTest(unittest.TestCase):
             self.assertEqual(degraded.returncode, 2)
             self.assertIn("correction_registry.registry_meta", degraded.stdout)
 
+    def test_workflow_predecessor_without_optional_report_hash_is_nonblocking(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            old, new = root / "old.sqlite", root / "new.sqlite"
+            report = root / "report.json"
+            fingerprint = "a" * 64
+            registry.build_registry(old, observed_at="2026-10-19T00:00:00Z")
+            shutil.copy2(old, new)
+            # Match the scheduled source workflow: the report hash is omitted.
+            registry.link_release(
+                new, release_fingerprint=fingerprint,
+                release_tag=f"tcia-metadata-v2-2026.10.19-{fingerprint[:12]}",
+                source_health="verified_current",
+                observed_at="2026-10-20T00:00:00Z",
+            )
+            command = [
+                sys.executable, str(SCRIPT), "--correction-new", str(new),
+                "--correction-old", str(old), "--baseline-fingerprint", fingerprint,
+                "--json-out", str(report), "--fail-on-unexplained-high",
+            ]
+            result = subprocess.run(command, text=True, capture_output=True)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            payload = json.loads(report.read_text())
+            self.assertEqual(payload["unexplained_high_severity"], [])
+            self.assertEqual(payload["accepted_predecessor_links"][0]["change_report_sha256"], "")
+
+            pristine = new.read_bytes()
+            for sql in (
+                "UPDATE correction_releases SET change_report_sha256='malformed'",
+                "UPDATE correction_releases SET source_health='unverified'",
+                "UPDATE correction_releases SET decision_set_sha256='wrong'",
+                "UPDATE correction_releases SET release_tag='unrelated-release'",
+                "DELETE FROM correction_release_revisions WHERE revision_id="
+                "(SELECT revision_id FROM correction_release_revisions LIMIT 1)",
+                "UPDATE correction_releases SET last_seen_at='2026-10-21T00:00:00Z'",
+            ):
+                with self.subTest(mutation=sql):
+                    new.write_bytes(pristine)
+                    with sqlite3.connect(new) as conn:
+                        conn.execute(sql)
+                    rejected = subprocess.run(command, text=True, capture_output=True)
+                    self.assertEqual(rejected.returncode, 2, rejected.stdout + rejected.stderr)
+                    self.assertEqual(json.loads(report.read_text())["accepted_predecessor_links"], [])
+
     def test_exact_healthy_predecessor_link_is_nonblocking(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

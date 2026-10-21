@@ -191,6 +191,18 @@ def git_changed_paths(repository_root: Path, previous_commit: str, current_commi
     return sorted({line.strip() for line in result.stdout.splitlines() if line.strip()})
 
 
+def requires_manifest_refresh(snapshot_db: Path) -> bool:
+    """Unversioned external manifest bytes are not proved by snapshot parity."""
+    with closing(sqlite3.connect(f"file:{snapshot_db}?mode=ro", uri=True)) as conn:
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(agent_current_downloads)")}
+        if not {"parent_source", "hidden", "download_url"}.issubset(columns):
+            return False
+        return conn.execute(
+            "SELECT 1 FROM agent_current_downloads WHERE parent_source='analysis-results' "
+            "AND hidden=0 AND lower(download_url) LIKE '%.tcia%' LIMIT 1"
+        ).fetchone() is not None
+
+
 def build_plan(
     current_db: Path,
     previous_db: Path | None,
@@ -213,7 +225,7 @@ def build_plan(
         reasons.append("verified previous bundle manifest is unavailable")
 
     manifest: dict[str, Any] = {}
-    if not reasons:
+    if previous_manifest and previous_manifest.is_file():
         manifest = json.loads(previous_manifest.read_text(encoding="utf-8"))
         previous_release_fingerprint = str(manifest.get("release_fingerprint") or "")
         previous_commit = str((manifest.get("producer") or {}).get("commit") or "")
@@ -222,6 +234,9 @@ def build_plan(
         if len(previous_commit) != 40:
             reasons.append("previous bundle manifest has no exact producer commit")
         reasons.extend(prior_health_reuse_errors(manifest))
+
+    if requires_manifest_refresh(current_db):
+        reasons.append("external DICOM manifest content requires fresh source resolution")
 
     if previous_db and previous_db.is_file():
         previous_fingerprint = downstream_snapshot_fingerprint(previous_db)
@@ -310,6 +325,8 @@ def verify_plan(
     if actual_disqualifying != plan.get("disqualifying_paths"):
         errors.append("selective release disqualifying paths mismatch")
     if plan.get("mode") == FAST_MODE:
+        if requires_manifest_refresh(current_db):
+            errors.append("fast plan cannot prove unchanged external DICOM manifests")
         projection = plan.get("downstream_snapshot_fingerprint") or {}
         if projection.get("current") != projection.get("previous"):
             errors.append("fast plan has unequal downstream snapshot fingerprints")
