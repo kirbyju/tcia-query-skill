@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import tcia_participant_inventory as inventory
+from tcia_participant_groups import build_groups, validate_groups
 
 
 class ManifestParticipantLinksTests(unittest.TestCase):
@@ -104,6 +105,10 @@ class ManifestParticipantLinksTests(unittest.TestCase):
         self.assertEqual(c.execute("SELECT cross_dataset_identity_status FROM participants "
                                   "WHERE short_title='Derived' AND display_participant_id='002'").fetchone()[0],
                          "not_asserted")
+        groups = build_groups(c, {identity: "Human" for identity in types.values()})
+        self.assertEqual(groups["participant_groups"], 3)
+        self.assertEqual(groups["rejected_group_links"], 0)
+        self.assertEqual(validate_groups(c), [])
 
 
 if __name__ == "__main__":

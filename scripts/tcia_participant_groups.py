@@ -8,6 +8,7 @@ from pathlib import Path
 import sqlite3
 
 SOURCE_METHODS = {
+    'manifest_series_patient_crosswalk',
     'idc_source_collection_and_exact_identifier',
     'official_acrin_ispy2_clinical_crosswalk',
     'official_dataset_relationship_and_exact_identifier',
