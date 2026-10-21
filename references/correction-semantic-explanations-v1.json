@@ -641,6 +641,140 @@
         "no change to controlled-access requirements",
         "no unrelated change or different row digest accepted"
       ]
+    },
+    {
+      "batch_id": "wordpress-pathology-download-labels-2026-10-21",
+      "reviewer": "Codex, under requester-authorized release review",
+      "approved_at": "2026-10-21T21:41:37Z",
+      "rationale": "Four pathology download-summary rows follow exact current official WordPress titles and structured categories. Two TIFF summaries now use the published Whole Slide Image type, consistent with the documented 20x scanned and reconstructed whole-mount sections; PROSTATE-MRI follows the explicit Image Annotations category. Independent field comparison found only asset_name, media_kind, or object_role changes. Every route, count, size, identity, and file-grain record is unchanged.",
+      "evidence_id": "github-actions:39671942995:metadata_change_report_final",
+      "evidence": "Retained producer 4cd8d4e94066b9add951123cd8ef19b41ec060da; prior immutable bundle ; exact actual report SHA256 a429c3e20cfd06a3f4bb0aa0d0e07d4af4486d4c84b769771657431cfa22e1a5; complete actual candidate review receipt SHA256 4fe96f16e8f5424bf84400025992eb9cfccf6b8e4f8c31cec303bce3c1809e11. All 9369 participant changes exactly match the independently rebuilt and source-verified prediction, receipt SHA256 928eb6b4fe4a1b0515ceb5f78b2b085c453e68280f4153c2f9b1a4117b935f89. Eight candidate databases pass hashes, SQLite integrity, foreign keys, required objects, profiles, source health, and a negative wrong-component probe. All 501 NLST links and groupings are retained; no source-link IDs are removed.",
+      "artifact": "public_non_dicom",
+      "entity_table": "public_non_dicom_assets",
+      "change_count": 4,
+      "change_kind_counts": {
+        "modified": 4
+      },
+      "changes_sha256": "ac571921c88b23a7a8fc6f80449ebaa56a163926549a7ad155bf7294d5d56809",
+      "negative_scope": [
+        "no changed or removed retained participant identities",
+        "no removed source links or unsupported cross-dataset merges",
+        "no clinical availability interpreted as physical imaging inventory growth",
+        "no download-route, access-policy, physical-file, count, or byte changes approved",
+        "no unrelated row or different before/after digest accepted"
+      ]
+    },
+    {
+      "batch_id": "manifest-series-inventory-participants-2026-10-21",
+      "reviewer": "Codex, under requester-authorized release review",
+      "approved_at": "2026-10-21T21:41:37Z",
+      "rationale": "Exactly 258 ACRIN 6685-Tumor-Annotations participants are added from manifest-selected patient identities supported by inherited source clinical facts and an existing source Collection participant. Every retained participant row is identical to the immutable baseline; no participant is removed.",
+      "evidence_id": "github-actions:39671942995:metadata_change_report_final",
+      "evidence": "Retained producer 4cd8d4e94066b9add951123cd8ef19b41ec060da; prior immutable bundle ; exact actual report SHA256 a429c3e20cfd06a3f4bb0aa0d0e07d4af4486d4c84b769771657431cfa22e1a5; complete actual candidate review receipt SHA256 4fe96f16e8f5424bf84400025992eb9cfccf6b8e4f8c31cec303bce3c1809e11. All 9369 participant changes exactly match the independently rebuilt and source-verified prediction, receipt SHA256 928eb6b4fe4a1b0515ceb5f78b2b085c453e68280f4153c2f9b1a4117b935f89. Eight candidate databases pass hashes, SQLite integrity, foreign keys, required objects, profiles, source health, and a negative wrong-component probe. All 501 NLST links and groupings are retained; no source-link IDs are removed.",
+      "artifact": "participant_inventory",
+      "entity_table": "participants",
+      "change_count": 258,
+      "change_kind_counts": {
+        "added": 258
+      },
+      "changes_sha256": "4b9ba5879d3ac705518489ddc3743338e22345434b8573acb42d25978d47927a",
+      "negative_scope": [
+        "no changed or removed retained participant identities",
+        "no removed source links or unsupported cross-dataset merges",
+        "no clinical availability interpreted as physical imaging inventory growth",
+        "no download-route, access-policy, physical-file, count, or byte changes approved",
+        "no unrelated row or different before/after digest accepted"
+      ]
+    },
+    {
+      "batch_id": "manifest-series-inventory-participant-identifiers-2026-10-21",
+      "reviewer": "Codex, under requester-authorized release review",
+      "approved_at": "2026-10-21T21:41:37Z",
+      "rationale": "Exactly 3546 Analysis Result clinical identifiers match the independently rebuilt clinical-only projection. Each belongs to one manifest-selected, dataset-qualified patient; all existing identifiers remain unchanged and no bare-ID cross-dataset join is introduced.",
+      "evidence_id": "github-actions:39671942995:metadata_change_report_final",
+      "evidence": "Retained producer 4cd8d4e94066b9add951123cd8ef19b41ec060da; prior immutable bundle ; exact actual report SHA256 a429c3e20cfd06a3f4bb0aa0d0e07d4af4486d4c84b769771657431cfa22e1a5; complete actual candidate review receipt SHA256 4fe96f16e8f5424bf84400025992eb9cfccf6b8e4f8c31cec303bce3c1809e11. All 9369 participant changes exactly match the independently rebuilt and source-verified prediction, receipt SHA256 928eb6b4fe4a1b0515ceb5f78b2b085c453e68280f4153c2f9b1a4117b935f89. Eight candidate databases pass hashes, SQLite integrity, foreign keys, required objects, profiles, source health, and a negative wrong-component probe. All 501 NLST links and groupings are retained; no source-link IDs are removed.",
+      "artifact": "participant_inventory",
+      "entity_table": "participant_identifiers",
+      "change_count": 3546,
+      "change_kind_counts": {
+        "added": 3546
+      },
+      "changes_sha256": "403701eb13afc3237e6a5b9d7321375ef6f883d11de60786726c31f8a63e076d",
+      "negative_scope": [
+        "no changed or removed retained participant identities",
+        "no removed source links or unsupported cross-dataset merges",
+        "no clinical availability interpreted as physical imaging inventory growth",
+        "no download-route, access-policy, physical-file, count, or byte changes approved",
+        "no unrelated row or different before/after digest accepted"
+      ]
+    },
+    {
+      "batch_id": "manifest-series-inventory-participant-assets-2026-10-21",
+      "reviewer": "Codex, under requester-authorized release review",
+      "approved_at": "2026-10-21T21:41:37Z",
+      "rationale": "Exactly 3546 clinical_metadata metadata_only availability records match the independently rebuilt clinical projection. Every row has null study, series, file, and byte counts and no file-level metadata. No imaging payload or physical inventory growth is asserted.",
+      "evidence_id": "github-actions:39671942995:metadata_change_report_final",
+      "evidence": "Retained producer 4cd8d4e94066b9add951123cd8ef19b41ec060da; prior immutable bundle ; exact actual report SHA256 a429c3e20cfd06a3f4bb0aa0d0e07d4af4486d4c84b769771657431cfa22e1a5; complete actual candidate review receipt SHA256 4fe96f16e8f5424bf84400025992eb9cfccf6b8e4f8c31cec303bce3c1809e11. All 9369 participant changes exactly match the independently rebuilt and source-verified prediction, receipt SHA256 928eb6b4fe4a1b0515ceb5f78b2b085c453e68280f4153c2f9b1a4117b935f89. Eight candidate databases pass hashes, SQLite integrity, foreign keys, required objects, profiles, source health, and a negative wrong-component probe. All 501 NLST links and groupings are retained; no source-link IDs are removed.",
+      "artifact": "participant_inventory",
+      "entity_table": "participant_assets",
+      "change_count": 3546,
+      "change_kind_counts": {
+        "added": 3546
+      },
+      "changes_sha256": "181bc078f99c1afab8671915ad6b66a99fdcff0d1c1ce52dbcffa850d78a59af",
+      "negative_scope": [
+        "no changed or removed retained participant identities",
+        "no removed source links or unsupported cross-dataset merges",
+        "no clinical availability interpreted as physical imaging inventory growth",
+        "no download-route, access-policy, physical-file, count, or byte changes approved",
+        "no unrelated row or different before/after digest accepted"
+      ]
+    },
+    {
+      "batch_id": "manifest-series-inventory-participant-identity-evidence-2026-10-21",
+      "reviewer": "Codex, under requester-authorized release review",
+      "approved_at": "2026-10-21T21:41:37Z",
+      "rationale": "Exactly 501 prior NLST relationship observations are replaced by 501 manifest-series patient-crosswalk observations for the same target/source patient pairs. The other 258 added observations support the newly inventoried ACRIN 6685 annotation participants. The changed evidence IDs are independently reproduced from the unchanged link identity and the explicit resolution method; no source link or participant identity is retired.",
+      "evidence_id": "github-actions:39671942995:metadata_change_report_final",
+      "evidence": "Retained producer 4cd8d4e94066b9add951123cd8ef19b41ec060da; prior immutable bundle ; exact actual report SHA256 a429c3e20cfd06a3f4bb0aa0d0e07d4af4486d4c84b769771657431cfa22e1a5; complete actual candidate review receipt SHA256 4fe96f16e8f5424bf84400025992eb9cfccf6b8e4f8c31cec303bce3c1809e11. All 9369 participant changes exactly match the independently rebuilt and source-verified prediction, receipt SHA256 928eb6b4fe4a1b0515ceb5f78b2b085c453e68280f4153c2f9b1a4117b935f89. Eight candidate databases pass hashes, SQLite integrity, foreign keys, required objects, profiles, source health, and a negative wrong-component probe. All 501 NLST links and groupings are retained; no source-link IDs are removed.",
+      "artifact": "participant_inventory",
+      "entity_table": "participant_identity_evidence",
+      "change_count": 1260,
+      "change_kind_counts": {
+        "added": 759,
+        "removed": 501
+      },
+      "changes_sha256": "351013a93e97562dde1b577ba2519962b620a860c4465f75f03a4f8ff7987abf",
+      "negative_scope": [
+        "no changed or removed retained participant identities",
+        "no removed source links or unsupported cross-dataset merges",
+        "no clinical availability interpreted as physical imaging inventory growth",
+        "no download-route, access-policy, physical-file, count, or byte changes approved",
+        "no unrelated row or different before/after digest accepted"
+      ]
+    },
+    {
+      "batch_id": "manifest-series-inventory-participant-source-links-2026-10-21",
+      "reviewer": "Codex, under requester-authorized release review",
+      "approved_at": "2026-10-21T21:41:37Z",
+      "rationale": "Exactly 501 existing LIDC-annot-NLST501 links retain their target key, NLST source key, source PatientID, linked status, and high confidence; only the resolution method and attributable evidence change to the verified manifest-series patient crosswalk. Exactly 258 ACRIN 6685 annotation links are added from the same verified patient crosswalk. All prior source-link IDs remain present, endpoint foreign keys pass, and the curated grouping review rejects zero links.",
+      "evidence_id": "github-actions:39671942995:metadata_change_report_final",
+      "evidence": "Retained producer 4cd8d4e94066b9add951123cd8ef19b41ec060da; prior immutable bundle ; exact actual report SHA256 a429c3e20cfd06a3f4bb0aa0d0e07d4af4486d4c84b769771657431cfa22e1a5; complete actual candidate review receipt SHA256 4fe96f16e8f5424bf84400025992eb9cfccf6b8e4f8c31cec303bce3c1809e11. All 9369 participant changes exactly match the independently rebuilt and source-verified prediction, receipt SHA256 928eb6b4fe4a1b0515ceb5f78b2b085c453e68280f4153c2f9b1a4117b935f89. Eight candidate databases pass hashes, SQLite integrity, foreign keys, required objects, profiles, source health, and a negative wrong-component probe. All 501 NLST links and groupings are retained; no source-link IDs are removed.",
+      "artifact": "participant_inventory",
+      "entity_table": "participant_source_links",
+      "change_count": 759,
+      "change_kind_counts": {
+        "modified": 501,
+        "added": 258
+      },
+      "changes_sha256": "ba282d30e6a63d9ccee4e69cc6fdcfa79a93bb1cd4fab5eea06d7b17e24e4f77",
+      "negative_scope": [
+        "no changed or removed retained participant identities",
+        "no removed source links or unsupported cross-dataset merges",
+        "no clinical availability interpreted as physical imaging inventory growth",
+        "no download-route, access-policy, physical-file, count, or byte changes approved",
+        "no unrelated row or different before/after digest accepted"
+      ]
     }
   ],
   "explanation_batches": [

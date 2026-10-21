@@ -35,6 +35,16 @@ a source error and remains blocked by `--require-complete-sources`.
 
 ### Local resumable verification
 
+The October 21 manifest-scope candidate from producer `4cd8d4e` was reviewed
+against retained run `39671942995`: all 9,369 participant row hashes exactly
+match an independently rebuilt, source-verified prediction. Four additional
+pathology download-summary changes match published WordPress titles and
+structured categories; file-grain rows, counts, sizes, and routes are unchanged.
+All 501 NLST source links and their curated group assignments remain intact.
+The six appended exact batches bind this finite review; the original producer
+and retained payloads remain fixed during resume. Complete review receipt SHA-256:
+`4fe96f16e8f5424bf84400025992eb9cfccf6b8e4f8c31cec303bce3c1809e11`.
+
 The stable public release is one atomic, fingerprinted bundle. Do not publish a
 clinical, public non-DICOM, or Participant Inventory replacement independently
 under the moving stable tag: the component manifests and cross-component
