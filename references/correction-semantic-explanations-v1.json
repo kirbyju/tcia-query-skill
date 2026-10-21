@@ -548,6 +548,99 @@
       "change_kind_counts": {"added": 1002, "removed": 501},
       "changes_sha256": "a62c96fa0d69c3bfcaec8d88def8e2439b952f0c60066ec9547dd9eb786e80c1",
       "negative_scope": ["no approval for a different change count or digest", "no participant addition, removal, or cross-dataset reassignment", "no change to clinical or DICOM assets", "no participant asset outside LIDC-annot-NLST501"]
+    },
+    {
+      "batch_id": "manifest-series-scope-clinical-facts-2026-10-21",
+      "reviewer": "Codex, under requester-authorized release review",
+      "approved_at": "2026-10-21T19:17:52Z",
+      "rationale": "Exact manifest-selected inheritance adds 14081 source-supported facts across nine Analysis Results and refreshes only relationship provenance on the same 2809 LIDC-annot-NLST501 facts. Independent immutable-baseline replay found no retained fact value changes and no fact removals; every inherited value and source-scoped participant matches the manifest/series crosswalk and source clinical summary.",
+      "evidence_id": "github-actions:39655839796:metadata_change_report",
+      "evidence": "Exact producer d51362474ab379ed4d7c306b8e839e460a8c9734; prior bundle 2eadf2ef8fb38e61fa967adcf042c7eb4395a75a3e5b1df4dbdc4a995be13c1f; source report SHA256 892d4ab6db6fe4cbee282ec8b6019956ccad6cee32fd07d316600940c057747e; independent complete row-review receipt SHA256 3897d5c5ee4467327ab00c8ce0386907b21779ea8ec8ca1708537f35550d9b8e. All 20442 flagged rows were reproduced exactly; clinical source-value audit had zero mismatches.",
+      "artifact": "clinical",
+      "entity_table": "clinical_facts",
+      "change_count": 16890,
+      "change_kind_counts": {
+        "added": 14081,
+        "modified": 2809
+      },
+      "changes_sha256": "f80969b783998c44249c7d1cab93c7cd864783cf83deb0fb346d13ef1b0a86d4",
+      "negative_scope": [
+        "no clinical fact or subject removals",
+        "no changed retained clinical fact values",
+        "no bare-ID joins across source Collections",
+        "no authorization for unavailable or ambiguous series mappings",
+        "no change to controlled-access requirements",
+        "no unrelated change or different row digest accepted"
+      ]
+    },
+    {
+      "batch_id": "manifest-series-scope-clinical-subjects-2026-10-21",
+      "reviewer": "Codex, under requester-authorized release review",
+      "approved_at": "2026-10-21T19:17:52Z",
+      "rationale": "Exactly 3546 Analysis Result clinical subjects are added from independently verified manifest-selected series and their source-scoped clinical values. No existing clinical subject is modified or removed, and no participant namespace is merged across Collections.",
+      "evidence_id": "github-actions:39655839796:metadata_change_report",
+      "evidence": "Exact producer d51362474ab379ed4d7c306b8e839e460a8c9734; prior bundle 2eadf2ef8fb38e61fa967adcf042c7eb4395a75a3e5b1df4dbdc4a995be13c1f; source report SHA256 892d4ab6db6fe4cbee282ec8b6019956ccad6cee32fd07d316600940c057747e; independent complete row-review receipt SHA256 3897d5c5ee4467327ab00c8ce0386907b21779ea8ec8ca1708537f35550d9b8e. All 20442 flagged rows were reproduced exactly; clinical source-value audit had zero mismatches.",
+      "artifact": "clinical",
+      "entity_table": "clinical_subjects",
+      "change_count": 3546,
+      "change_kind_counts": {
+        "added": 3546
+      },
+      "changes_sha256": "ce9c3201455657cb75b72b818cfc07898f065b396989f726a7e4b4b5cc95b48d",
+      "negative_scope": [
+        "no clinical fact or subject removals",
+        "no changed retained clinical fact values",
+        "no bare-ID joins across source Collections",
+        "no authorization for unavailable or ambiguous series mappings",
+        "no change to controlled-access requirements",
+        "no unrelated change or different row digest accepted"
+      ]
+    },
+    {
+      "batch_id": "manifest-series-scope-correction-decisions-2026-10-21",
+      "reviewer": "Codex, under requester-authorized release review",
+      "approved_at": "2026-10-21T19:17:52Z",
+      "rationale": "Three historical clinical derivation revisions record the updated clinical module fingerprint for CT COLONOGRAPHY, EA1141, and HNSCC. Independent registry replay reproduces all row hashes; AST comparison with the prior producer proves all three derivation function bodies unchanged. The active durable decision-set digest remains unchanged.",
+      "evidence_id": "github-actions:39655839796:metadata_change_report",
+      "evidence": "Exact producer d51362474ab379ed4d7c306b8e839e460a8c9734; prior bundle 2eadf2ef8fb38e61fa967adcf042c7eb4395a75a3e5b1df4dbdc4a995be13c1f; source report SHA256 892d4ab6db6fe4cbee282ec8b6019956ccad6cee32fd07d316600940c057747e; independent complete row-review receipt SHA256 3897d5c5ee4467327ab00c8ce0386907b21779ea8ec8ca1708537f35550d9b8e. All 20442 flagged rows were reproduced exactly; clinical source-value audit had zero mismatches.",
+      "artifact": "correction_registry",
+      "entity_table": "correction_decisions",
+      "change_count": 3,
+      "change_kind_counts": {
+        "added": 3
+      },
+      "changes_sha256": "14ad22363b84aa0d31cef80ea842f5c364549c909f54d68ad28b6c0011052259",
+      "negative_scope": [
+        "no clinical fact or subject removals",
+        "no changed retained clinical fact values",
+        "no bare-ID joins across source Collections",
+        "no authorization for unavailable or ambiguous series mappings",
+        "no change to controlled-access requirements",
+        "no unrelated change or different row digest accepted"
+      ]
+    },
+    {
+      "batch_id": "manifest-series-scope-correction-effects-2026-10-21",
+      "reviewer": "Codex, under requester-authorized release review",
+      "approved_at": "2026-10-21T19:17:52Z",
+      "rationale": "Exactly three effect rows accompany the independently reproduced clinical module-fingerprint revisions for unchanged CT COLONOGRAPHY, EA1141, and HNSCC derivations. No policy algorithm, clinical value, approval scope, or active durable decision set is changed.",
+      "evidence_id": "github-actions:39655839796:metadata_change_report",
+      "evidence": "Exact producer d51362474ab379ed4d7c306b8e839e460a8c9734; prior bundle 2eadf2ef8fb38e61fa967adcf042c7eb4395a75a3e5b1df4dbdc4a995be13c1f; source report SHA256 892d4ab6db6fe4cbee282ec8b6019956ccad6cee32fd07d316600940c057747e; independent complete row-review receipt SHA256 3897d5c5ee4467327ab00c8ce0386907b21779ea8ec8ca1708537f35550d9b8e. All 20442 flagged rows were reproduced exactly; clinical source-value audit had zero mismatches.",
+      "artifact": "correction_registry",
+      "entity_table": "correction_effects",
+      "change_count": 3,
+      "change_kind_counts": {
+        "added": 3
+      },
+      "changes_sha256": "6b14d1586269c337117229346df291c7436619538420d23478f4c4574374819c",
+      "negative_scope": [
+        "no clinical fact or subject removals",
+        "no changed retained clinical fact values",
+        "no bare-ID joins across source Collections",
+        "no authorization for unavailable or ambiguous series mappings",
+        "no change to controlled-access requirements",
+        "no unrelated change or different row digest accepted"
+      ]
     }
   ],
   "explanation_batches": [

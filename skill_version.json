@@ -34,7 +34,7 @@
     "references/correction-assertions-v1.json": "bc18f600242fcecb8e046930fad6418db294d96871ed67450eee2cb8c6b758ba",
     "references/correction-lifecycle.md": "f7e454242b0e07302ae090d6790b39bd79278b3443a222ef80ca9409aedf014a",
     "references/correction-registry-v1.schema.json": "c9c3b967a3c90a99f7aaf828590a87678744a110aef95b762ef72464b59f91af",
-    "references/correction-semantic-explanations-v1.json": "56465588fe6e18dc40798daf9ca348ee4a6dffee84668b577590e73f595cfcf3",
+    "references/correction-semantic-explanations-v1.json": "ff4ce88eddafff24221ebb5e82fb138391c458374e509148ecb4ceb154777fd7",
     "references/cptac_gbm_codex_inventory_v1.csv": "650f0c09da49a17ba58f10d861a0b80519e5aeeeaf745186f542e80ea19ada4d",
     "references/cptac_gbm_codex_inventory_v1.json": "6515bf199d8e84e28d48e6bf7b2ee0bceeeee66d41e719bf31d02c6befe94c00",
     "references/datacite-doi-relationships.md": "c47670a13b47701a6a3a39962b42e2afa67c5c34c13e9aa5cc15c5f34fc5c3db",
@@ -44,7 +44,7 @@
     "references/general-commons-graphql.md": "b2c3c931816bb3245f0b59a4dde1e3001959bd51838b1e3bc23bc1be9e6f6407",
     "references/geometry-batch-slurm.md": "e911e6e1de46cd564d918a9cc9ef8f411e39cc28c6ee1af9021fc43da23cf7d0",
     "references/idc-public-dicom.md": "2c82815b34adfc1750d97addef6920d6fb56102a79de685268094cd601b56c42",
-    "references/maintainer-operations.md": "1b1eb966871264ddc59a449f8d1657f40736a3ffa9b98c48988da1bce747db3f",
+    "references/maintainer-operations.md": "fbd578c20cce6e27fb7c12603552c94595388544b1e5fd2db3409c601acb6c69",
     "references/nbia-public-dicom-fallback.md": "530de4e4e6f0cf804cf5dbdd460483aedc5b3a8f9c294736afa63ff3ee2dcdd6",
     "references/nifti.md": "2b627fc7126f5c1bddda471ace284f6b85385449905ddf0f71cd7e7de27f0ac9",
     "references/participant-identity-methods.md": "252ac7e686473eb4f462b0422b66221b2e2b42880478ec840fa616f8c946fc10",
@@ -127,7 +127,7 @@
     "scripts/tests/test_tcia_artifact_model.py": "8ead09edd37c6ee2facd9929fe9ea9adfdf5ecd07b38c6e700a82eb3939f290f",
     "scripts/tests/test_tcia_clinical_metadata.py": "f10677321c9beeb2ec92ab8cb1549acfcbd9f41ac269326e8862f1874f6a31e0",
     "scripts/tests/test_tcia_controlled_access_metadata.py": "9fd9f8b1ff732d7f2ce02eaf30480e052f4b80b9217f435bdc012adfb2a137f2",
-    "scripts/tests/test_tcia_correction_registry.py": "e543c35bd971b08638c95b497cd449b39a5c8fd015eede41c1f2fdedcbd5e5a8",
+    "scripts/tests/test_tcia_correction_registry.py": "6b622ac276a9cf3face9a21b92604087769eec8ff0646120e4dbef4d28f2520a",
     "scripts/tests/test_tcia_diagnostic_status.py": "a00104b045e32288b56d43139f3ec9f9bb89926eac677dd356b07f97436397f5",
     "scripts/tests/test_tcia_dicom_source_scope.py": "80531d71e05c94c954d57d378446cd6f2364a83df955bc7b557b164403b7e984",
     "scripts/tests/test_tcia_freshness.py": "fc2d6988581e5cacc2531e648258d352196803d6d7012bf79e6c8ddac4cfce9c",
@@ -153,6 +153,6 @@
     "scripts/tests/test_tcia_v2_staging.py": "dda82d5c65b8e03b543fc80c44f30acf47a6c29861b1565104e96c568399ec25"
   },
   "schema_version": 1,
-  "skill_version": "2026.10.21.4",
-  "updated_at_utc": "2026-10-21T18:01:22.334764+00:00"
+  "skill_version": "2026.10.21.5",
+  "updated_at_utc": "2026-10-21T19:18:13.290057+00:00"
 }

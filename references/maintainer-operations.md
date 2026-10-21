@@ -321,6 +321,18 @@ Changing provenance or cohort coverage still runs through the ordinary exact
 semantic gate. A passing fixture test does not authorize changed release rows;
 review the fresh candidate and its source evidence before publication.
 
+The October 21 migration was independently replayed against immutable bundle
+`2eadf2ef8fb38e61fa967adcf042c7eb4395a75a3e5b1df4dbdc4a995be13c1f`.
+Source run `39655839796` reported exactly the reproduced 14,081 added clinical
+facts, 2,809 provenance-only fact updates, and 3,546 added clinical subjects.
+There were no existing fact-value changes or fact/subject removals. Three
+additional policy revision/effect pairs record only the changed clinical module
+fingerprint; all three derivation function ASTs match the prior producer.
+The four exact explanation batches bind the full changed-row digests and counts
+to that source report; they do not grant a standing manifest or source-health
+waiver. The source report SHA-256 is
+`892d4ab6db6fe4cbee282ec8b6019956ccad6cee32fd07d316600940c057747e`.
+
 ## Raw Hidden-State Investigation
 
 The public MCP, REST, and `TciaQueryService` surfaces deliberately exclude hidden, staged, and retired WordPress records. A maintainer who must investigate raw source state may use the local snapshot/search builder CLI's explicit `--include-hidden` option in a controlled workflow:
