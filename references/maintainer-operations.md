@@ -4,6 +4,14 @@ This reference is for repository and snapshot maintainers, not normal public-age
 
 ## Build And Validate
 
+Manifest-backed clinical inheritance also supplies explicit patient-to-source
+crosswalks to Participant Inventory. The inventory verifies the inherited fact's
+relationship, source identity, and hash-bound manifest evidence before linking
+that exact dataset-qualified participant. This keeps migrated IDC search/cart
+URLs from retiring source links simply because the URL no longer names the
+Collection. A dataset relationship or a matching bare identifier alone does not
+authorize this path.
+
 ```bash
 python3 scripts/tcia_snapshot.py build --out cache/tcia_snapshot.sqlite --gzip-out dist/tcia_snapshot.sqlite.gz --manifest-out dist/tcia_snapshot_manifest.json --exports-dir dist
 python3 scripts/tcia_snapshot.py validate --db cache/tcia_snapshot.sqlite

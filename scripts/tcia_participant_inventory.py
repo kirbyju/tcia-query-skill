@@ -756,6 +756,74 @@ def record_source_collection_link(
         )
 
 
+def manifest_inherited_source_links(clinical_db: Path) -> list[dict[str, Any]]:
+    """Recover explicit patient crosswalks from validated manifest inheritance.
+
+    Dataset relationship prose and matching bare identifiers are insufficient:
+    each returned pair must occur in an inherited fact whose exact relationship
+    and manifest evidence also occur in the clinical relationship table.
+    """
+    if not clinical_db.exists():
+        return []
+    links: dict[tuple[str, str], dict[str, Any]] = {}
+    with closing(connect(clinical_db)) as clinical:
+        if not all(table_exists(clinical, table) for table in (
+            "clinical_facts", "clinical_dataset_relationships"
+        )):
+            return []
+        relationships = {
+            row["relationship_id"]: dict(row) for row in clinical.execute(
+                "SELECT * FROM clinical_dataset_relationships "
+                "WHERE relationship_source='tcia_manifest_series_crosswalk'"
+            )
+        }
+        if not relationships:
+            return []
+        for row in clinical.execute(
+            "SELECT fact_id,short_title,subject_id,provenance_json FROM clinical_facts "
+            "WHERE source_kind='tcia_collection_subject_inheritance'"
+        ):
+            provenance = json.loads(row["provenance_json"])
+            if provenance.get("relationship_source") != "tcia_manifest_series_crosswalk":
+                continue
+            relation = relationships.get(provenance.get("relationship_id"))
+            source_id = str(provenance.get("inherited_from_subject_id") or "").strip()
+            if (not relation or not source_id
+                or relation["target_short_title"] != row["short_title"]
+                or relation["source_short_title"] != provenance.get("inherited_from_short_title")
+                or relation["relationship_evidence"] != provenance.get("relationship_evidence")
+                or source_id.casefold() != str(row["subject_id"]).casefold()):
+                raise RuntimeError("Manifest clinical patient crosswalk has inconsistent provenance")
+            evidence = json.loads(relation["relationship_evidence"])
+            downloads = evidence.get("downloads")
+            if (not isinstance(downloads, list) or not downloads
+                or not evidence.get("idc_version")
+                or evidence.get("policy_version") != 1
+                or any(
+                    not isinstance(download, dict)
+                    or any(not re.fullmatch(r"[0-9a-f]{64}", str(download.get(key, "")))
+                           for key in ("manifest_sha256", "series_set_sha256"))
+                    or not isinstance(download.get("requested_series"), int)
+                    or download["requested_series"] <= 0
+                    for download in downloads
+                )):
+                raise RuntimeError("Manifest clinical patient crosswalk lacks download evidence")
+            key = (str(row["short_title"]), str(row["subject_id"]).casefold())
+            identity = (relation["source_short_title"], source_id)
+            if key in links:
+                if links[key]["source_identity"] != identity:
+                    raise RuntimeError("Manifest clinical patient crosswalk has ambiguous source identity")
+                continue
+            links[key] = {
+                "target_short_title": row["short_title"],
+                "target_subject_id": row["subject_id"],
+                "source_identity": identity,
+                "relationship_id": relation["relationship_id"],
+                "manifest_evidence": evidence,
+            }
+    return [links[key] for key in sorted(links)]
+
+
 def apply_analysis_result_source_collection_links(
     conn: sqlite3.Connection,
     *,
@@ -879,6 +947,49 @@ def apply_analysis_result_source_collection_links(
                                     }),
                                 ),
                             )
+
+    # The clinical artifact retains the exact manifest-selected patient pair.
+    # Reuse that validated crosswalk when an IDC URL no longer names a dataset.
+    for link in manifest_inherited_source_links(clinical_db):
+        target_type, target_title = resolve_dataset_identity(
+            dataset_types, link["target_short_title"], "Analysis Result"
+        )
+        source_title, source_id = link["source_identity"]
+        source_type, resolved_source = resolve_dataset_identity(
+            dataset_types, source_title, "Collection"
+        )
+        if (target_type, source_type, resolved_source) != (
+            "Analysis Result", "Collection", source_title
+        ) or (target_type, target_title) not in dataset_types.values() or (
+            source_type, source_title
+        ) not in dataset_types.values():
+            raise RuntimeError("Manifest patient crosswalk has invalid dataset identities")
+        target_key = participant_key(target_type, target_title, link["target_subject_id"])
+        if target_key in directly_linked or not conn.execute(
+            "SELECT 1 FROM participants WHERE participant_key=?", (target_key,)
+        ).fetchone():
+            continue
+        source_key = participant_key("Collection", source_title, source_id)
+        source_present = bool(conn.execute(
+            "SELECT 1 FROM participants WHERE participant_key=?", (source_key,)
+        ).fetchone())
+        status = "linked_source_collection" if source_present else "source_participant_not_current"
+        record_source_collection_link(
+            conn, analysis_result_participant_key=target_key,
+            source_collection_short_title=source_title, source_participant_id=source_id,
+            source_collection_participant_key=source_key if source_present else None,
+            link_status=status, resolution_method="manifest_series_patient_crosswalk",
+            confidence="high", evidence_source="tcia_manifest_series_crosswalk",
+            evidence_pointer=f"clinical_metadata:clinical_dataset_relationships:{link['relationship_id']}",
+            evidence_url="", evidence={
+                "analysis_result_short_title": target_title,
+                "relationship_id": link["relationship_id"],
+                "downloads": link["manifest_evidence"]["downloads"],
+                "idc_version": link["manifest_evidence"]["idc_version"],
+            },
+        )
+        directly_linked.add(target_key)
+        counts[status] += 1
 
     relationships: dict[tuple[str, str], list[dict[str, str]]] = defaultdict(list)
     for row in wordpress_analysis_result_relationships(snapshot_db):
