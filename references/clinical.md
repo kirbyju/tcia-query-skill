@@ -5,6 +5,65 @@ diagnoses, outcomes, treatment-response labels, collection-specific source
 tables, and sparse DICOM fallback fields. Confirm TCIA provenance and access in
 the base snapshot first.
 
+## Answering participant-level questions
+
+Clinical aggregates and participant summaries in these artifacts are a derived
+curation layer, including when they contain recorded source values. They do not
+replace the dataset's TCIA WordPress description or its original clinical files.
+Include that caveat in participant-level results and exports, with links back to
+the dataset page and applicable source files. Preserve and explain discrepancies
+rather than treating a resolved bundle value as the authoritative correction.
+
+Participant-level describes the output grain, not a requirement that every
+value was measured for that individual. For discovery, inventories, and linkage
+preparation, include supported diagnosis and site inferences unless the user
+requests recorded values only. Identify the evidence for each field: value,
+recorded or inferred status, evidence scope, and source. A collection-derived
+label remains an inference when repeated on participant rows; it does not
+establish a cross-system participant match.
+
+Resolve diagnosis and site independently. Preserve a recorded diagnosis when
+the site is inferred, and vice versa. Do not use one combined inference flag to
+blank both fields or drop the participant. Apply the eligibility and cohort
+review rules below before assigning a collection label: a single cancer label
+does not establish that healthy controls have that cancer, and multiple disease
+labels do not identify each participant's subtype. If an inference cannot be
+supported, retain the collection context separately and explain the unresolved
+participant value.
+
+Include all formats and access levels within the user's scope. Controlled
+access limits retrieval, not inclusion of known metadata in an inventory.
+Likewise, absence from IDC or a DICOM-derived imaging allowlist does not
+establish absence of non-DICOM participants or supporting clinical data.
+Retain clinical-only participants and known dataset/download records with
+explicit linkage or access limitations; do not invent missing participant IDs
+from aggregate counts or retrieve restricted data without authorization.
+
+Before concluding that participant clinical data or inferred labels are absent:
+
+- Compare Participant Inventory coverage with the clinical resolved views.
+  `agent_clinical_subjects` filters to `has_imaging = 1`; inspect
+  `agent_clinical_all_subjects` and sourced facts when known participants are
+  missing. Where exposed, `agent_participant_clinical_values` provides the
+  inventory-linked clinical view; it does not prove source completeness.
+- Inspect current download records, explicitly linked external clinical
+  resources, and related Analysis Results for supporting CSV/TSV/XLS/XLSX
+  tables, including files labeled Demographic or Other. Distinguish clinical
+  observations from annotation measurements and scanner/sequence metadata.
+- Check ingestion status, warnings, raw source columns, and inference
+  candidate/applied counts. A skipped identifier column, unmapped age field,
+  or zero inference candidates can explain blank output despite available
+  source data. Validate dataset-scoped identifiers before recovering values;
+  never guess an ID transformation or bypass QC exclusions.
+
+Use the selected service's coverage/fact surfaces first. If it cannot expose
+the needed diagnostics, state that limitation and route to an authorized local
+artifact review rather than downloading a bundle for a routine remote query.
+Describe missing coverage as unavailable, not ingested, not harmonized, not
+linked, restricted, or unresolved according to the evidence; a blank cell
+alone does not mean the dataset lacks clinical data. Report recorded and
+inferred coverage separately, with the relevant participant denominator.
+
 ## Source precedence
 
 Resolve each concept independently:

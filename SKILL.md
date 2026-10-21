@@ -10,6 +10,8 @@ license: Apache-2.0
 
 TCIA WordPress Collection and Analysis Result records decide whether a dataset is TCIA-published. Use the release-backed SQLite snapshot or snapshot-backed MCP/REST service for normal discovery. IDC, CDA, General Commons, CTDC, PathDB, DataCite, Zenodo, and Aspera may enrich or route access; they do not establish TCIA publication.
 
+Aggregated participant information, harmonized clinical values, inferred labels, identity groupings, and computed counts are an additional layer of curation derived from the original datasets. Bundle artifacts and their MCP/REST projections support discovery and analysis; they are not authoritative replacements for the source datasets. For authoritative dataset descriptions, cohort definitions, reported counts, and access terms, return to the TCIA WordPress Collection or Analysis Result page and its linked original supporting files for participant-level values. Report discrepancies between derived results and sources explicitly; artifact validation does not establish source completeness or clinical correctness.
+
 TCIA's Publications EndNote export is the authority for verified analytical use: a linked TCIA dataset was actually analyzed in the listed paper. DataCite is the authority for dataset DOI metadata and source-specific event metrics, not the verified-use bibliography or TCIA download totals. Both are included in the release-backed snapshot and exposed through MCP/REST; `scripts/tcia_publications.py` remains available for direct local XML work.
 
 ## Check Skill Guidance Freshness
@@ -66,7 +68,7 @@ rollback selects a retained verified generation and also requires a restart.
 4. Use `search_verified_publications` or `get_dataset_impact` for EndNote-verified analytical use; do not reinterpret these as mere mentions.
 5. Use download-level labels for modality, file type, access, and route decisions. Split mixed datasets into open and controlled components.
 6. Check related Analysis Results before saying a Collection lacks annotations, segmentations, labels, or ground truth.
-7. Use `search_participants` for availability, `get_participant_assets` for drill-down, and `get_dataset_participant_coverage` before completeness claims. Participant identity is dataset-scoped; Collections and Analysis Results remain distinct.
+7. Use `search_participants` for availability, `get_participant_assets` for drill-down, and `get_dataset_participant_coverage` before completeness claims. Participant identity is dataset-scoped; Collections and Analysis Results remain distinct. For participant-level clinical questions, load `references/clinical.md`: include supported diagnosis/site inferences with field-level flags and provenance unless the user requests recorded values only. Investigate coverage and ingestion gaps before interpreting blanks as absent source data.
 8. Follow `next_cursor` while `has_more` is true. Keep the same filters and limit because cursors are release/component/file-generation-local and query-bound; restart after any artifact change.
 9. Cite the TCIA page and DOI where available. State access/license caveats and distinguish verified, published, deployed, and unverified status.
 
@@ -105,9 +107,10 @@ rollback selects a retained verified generation and also requires a restart.
 ## Domain Guardrails
 
 - Preserve dataset/source provenance. A downstream record derived from a TCIA DOI remains external unless WordPress lists it as a Collection or Analysis Result.
+- For inventories and linkage preparation, include all in-scope formats and access levels unless the user restricts them. DICOM/non-DICOM and open/controlled are descriptive attributes and retrieval constraints, not automatic exclusions. Report known participants, supporting tables, and unresolved coverage even when individual images or restricted clinical values are unavailable.
 - License metadata, not generic page visibility, determines access. Clearly distinguish open, noncommercial, mixed, and controlled/restricted states.
 - Public DICOM detail remains in IDC. Use the public non-DICOM artifact for NIfTI, MHA/MHD, NRRD, images/video, pathology, and reviewed IDC-missing exceptions. Do not infer annotation-to-source relationships without evidence.
-- Clinical identity is `(short_title, subject_id)`. Preserve fact provenance, inference flags, source precedence, and conflicts; load `references/clinical.md` before patient-level claims.
+- Clinical identity is `(short_title, subject_id)`. Distinguish recorded participant values, supported collection-derived inferences, and unresolved values. Preserve fact provenance, field-level inference flags, source precedence, and conflicts; do not silently blank inferred labels or discard recorded values because a different field is inferred. Load `references/clinical.md` before patient-level claims.
 - Use CDA only for enrichment after validating TCIA/IDC identifiers. Do not use it to claim TCIA publication, official clinical completeness, or access rights.
 - Do not broaden downstream searches beyond validated TCIA short titles, DOIs, or participant identifiers without explicit exploratory scope.
 - Viewer routing: use `references/visualization.md`. For IDC, request a current viewer URL from the selected IDC surface rather than copying viewer products or URL formats into this skill; PathDB preview rules remain TCIA-specific.
@@ -117,5 +120,7 @@ rollback selects a retained verified generation and also requires a restart.
 ## Answer Shape
 
 For discovery, prefer a compact ranked table with dataset, type, match reason, access/route, license, DOI, and caveats. For a specific dataset, include the TCIA page, current download-level evidence, related Analysis Results, and access route.
+
+When presenting aggregated participant or harmonized clinical results, include a concise caveat that these are derived, additionally curated metadata, and link the relevant TCIA dataset pages and original supporting files so users can verify authoritative details. Preserve the distinction even when the values are recorded rather than inferred.
 
 For recency, distinguish first release from last update and include date provenance. Treat `current_record_still_v1_date_updated` as an estimate. For freshness-sensitive work, report the verified skill version and bundle timestamp; otherwise label the result offline/unverified.

@@ -2,12 +2,12 @@
   "files": {
     ".agents/skills/tcia-release-verification/SKILL.md": "4813cd18d31e45cf2536f5e80fcd74e81f66dbbfae1a97b341b659f517bc208d",
     "AGENTS.md": "25af7a2157ae17686d34c85d4b6becf38d00d38a741baadc59cdfbcbf322e4a8",
-    "README.md": "a8fa6533c92a867927a19ff67785cd7983481bf20353662c27ed5b2c9ad6cb79",
-    "SKILL.md": "4f4c62b95243e6f161fb75228b3c3f0a02e1e31f0e60fe6324bebcf89aa13ac5",
+    "README.md": "266cbae35d93a465dd3aab8552d34a543f46917485f87baee57bef129b22c363",
+    "SKILL.md": "9f4c58578fee372dfb94b447965e71ee560fa648ce066ce483b791a2aeba9bab",
     "agents/openai.yaml": "ea107d3e983d86fd1c397f8a347b4202193bb3c987cd74514c6c20c4100581f0",
     "evals/README.md": "d1d3a3212ee938b2dd4fc775eb21c434e1aa0335620d36a1d410a82b380f0704",
     "evals/answer-rubric.schema.json": "881379b3384e81aa4faef8f4f826e09f4d48967ec6e81a077a482156224915c0",
-    "evals/prompts.csv": "3ad3590e3e0cb3d6b671caacb5f516eb7e3a2e291caf887135a14bb8da80bdf1",
+    "evals/prompts.csv": "99bf6e34c0ae450f31a21be195b9a1967ee65d719be8e086c4ee4753f6e0d8f3",
     "mcp_server/DEPLOYMENT.md": "96cb86da43d75eabe81533b0c4c4493b4644a46c9be53ac7eeca60ec946c8867",
     "mcp_server/IMPLEMENTATION_PLAN.md": "40127cbb9e542d9b9173452175fce181878989afad4274fe7303f23b0ebca73c",
     "mcp_server/README.md": "ba9d7a125edf405759d9376430f7a3718a4ee1fac9e9fe6021fe7cf6518f118a",
@@ -24,12 +24,12 @@
     "mcp_server/tests/test_service.py": "0a27ec2fb0472a2b983e14fa4b402a305fe5e3e8229945f1d9078b20ae36acba",
     "references/README.md": "eacd2b25548cc91c21946e0d20b41809d738bc08161d7b1d0b2700e39e8ae428",
     "references/api-upgrade-notes.md": "14d6db63eecaa43662abb46fafffd5301d09d69d55e9b491ef208ec9b5ee1e8a",
-    "references/artifact-model.md": "524b13c409e84c10d63f796799d5668c9a850370f0b97ef35d43b63a95f8d41e",
+    "references/artifact-model.md": "600cfba7900c64159a5aeff17a4d4e4e0336bbb7c04237d4ed96ea4995b7f9b4",
     "references/aspera.md": "64fc04697a55ef2d3ba560ae7ca7540b9ab62f4af218b7556ceaaf2b52fcfc32",
     "references/brats2021_tcia_crosswalk_v1.csv": "ba986fab788ee8ad3ea7fa2354d2dae4495ccc8e387d5f341cfd740db4ffcd00",
     "references/brats2021_tcia_crosswalk_v1.json": "462e0dbc3d3c849971e61f4a16f52a3f592eb35a24ba6fcacd3b14d26c053121",
     "references/cda.md": "d25037e88f7c1dab966252c056885f29559b9e4382c22d2dafe369aebb077742",
-    "references/clinical.md": "3fbfcba346a2e322305d23bd8e4740fa5b78bc04f41111036dd2d7316eeb5a08",
+    "references/clinical.md": "fcb2db934be904d76daf805ca2443f793f25b31f25ffa0280327a7a4d25364c9",
     "references/controlled-access.md": "d031efcfac62de238dcb0bebcfc88fc6a1e2fed5042c3f920a00ce73cab69cde",
     "references/correction-assertions-v1.json": "bc18f600242fcecb8e046930fad6418db294d96871ed67450eee2cb8c6b758ba",
     "references/correction-lifecycle.md": "f7e454242b0e07302ae090d6790b39bd79278b3443a222ef80ca9409aedf014a",
@@ -148,6 +148,6 @@
     "scripts/tests/test_tcia_v2_staging.py": "dda82d5c65b8e03b543fc80c44f30acf47a6c29861b1565104e96c568399ec25"
   },
   "schema_version": 1,
-  "skill_version": "2026.10.20.1",
-  "updated_at_utc": "2026-10-20T18:14:40.317199+00:00"
+  "skill_version": "2026.10.21.2",
+  "updated_at_utc": "2026-10-21T15:16:13.023027+00:00"
 }

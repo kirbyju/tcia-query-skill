@@ -17,6 +17,15 @@ a verified release bundle, then supports different use cases through skill
 guidance, MCP, REST, or local artifacts. The underlying imaging and supporting
 data remain with the systems responsible for them.
 
+Participant aggregates, harmonized clinical values, inferred labels, identity
+groupings, and computed counts represent an additional layer of data curation
+derived from the original datasets. The bundle and its MCP/REST projections
+are discovery and analysis aids, not authoritative replacements for those
+datasets. Verify authoritative dataset details on the TCIA WordPress Collection
+or Analysis Result page and in its linked original supporting files. Validation
+of a bundle does not establish source completeness or clinical correctness;
+discrepancies should be checked against the sources and reported explicitly.
+
 ## What It Can Do
 
 - Find TCIA Collections and Analysis Results by disease, body site, modality,

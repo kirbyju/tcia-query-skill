@@ -8,6 +8,15 @@ Participant Explorer integration, and migration from the May 2026 artifact line.
 Keep physical artifacts separate when access policy, authority, refresh cost, or
 installation audience differ. Compose them through the Participant Inventory.
 
+The Participant Inventory and clinical aggregates are an additional curation
+layer derived from original datasets, not an independent source of authority.
+The table below describes each surface's role; bundling or validating a source
+projection does not transfer source authority to the artifact. Verify dataset
+descriptions, cohort definitions, reported counts, and access terms on the TCIA
+WordPress dataset page, and participant values in its linked original supporting
+files. Preserve discrepancies and provenance in derived outputs; see
+`references/clinical.md` for participant-level reporting caveats.
+
 | Surface | Authority and scope | Distribution |
 | --- | --- | --- |
 | Base TCIA snapshot | WordPress publication identity, downloads, licenses, and routes | Required |
