@@ -43,6 +43,7 @@ from .models import (
     LinkIssuesResponse,
     ParticipantDetailResponse,
     ParticipantsResponse,
+    ParticipantSummaryResponse,
     CoverageResponse,
     V1ReleasesResponse,
     VerifiedPublicationsResponse,
@@ -58,7 +59,8 @@ get_snapshot_info. Use search tools for compact discovery and follow with detail
 tools. Results cover TCIA-published Collections and Analysis Results.
 Check download-level access and format labels before routing: public DICOM detail
 belongs to IDC/idc-index; controlled metadata never grants access. Preserve
-dataset-scoped participant identity and check coverage before completeness claims.
+dataset-scoped participant identity. Use get_participant_summary for curated
+counts; reserve identity diagnostics for troubleshooting and honor summary notices.
 This server never transfers payload data."""
 
 GUIDE = f"""\
@@ -89,7 +91,10 @@ Recommended workflow:
 7. Use `search_verified_publications` and `get_dataset_impact` for verified
    analytical use. TCIA's maintained EndNote library means the linked dataset
    was analyzed in the listed publication.
-8. Use `search_participants`, `get_participant`, and `get_participant_assets`
+8. Use `get_participant_summary` for archive or selected-dataset counts. Report
+   the curated count and relevant species; reserve identity diagnostics for
+   troubleshooting or methodology questions. Surface returned coverage notices.
+   Use `search_participants`, `get_participant`, and `get_participant_assets`
    for dataset-scoped participant discovery and holdings. Use
    `get_dataset_participant_coverage` before asserting complete linkage.
 9. Use `get_controlled_access_files` only for public file-grain metadata about
@@ -104,6 +109,7 @@ Recommended workflow:
 
 PUBLIC_V2_TOOL_NAMES = (
     "get_snapshot_info",
+    "get_participant_summary",
     "search_participants",
     "get_participant",
     "get_participant_assets",
@@ -245,6 +251,15 @@ def get_snapshot_info() -> BundleResponse:
     """Return the installed V2 manifest, profile, component schemas, and capabilities."""
 
     return service().bundle_info()
+
+
+@mcp.tool(annotations=QUERY_ANNOTATIONS, meta={"snapshot_local": True}, structured_output=True)
+@guard
+def get_participant_summary(
+    short_titles: list[str] | None = None, dataset_type: str = "both"
+) -> ParticipantSummaryResponse:
+    """Return curated participant totals for the archive or selected datasets, with species counts."""
+    return service().get_participant_summary(short_titles=short_titles, dataset_type=dataset_type)
 
 
 @mcp.tool(annotations=QUERY_ANNOTATIONS, meta={"snapshot_local": True}, structured_output=True)

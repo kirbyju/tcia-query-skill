@@ -258,6 +258,10 @@ class V2AuditSplitTests(unittest.TestCase):
                     "INSERT INTO participant_inventory_meta VALUES ('schema_version',?)",
                     (str(participants.SCHEMA_VERSION),),
                 )
+            with sqlite3.connect(database) as conn:
+                conn.row_factory = sqlite3.Row
+                from tcia_participant_groups import build_groups
+                build_groups(conn, {('Collection', 'TEST'): 'Human'})
             audit.split_database(
                 database,
                 audit_database,
@@ -267,6 +271,8 @@ class V2AuditSplitTests(unittest.TestCase):
             validation = participants.validate_database(database)
             self.assertTrue(validation["ok"], validation["errors"])
             with sqlite3.connect(database) as conn:
+                self.assertEqual(conn.execute("SELECT SUM(participant_count) FROM agent_participant_summary").fetchone()[0], 1)
+                self.assertEqual(conn.execute("SELECT COUNT(*) FROM participant_group_members").fetchone()[0], 1)
                 self.assertEqual(
                     conn.execute("SELECT provenance_json FROM participant_identifiers").fetchone()[0],
                     "{}",

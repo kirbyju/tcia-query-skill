@@ -309,6 +309,8 @@ class V1Release(PublicModel):
 
 
 class ParticipantLinkIssue(PublicModel):
+    current_disposition: str | None = None
+    disposition_evidence_reference: str | None = None
     issue_id: str | None = None
     dataset_type: str | None = None
     short_title: str | None = None
@@ -531,6 +533,7 @@ class BundleInstall(PublicModel):
 
 class Capabilities(PublicModel):
     participant_search: bool
+    participant_summary: bool = False
     public_non_dicom_detail: bool
     controlled_access_detail: bool | None = None
     clinical_detail: bool | None = None
@@ -729,3 +732,24 @@ class ProblemDetail(PublicModel):
     detail: str
     code: str
     retryable: bool
+
+
+class ParticipantSpeciesCount(PublicModel):
+    subject_category: str
+    species: str
+    participant_count: int = Field(ge=0)
+
+
+class ParticipantSummaryResponse(PublicModel):
+    participant_count: int = Field(ge=0)
+    human_participant_count: int = Field(ge=0)
+    animal_participant_count: int = Field(ge=0)
+    phantom_participant_count: int = Field(ge=0)
+    benchmark_participant_count: int = Field(ge=0)
+    unclassified_participant_count: int = Field(ge=0)
+    dataset_count: int = Field(ge=0)
+    datasets_with_participant_inventory: int = Field(ge=0)
+    species_breakdown: list[ParticipantSpeciesCount]
+    release_fingerprint: str
+    count_basis: str
+    notices: list[str]

@@ -1,0 +1,89 @@
+"""Curated index tests focus on identity safety and reproducible counts."""
+import sqlite3
+import sys
+from pathlib import Path
+import unittest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import tcia_participant_inventory as inventory
+from tcia_participant_groups import build_groups, validate_groups
+
+
+class ParticipantGroupTests(unittest.TestCase):
+    def setUp(self):
+        self.db = sqlite3.connect(':memory:')
+        self.db.row_factory = sqlite3.Row
+        self.db.executescript(inventory.SCHEMA)
+        self.addCleanup(self.db.close)
+        self.species = {}
+
+    def person(self, title, identifier='1', kind='Collection', species='Human'):
+        self.species[(kind, title)] = species
+        return inventory.ensure_participant(self.db, kind, title, identifier,
+            managed_system='tcia_wordpress', namespace='fixture', evidence='fixture', provenance={})
+
+    def equivalent(self, a, b, key, confidence='high'):
+        self.db.execute('INSERT INTO participant_equivalences VALUES (?,?,?,?,?,?,?)',
+                        (key, a, b, 'official_collection_overlap_declaration_and_exact_shared_namespace',
+                         confidence, 'reviewed.json', '{}'))
+
+    def source(self, result, collection, title, key='source'):
+        self.db.execute('INSERT INTO participant_source_links VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+                        (key, result, title, collection, '1', 'linked_source_collection',
+                         'official_reviewed_finite_participant_crosswalk', 'high', 'reviewed.json', key, '', '{}'))
+
+    def test_transitive_consolidation_and_identical_bare_ids_remain_separate(self):
+        a, b, c = self.person('A'), self.person('B'), self.person('Unrelated')
+        result = self.person('Derived', kind='Analysis Result')
+        self.equivalent(a,b,'eq'); self.source(result,b,'B')
+        self.assertEqual(build_groups(self.db,self.species)['participant_groups'],2)
+        ids = dict(self.db.execute('SELECT participant_key,participant_group_id FROM participant_group_members'))
+        self.assertEqual(ids[a],ids[b]); self.assertEqual(ids[a],ids[result]); self.assertNotEqual(ids[a],ids[c])
+        self.assertEqual(validate_groups(self.db),[])
+        before = list(self.db.execute('SELECT * FROM participant_groups ORDER BY 1'))
+        build_groups(self.db,self.species)
+        self.assertEqual(before,list(self.db.execute('SELECT * FROM participant_groups ORDER BY 1')))
+
+    def test_conflicting_transitive_component_is_rejected_in_full(self):
+        a, a2, b = self.person('A','1'),self.person('A','2'),self.person('B')
+        self.equivalent(a,b,'one');self.equivalent(a2,b,'two')
+        self.assertEqual(build_groups(self.db,self.species)['participant_groups'],3)
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM participant_group_link_review WHERE disposition='rejected'").fetchone()[0],2)
+        self.assertEqual(validate_groups(self.db),[])
+
+    def test_unreviewed_edges_and_wrong_endpoint_scopes_are_rejected(self):
+        a,b,r = self.person('A'),self.person('B'),self.person('Derived',kind='Analysis Result')
+        self.equivalent(a,b,'low',confidence='low');self.equivalent(a,r,'wrong-scope')
+        self.assertEqual(build_groups(self.db,self.species)['participant_groups'],3)
+
+    def test_categories_keep_nonhuman_and_mixed_groups_separate(self):
+        self.person('Human');self.person('Animal',species='Mouse')
+        self.person('Phantom',species='Physical Phantom')
+        self.person('Pseudo-PHI-DICOM-Data');self.person('Unknown',species='')
+        a=self.person('MixedA');b=self.person('MixedB',species='Mouse');self.equivalent(a,b,'mixed')
+        build_groups(self.db,self.species)
+        counts=dict(self.db.execute('SELECT subject_category,COUNT(*) FROM participant_groups GROUP BY 1'))
+        self.assertEqual(counts,dict(human=1,animal=1,phantom=1,benchmark=1,unclassified=2))
+
+    def test_staff_dispositions_preserve_source_status(self):
+        a=self.person('A');r=self.person('Derived',kind='Analysis Result');self.source(r,a,'A')
+        for issue_id,title,identifier,status,code in [
+            ('resolved','A','1','resolved','source_collection_match_unresolved'),
+            ('mapped','Derived','1','open','brats_source_collection_participant_not_current'),
+            ('unresolved','A','1','open','ambiguous_source_collection_match'),
+            ('explained','TCGA-GBM-QI-Radiogenomics','TCGA-06-0118','open','source_collection_participant_not_current')]:
+            if issue_id=='explained':self.person(title,identifier,kind='Analysis Result')
+            self.db.execute('INSERT INTO participant_link_issues VALUES (?,?,?,?,?,?,?,?)',
+                            (issue_id,'Analysis Result' if title!='A' else 'Collection',title,identifier,code,status,'fixture','{}'))
+        build_groups(self.db,self.species)
+        self.assertEqual(dict(self.db.execute('SELECT issue_id,disposition FROM participant_issue_dispositions')),
+                         dict(resolved='source_resolved',mapped='resolved_by_reviewed_mapping',unresolved='actionable',explained='explained_annotation_only'))
+        self.assertEqual(self.db.execute("SELECT status FROM participant_link_issues WHERE issue_id='mapped'").fetchone()[0],'open')
+
+    def test_validation_detects_missing_members_and_wrong_counts(self):
+        a=self.person('A');build_groups(self.db,self.species)
+        self.db.execute('DELETE FROM participant_group_members WHERE participant_key=?',(a,))
+        self.assertEqual(len(validate_groups(self.db)),2)
+
+
+if __name__=='__main__':unittest.main()

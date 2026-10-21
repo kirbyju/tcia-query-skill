@@ -68,7 +68,15 @@ rollback selects a retained verified generation and also requires a restart.
 4. Use `search_verified_publications` or `get_dataset_impact` for EndNote-verified analytical use; do not reinterpret these as mere mentions.
 5. Use download-level labels for modality, file type, access, and route decisions. Split mixed datasets into open and controlled components.
 6. Check related Analysis Results before saying a Collection lacks annotations, segmentations, labels, or ground truth.
-7. Use `search_participants` for availability, `get_participant_assets` for drill-down, and `get_dataset_participant_coverage` before completeness claims. Participant identity is dataset-scoped; Collections and Analysis Results remain distinct. For participant-level clinical questions, load `references/clinical.md`: include supported diagnosis/site inferences with field-level flags and provenance unless the user requests recorded values only. Investigate coverage and ingestion gaps before interpreting blanks as absent source data.
+7. Use `get_participant_summary` for archive-wide or selected-dataset participant
+   totals. Report the curated count directly, using `human_participant_count` when
+   the question asks about people, and the species breakdown when relevant. Honor
+   returned coverage notices. Do not sum dataset subject counts, count search rows,
+   or reconstruct identity groups. Reserve mapping provenance, source issue counts,
+   and unresolved identity details for staff troubleshooting or explicit methodology
+   questions. If the curated summary is unavailable, report that availability issue;
+   do not substitute a raw membership count.
+   Use `search_participants` for availability, `get_participant_assets` for drill-down, and `get_dataset_participant_coverage` before completeness claims. Participant identity is dataset-scoped; Collections and Analysis Results remain distinct. For participant-level clinical questions, load `references/clinical.md`: include supported diagnosis/site inferences with field-level flags and provenance unless the user requests recorded values only. Investigate coverage and ingestion gaps before interpreting blanks as absent source data.
 8. Follow `next_cursor` while `has_more` is true. Keep the same filters and limit because cursors are release/component/file-generation-local and query-bound; restart after any artifact change.
 9. Cite the TCIA page and DOI where available. State access/license caveats and distinguish verified, published, deployed, and unverified status.
 

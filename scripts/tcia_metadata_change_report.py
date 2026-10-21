@@ -99,6 +99,9 @@ PROFILES = {
         TableSpec("participant_identity_evidence", ("identity_evidence_id",), "high"),
         TableSpec("participant_source_links", ("participant_source_link_id",), "high"),
         TableSpec("participant_equivalences", ("participant_equivalence_id",), "high"),
+        TableSpec("participant_groups", ("participant_group_id",), "high"),
+        TableSpec("participant_group_members", ("participant_key",), "high"),
+        TableSpec("participant_issue_dispositions", ("issue_id",)),
     ),
     "correction": (
         TableSpec(

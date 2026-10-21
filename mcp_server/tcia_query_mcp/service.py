@@ -1319,6 +1319,12 @@ class TciaQueryService:
             )
         info["v2_capabilities"] = {
             "participant_search": "participant_inventory.sqlite.gz" in installed_assets,
+            "participant_summary": "participant_inventory.sqlite.gz" in installed_assets and any(
+                component.get("database_asset") == "participant_inventory.sqlite.gz"
+                and isinstance(component.get("schema_version"), int)
+                and component["schema_version"] >= 10
+                for component in (bundle.get("components") or {}).values()
+            ),
             "public_non_dicom_detail": "public_non_dicom_metadata.sqlite.gz" in installed_assets,
             "controlled_access_detail": "controlled_access_metadata.sqlite.gz" in installed_assets,
             "clinical_detail": "clinical_metadata.sqlite.gz" in installed_assets,
@@ -1403,6 +1409,11 @@ class TciaQueryService:
                         details for details in manifest["components"].values()
                         if details.get("database_asset") == asset
                     )
+                    if asset == "participant_inventory.sqlite.gz" and int(component.get("schema_version") or 0) >= 10:
+                        for name in ("participant_groups", "participant_group_members", "agent_participant_summary",
+                                     "agent_participant_group_members", "participant_issue_dispositions"):
+                            if not self._object_exists(conn, name):
+                                missing.append(f"{asset}:{name}")
                     metadata = self._read_meta_table(conn, meta_tables[asset])
                     actual_schema = metadata.get("schema_version")
                     if actual_schema is None:
@@ -3009,6 +3020,53 @@ class TciaQueryService:
             "note": "Review conflicts before analysis; resolved values follow the documented source precedence.",
         }
 
+    def get_participant_summary(
+        self, short_titles: list[str] | None = None, dataset_type: str = "both"
+    ) -> dict[str, Any]:
+        """Count the release's curated index across visible selected datasets."""
+        kind = dataset_type.strip().casefold()
+        if kind not in {"both", "collection", "analysis result"}:
+            raise InvalidRequestError("dataset_type must be both, Collection, or Analysis Result")
+        visible = self._visible_dataset_keys()
+        selected = {key for key in visible if kind == "both" or key[0] == kind}
+        if short_titles is not None:
+            titles = {title.strip().casefold() for title in short_titles}
+            if not titles or "" in titles:
+                raise InvalidRequestError("short_titles must contain at least one nonempty title")
+            if titles - {title for _, title in selected}:
+                raise NotFoundError("One or more selected datasets are unavailable")
+            selected = {key for key in selected if key[1] in titles}
+        manifest, _ = self._installed_contract()
+        self._component_identity("participant_inventory.sqlite.gz")
+        with self._connect_participants() as conn:
+            if not self._object_exists(conn, "agent_participant_group_members"):
+                raise ServiceUnavailableError("Curated participant summary requires Participant Inventory schema 10 or later")
+            where, params = self._visible_pair_sql(selected, alias="m")
+            rows = conn.execute(
+                "SELECT subject_category,species,COUNT(*) AS participant_count FROM ("
+                "SELECT DISTINCT m.participant_group_id,m.subject_category,m.species "
+                "FROM agent_participant_group_members m WHERE " + where +
+                ") GROUP BY subject_category,species ORDER BY subject_category,species", params,
+            ).fetchall()
+            covered = conn.execute(
+                "SELECT COUNT(*) FROM (SELECT DISTINCT m.dataset_type,m.short_title "
+                "FROM agent_participant_group_members m WHERE " + where + ")", params,
+            ).fetchone()[0]
+        breakdown = [dict(row) for row in rows]
+        totals = {category: sum(row["participant_count"] for row in breakdown
+                                if row["subject_category"] == category)
+                  for category in ("human", "animal", "phantom", "benchmark", "unclassified")}
+        missing = len(selected) - covered
+        return {
+            "participant_count": sum(totals.values()),
+            **{f"{category}_participant_count": count for category, count in totals.items()},
+            "dataset_count": len(selected), "datasets_with_participant_inventory": covered,
+            "species_breakdown": breakdown,
+            "release_fingerprint": manifest["release_fingerprint"],
+            "count_basis": "TCIA curated participant index",
+            "notices": ([f"Participant inventories are unavailable for {missing} selected datasets."] if missing else []),
+        }
+
     def search_participants(self, **filters: Any) -> dict[str, Any]:
         """Search canonical dataset-scoped participants from the V2 research core."""
         limit = coerce_limit(filters.get("limit"), default=25, maximum=500)
@@ -3510,6 +3568,7 @@ class TciaQueryService:
                     [title, *type_params],
                 ).fetchall()
             ]
+            self._add_issue_dispositions(conn, issues)
             sources = [
                 {
                     key: value
@@ -3533,6 +3592,18 @@ class TciaQueryService:
             ),
         }
 
+    def _add_issue_dispositions(self, conn: sqlite3.Connection, rows: list[dict[str, Any]]) -> None:
+        if not self._object_exists(conn, "participant_issue_dispositions"):
+            return
+        for row in rows:
+            disposition = conn.execute(
+                "SELECT disposition,evidence_reference FROM participant_issue_dispositions WHERE issue_id=?",
+                (row.get("issue_id"),),
+            ).fetchone()
+            if disposition:
+                row["current_disposition"] = disposition[0]
+                row["disposition_evidence_reference"] = disposition[1]
+
     def find_participant_link_issues(self, **filters: Any) -> dict[str, Any]:
         limit = coerce_limit(filters.get("limit"), default=50, maximum=500)
         short_titles = [item.lower() for item in as_list(filters.get("short_titles"))]
@@ -3553,6 +3624,7 @@ class TciaQueryService:
             sql += " ORDER BY lower(short_title), status, issue_code LIMIT ?"
             params.append(limit)
             rows = [normalize_v2_row(row) for row in conn.execute(sql, params).fetchall()]
+            self._add_issue_dispositions(conn, rows)
         return {"participant_link_issues": rows, "count": len(rows), "limit": limit}
 
     def find_public_non_dicom_assets(self, **filters: Any) -> dict[str, Any]:

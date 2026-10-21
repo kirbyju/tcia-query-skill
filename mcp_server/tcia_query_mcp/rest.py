@@ -36,6 +36,7 @@ from .models import (
     LinkIssuesResponse,
     ParticipantDetailResponse,
     ParticipantsResponse,
+    ParticipantSummaryResponse,
     ProblemDetail,
     V1ReleasesResponse,
     VerifiedPublicationsResponse,
@@ -76,6 +77,11 @@ class SearchDatasetsRequest(BaseModel):
     doi: str | None = None
     limit: int = Field(default=25, ge=1, le=200)
     cursor: str | None = None
+
+
+class ParticipantSummaryRequest(BaseModel):
+    short_titles: list[str] | None = None
+    dataset_type: str = "both"
 
 
 class SearchParticipantsRequest(BaseModel):
@@ -245,6 +251,13 @@ def create_app(service: TciaQueryService | None = None) -> FastAPI:
     )
     def v2_search_participants(request: SearchParticipantsRequest) -> dict[str, Any]:
         return S().search_participants(**request.model_dump())
+
+    @app.post(
+        f"{V2_API_PREFIX}/participants/summary", response_model=ParticipantSummaryResponse,
+        responses=PROBLEM_RESPONSES,
+    )
+    def v2_participant_summary(request: ParticipantSummaryRequest) -> dict[str, Any]:
+        return S().get_participant_summary(**request.model_dump())
 
     @app.get(f"{V2_API_PREFIX}/participants/{{participant_key}}", response_model=ParticipantDetailResponse)
     def v2_get_participant(participant_key: str) -> dict[str, Any]:

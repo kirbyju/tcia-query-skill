@@ -503,7 +503,9 @@ does not replace or rewrite the source-value contracts above.
 ## Participant Explorer presentation
 
 Query `agent_participant_search` in the Participant Inventory first; it is the
-one-row-per-canonical-participant search contract. Use these three public
+one-row-per-canonical-participant **within a dataset** search contract.
+For cross-dataset counts, use the schema-10 curated participant index and
+`get_participant_summary`; see `references/participant-identity-methods.md`. Use these three public
 facets, aligned with the WordPress label hierarchy:
 
 - `data_category`: broad content category, such as Radiology, Pathology,

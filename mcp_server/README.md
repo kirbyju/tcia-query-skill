@@ -42,6 +42,7 @@ Core MCP tools:
 - `get_current_downloads`
 - `summarize_access`
 - `find_dicom_annotations`
+- `get_participant_summary` — curated archive or selected-dataset totals and species breakdown (Participant Inventory schema 10+)
 - `search_participants`
 - `get_participant`
 - `get_participant_assets`
@@ -243,3 +244,19 @@ Do not commit runtime state:
 
 The repository `.gitignore` excludes `cache/`, `dist/`, `*.sqlite`,
 `*.sqlite.gz`, and `*_manifest.json`.
+
+### Curated participant counts
+
+Call `get_participant_summary` or `POST /v2/participants/summary` with optional
+`short_titles` and `dataset_type` (`both`, `Collection`, or `Analysis Result`).
+The response contains `participant_count`, category totals (including
+`human_participant_count`), `species_breakdown`, selected/inventoried dataset
+counts, a release fingerprint, and any inventory coverage notices. It contains
+no identity issue ledger. Omit titles for archive totals; an empty selection or
+unknown title is rejected. The selected total counts each curated group once.
+
+`get_snapshot_info.v2_capabilities.participant_summary` advertises schema-10+
+summary availability from the installed manifest. Older inventories retain their
+existing discovery APIs but cannot supply this summary. Staff can use
+`find_participant_link_issues` for source status plus `current_disposition`;
+see [identity methods](../references/participant-identity-methods.md).

@@ -23,6 +23,7 @@ from typing import Any
 
 from tcia_artifact_model import SCHEMA_VERSION as MODEL_SCHEMA_VERSION
 from tcia_artifact_model import json_dumps, stable_id
+from tcia_participant_groups import SCHEMA as GROUP_SCHEMA
 try:
     from tcia_v2_staging import resolve_component as resolve_staging_component
 except ImportError:
@@ -48,7 +49,7 @@ DEFAULT_RELEASE_TAG = "tcia-metadata-v2-latest"
 DEFAULT_REPOSITORY = "kirbyju/tcia-query-skill"
 DB_ASSET = "participant_inventory.sqlite.gz"
 MANIFEST_ASSET = "participant_inventory_manifest.json"
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 GEOMETRY_CAPABLE_FORMATS = {"DICOM", "NIFTI", "MHA", "MHD", "NRRD"}
 GEOMETRY_CHECKED_STATUSES = {
@@ -374,6 +375,8 @@ LEFT JOIN participants source
 CREATE VIEW agent_participant_search AS
 SELECT * FROM agent_participants;
 """
+
+SCHEMA += GROUP_SCHEMA
 
 
 def connect(path: Path) -> sqlite3.Connection:
@@ -2192,6 +2195,16 @@ def resolve_within_dataset_identifiers(conn: sqlite3.Connection) -> dict[str, in
     return resolution_counts
 
 
+def build_participant_groups(conn: sqlite3.Connection, snapshot_db: Path) -> dict[str, int]:
+    from tcia_participant_groups import build_groups
+    with closing(connect(snapshot_db)) as source:
+        columns = {r[1] for r in source.execute("PRAGMA table_info(agent_datasets)")}
+        species = "species" if "species" in columns else "'' AS species"
+        labels = {(r['dataset_type'], r['short_title']): str(r['species'] or '')
+                  for r in source.execute(f"SELECT dataset_type,short_title,{species} FROM agent_datasets")}
+    return build_groups(conn, labels)
+
+
 def build_database(
     out: Path,
     *,
@@ -2265,8 +2278,14 @@ def build_database(
         record_source(conn, 'reviewed_participant_identity', DEFAULT_REFERENCE, True,
                       counts['reviewed_identity_links']['source_links'] + counts['reviewed_identity_links']['collection_equivalences'],
                       'Finite reviewed source links, Collection equivalences, and within-dataset aliases; raw identities retained.')
+        counts.update(build_participant_groups(conn, snapshot_db))
+        from tcia_participant_groups import REVIEW_REFERENCE
+        record_source(conn, 'reviewed_participant_issue_dispositions', REVIEW_REFERENCE, True,
+                      conn.execute("SELECT COUNT(*) FROM participant_issue_dispositions WHERE disposition='explained_annotation_only'").fetchone()[0],
+                      'Finite reviewed annotation-only coverage dispositions; source issues retained.')
         metadata = {
             "schema_version": SCHEMA_VERSION,
+            "curated_participant_index_version": 1,
             "artifact_model_schema_version": MODEL_SCHEMA_VERSION,
             "generated_at_utc": datetime.now(timezone.utc).isoformat(),
             "identity_rule": (
@@ -2336,6 +2355,17 @@ def validate_database(
         missing = sorted(required - objects)
         if missing:
             errors.append("missing objects: " + ", ".join(missing))
+        version = conn.execute("SELECT value FROM participant_inventory_meta WHERE key='schema_version'").fetchone()
+        if version and int(version[0]) >= 10:
+            group_objects = {'participant_groups', 'participant_group_members', 'agent_participant_summary',
+                             'agent_participant_group_members', 'participant_group_link_review',
+                             'participant_issue_dispositions'}
+            absent = group_objects - objects
+            if absent:
+                errors.append("missing curated participant objects: " + ", ".join(sorted(absent)))
+            else:
+                from tcia_participant_groups import validate_groups
+                errors.extend(validate_groups(conn))
         if 'participant_equivalences' in objects:
             invalid_equivalences = conn.execute('''SELECT COUNT(*) FROM participant_equivalences e
                 JOIN participants l ON l.participant_key=e.left_participant_key
@@ -2509,6 +2539,11 @@ def validate_database(
                 "WHERE dataset_type='Analysis Result'"
             ).fetchone()[0],
         }
+        if 'participant_groups' in objects:
+            counts['participant_groups'] = conn.execute('SELECT COUNT(*) FROM participant_groups').fetchone()[0]
+            counts['duplicate_memberships_removed'] = counts['participants'] - counts['participant_groups']
+            for row in conn.execute('SELECT subject_category,COUNT(*) FROM participant_groups GROUP BY subject_category'):
+                counts[f'participants_{row[0]}'] = row[1]
         if counts["participants"] > 100000:
             brats_counts = {
                 "brats_participants": conn.execute(

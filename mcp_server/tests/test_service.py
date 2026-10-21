@@ -800,6 +800,102 @@ def create_public_non_dicom_db(path: Path) -> None:
 
 
 class TciaQueryServiceTests(unittest.TestCase):
+    def install_curated_fixture(self):
+        with connect(self.participants) as conn:
+            conn.executescript("""
+                CREATE TABLE participant_groups (participant_group_id TEXT PRIMARY KEY,
+                    subject_category TEXT,species TEXT,membership_count INTEGER);
+                CREATE TABLE participant_group_members (participant_key TEXT PRIMARY KEY,participant_group_id TEXT);
+                INSERT INTO participant_groups VALUES ('shared','human','Human',2),('other','human','Human',1);
+                INSERT INTO participants VALUES ('derived','Analysis Result','Derived','1','dataset_scoped','single_namespace','source_identifier','not_asserted');
+                INSERT INTO participant_group_members VALUES ('participant-1','shared'),('participant-2','other'),('derived','shared');
+                CREATE VIEW agent_participant_group_members AS
+                SELECT m.*,p.dataset_type,p.short_title,p.display_participant_id,g.subject_category,g.species
+                FROM participant_group_members m JOIN participants p USING(participant_key)
+                JOIN participant_groups g USING(participant_group_id);
+            """)
+
+        with connect(self.snapshot) as conn:
+            conn.execute("CREATE TEMP TABLE selected AS SELECT * FROM agent_dataset_access_summary WHERE short_title='TCGA-BRCA' LIMIT 1")
+            conn.execute("UPDATE selected SET short_title='Derived',dataset_type='Analysis Result'")
+            conn.execute("INSERT INTO agent_dataset_access_summary SELECT * FROM selected")
+
+    def test_curated_summary_counts_groups_and_omits_audit_details(self):
+        self.install_curated_fixture()
+        result=self.service.get_participant_summary(short_titles=['TCGA-BRCA'])
+        from mcp_server.tcia_query_mcp.models import ParticipantSummaryResponse
+        ParticipantSummaryResponse.model_validate(result)
+        self.assertEqual(result['participant_count'],2)
+        self.assertEqual(result['human_participant_count'],2)
+        self.assertEqual(result['dataset_count'],1)
+        self.assertEqual(result['notices'],[])
+        self.assertNotIn('participant_link_issues',result)
+        self.assertEqual(self.service.get_participant_summary(short_titles=['Derived'])['participant_count'],1)
+        self.assertEqual(self.service.get_participant_summary(short_titles=['TCGA-BRCA','Derived'])['participant_count'],2)
+        response=TestClient(create_app(self.service)).post('/v2/participants/summary',json={'short_titles':['TCGA-BRCA']})
+        self.assertEqual(response.status_code,200)
+        self.assertEqual(response.json(),result)
+
+        async def run():
+            with patch("mcp_server.tcia_query_mcp.server.service", return_value=self.service):
+                return await mcp.call_tool("get_participant_summary", {"short_titles": ["TCGA-BRCA"]})
+        rpc = asyncio.run(run())
+        self.assertFalse(rpc.is_error)
+        self.assertEqual(rpc.structured_content, result)
+
+    def test_curated_capability_tracks_installed_schema_and_readiness_checks_objects(self):
+        self.assertFalse(self.service.bundle_info()['v2_capabilities']['participant_summary'])
+        manifest=json.loads(self.bundle_manifest.read_text())
+        manifest['components']['participant_inventory']['schema_version']=10
+        self.bundle_manifest.write_text(json.dumps(manifest))
+        with connect(self.participants) as conn:
+            conn.execute("UPDATE participant_inventory_meta SET value='10' WHERE key='schema_version'")
+        self.assertTrue(self.service.bundle_info()['v2_capabilities']['participant_summary'])
+        # A claimed schema 10 without the curated tables cannot be ready.
+        with self.assertRaises(ServiceUnavailableError):
+            self.service.readiness_info()
+
+
+    def test_curated_summary_requires_curated_artifact_and_valid_selection(self):
+        with self.assertRaises(ServiceUnavailableError):self.service.get_participant_summary()
+        self.install_curated_fixture()
+        with self.assertRaises(InvalidRequestError):self.service.get_participant_summary(short_titles=[])
+        with self.assertRaises(InvalidRequestError):self.service.get_participant_summary(dataset_type='unknown')
+        with self.assertRaises(NotFoundError):self.service.get_participant_summary(short_titles=['UNKNOWN'])
+        with self.assertRaises(NotFoundError):self.service.get_participant_summary(short_titles=['TCGA-BRCA'],dataset_type='Analysis Result')
+
+    def test_staff_issue_dispositions_are_separate_from_source_status(self):
+        with connect(self.participants) as conn:
+            conn.executescript("""
+                CREATE TABLE participant_issue_dispositions (
+                    issue_id TEXT PRIMARY KEY, source_status TEXT, disposition TEXT, evidence_reference TEXT);
+                INSERT INTO participant_issue_dispositions VALUES (
+                    'issue-1','review_required','explained_annotation_only','reviewed.json');
+            """)
+        result = self.service.find_participant_link_issues(statuses=['review_required'])
+        LinkIssuesResponse.model_validate(result)
+        issue = result['participant_link_issues'][0]
+        self.assertEqual(issue['status'], 'review_required')
+        self.assertEqual(issue['current_disposition'], 'explained_annotation_only')
+        coverage = self.service.get_dataset_participant_coverage('TCGA-BRCA')
+        CoverageResponse.model_validate(coverage)
+        self.assertEqual(coverage['participant_link_issues'][0]['current_disposition'], 'explained_annotation_only')
+        self.assertFalse(coverage['coverage_complete'])
+
+    def test_curated_summary_filters_hidden_members_and_reports_missing_inventory(self):
+        self.install_curated_fixture()
+        # A hidden group's membership must not contribute, even if the group is present.
+        with connect(self.participants) as conn:
+            conn.execute("INSERT INTO participant_groups VALUES ('hidden','animal','Mouse',1)")
+            conn.execute("INSERT INTO participants VALUES ('hidden','Collection','HIDDEN','1','dataset_scoped','single_namespace','source_identifier','not_asserted')")
+            conn.execute("INSERT INTO participant_group_members VALUES ('hidden','hidden')")
+        result=self.service.get_participant_summary()
+        self.assertEqual(result['participant_count'],2)
+        self.assertEqual(result['animal_participant_count'],0)
+        self.assertGreater(result['dataset_count'],result['datasets_with_participant_inventory'])
+        self.assertTrue(result['notices'])
+        with self.assertRaises(NotFoundError):self.service.get_participant_summary(short_titles=['HIDDEN'])
+
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
         root = Path(self.tmp.name)

@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "reviewed_at": "2026-10-19",
+  "cohorts": [
+    {
+      "classification": "explained_annotation_only_source_images_unavailable",
+      "dataset_type": "Analysis Result",
+      "identifiers": [
+        "TCGA-06-0118",
+        "TCGA-06-0123",
+        "TCGA-06-0134",
+        "TCGA-06-0144"
+      ],
+      "note": "Retained annotations have unavailable current source-image participants, consistent with the published four-patient removal notice. The notice does not individually name these IDs.",
+      "review_sha256": "698bc861bef164b29c0b3a02f179d7f3ed09260ccdd4de450d62a94367db6212",
+      "short_title": "TCGA-GBM-QI-Radiogenomics",
+      "sources": [
+        {
+          "bytes": 293869,
+          "file": "dataset-page.html",
+          "retrieved_at": "2026-10-19T13:24:08+00:00",
+          "sha256": "ed1a9b4b6fbbb251913bd81254aed14fb6faee3a9830dc859fada991d56b367f",
+          "url": "https://www.cancerimagingarchive.net/analysis-result/tcga-gbm-qi-radiogenomics/"
+        },
+        {
+          "bytes": 610752,
+          "file": "SupplementaryDataZIP_AIMfiles.zip",
+          "retrieved_at": "2026-10-19T13:24:09+00:00",
+          "sha256": "8e0560497cebcdfd6ab182590cf46cd97c5ab55bb89c2d5818900a9a5c658d9b",
+          "url": "https://www.cancerimagingarchive.net/wp-content/uploads/SupplementaryDataZIP_AIMfiles.zip"
+        },
+        {
+          "bytes": 11253,
+          "file": "GC_manifest_TCGA-GBM-QI-RADIOGENOMICS_4fewer_for_RJEFTJBU.csv",
+          "retrieved_at": "2026-10-19T13:24:09+00:00",
+          "sha256": "7f2d69336900018827b1e9dc51818879c8a44b0b3e7378a0659e98050a52ca8f",
+          "url": "https://www.cancerimagingarchive.net/wp-content/uploads/GC_manifest_TCGA-GBM-QI-RADIOGENOMICS_4fewer_for_RJEFTJBU.csv"
+        },
+        {
+          "bytes": 1458060,
+          "file": "GC_manifest_TCGA-GBM_20260326.csv",
+          "retrieved_at": "2026-10-19T13:26:23+00:00",
+          "sha256": "17a48bdd5fd67d5f5e7816c8076b61f7ec9dbb95968a694a9295012f0b262e61",
+          "url": "https://www.cancerimagingarchive.net/wp-content/uploads/GC_manifest_TCGA-GBM_20260326.csv"
+        }
+      ],
+      "issue_code": "source_collection_participant_not_current"
+    }
+  ]
+}

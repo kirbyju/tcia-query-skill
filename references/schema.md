@@ -692,3 +692,13 @@ WHERE s.resolved_access_level IN ('controlled', 'mixed')
   )
 ORDER BY s.short_title;
 ```
+
+## Curated participant totals
+
+Participant Inventory schema 10 adds release-built `participant_groups` and
+`participant_group_members`. `agent_participant_summary` returns species/category
+counts across the inventory; `agent_participant_group_members` supports selected
+scopes with `COUNT(DISTINCT participant_group_id)`. Dataset-scoped participant
+rows and keys retain their existing meaning. Use `get_participant_summary` for
+public counts, with visible-dataset filtering and inventory coverage notices.
+See `references/participant-identity-methods.md` for index and staff audit contracts.

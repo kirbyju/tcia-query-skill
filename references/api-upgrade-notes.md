@@ -40,3 +40,13 @@ This release intentionally narrows and types the public agent/API contract.
 - Retired standalone `/v1/nifti/...` and `/v1/pathology/...` REST URLs return stable `410 Gone` Problem Details plus the standard V1 deprecation/migration headers; they never query legacy sidecars. Use `/v2/public-non-dicom/assets`.
 
 Clients should treat additive response fields as compatible, avoid decoding cursors, and use the advertised OpenAPI/MCP schemas rather than hand-maintained field lists.
+
+## Participant Inventory schema 10
+
+Additive `get_participant_summary` MCP tool and `POST /v2/participants/summary`
+REST endpoint use release-built curated groups for archive and selected-dataset
+counts. No runtime graph reconstruction or raw-row fallback is performed. Install
+a rebuilt schema-10 bundle before using this capability; existing bundles remain
+compatible with existing tools. Staff issue responses add optional
+`current_disposition` and `disposition_evidence_reference` fields while retaining
+raw status/filter semantics. See `participant-identity-methods.md`.
