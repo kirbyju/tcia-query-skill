@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "dataset_type": "Analysis Result",
+  "short_title": "TOMPEI-CMMD",
+  "download_id": "50085",
+  "source_url": "https://www.cancerimagingarchive.net/wp-content/uploads/TOMPEI-CMMD_v01_20250123.zip",
+  "package_sha256": "bf1e92620082be2b3077ce681253455bc9f2a4c171bd5771370a0194efa6f678",
+  "package_size_bytes": 4792489,
+  "inventory_sha256": "fe6421d535c50c6298db52ad95291acf19d2c3eff704a2523c104222f8ecb993",
+  "files": 1385,
+  "participants": 1363,
+  "reviewed_at": "2026-10-22",
+  "evidence_url": "https://www.cancerimagingarchive.net/analysis-result/tompei-cmmd/",
+  "method": "Exact official ZIP member names; each annotation JSON links to the dataset-scoped ID in its filename. MacOS resource entries excluded."
+}

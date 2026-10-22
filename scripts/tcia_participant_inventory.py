@@ -1771,6 +1771,20 @@ def ingest_clinical(
         record_source(conn, "clinical_metadata", path, False, 0, "Optional clinical metadata not installed.")
         return 0
     imported = 0
+    # NLST's clinical delivery covers both trial arms. Only identifiers with
+    # current published imaging evidence belong in this imaging inventory.
+    # Keep the complete source clinical artifact untouched; do not infer arms.
+    nlst_imaging_ids = {
+        str(row[0]).casefold()
+        for row in conn.execute(
+            "SELECT DISTINCT i.raw_identifier FROM participant_identifiers i "
+            "JOIN participants p USING(participant_key) "
+            "JOIN participant_assets a USING(participant_key) "
+            "WHERE p.dataset_type='Collection' AND p.short_title='NLST' "
+            "AND a.data_domain IN ('radiology','pathology') "
+            "AND COALESCE(a.source_version,'') <> 'legacy'"
+        )
+    }
     with closing(connect(path)) as source:
         codex_projection = cptac_gbm_codex_clinical_projection(source)
         if table_exists(source, "agent_clinical_all_subjects"):
@@ -1790,6 +1804,8 @@ def ingest_clinical(
                 # membership only after the clinical artifact has an explicit
                 # result-owned imaging/crosswalk link.
                 if dataset_type == "Analysis Result" and not row["has_imaging"]:
+                    continue
+                if short_title == "NLST" and raw_id.casefold() not in nlst_imaging_ids:
                     continue
                 resolved_ids = (
                     codex_projection.get(raw_id, [raw_id])
@@ -1911,6 +1927,8 @@ def ingest_clinical(
                 dataset_type, short_title = resolve_dataset_identity(
                     dataset_types, str(row["short_title"]), "Collection"
                 )
+                if short_title == "NLST" and raw_id.casefold() not in nlst_imaging_ids:
+                    continue
                 raw_value = str(row["value_text"] or "")
                 standardized = str(row["value_resolved"] or "")
                 if row["is_inferred"]:
@@ -2000,6 +2018,8 @@ def ingest_clinical(
                     dataset_types, str(row["short_title"]), "Collection"
                 )
                 if dataset_type != "Collection":
+                    continue
+                if short_title == "NLST" and raw_id.casefold() not in nlst_imaging_ids:
                     continue
                 key = ensure_participant(
                     conn,
@@ -2362,14 +2382,17 @@ def build_database(
         )
         import sys
         from tcia_reviewed_identity import apply as apply_reviewed_identity
+        from tcia_reviewed_identity import apply_cbis_ddsm_aliases
         clinical_alias_counts = apply_clinical_participant_aliases(conn, clinical_db)
         counts.update(clinical_alias_counts)
+        counts.update(apply_cbis_ddsm_aliases(conn, clinical_db, api=sys.modules[__name__]))
         counts["display_identifiers_selected"] = select_display_participant_ids(conn)
         resolution_counts = resolve_within_dataset_identifiers(conn)
         counts.update(resolution_counts)
         counts["within_dataset_identity_resolutions"] = (
             sum(resolution_counts.values())
             + clinical_alias_counts["ispy2_clinical_aliases"]
+            + counts["cbis_ddsm_aliases"]
         )
         counts['reviewed_identity_aliases'] = apply_reviewed_identity(
             conn, aliases=True, api=sys.modules[__name__])
@@ -2412,6 +2435,11 @@ def build_database(
             ),
             "clinical_values_storage": (
                 "embedded" if include_clinical_values else "clinical_metadata_detail_artifact"
+            ),
+            "nlst_clinical_membership_policy": (
+                "Only dataset-scoped identifiers with current published CT or pathology "
+                "inventory evidence are eligible; full trial clinical tables remain "
+                "preserved in clinical_metadata. No trial arm is inferred."
             ),
         }
         conn.executemany(
@@ -2561,10 +2589,16 @@ def validate_database(
                 SELECT 1 FROM participant_identity_evidence e
                 WHERE e.participant_key = p.participant_key
                   AND e.resolution_scope = 'within_dataset'
-                  AND e.resolution_method IN (
+                  AND (e.resolution_method IN (
                     'official_clinical_identifier_crosswalk',
                     'official_brats_workbook_ucsf_metadata_and_documented_followup_correction',
                     'official_pseudo_phi_patient_uid_crosswalk_and_digest_reconciliation')
+                    OR (p.dataset_type='Collection' AND p.short_title='CBIS-DDSM'
+                        AND e.resolution_method='official_cbis_ddsm_case_identifier_crosswalk'
+                        AND json_extract(e.evidence_json, '$.raw_identifier')=i.raw_identifier
+                        AND casefold(json_extract(e.evidence_json, '$.participant_id'))=
+                            casefold(p.display_participant_id)
+                        AND json_array_length(e.evidence_json, '$.source_row_sha256') > 0))
                   AND e.status = 'resolved'
               )
             """
@@ -2616,6 +2650,17 @@ def validate_database(
         ).fetchone()[0]
         if orphan_source_links:
             errors.append(f"orphan participant source links: {orphan_source_links}")
+        nlst_clinical_only = conn.execute(
+            "SELECT COUNT(*) FROM participants p WHERE p.short_title='NLST' "
+            "AND p.dataset_type='Collection' AND EXISTS (SELECT 1 FROM participant_assets a "
+            "WHERE a.participant_key=p.participant_key AND a.data_domain='clinical') "
+            "AND NOT EXISTS (SELECT 1 FROM participant_assets a "
+            "WHERE a.participant_key=p.participant_key "
+            "AND a.data_domain IN ('radiology','pathology') "
+            "AND COALESCE(a.source_version,'')<>'legacy')"
+        ).fetchone()[0]
+        if nlst_clinical_only:
+            errors.append(f"NLST clinical-only participants outside imaging scope: {nlst_clinical_only}")
         counts = {
             "participants": conn.execute("SELECT COUNT(*) FROM participants").fetchone()[0],
             "participant_assets": conn.execute("SELECT COUNT(*) FROM participant_assets").fetchone()[0],
@@ -2656,6 +2701,12 @@ def validate_database(
             for row in conn.execute('SELECT subject_category,COUNT(*) FROM participant_groups GROUP BY subject_category'):
                 counts[f'participants_{row[0]}'] = row[1]
         if counts["participants"] > 100000:
+            cbis = conn.execute(
+                "SELECT COUNT(*), SUM(has_clinical), SUM(has_public_dicom) "
+                "FROM agent_participants WHERE dataset_type='Collection' AND short_title='CBIS-DDSM'"
+            ).fetchone()
+            if tuple(cbis) != (1566, 1566, 1566):
+                errors.append(f"CBIS-DDSM participant/clinical/imaging coverage regression: {tuple(cbis)}")
             brats_counts = {
                 "brats_participants": conn.execute(
                     "SELECT COUNT(*) FROM participants WHERE dataset_type='Analysis Result' AND short_title=?",
@@ -2755,6 +2806,7 @@ def validate_database(
                 "TCGA-KIRC-Radiogenomics": 103,
                 "TCGA-OV-Proteogenomics": 20,
                 "TCGA-OV-Radiogenomics": 93,
+                "TOMPEI-CMMD": 1363,
             }
             for short_title, expected in reviewed_analysis_result_expected.items():
                 participant_count = conn.execute(

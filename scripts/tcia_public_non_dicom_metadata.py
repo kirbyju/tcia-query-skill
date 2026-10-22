@@ -1888,6 +1888,79 @@ def capture_wordpress_download_identities(conn: sqlite3.Connection) -> int:
     )
 
 
+def ingest_tompei_cmmd_annotations(
+    conn: sqlite3.Connection, snapshot_db: Path, *,
+    inventory_path: Path = SKILL_ROOT / 'references/tompei_cmmd_annotation_inventory_v1.csv',
+    provenance_path: Path = SKILL_ROOT / 'references/tompei_cmmd_annotation_inventory_v1.json',
+) -> dict[str, int]:
+    """Import exact JSON annotation members, not arbitrary JSON attachments."""
+    counts = {'files': 0, 'participants': 0}
+    with closing(connect(snapshot_db)) as source:
+        download = source.execute(
+            "SELECT * FROM agent_current_downloads WHERE short_title='TOMPEI-CMMD' "
+            "AND dataset_type='Analysis Result' AND download_id='50085' "
+            "AND hidden=0 AND controlled_access=0"
+        ).fetchone()
+    if download is None:
+        return counts
+    provenance = json.loads(provenance_path.read_text())
+    if (provenance.get('schema_version') != 1
+            or provenance.get('short_title') != 'TOMPEI-CMMD'
+            or provenance.get('download_id') != '50085'
+            or download['download_url'] != provenance.get('source_url')
+            or 'JSON' not in parse_list(download['file_types'])
+            or 'Segmentation' not in parse_list(download['data_types'])):
+        raise RuntimeError('TOMPEI-CMMD annotation source differs from reviewed package')
+    if file_sha256(inventory_path) != provenance.get('inventory_sha256'):
+        raise RuntimeError('TOMPEI-CMMD annotation inventory digest mismatch')
+    with inventory_path.open(newline='') as handle:
+        rows = list(csv.DictReader(handle))
+    if (len(rows) != provenance['files']
+            or len({r['package_path'] for r in rows}) != len(rows)
+            or len({r['participant_id'] for r in rows}) != provenance['participants']):
+        raise RuntimeError('TOMPEI-CMMD annotation inventory coverage mismatch')
+    for row in rows:
+        match = re.fullmatch(
+            r'TOMPEI-CMMD_v01_20250123/(D[12]-\d{4})_MLO_[LR]_AnnotationFile\.json',
+            row['package_path'])
+        if (not match or match[1] != row['participant_id']
+                or not re.fullmatch(r'[0-9a-f]{64}', row['sha256'])
+                or int(row['size_bytes']) <= 0):
+            raise RuntimeError('TOMPEI-CMMD annotation member identity mismatch')
+    for row in rows:
+        subject = row['participant_id']
+        asset_id = stable_id('asset', 'tompei_cmmd_annotation', '50085', row['package_path'])
+        evidence = {**provenance, 'package_path': row['package_path'],
+                    'inventory_reference': inventory_path.name}
+        insert_asset(conn, {
+            'asset_id': asset_id, 'dataset_type': 'Analysis Result', 'short_title': 'TOMPEI-CMMD',
+            'download_row_id': download['download_row_id'], 'download_id': '50085',
+            'subject_id': subject, 'subject_id_namespace': 'tcia_dataset:TOMPEI-CMMD',
+            'participant_link_status': 'reviewed_source_inventory', 'asset_granularity': 'file',
+            'asset_name': Path(row['package_path']).name, 'file_name': Path(row['package_path']).name,
+            'package_path': row['package_path'], 'file_format': 'JSON', 'container_format': 'ZIP',
+            'media_kind': 'geometric_annotation', 'spatial_dimensionality': '2d',
+            'temporal_dimensionality': 'static', 'imaging_domain': 'imaging_annotation',
+            'modality': 'MG', 'object_role': 'segmentation', 'represented_file_count': 1,
+            'size_bytes': int(row['size_bytes']), 'checksum': row['sha256'],
+            'checksum_algorithm': 'sha256', 'representation_provenance_class': 'submitted_original',
+            'source_system': 'tcia_wordpress',
+            'source_record_id': f"tompei-cmmd-annotation:{row['package_path']}",
+            'source_url': provenance['source_url'], 'raw_values_json': '{}',
+            'provenance_json': json_dumps(evidence), 'quality_flag_json': '{}',
+            'geometry_status': 'not_applicable',
+        })
+        insert_location(conn, location_values(
+            asset_id, provenance['source_url'], representation_class='submitted_original',
+            provenance={'archive_member': row['package_path'], 'package_sha256': provenance['package_sha256']}))
+        insert_asset_participant(
+            conn, asset_id=asset_id, short_title='TOMPEI-CMMD', subject_id=subject,
+            namespace='tcia_dataset:TOMPEI-CMMD', raw_subject_id=subject,
+            participant_role='segmented_subject', link_status='reviewed_source_inventory',
+            evidence=evidence)
+    return {'files': len(rows), 'participants': len({r['participant_id'] for r in rows})}
+
+
 def ingest_wordpress(conn: sqlite3.Connection, snapshot_db: Path) -> int:
     count = 0
     with closing(connect(snapshot_db)) as source:
@@ -6836,6 +6909,7 @@ def delete_refreshable_assets(conn: sqlite3.Connection) -> int:
         "   OR source_record_id LIKE 'tcga-lgg-mask-%' "
         "   OR source_record_id LIKE 'tcga-lgg-mask-inventory:%' "
         "   OR source_record_id LIKE 'reviewed-participant-inventory:%' "
+        "   OR source_record_id LIKE 'tompei-cmmd-annotation:%' "
         "   OR source_system='tcia_pathdb'"
     )
     count = int(conn.execute("SELECT COUNT(*) FROM refresh_asset_ids").fetchone()[0])
@@ -7201,6 +7275,8 @@ def build_database(
             f"reviewed_analysis_result_participants_{key}": value
             for key, value in reviewed_participants.items()
         })
+        tompei = ingest_tompei_cmmd_annotations(conn, snapshot_db)
+        counts.update({f'tompei_cmmd_annotations_{key}': value for key, value in tompei.items()})
         path_contracts = apply_reviewed_path_contracts(
             conn, clinical_db, crosswalk_curation, pathology_db=pathology_db
         )

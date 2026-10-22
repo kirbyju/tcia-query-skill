@@ -457,6 +457,30 @@ resolve I-SPY2 aliases and let a BreastDCEDL_ISPY2 participant link to both
 source Collections. Equal bare identifiers in unrelated Collections, such as
 NLST, are not evidence and remain separate.
 
+NLST clinical tables cover the broader trial, including the radiography arm
+whose images will not be supplied to TCIA. Participant Inventory imports NLST
+clinical memberships and optional embedded facts only for dataset-scoped IDs
+already supported by current published CT or pathology assets. Historical IDC
+presence cannot reintroduce excluded clinical-only IDs. The complete clinical
+tables remain preserved in `clinical_metadata.sqlite`; this inventory policy
+does not assign trial arms to individual participants.
+
+CBIS-DDSM is a documented within-Collection alias exception: TCIA explicitly
+states that scan-specific DICOM PatientIDs represent multiple identifiers per
+participant. The builder resolves only the documented CBIS case-ID structure
+to `P_NNNNN` IDs present in the official case-description rows, after checking
+the source patient field and patient-specific image paths. Raw identifiers,
+asset IDs, source links, and evidence are retained. This rule never applies to
+other datasets or identifiers outside the supported source cohort.
+
+TOMPEI-CMMD annotation assets use a finite, hash-bound inventory of 1,385 JSON
+members for 1,363 participants in the official annotation ZIP. The importer
+checks the active download identity, inventory digest, exact member syntax,
+and cohort cardinality before writing. JSON coordinates are represented as
+geometric segmentation annotations; source mammograms remain in CMMD, linked
+through `participant_source_links`. The workbook's additional 412 IDs outside
+the annotation cohort do not become Analysis Result participants.
+
 The reviewed BraTS workbook is the explicit exception to the default
 cross-dataset non-assertion rule: it supplies both the source Collection and
 source PatientID. Current-inventory matches are marked
