@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "short_title": "UCSD-BMETS-Longitudinal",
+  "download_id": "55864",
+  "source_url": "https://faspex.cancerimagingarchive.net/aspera/faspex/public/package?context=eyJyZXNvdXJjZSI6InBhY2thZ2VzIiwidHlwZSI6ImV4dGVybmFsX2Rvd25sb2FkX3BhY2thZ2UiLCJpZCI6IjEzNDMiLCJwYXNzY29kZSI6ImI5MDI5NmEwNTgxNDhlMGIzZTM1MjY2MDQ4NjRjOWM1ZDQ3YWVkZmMiLCJwYWNrYWdlX2lkIjoiMTM0MyIsImVtYWlsIjoiaGVscEBjYW5jZXJpbWFnaW5nYXJjaGl2ZS5uZXQifQ==",
+  "inventory_sha256": "f2e50f5ad7ca843a3a4639c5460f3655c773916f0b8958feea34dc9053f40f3b",
+  "listing_sha256": "343f5313f0d6dfc4afb13bfae48f50492c2021296d6dc31af83f122213c16968",
+  "metadata_sha256": "53ac850fcd31094b2fc131cad08b23497b9539bbf75cf2b3679b7e7108fa41c7",
+  "metadata_url": "https://www.cancerimagingarchive.net/wp-content/uploads/UCSD-BMETS-Longitudinal_TCIA_MRImetadata.tsv",
+  "studies": 1065,
+  "participants": 300,
+  "reviewed_at": "2026-10-22",
+  "method": "Exact public Faspex study directories cross-checked against official MRI metadata Study ID. File-level contents and counts are not asserted."
+}

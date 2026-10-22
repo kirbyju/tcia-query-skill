@@ -1468,6 +1468,10 @@ def ingest_public_non_dicom(
                 "pa", key, "public_non_dicom", source_system,
                 row["file_formats"], row["object_roles"],
             )
+            study_only = (
+                short_title == 'UCSD-BMETS-Longitudinal'
+                and not row['file_assets'] and not row['represented_files']
+            )
             add_asset(conn, {
                 "participant_asset_id": asset_id,
                 "participant_key": key,
@@ -1485,15 +1489,15 @@ def ingest_public_non_dicom(
                 "geometry_not_regular_count": row["geometry_not_regular_count"] or 0,
                 "geometry_not_checked_count": row["geometry_not_checked_count"] or 0,
                 "geometry_source": "public_non_dicom_metadata",
-                "study_count": None,
+                "study_count": row['asset_rows'] if study_only else None,
                 "series_count": None,
                 "file_count": (
-                    row["represented_files"]
+                    None if study_only else row["represented_files"]
                     if "represented_files" in row.keys() and row["represented_files"]
                     else row["file_assets"] or row["asset_rows"]
                 ),
                 "known_size_bytes": row["known_size_bytes"] or 0,
-                "has_file_level_metadata": 1,
+                "has_file_level_metadata": 0 if study_only else 1,
                 "detail_pointer": f"agent_public_non_dicom_asset_participants:{row['short_title']}:{raw_id}",
                 "access_route": (
                     row["access_route"]
@@ -2396,6 +2400,9 @@ def build_database(
         )
         counts['reviewed_identity_aliases'] = apply_reviewed_identity(
             conn, aliases=True, api=sys.modules[__name__])
+        from tcia_clinical_only_repairs import IDENTITY_REFERENCE
+        counts['clinical_only_reviewed_aliases'] = apply_reviewed_identity(
+            conn, aliases=True, api=sys.modules[__name__], reference=IDENTITY_REFERENCE)
         source_links = apply_analysis_result_source_collection_links(
             conn,
             snapshot_db=snapshot_db,
@@ -2408,6 +2415,12 @@ def build_database(
         counts.update({f"brats_{key}": value for key, value in brats_links.items()})
         counts['reviewed_identity_links'] = apply_reviewed_identity(
             conn, aliases=False, api=sys.modules[__name__])
+        counts['clinical_only_reviewed_links'] = apply_reviewed_identity(
+            conn, aliases=False, api=sys.modules[__name__], reference=IDENTITY_REFERENCE)
+        record_source(conn, 'clinical_only_identity_repairs', IDENTITY_REFERENCE, True,
+                      counts['clinical_only_reviewed_aliases']['aliases']
+                      + counts['clinical_only_reviewed_links']['collection_equivalences'],
+                      'Finite source-bound within-dataset aliases and explicit ACRIN/I-SPY2 identity links; unresolved cases remain separate.')
         from tcia_reviewed_identity import DEFAULT_REFERENCE
         record_source(conn, 'reviewed_participant_identity', DEFAULT_REFERENCE, True,
                       counts['reviewed_identity_links']['source_links'] + counts['reviewed_identity_links']['collection_equivalences'],
@@ -2514,7 +2527,14 @@ def validate_database(
                    OR e.evidence_source='' OR e.participant_equivalence_id=''
                    OR e.resolution_method NOT IN (
                      'official_collection_overlap_declaration_and_exact_shared_namespace',
-                     'official_brats_peds_source_mapping_and_reviewed_dfci_finite_padding_alias')''').fetchone()[0]
+                     'official_brats_peds_source_mapping_and_reviewed_dfci_finite_padding_alias',
+                     'official_acrin_ispy2_clinical_crosswalk')
+                   OR (e.resolution_method='official_acrin_ispy2_clinical_crosswalk' AND (
+                       l.short_title<>'ISPY2' OR r.short_title<>'ACRIN-6698'
+                       OR e.evidence_source<>'clinical_only_identity_repairs_v1.json'
+                       OR json_extract(e.evidence_json,'$.left.identifier') IS NOT l.display_participant_id
+                       OR json_extract(e.evidence_json,'$.right.identifier') IS NOT r.display_participant_id
+                       OR json_extract(e.evidence_json,'$.evidence.source_row_sha256') IS NULL))''').fetchone()[0]
             if invalid_equivalences:
                 errors.append(f'invalid reviewed Collection equivalences: {invalid_equivalences}')
         cross_dataset = conn.execute(
@@ -2598,7 +2618,15 @@ def validate_database(
                         AND json_extract(e.evidence_json, '$.raw_identifier')=i.raw_identifier
                         AND casefold(json_extract(e.evidence_json, '$.participant_id'))=
                             casefold(p.display_participant_id)
-                        AND json_array_length(e.evidence_json, '$.source_row_sha256') > 0))
+                        AND json_array_length(e.evidence_json, '$.source_row_sha256') > 0)
+                    OR (e.resolution_method='official_reviewed_finite_within_dataset_crosswalk'
+                        AND json_extract(e.evidence_json,'$.reference')='clinical_only_identity_repairs_v1.json'
+                        AND casefold(json_extract(e.evidence_json,'$.left.identifier'))=casefold(i.raw_identifier)
+                        AND json_extract(e.evidence_json,'$.left.short_title')=p.short_title
+                        AND json_extract(e.evidence_json,'$.right.short_title')=p.short_title
+                        AND json_extract(e.evidence_json,'$.right.dataset_type')=p.dataset_type
+                        AND casefold(json_extract(e.evidence_json,'$.right.identifier'))=
+                            casefold(p.display_participant_id)))
                   AND e.status = 'resolved'
               )
             """

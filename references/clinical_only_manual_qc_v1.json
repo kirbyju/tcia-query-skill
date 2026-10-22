@@ -1,0 +1,181 @@
+{
+  "schema_version": 1,
+  "reviewed_at": "2026-10-22",
+  "review_requested_for": "2026-10-23 morning America/New_York",
+  "baseline_bundle_fingerprint": "ca1034fa1696b8ce2d2338a44cbc1b7ad21fcf8ce0385cb6ea3ef864d6a1d37b",
+  "record_count": 71,
+  "dataset_count": 9,
+  "records": [
+    {
+      "short_title": "CFB-GBM",
+      "record_count": 1,
+      "participant_ids": [
+        "89"
+      ],
+      "finding": "Missing package participant",
+      "manual_qc_question": "Clinical ID 89 has no current image owner 089. Confirm current package coverage; no numeric substitution proposed.",
+      "disposition": "manual_review",
+      "changed": false
+    },
+    {
+      "short_title": "ACRIN-FLT-Breast",
+      "record_count": 7,
+      "participant_ids": [
+        "ACRIN-FLT_Breast_032",
+        "ACRIN-FLT_Breast_055",
+        "ACRIN-FLT_Breast_056",
+        "ACRIN-FLT_Breast_065",
+        "ACRIN-FLT_Breast_068",
+        "ACRIN-FLT_Breast_074",
+        "ACRIN-FLT_Breast_088"
+      ],
+      "finding": "Broader clinical cohort",
+      "manual_qc_question": "After 83 spelling repairs, seven enrolled IDs lack current image membership. Confirm inventory inclusion policy; preserve source records.",
+      "disposition": "manual_review",
+      "changed": false
+    },
+    {
+      "short_title": "ACRIN-Contralateral-Breast-MR",
+      "record_count": 23,
+      "participant_ids": [
+        "ACRIN-Contralateral-Breast-MR-020",
+        "ACRIN-Contralateral-Breast-MR-096",
+        "ACRIN-Contralateral-Breast-MR-120",
+        "ACRIN-Contralateral-Breast-MR-142",
+        "ACRIN-Contralateral-Breast-MR-189",
+        "ACRIN-Contralateral-Breast-MR-249",
+        "ACRIN-Contralateral-Breast-MR-381",
+        "ACRIN-Contralateral-Breast-MR-384",
+        "ACRIN-Contralateral-Breast-MR-457",
+        "ACRIN-Contralateral-Breast-MR-490",
+        "ACRIN-Contralateral-Breast-MR-495",
+        "ACRIN-Contralateral-Breast-MR-531",
+        "ACRIN-Contralateral-Breast-MR-533",
+        "ACRIN-Contralateral-Breast-MR-571",
+        "ACRIN-Contralateral-Breast-MR-600",
+        "ACRIN-Contralateral-Breast-MR-613",
+        "ACRIN-Contralateral-Breast-MR-619",
+        "ACRIN-Contralateral-Breast-MR-829",
+        "ACRIN-Contralateral-Breast-MR-830",
+        "ACRIN-Contralateral-Breast-MR-841",
+        "ACRIN-Contralateral-Breast-MR-867",
+        "ACRIN-Contralateral-Breast-MR-923",
+        "ACRIN-Contralateral-Breast-MR-953"
+      ],
+      "finding": "Clinical/imaging cohort difference",
+      "manual_qc_question": "1007 clinical IDs versus 984 current imaging IDs. Verify the 23 unmatched cases and cohort exclusions.",
+      "disposition": "manual_review",
+      "changed": false
+    },
+    {
+      "short_title": "ACRIN-NSCLC-FDG-PET",
+      "record_count": 9,
+      "participant_ids": [
+        "ACRIN-NSCLC-FDG-PET-060",
+        "ACRIN-NSCLC-FDG-PET-101",
+        "ACRIN-NSCLC-FDG-PET-111",
+        "ACRIN-NSCLC-FDG-PET-156",
+        "ACRIN-NSCLC-FDG-PET-182",
+        "ACRIN-NSCLC-FDG-PET-205",
+        "ACRIN-NSCLC-FDG-PET-211",
+        "ACRIN-NSCLC-FDG-PET-240",
+        "ACRIN-NSCLC-FDG-PET-246"
+      ],
+      "finding": "Clinical/imaging cohort difference",
+      "manual_qc_question": "251 clinical IDs versus 242 imaging IDs. Check trial eligibility/exclusions and the extra clinical identifier.",
+      "disposition": "manual_review",
+      "changed": false
+    },
+    {
+      "short_title": "ACRIN-FMISO-Brain",
+      "record_count": 5,
+      "participant_ids": [
+        "ACRIN-FMISO-Brain-016",
+        "ACRIN-FMISO-Brain-021",
+        "ACRIN-FMISO-Brain-026",
+        "ACRIN-FMISO-Brain-037",
+        "ACRIN-FMISO-Brain-041"
+      ],
+      "finding": "Clinical/imaging cohort difference",
+      "manual_qc_question": "50 clinical IDs versus 45 imaging IDs. Check the five cases against trial and image availability records.",
+      "disposition": "manual_review",
+      "changed": false
+    },
+    {
+      "short_title": "DLBCL-Morphology",
+      "record_count": 5,
+      "participant_ids": [
+        "13909",
+        "13921",
+        "13925",
+        "13990",
+        "13992"
+      ],
+      "finding": "TMA/ROI linkage needed",
+      "manual_qc_question": "209 clinical cases versus 204 linked image owners. Require TMA/ROI case evidence; patch filenames alone are unsafe (13909.png occurs under case folder 13915).",
+      "disposition": "manual_review",
+      "changed": false
+    },
+    {
+      "short_title": "Head-Neck-PET-CT",
+      "record_count": 2,
+      "participant_ids": [
+        "HN-CHUS-079",
+        "HN-HGJ-068"
+      ],
+      "finding": "Explicit source exclusion",
+      "manual_qc_question": "Both unmatched IDs occur in the workbook Excluded sheet. Decide whether they should remain in the inventory; raw clinical rows remain authoritative.",
+      "disposition": "manual_review",
+      "changed": false
+    },
+    {
+      "short_title": "HNSCC",
+      "record_count": 1,
+      "participant_ids": [
+        "HNSCC-01-0295"
+      ],
+      "finding": "Controlled image manifest mismatch",
+      "manual_qc_question": "HNSCC-01-0295 is in official clinical data and historical membership, but not current controlled image inventory. Verify current manifest availability; do not invent a route.",
+      "disposition": "manual_review",
+      "changed": false
+    },
+    {
+      "short_title": "AURORA-Metastatic-Breast-Multiomics",
+      "record_count": 18,
+      "participant_ids": [
+        "9830.01",
+        "9830.02",
+        "A16",
+        "A17",
+        "A19",
+        "A20",
+        "A21",
+        "A23",
+        "A25",
+        "A26",
+        "A27",
+        "A28",
+        "A30",
+        "A32",
+        "A34",
+        "A38",
+        "A4",
+        "AFUL"
+      ],
+      "finding": "Normal donor and missing case review",
+      "manual_qc_question": "17 IDs occur only in the Normal tissues study sheet; AFUL occurs in the AURORA study sheet without a linked image owner. Review donor/specimen crosswalks and control scope.",
+      "disposition": "manual_review",
+      "changed": false
+    }
+  ],
+  "additional_asset_reviews": [
+    {
+      "short_title": "HistologyHSI-BC-Recurrence",
+      "asset_id": "asset_b6e157663acdb0a75ee82b7e",
+      "finding": "PathDB source record ID raw collapsed 408 capture identifiers onto one asset with an empty package path.",
+      "manual_qc_question": "Verify PathDB record/file identifiers and repair the provider projection before asserting individual file identity. Patient imaging is independently covered by the verified Aspera assets. Original asset, locations and raw ownership evidence are preserved; unsupported participant edges are removed.",
+      "patient_coverage_unresolved": false,
+      "disposition": "manual_review"
+    }
+  ]
+}

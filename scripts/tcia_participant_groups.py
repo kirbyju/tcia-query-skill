@@ -18,6 +18,7 @@ SOURCE_METHODS = {
 EQUIVALENCE_METHODS = {
     'official_collection_overlap_declaration_and_exact_shared_namespace',
     'official_brats_peds_source_mapping_and_reviewed_dfci_finite_padding_alias',
+    'official_acrin_ispy2_clinical_crosswalk',
 }
 BENCHMARKS = {'Pseudo-PHI-DICOM-Data', 'MIDI-B-Test-MIDI-B-Validation'}
 CATEGORIES = ('human', 'animal', 'phantom', 'benchmark', 'unclassified')
@@ -92,6 +93,18 @@ def build_groups(conn: sqlite3.Connection, dataset_species: dict[tuple[str, str]
               or (source and people[right]['short_title'] != row['source_collection_short_title'])
               or (not source and people[left]['short_title'] == people[right]['short_title'])):
             reason = 'endpoint_scope_mismatch'
+        if not reason and not source and row['resolution_method'] == 'official_acrin_ispy2_clinical_crosswalk':
+            evidence = json.loads(row['evidence_json'])
+            raw = evidence.get('evidence', {})
+            fields = raw.get('source_fields', {})
+            if (people[left]['short_title'] != 'ISPY2' or people[right]['short_title'] != 'ACRIN-6698'
+                    or row['evidence_source'] != 'clinical_only_identity_repairs_v1.json'
+                    or evidence.get('left', {}).get('identifier') != people[left]['display_participant_id']
+                    or evidence.get('right', {}).get('identifier') != people[right]['display_participant_id']
+                    or fields.get('dicom_patient_id') != people[right]['display_participant_id']
+                    or 'ISPY2-' + str(fields.get('i_spy_2_research_id', '')) != people[left]['display_participant_id']
+                    or len(str(raw.get('source_row_sha256', ''))) != 64):
+                reason = 'unsupported_acrin_ispy2_crosswalk_scope'
         if reason:
             reviews.append((kind, edge_id, 'not_linked' if reason == 'source_not_linked' else 'rejected', reason))
             continue

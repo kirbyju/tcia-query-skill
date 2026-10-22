@@ -89,6 +89,7 @@ def load_reference(path=DEFAULT_REFERENCE):
     if data.get('schema_version') != 1 or not isinstance(data.get('records'), list):
         raise ValueError('Unsupported reviewed participant identity input')
     seen = set()
+    alias_targets = {}
     for row in data['records']:
         kind = row['kind']
         if kind not in {'source_link', 'replace_source_links', 'within_dataset_alias', 'collection_equivalence'}:
@@ -100,6 +101,12 @@ def load_reference(path=DEFAULT_REFERENCE):
         left, right = row['left'], row['right']
         if kind == 'within_dataset_alias' and (left['dataset_type'], left['short_title']) != (right['dataset_type'], right['short_title']):
             raise ValueError('Alias crosses dataset scopes')
+        if kind == 'within_dataset_alias':
+            alias = (left['dataset_type'], left['short_title'], left['identifier'].casefold())
+            target = right['identifier'].casefold()
+            if alias in alias_targets and alias_targets[alias] != target:
+                raise ValueError('Ambiguous reviewed alias target')
+            alias_targets[alias] = target
         if kind in {'source_link', 'replace_source_links'} and (left['dataset_type'], right['dataset_type']) != ('Analysis Result', 'Collection'):
             raise ValueError('Source link endpoint contract violated')
         if kind == 'collection_equivalence' and (left['dataset_type'] != 'Collection' or right['dataset_type'] != 'Collection' or left['short_title'] == right['short_title']):

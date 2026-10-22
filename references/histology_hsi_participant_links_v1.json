@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "short_title": "HistologyHSI-BC-Recurrence",
+  "inventory_sha256": "d5b63960a3c3e5078c35bc2393daabc7cb6417515daadfaf71f55e2b1b9de464",
+  "links": 5856,
+  "participants": 47,
+  "source_url": "https://www.cancerimagingarchive.net/collection/histologyhsi-bc-recurrence/",
+  "baseline_bundle_fingerprint": "ca1034fa1696b8ce2d2338a44cbc1b7ad21fcf8ce0385cb6ea3ef864d6a1d37b",
+  "method": "Published HSI_VNIR_{P}_{TT}_x10_C{CN} convention identifies P as patient ID; WSI image directories and MRXS basenames use the same official case IDs. Original asset IDs, paths, and raw ownership retained.",
+  "reviewed_at": "2026-10-22",
+  "manual_qc_pathdb_asset": {
+    "asset_id": "asset_b6e157663acdb0a75ee82b7e",
+    "source_system": "tcia_pathdb",
+    "source_record_id": "raw",
+    "file_name": "raw",
+    "raw_capture_links": 408,
+    "finding": "A nonunique PathDB raw record ID collapsed 408 capture identities onto one asset with an empty path. Preserve the record and raw evidence but remove unsupported participant ownership; use the verified Aspera files for patient availability."
+  }
+}

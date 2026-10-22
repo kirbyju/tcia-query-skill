@@ -8423,6 +8423,10 @@ def build(args: argparse.Namespace) -> None:
         max_bytes=args.max_artifact_bytes,
     )
     insert_meta(conn, "tompei_cmmd_package_cohort_result", tompei_cmmd_result)
+    from types import SimpleNamespace
+    from tcia_clinical_only_repairs import repair_ldct_case_ownership
+    ldct_result = repair_ldct_case_ownership(conn, api=SimpleNamespace(**globals()))
+    insert_meta(conn, 'ldct_case_ownership_repair', ldct_result)
     nlst_harmonization_result = harmonize_nlst_clinical_facts(conn)
     insert_meta(conn, "nlst_clinical_harmonization", nlst_harmonization_result)
     low_risk_harmonization_result = harmonize_low_risk_dataset_facts(conn)

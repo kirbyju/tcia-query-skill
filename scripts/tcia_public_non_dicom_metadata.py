@@ -6910,6 +6910,7 @@ def delete_refreshable_assets(conn: sqlite3.Connection) -> int:
         "   OR source_record_id LIKE 'tcga-lgg-mask-inventory:%' "
         "   OR source_record_id LIKE 'reviewed-participant-inventory:%' "
         "   OR source_record_id LIKE 'tompei-cmmd-annotation:%' "
+        "   OR source_record_id LIKE 'ucsd-bmets-study:%' "
         "   OR source_system='tcia_pathdb'"
     )
     count = int(conn.execute("SELECT COUNT(*) FROM refresh_asset_ids").fetchone()[0])
@@ -7277,6 +7278,12 @@ def build_database(
         })
         tompei = ingest_tompei_cmmd_annotations(conn, snapshot_db)
         counts.update({f'tompei_cmmd_annotations_{key}': value for key, value in tompei.items()})
+        import sys
+        from tcia_clinical_only_repairs import repair_histology_hsi_links, ingest_ucsd_bmets_studies
+        hsi = repair_histology_hsi_links(conn, api=sys.modules[__name__])
+        counts.update({f'histology_hsi_reviewed_{key}': value for key, value in hsi.items()})
+        bmets = ingest_ucsd_bmets_studies(conn, snapshot_db, api=sys.modules[__name__])
+        counts.update({f'ucsd_bmets_reviewed_{key}': value for key, value in bmets.items()})
         path_contracts = apply_reviewed_path_contracts(
             conn, clinical_db, crosswalk_curation, pathology_db=pathology_db
         )
