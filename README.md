@@ -251,7 +251,7 @@ the user to download local artifacts merely to answer a routine question.
 
 ### Local artifact metadata
 
-The base snapshot is normally rebuilt once daily at 7:17 AM
+The base snapshot is normally rebuilt once daily at 2:17 AM
 America/New_York, followed by the bundle producer. Users who have explicitly
 chosen offline, bulk, custom-SQL, pinned-release, or server-operation work can
 run the bundle installer to compare and refresh the checksum-verified local

@@ -186,7 +186,7 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
         self.assertIn("fetch-depth: 0", source)
         self.assertIn("scripts/tcia_selective_release.py plan", source)
         self.assertIn("force_full_build:", source)
-        self.assertIn('cron: "17 7 * * *"', source)
+        self.assertIn('cron: "17 2 * * *"', source)
         self.assertNotIn('cron: "17 19 * * *"', source)
         self.assertIn("daily authoritative-source refresh floor", source)
         self.assertIn("--force-full-reason \"operator requested all clinical downloads\"", source)

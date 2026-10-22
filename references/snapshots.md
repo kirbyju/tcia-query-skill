@@ -21,7 +21,7 @@ The skill uses a local SQLite snapshot for routine TCIA discovery instead of que
 - DataCite records under the TCIA DOI prefix `10.7937`.
 
 Generated snapshot files are intentionally not committed to the repository.
-GitHub Actions builds them once daily at 7:17 AM America/New_York and
+GitHub Actions builds them once daily at 2:17 AM America/New_York and
 publishes changed content through the release bundle:
 
 - `tcia_snapshot.sqlite.gz`

@@ -36,7 +36,7 @@ on:
           - "false"
           - "true"
   schedule:
-    - cron: "17 7 * * *"
+    - cron: "17 2 * * *"
       timezone: "America/New_York"
 
 permissions:
@@ -139,7 +139,7 @@ jobs:
             force_args+=(--force-full-reason "operator requested a full build")
           fi
           if [ "${{ github.event_name }}" = "schedule" ] && \
-             [ "${{ github.event.schedule }}" = "17 7 * * *" ]; then
+             [ "${{ github.event.schedule }}" = "17 2 * * *" ]; then
             force_args+=(--force-full-reason "daily authoritative-source refresh floor")
           fi
           if [ "${{ inputs.refresh_all_clinical_downloads || 'false' }}" = "true" ]; then
