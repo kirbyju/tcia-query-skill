@@ -377,9 +377,12 @@ jobs:
           # aliases with their corresponding ISPY2-prefixed DICOM PatientIDs.
           # CPTAC-Glioblastoma-CODEX is authoritatively published as an
           # Analysis Result, so it must not inflate Collection coverage.
+          # The reviewed NLST imaging-scope repair removes 35,449 clinical-only
+          # trial identifiers from this imaging inventory. The verified
+          # post-repair build contains 89,505 Collection participants.
           python scripts/tcia_participant_inventory.py validate \
             --db cache/participant_inventory.sqlite \
-            --min-collection-participants 124674 \
+            --min-collection-participants 89500 \
             --min-collections 221 \
             --min-analysis-result-participants 11730 \
             --min-analysis-results 29

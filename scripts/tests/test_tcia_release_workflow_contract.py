@@ -10,6 +10,12 @@ RESUME_WORKFLOW = ROOT / ".github" / "workflows" / "resume-metadata-v2-release.y
 
 
 class ReleaseWorkflowContractTests(unittest.TestCase):
+    def test_collection_coverage_floor_uses_reviewed_nlst_imaging_scope(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn("removes 35,449 clinical-only", workflow)
+        self.assertIn("--min-collection-participants 89500", workflow)
+        self.assertNotIn("--min-collection-participants 124674", workflow)
+
     def test_resume_review_is_append_only_and_cannot_change_producer_inputs(self):
         text = RESUME_WORKFLOW.read_text()
         for marker in (
