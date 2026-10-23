@@ -775,6 +775,156 @@
         "no download-route, access-policy, physical-file, count, or byte changes approved",
         "no unrelated row or different before/after digest accepted"
       ]
+    },
+    {
+      "batch_id": "ldct-all-clinical-facts-2026-10-23",
+      "reviewer": "Codex, under requester-authorized release review",
+      "approved_at": "2026-10-23T17:00:00Z",
+      "rationale": "The exact LDCT nested-package refresh replaces the two legacy abdomen/chest workbook interpretations and adds the open-access head/neuro workbook. All 551 source rows are retained under the workbook Case identity: abdomen has 361 rows across 75 C cases, chest has 101 rows across 52 L cases, and head/neuro has 89 rows across 52 N cases. Every head/neuro row has an exact Case plus SeriesUID match to the controlled General Commons series inventory; only those 52 workbook-supported N cases receive these clinical facts. The 911 removed fact identities are the legacy abdomen/chest facts tied to misread subject headers, and the 1,822 additions are their corrected replacements plus the head/neuro facts.",
+      "evidence_id": "github-actions:39988739198:metadata_change_report",
+      "evidence": "All-live source run 39988739198, producer 50d2af7a21f76a970daa746ad6494cbb7c9a2f80, exact report SHA256 f58a02abc6c0948cb9bb8ccc16525cf80a65eefeb68b0a1db78a29ec75523513. Independent nested-ZIP audit found 551 rows and 179 workbook cases across abdomen, chest, and head/neuro; all 89 head/neuro rows and 52 distinct SeriesUIDs matched the General Commons controlled series inventory exactly.",
+      "artifact": "clinical",
+      "entity_table": "clinical_facts",
+      "change_count": 2733,
+      "change_kind_counts": {
+        "added": 1822,
+        "removed": 911
+      },
+      "changes_sha256": "ccaf7d44319de76c7cde1a2ea19dce0333b039f4776b1335eb98e13f29725ab7",
+      "negative_scope": [
+        "no LDCT subject identity inferred from a bare identifier outside the dataset namespace",
+        "no head or neuro subject promoted without an exact workbook Case and General Commons SeriesUID match",
+        "no clinical value changed beyond correcting workbook row and subject interpretation",
+        "no controlled-access imaging payload is exposed",
+        "no unrelated clinical fact or different row digest accepted"
+      ]
+    },
+    {
+      "batch_id": "ldct-all-clinical-subjects-2026-10-23",
+      "reviewer": "Codex, under requester-authorized release review",
+      "approved_at": "2026-10-23T17:00:00Z",
+      "rationale": "Exactly 127 dataset-qualified abdomen and chest Case subjects replace two false subjects created from the GE and Siemens section labels. The 52 head/neuro N cases already exist through the controlled imaging roster and therefore do not create duplicate clinical subjects. All subject keys remain scoped to ldctandprojectiondata.",
+      "evidence_id": "github-actions:39988739198:metadata_change_report",
+      "evidence": "All-live source run 39988739198, producer 50d2af7a21f76a970daa746ad6494cbb7c9a2f80, exact report SHA256 f58a02abc6c0948cb9bb8ccc16525cf80a65eefeb68b0a1db78a29ec75523513. Independent workbook audit confirmed 75 C cases, 52 L cases, and removal of the two header artifacts ge and siemens.",
+      "artifact": "clinical",
+      "entity_table": "clinical_subjects",
+      "change_count": 129,
+      "change_kind_counts": {
+        "added": 127,
+        "removed": 2
+      },
+      "changes_sha256": "b46d7881d81bef10faa4e54204b03baf9debb3876219e00d6b6d09e358ee1412",
+      "negative_scope": [
+        "no cross-dataset bare-ID merge",
+        "no duplicate head or neuro subject creation",
+        "no subject removal other than the two verified spreadsheet header artifacts",
+        "no unrelated subject or different row digest accepted"
+      ]
+    },
+    {
+      "batch_id": "ldct-policy-correction-cases-2026-10-23",
+      "reviewer": "Codex, under requester-authorized release review",
+      "approved_at": "2026-10-23T17:00:00Z",
+      "rationale": "Exactly two new registry cases record the reviewed LDCT Case-column override and its official-source transform version. They document the approved nested-workbook identity repair and do not authorize any unrelated normalization.",
+      "evidence_id": "github-actions:39988739198:metadata_change_report",
+      "evidence": "All-live source run 39988739198, producer 50d2af7a21f76a970daa746ad6494cbb7c9a2f80, exact report SHA256 f58a02abc6c0948cb9bb8ccc16525cf80a65eefeb68b0a1db78a29ec75523513; registry replay identified only the ldctandprojectiondata subject-column and transform-version cases as new.",
+      "artifact": "correction_registry",
+      "entity_table": "correction_cases",
+      "change_count": 2,
+      "change_kind_counts": {
+        "added": 2
+      },
+      "changes_sha256": "c9caa150c648c93e2f5d3073ce7563c67f18d2c0eac9e0968645ebbe940cab09",
+      "negative_scope": [
+        "no unrelated correction case",
+        "no blanket clinical normalization approval",
+        "no change to controlled-access requirements",
+        "no different row digest accepted"
+      ]
+    },
+    {
+      "batch_id": "ldct-and-procedural-policy-decisions-2026-10-23",
+      "reviewer": "Codex, under requester-authorized release review",
+      "approved_at": "2026-10-23T17:00:00Z",
+      "rationale": "Exactly five reviewed decisions are added: the LDCT Case-column override and transform version, plus regenerated procedural revisions for CT COLONOGRAPHY, EA1141, and HNSCC. The latter three use scoped AST and constant fingerprints; independent comparison confirms their algorithms and resulting clinical values are unchanged. Their exact policy fingerprints are 40ead6781ce2c0943c2d90fcfe95e78241b2c44a136957da0eb2c601ff257aac, 731c93e757829323d312754e0234c08372fb6373affd55aba422a670adbe22d6, and 1aa189cf88192b35b63855494d18abc4fe13c8bd15b13ce4889748ac2b465b97.",
+      "evidence_id": "github-actions:39988739198:metadata_change_report",
+      "evidence": "All-live source run 39988739198, producer 50d2af7a21f76a970daa746ad6494cbb7c9a2f80, exact report SHA256 f58a02abc6c0948cb9bb8ccc16525cf80a65eefeb68b0a1db78a29ec75523513. Registry replay mapped all five revisions to the two approved LDCT policies and the three previously reviewed unchanged clinical derivations.",
+      "artifact": "correction_registry",
+      "entity_table": "correction_decisions",
+      "change_count": 5,
+      "change_kind_counts": {
+        "added": 5
+      },
+      "changes_sha256": "c634a68272ec986112b79f0dbda8e468fec39d171b60192a71dd02ce6bfe737b",
+      "negative_scope": [
+        "no changed CT COLONOGRAPHY, EA1141, or HNSCC clinical value",
+        "no procedural policy outside the five exact reviewed decisions",
+        "no blanket module-fingerprint approval",
+        "no unrelated decision or different row digest accepted"
+      ]
+    },
+    {
+      "batch_id": "ldct-and-procedural-policy-effects-2026-10-23",
+      "reviewer": "Codex, under requester-authorized release review",
+      "approved_at": "2026-10-23T17:00:00Z",
+      "rationale": "Exactly five effect rows accompany the two approved LDCT policies and the three unchanged procedural policy revisions for CT COLONOGRAPHY, EA1141, and HNSCC. No additional clinical value or scope is approved.",
+      "evidence_id": "github-actions:39988739198:metadata_change_report",
+      "evidence": "All-live source run 39988739198, producer 50d2af7a21f76a970daa746ad6494cbb7c9a2f80, exact report SHA256 f58a02abc6c0948cb9bb8ccc16525cf80a65eefeb68b0a1db78a29ec75523513; exact registry replay produced one effect for each of the five reviewed decisions.",
+      "artifact": "correction_registry",
+      "entity_table": "correction_effects",
+      "change_count": 5,
+      "change_kind_counts": {
+        "added": 5
+      },
+      "changes_sha256": "e51fe4b74d025d170b42004bfe918ee008bcd6752ca371959483f84dcd2cb4ce",
+      "negative_scope": [
+        "no clinical value effect outside the approved LDCT identity repair",
+        "no unrelated correction effect",
+        "no blanket first-registry approval",
+        "no different row digest accepted"
+      ]
+    },
+    {
+      "batch_id": "reviewed-policy-registry-integrity-validation-2026-10-23",
+      "reviewer": "Codex, under requester-authorized release review",
+      "approved_at": "2026-10-23T17:00:00Z",
+      "rationale": "One deterministic registry-integrity validation records the new active decision-set digest after the five exact reviewed revisions. The historical bootstrap digest remains independently bound to its immutable release links and validation evidence.",
+      "evidence_id": "github-actions:39988739198:metadata_change_report",
+      "evidence": "All-live source run 39988739198, producer 50d2af7a21f76a970daa746ad6494cbb7c9a2f80, exact report SHA256 f58a02abc6c0948cb9bb8ccc16525cf80a65eefeb68b0a1db78a29ec75523513. The full registry/workflow suite and replay against the published registry passed with the historical bootstrap digest preserved.",
+      "artifact": "correction_registry",
+      "entity_table": "correction_validations",
+      "change_count": 1,
+      "change_kind_counts": {
+        "added": 1
+      },
+      "changes_sha256": "948b5d1b0c0ad404966a761f31235d919f0632371712aa97dad316f7d4174fe6",
+      "negative_scope": [
+        "no failed validation accepted",
+        "no waiver introduced",
+        "no historical bootstrap evidence changed",
+        "no unrelated validation or different row digest accepted"
+      ]
+    },
+    {
+      "batch_id": "reviewed-policy-active-decision-digest-2026-10-23",
+      "reviewer": "Codex, under requester-authorized release review",
+      "approved_at": "2026-10-23T17:00:00Z",
+      "rationale": "The sole registry metadata change is the deterministic active_decision_set_sha256 update caused by the five exact reviewed decisions. Source health remains verified_current in the all-live run; no other registry metadata changes.",
+      "evidence_id": "github-actions:39988739198:metadata_change_report",
+      "evidence": "All-live source run 39988739198, producer 50d2af7a21f76a970daa746ad6494cbb7c9a2f80, exact report SHA256 f58a02abc6c0948cb9bb8ccc16525cf80a65eefeb68b0a1db78a29ec75523513. Report grouping contains exactly one registry_meta modification and no source_health change.",
+      "artifact": "correction_registry",
+      "entity_table": "registry_meta",
+      "change_count": 1,
+      "change_kind_counts": {
+        "modified": 1
+      },
+      "changes_sha256": "3570e48fc47a400d45746363bc79b8c7cd46e3ed3ba9e74b5b7b3b0faf329c06",
+      "negative_scope": [
+        "no source-health downgrade accepted",
+        "no unrelated registry metadata change",
+        "no waiver or gate bypass",
+        "no different row digest accepted"
+      ]
     }
   ],
   "explanation_batches": [
