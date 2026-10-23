@@ -2507,6 +2507,12 @@ def validate_database(
         missing = sorted(required - objects)
         if missing:
             errors.append("missing objects: " + ", ".join(missing))
+        provenance_row = conn.execute(
+            "SELECT value FROM participant_inventory_meta WHERE key='provenance_storage'"
+        ).fetchone()
+        provenance_in_companion = bool(
+            provenance_row and provenance_row[0] == "companion_audit_artifact"
+        )
         version = conn.execute("SELECT value FROM participant_inventory_meta WHERE key='schema_version'").fetchone()
         if version and int(version[0]) >= 10:
             group_objects = {'participant_groups', 'participant_group_members', 'agent_participant_summary',
@@ -2529,12 +2535,14 @@ def validate_database(
                      'official_collection_overlap_declaration_and_exact_shared_namespace',
                      'official_brats_peds_source_mapping_and_reviewed_dfci_finite_padding_alias',
                      'official_acrin_ispy2_clinical_crosswalk')
-                   OR (e.resolution_method='official_acrin_ispy2_clinical_crosswalk' AND (
+                   OR (?=0 AND e.resolution_method='official_acrin_ispy2_clinical_crosswalk' AND (
                        l.short_title<>'ISPY2' OR r.short_title<>'ACRIN-6698'
                        OR e.evidence_source<>'clinical_only_identity_repairs_v1.json'
                        OR json_extract(e.evidence_json,'$.left.identifier') IS NOT l.display_participant_id
                        OR json_extract(e.evidence_json,'$.right.identifier') IS NOT r.display_participant_id
-                       OR json_extract(e.evidence_json,'$.evidence.source_row_sha256') IS NULL))''').fetchone()[0]
+                       OR json_extract(e.evidence_json,'$.evidence.source_row_sha256') IS NULL))''',
+                (int(provenance_in_companion),),
+            ).fetchone()[0]
             if invalid_equivalences:
                 errors.append(f'invalid reviewed Collection equivalences: {invalid_equivalences}')
         cross_dataset = conn.execute(
@@ -2613,23 +2621,37 @@ def validate_database(
                     'official_clinical_identifier_crosswalk',
                     'official_brats_workbook_ucsf_metadata_and_documented_followup_correction',
                     'official_pseudo_phi_patient_uid_crosswalk_and_digest_reconciliation')
-                    OR (p.dataset_type='Collection' AND p.short_title='CBIS-DDSM'
-                        AND e.resolution_method='official_cbis_ddsm_case_identifier_crosswalk'
-                        AND json_extract(e.evidence_json, '$.raw_identifier')=i.raw_identifier
-                        AND casefold(json_extract(e.evidence_json, '$.participant_id'))=
-                            casefold(p.display_participant_id)
-                        AND json_array_length(e.evidence_json, '$.source_row_sha256') > 0)
-                    OR (e.resolution_method='official_reviewed_finite_within_dataset_crosswalk'
-                        AND json_extract(e.evidence_json,'$.reference')='clinical_only_identity_repairs_v1.json'
-                        AND casefold(json_extract(e.evidence_json,'$.left.identifier'))=casefold(i.raw_identifier)
-                        AND json_extract(e.evidence_json,'$.left.short_title')=p.short_title
-                        AND json_extract(e.evidence_json,'$.right.short_title')=p.short_title
-                        AND json_extract(e.evidence_json,'$.right.dataset_type')=p.dataset_type
-                        AND casefold(json_extract(e.evidence_json,'$.right.identifier'))=
-                            casefold(p.display_participant_id)))
+                    OR (
+                      p.dataset_type='Collection' AND p.short_title='CBIS-DDSM'
+                      AND e.resolution_method='official_cbis_ddsm_case_identifier_crosswalk'
+                      AND (
+                        ?=1 OR (
+                            json_extract(e.evidence_json, '$.raw_identifier')=i.raw_identifier
+                            AND casefold(json_extract(e.evidence_json, '$.participant_id'))=
+                                casefold(p.display_participant_id)
+                            AND json_array_length(e.evidence_json, '$.source_row_sha256') > 0
+                        )
+                      )
+                    )
+                    OR (
+                      e.resolution_method='official_reviewed_finite_within_dataset_crosswalk'
+                      AND (
+                        ?=1 OR (
+                            json_extract(e.evidence_json,'$.reference')='clinical_only_identity_repairs_v1.json'
+                            AND casefold(json_extract(e.evidence_json,'$.left.identifier'))=casefold(i.raw_identifier)
+                            AND json_extract(e.evidence_json,'$.left.short_title')=p.short_title
+                            AND json_extract(e.evidence_json,'$.right.short_title')=p.short_title
+                            AND json_extract(e.evidence_json,'$.right.dataset_type')=p.dataset_type
+                            AND casefold(json_extract(e.evidence_json,'$.right.identifier'))=
+                                casefold(p.display_participant_id)
+                        )
+                      )
+                    )
+                  )
                   AND e.status = 'resolved'
               )
             """
+            , (int(provenance_in_companion), int(provenance_in_companion))
         ).fetchone()[0]
         if identifier_case_mismatches:
             errors.append(

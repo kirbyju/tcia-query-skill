@@ -285,6 +285,82 @@ class V2AuditSplitTests(unittest.TestCase):
                 self.assertEqual(row[:3], ("participant_identifiers", "pid1", "provenance_json"))
                 self.assertIn("clinical_metadata", row[3])
 
+    def test_participant_research_validation_uses_companionized_identity_evidence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            database = root / "participant_inventory.sqlite"
+            audit_database = root / "participant_inventory_audit.sqlite"
+            with sqlite3.connect(database) as conn:
+                conn.executescript(participants.SCHEMA)
+                left = participants.ensure_participant(
+                    conn, "Collection", "ISPY2", "ISPY2-001",
+                    managed_system="tcia_wordpress", namespace="tcia_dataset:ISPY2",
+                    evidence="fixture", provenance={},
+                )
+                right = participants.ensure_participant(
+                    conn, "Collection", "ACRIN-6698", "ACRIN-001",
+                    managed_system="tcia_wordpress", namespace="tcia_dataset:ACRIN-6698",
+                    evidence="fixture", provenance={},
+                )
+                conn.execute(
+                    "INSERT INTO participant_equivalences VALUES (?,?,?,?,?,?,?)",
+                    (
+                        "eq-1", left, right,
+                        "official_acrin_ispy2_clinical_crosswalk", "high",
+                        "clinical_only_identity_repairs_v1.json",
+                        '{"left":{"identifier":"ISPY2-001"},'
+                        '"right":{"identifier":"ACRIN-001"},'
+                        '"evidence":{"source_row_sha256":["abc"]}}',
+                    ),
+                )
+                cbis = participants.ensure_participant(
+                    conn, "Collection", "CBIS-DDSM", "P_00038",
+                    managed_system="tcia_wordpress", namespace="tcia_dataset:CBIS-DDSM",
+                    evidence="fixture", provenance={},
+                )
+                conn.execute(
+                    "INSERT INTO participant_identifiers VALUES (?,?,?,?,?,?,?,?)",
+                    (
+                        "pid-cbis-alias", cbis, "crdc_idc", "tcia_dataset:CBIS-DDSM",
+                        "Calc-Test_P_00038_LEFT_CC_1", "Calc-Test_P_00038_LEFT_CC_1",
+                        "official_cbis_ddsm_case_identifier_crosswalk", "{}",
+                    ),
+                )
+                conn.execute(
+                    "INSERT INTO participant_identity_evidence VALUES (?,?,?,?,?,?,?,?)",
+                    (
+                        "evidence-cbis", cbis, "within_dataset",
+                        "official_cbis_ddsm_case_identifier_crosswalk", "resolved", "high",
+                        "fixture",
+                        '{"raw_identifier":"Calc-Test_P_00038_LEFT_CC_1",'
+                        '"participant_id":"P_00038",'
+                        '"source_row_sha256":["def"]}',
+                    ),
+                )
+                conn.execute(
+                    "INSERT INTO participant_inventory_meta VALUES ('schema_version','9')"
+                )
+            self.assertTrue(participants.validate_database(database)["ok"])
+            audit.split_database(
+                database, audit_database, artifact="participant_inventory", replace=True
+            )
+            validation = participants.validate_database(database)
+            self.assertTrue(validation["ok"], validation["errors"])
+            with sqlite3.connect(database) as conn:
+                self.assertEqual(
+                    conn.execute(
+                        "SELECT evidence_json FROM participant_equivalences"
+                    ).fetchone()[0],
+                    "{}",
+                )
+                conn.execute(
+                    "UPDATE participant_equivalences SET confidence='low'"
+                )
+            validation = participants.validate_database(database)
+            self.assertIn(
+                "invalid reviewed Collection equivalences: 1", validation["errors"]
+            )
+
     def test_compact_v3_projects_without_mutating_source_and_reconstructs_provenance(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

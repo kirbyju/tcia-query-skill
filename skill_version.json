@@ -115,7 +115,7 @@
     "scripts/tcia_nifti_metadata.py": "1416b6f1dc899c6d47b06a1def5621e4fd72724aee689462a38699478ea2b42d",
     "scripts/tcia_nifti_metadata_harvest.py": "9cdf60b2a00c0e0419dee7e5d202e1af6d73d6b700bf8225d5d9f165e3e323b0",
     "scripts/tcia_participant_groups.py": "876497694fede5fdcb89ec362f7ac347da322be8f64c527d1303aa184eb762b3",
-    "scripts/tcia_participant_inventory.py": "8fcb70586184fbf19e8bd43b615211ec26276069f40a5887b83faa94009fb47c",
+    "scripts/tcia_participant_inventory.py": "86affc5e3b42a6d5f36b5bce57e51435e99b72b0e7f3e537875a24864aab594c",
     "scripts/tcia_pathology_aspera_inventory.py": "3daae2c55f740f209776c03ca089165a4bf4cc30789847f84eb12b1d683526d0",
     "scripts/tcia_pathology_metadata.py": "91cb19a373d74bc4d8345afcbeccb37b4cede2b2b5c7d1c4c9dfac51d5328c98",
     "scripts/tcia_public_non_dicom_crosswalk_discovery.py": "36e168ec159c43baa8cd9b16e89becd843481d6720f3f0fa644fb7d4829d7795",
@@ -159,13 +159,13 @@
     "scripts/tests/test_tcia_selective_release.py": "b682313a5e6ebed2c58ca8843eb559030af12dec060974abdfbcbf6ccdcfaeab",
     "scripts/tests/test_tcia_skill_version.py": "4e3deee4d08f065f67805d5fe782b1ffce22d5688be269e8a0492c3a42bb6b7f",
     "scripts/tests/test_tcia_snapshot.py": "7f61ad89586407df14fcd0fa394cd41401fa667ec13d77fdfe3cc73ea2ed1766",
-    "scripts/tests/test_tcia_v2_audit.py": "12f8e246d4ca2e31bc13ced708207e2704f9e7ad0636a058e4310c0fef9c789b",
+    "scripts/tests/test_tcia_v2_audit.py": "e4348fd06f2c6bce13e6c31ce7f284b5948b900acb4a355d70d3273b3ce69e8a",
     "scripts/tests/test_tcia_v2_bundle.py": "6d001809bc8efd497c54375b02ebfadf9d71621217ab827f6a80722808a6b3cf",
     "scripts/tests/test_tcia_v2_checkpoint.py": "4553d2bb4688966bdc8af5cc05aac654a4687a79d8e1f2c1a9e5c64748fc7d28",
     "scripts/tests/test_tcia_v2_parity.py": "27f51ddd8bbc200eb85327cd716db37f2f7d12393bb25445ba4f5d6b6f8301ae",
     "scripts/tests/test_tcia_v2_staging.py": "dda82d5c65b8e03b543fc80c44f30acf47a6c29861b1565104e96c568399ec25"
   },
   "schema_version": 1,
-  "skill_version": "2026.10.23.4",
-  "updated_at_utc": "2026-10-23T18:54:57.318637+00:00"
+  "skill_version": "2026.10.23.5",
+  "updated_at_utc": "2026-10-23T19:58:32.115849+00:00"
 }
