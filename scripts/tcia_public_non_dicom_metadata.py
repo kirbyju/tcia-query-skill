@@ -4386,6 +4386,50 @@ PATHDB_COLLECTION_IDENTITY_OVERRIDES = {
 }
 
 
+PATHDB_REVIEWED_SUBJECT_OVERRIDES = {
+    ("ICDC-Glioma", "GLIOMA01-i_49E6"): {
+        "canonical_subject_id": "49E6",
+        "accepted_raw_subject_ids": {"49E6", "4.90E+07"},
+    },
+    ("ICDC-Glioma", "GLIOMA01-i_6E45"): {
+        "canonical_subject_id": "6E45",
+        "accepted_raw_subject_ids": {"6E45", "6.00E+45"},
+    },
+}
+
+
+def pathdb_subject_ids(
+    raw_collection: object, slide_id: object, patient_id: object
+) -> tuple[list[str], list[str], str]:
+    """Resolve bounded reviewed PathDB participant-ID source defects."""
+    collection = str(raw_collection or "").strip()
+    slide = str(slide_id or "").strip()
+    raw_subject_ids = parse_list(patient_id)
+    reviewed = PATHDB_REVIEWED_SUBJECT_OVERRIDES.get((collection, slide))
+    if reviewed:
+        accepted = set(reviewed["accepted_raw_subject_ids"])
+        if len(raw_subject_ids) != 1 or raw_subject_ids[0] not in accepted:
+            raise RuntimeError(
+                "Reviewed PathDB participant correction source drift: "
+                f"collection={collection!r}, slide_id={slide!r}, "
+                f"patient_id={patient_id!r}"
+            )
+        return (
+            raw_subject_ids,
+            [str(reviewed["canonical_subject_id"])],
+            "reviewed_pathdb_slide_subject_correction",
+        )
+    if collection == "HANCOCK" and re.match(
+        r"^(?:InvasionFront|TumorCenter)_.+_block\d+$", slide
+    ):
+        raw_subject_ids = re.findall(r"\d+", str(patient_id or ""))
+    resolved_subject_ids = [
+        hancock_subject_id(item) if collection == "HANCOCK" else item
+        for item in raw_subject_ids
+    ]
+    return raw_subject_ids, resolved_subject_ids, "source_identifier"
+
+
 def pathdb_dataset_identity(
     source: sqlite3.Connection, raw_collection: object
 ) -> tuple[str, str, dict[str, str]]:
@@ -4447,17 +4491,16 @@ def ingest_pathdb(conn: sqlite3.Connection, snapshot_db: Path, include_files: bo
             asset_id = stable_id("asset", "pathdb", row["collection"], row["slide_id"], row["camic_id"])
             is_hancock_tma_block = (
                 row["collection"] == "HANCOCK"
-                and re.match(r"^(?:InvasionFront|TumorCenter)_.+_block\d+$", str(row["slide_id"] or ""))
+                and re.match(
+                    r"^(?:InvasionFront|TumorCenter)_.+_block\d+$",
+                    str(row["slide_id"] or ""),
+                )
             )
-            raw_subject_ids = (
-                re.findall(r"\d+", str(row["patient_id"] or ""))
-                if is_hancock_tma_block
-                else parse_list(row["patient_id"])
+            raw_subject_ids, resolved_subject_ids, subject_resolution_method = (
+                pathdb_subject_ids(
+                    row["collection"], row["slide_id"], row["patient_id"]
+                )
             )
-            resolved_subject_ids = [
-                hancock_subject_id(item) if row["collection"] == "HANCOCK" else item
-                for item in raw_subject_ids
-            ]
             scalar_subject_id = resolved_subject_ids[0] if len(resolved_subject_ids) == 1 else ""
             if len(resolved_subject_ids) > 1:
                 link_status = "multi_participant_source_list"
@@ -4524,7 +4567,7 @@ def ingest_pathdb(conn: sqlite3.Connection, snapshot_db: Path, include_files: bo
                         "mapping_method": (
                             "hancock_numeric_to_patient_token"
                             if row["collection"] == "HANCOCK" and raw_subject_id != resolved_subject_id
-                            else "source_identifier"
+                            else subject_resolution_method
                         ),
                     },
                 )

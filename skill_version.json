@@ -120,7 +120,7 @@
     "scripts/tcia_pathology_metadata.py": "91cb19a373d74bc4d8345afcbeccb37b4cede2b2b5c7d1c4c9dfac51d5328c98",
     "scripts/tcia_public_non_dicom_crosswalk_discovery.py": "36e168ec159c43baa8cd9b16e89becd843481d6720f3f0fa644fb7d4829d7795",
     "scripts/tcia_public_non_dicom_crosswalks.py": "c7ddc5964ae60a6bfad4dcb6dd660224947bcad4e625b1e6d708e3eb5c37870c",
-    "scripts/tcia_public_non_dicom_metadata.py": "f6d1d4367e69b80edf57b16d7db27ad8735852dff0a768a2ea0b4151192846fe",
+    "scripts/tcia_public_non_dicom_metadata.py": "753c074c38ca573a88b64978398ab01578554b3d51bf79f42341bf4b46c16397",
     "scripts/tcia_publications.py": "fcd1aa1e5abd48d0f556165bbee85af7d30030ba4ece1af573c8a441b720659a",
     "scripts/tcia_release_review_queue.py": "b5d9738c52435cfc27c403e220d8fe880d795cdb8174eab145de15b1a17b4265",
     "scripts/tcia_reviewed_identity.py": "256b83a56ac4bb2a7b88bb4e084fb89f752dcfcbc5927ffb56c97a614e05e31b",
@@ -134,7 +134,7 @@
     "scripts/tcia_v2_staging.py": "23956a5bc09c3d7ee6ec7d74f88b458c59f716a80b6ca16ce6026ba66480bfc2",
     "scripts/tcia_wordpress_search.py": "c908e60b3de2e1f9edf97c00cc69b060fa6a8808ef37ba0c1eadd748513aed60",
     "scripts/tests/test_skill_eval_contract.py": "d4884aed3eb65262dc52723dcbab624bcd71a804435c46d27a6edca7d479775c",
-    "scripts/tests/test_tcia_artifact_model.py": "8ead09edd37c6ee2facd9929fe9ea9adfdf5ecd07b38c6e700a82eb3939f290f",
+    "scripts/tests/test_tcia_artifact_model.py": "6385488d3ec78647429f11314b783e18cf69d1096ec0b08d0ec7d331ffa6f6fa",
     "scripts/tests/test_tcia_clinical_metadata.py": "18d1811fb8fb1e5deb4fd49b504b26211db1117431f8b02a11fcb6505c48f003",
     "scripts/tests/test_tcia_clinical_only_repairs.py": "87c94dabc0c124c5f69460fa7f7c0d34e0bd57c7c4e38ad767a7ce1822eacc55",
     "scripts/tests/test_tcia_controlled_access_metadata.py": "9fd9f8b1ff732d7f2ce02eaf30480e052f4b80b9217f435bdc012adfb2a137f2",
@@ -166,6 +166,6 @@
     "scripts/tests/test_tcia_v2_staging.py": "dda82d5c65b8e03b543fc80c44f30acf47a6c29861b1565104e96c568399ec25"
   },
   "schema_version": 1,
-  "skill_version": "2026.10.23.5",
-  "updated_at_utc": "2026-10-23T19:58:32.115849+00:00"
+  "skill_version": "2026.10.23.6",
+  "updated_at_utc": "2026-10-23T21:30:07.878457+00:00"
 }

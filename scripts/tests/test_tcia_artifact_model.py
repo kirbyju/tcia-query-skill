@@ -2425,6 +2425,67 @@ class BuilderTests(unittest.TestCase):
                 ],
             )
 
+    def test_pathdb_icdc_scientific_notation_subjects_use_reviewed_slide_ids(self):
+        import sqlite3
+
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            snapshot = base / "snapshot.sqlite"
+            output = base / "public.sqlite"
+            self.build_snapshot(snapshot)
+            conn = sqlite3.connect(snapshot)
+            conn.execute(
+                "INSERT INTO agent_datasets VALUES (?, ?)",
+                ("Collection", "ICDC-Glioma"),
+            )
+            conn.executemany(
+                "INSERT INTO agent_pathdb_slides VALUES (?,?,?,?,?,?,?,?,?,?)",
+                [
+                    (
+                        "ICDC-Glioma", "4.90E+07", "GLIOMA01-i_49E6", "1",
+                        "", "https://example.test/49E6.svs", "SVS", "SM", "", "",
+                    ),
+                    (
+                        "ICDC-Glioma", "6.00E+45", "GLIOMA01-i_6E45", "2",
+                        "", "https://example.test/6E45.svs", "SVS", "SM", "", "",
+                    ),
+                ],
+            )
+            conn.commit()
+            conn.close()
+
+            public.build_database(
+                snapshot,
+                output,
+                nifti_db=None,
+                pathology_db=None,
+                include_pathdb_files=True,
+                replace=True,
+            )
+
+            conn = sqlite3.connect(output)
+            rows = conn.execute(
+                "SELECT a.asset_name, a.subject_id, p.raw_subject_id, p.subject_id, "
+                "p.evidence_json FROM public_non_dicom_assets AS a "
+                "JOIN public_non_dicom_asset_participants AS p USING (asset_id) "
+                "WHERE a.short_title='ICDC-Glioma' ORDER BY a.asset_name"
+            ).fetchall()
+            conn.close()
+            self.assertEqual(
+                [(row[0], row[1], row[2], row[3]) for row in rows],
+                [
+                    ("GLIOMA01-i_49E6", "49E6", "4.90E+07", "49E6"),
+                    ("GLIOMA01-i_6E45", "6E45", "6.00E+45", "6E45"),
+                ],
+            )
+            self.assertTrue(
+                all(
+                    json.loads(row[4])["mapping_method"]
+                    == "reviewed_pathdb_slide_subject_correction"
+                    for row in rows
+                )
+            )
+
     def test_participant_inventory_rejects_non_wordpress_dataset_identity(self):
         import sqlite3
 
