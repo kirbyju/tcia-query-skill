@@ -524,6 +524,70 @@ class CorrectionIdentityTests(unittest.TestCase):
                     observed_at="2026-09-11T12:02:00Z",
                 )
 
+    def test_initial_registry_bootstrap_remains_valid_after_reviewed_decisions_change(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            db = root / "registry.sqlite"
+            registry.build_registry(db, observed_at="2026-09-11T12:00:00Z")
+            self.mark_registry_source_verified(db)
+            manifest, release = self.write_legacy_release_contract(root)
+            bootstrap = registry.record_initial_registry_bootstrap(
+                db,
+                prior_manifest_path=manifest,
+                prior_release_json_path=release,
+                evidence_out=root / "bootstrap.json",
+                observed_at="2026-09-11T12:01:00Z",
+            )
+            registry.link_release(
+                db,
+                release_fingerprint="e" * 64,
+                release_tag="initial-correction-registry-release",
+                source_health="verified_current",
+                observed_at="2026-09-11T12:02:00Z",
+            )
+            with sqlite3.connect(db) as conn:
+                registry.make_reviewed_decision(
+                    conn,
+                    source_kind="clinical_normalization",
+                    dataset_type="Collection",
+                    short_title="NEW-REVIEW",
+                    decision_type="display_mapping",
+                    target="raw:X",
+                    status="approved",
+                    reviewer="curator",
+                    reviewed_at="2026-09-12T00:00:00Z",
+                    rationale="A later independently reviewed mapping.",
+                    resolution={"value": "X"},
+                    expected_effects=[{
+                        "artifact": "clinical",
+                        "entity_table": "clinical_facts",
+                        "field_name": "value_resolved",
+                        "effect_kind": "resolve",
+                        "after": "X",
+                    }],
+                    evidence=[{
+                        "source_record_id": "later-source",
+                        "excerpt": "X means X.",
+                    }],
+                )
+                conn.commit()
+                self.assertNotEqual(
+                    registry.decision_set_digest(conn),
+                    bootstrap["decision_set_sha256"],
+                )
+            self.assertTrue(registry.validate_database(db)["ok"])
+
+            with sqlite3.connect(db) as conn:
+                conn.execute("DELETE FROM correction_releases")
+                conn.commit()
+            validation = registry.validate_database(db)
+            self.assertFalse(validation["ok"])
+            self.assertIn(
+                "invalid initial-registry bootstrap evidence: "
+                "bootstrap decision-set digest mismatch",
+                validation["errors"],
+            )
+
     def test_initial_registry_bootstrap_rejects_nonlegacy_or_unverified_state(self) -> None:
         cases = (
             ("schema3", {"schema_version": 3}, "schema-2"),

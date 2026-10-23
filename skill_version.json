@@ -101,7 +101,7 @@
     "scripts/tcia_clinical_metadata.py": "63abb57031b5a669d356386ff328bf07c326b8067f48303c78899d6ac76b6db6",
     "scripts/tcia_clinical_only_repairs.py": "de41d31357a8e3a7975379dd51af45ba224664a6a5357dda7595309e73deac98",
     "scripts/tcia_controlled_access_metadata.py": "8ba93bb5d5d6b060ef82e25457f3069a180f46bf5cf3edcebe4c85405406b9c7",
-    "scripts/tcia_correction_registry.py": "4a55f11970836b09df86904ea4de7b2284b9297f87f7d375862360a881f0684e",
+    "scripts/tcia_correction_registry.py": "9881c0a550fcf1e5012031efdb7669289b77ee50ed753cdd9981354c5403cdeb",
     "scripts/tcia_create_data_retriever_csv.py": "ff351223974fba146ab2e6434b12891c7019c78eefed0d602b0d600f97ebe426",
     "scripts/tcia_diagnostic_status.py": "2fb5c296bc1a361814cc04d23e40553a10761fa8ff0fef7a45ccdec63f8c93c0",
     "scripts/tcia_dicom_source_scope.py": "0176dfd5ccf993302806d467e437b3a6dedd9da5bdba04faa27269f863b3cf4b",
@@ -138,7 +138,7 @@
     "scripts/tests/test_tcia_clinical_metadata.py": "18d1811fb8fb1e5deb4fd49b504b26211db1117431f8b02a11fcb6505c48f003",
     "scripts/tests/test_tcia_clinical_only_repairs.py": "87c94dabc0c124c5f69460fa7f7c0d34e0bd57c7c4e38ad767a7ce1822eacc55",
     "scripts/tests/test_tcia_controlled_access_metadata.py": "9fd9f8b1ff732d7f2ce02eaf30480e052f4b80b9217f435bdc012adfb2a137f2",
-    "scripts/tests/test_tcia_correction_registry.py": "2bbee780ec762ca4c49a6706a26c8f021150a4bdc5d8c037ddc2dfab6f748adb",
+    "scripts/tests/test_tcia_correction_registry.py": "4a3972a7dcbd87b52925a6a6000e531a06bdd8c3698fa211edd09b789ca40961",
     "scripts/tests/test_tcia_diagnostic_status.py": "a00104b045e32288b56d43139f3ec9f9bb89926eac677dd356b07f97436397f5",
     "scripts/tests/test_tcia_dicom_source_scope.py": "80531d71e05c94c954d57d378446cd6f2364a83df955bc7b557b164403b7e984",
     "scripts/tests/test_tcia_freshness.py": "fc2d6988581e5cacc2531e648258d352196803d6d7012bf79e6c8ddac4cfce9c",
@@ -166,6 +166,6 @@
     "scripts/tests/test_tcia_v2_staging.py": "dda82d5c65b8e03b543fc80c44f30acf47a6c29861b1565104e96c568399ec25"
   },
   "schema_version": 1,
-  "skill_version": "2026.10.23.1",
-  "updated_at_utc": "2026-10-23T14:55:24.644326+00:00"
+  "skill_version": "2026.10.23.2",
+  "updated_at_utc": "2026-10-23T15:50:17.109618+00:00"
 }

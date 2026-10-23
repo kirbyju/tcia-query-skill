@@ -1977,7 +1977,20 @@ def validate_database(
                         raise ValueError("bootstrap prior fingerprint mismatch")
                     if not re.fullmatch(r"[0-9a-f]{64}", str(prior.get("manifest_sha256") or "")):
                         raise ValueError("bootstrap prior manifest digest is invalid")
-                    if initial.get("decision_set_sha256") != active_digest:
+                    initial_decision_digest = str(
+                        initial.get("decision_set_sha256") or ""
+                    )
+                    release_decision_digests = {
+                        str(row[0]) for row in conn.execute(
+                            "SELECT decision_set_sha256 FROM correction_releases"
+                        )
+                    }
+                    if release_decision_digests:
+                        if initial_decision_digest not in release_decision_digests:
+                            raise ValueError(
+                                "bootstrap decision-set digest has no immutable release link"
+                            )
+                    elif initial_decision_digest != active_digest:
                         raise ValueError("bootstrap decision-set digest mismatch")
                     if initial.get("source_health") != "verified_current":
                         raise ValueError("bootstrap registry source health is not verified_current")
@@ -1995,11 +2008,29 @@ def validate_database(
                     if evidence_sha != meta["bootstrap_evidence_sha256"]:
                         raise ValueError("bootstrap evidence digest mismatch")
                     validation = conn.execute(
-                        """SELECT status,evidence_sha256 FROM correction_validations
+                        """SELECT status,actual_json,evidence_sha256
+                           FROM correction_validations
                            WHERE rule_id='initial_registry_bootstrap'"""
                     ).fetchall()
-                    if len(validation) != 1 or tuple(validation[0]) != ("passed", evidence_sha):
+                    if len(validation) != 1:
                         raise ValueError("bootstrap validation record is missing or inconsistent")
+                    validation_status, validation_actual_json, validation_evidence_sha = (
+                        validation[0]
+                    )
+                    validation_actual = json.loads(str(validation_actual_json))
+                    if (
+                        validation_status != "passed"
+                        or validation_evidence_sha != evidence_sha
+                        or validation_actual != {
+                            "prior_release_fingerprint": meta[
+                                "bootstrap_prior_release_fingerprint"
+                            ],
+                            "decision_set_sha256": initial_decision_digest,
+                        }
+                    ):
+                        raise ValueError(
+                            "bootstrap validation record is missing or inconsistent"
+                        )
                 except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
                     errors.append(f"invalid initial-registry bootstrap evidence: {exc}")
     return {"ok": not errors, "errors": errors, "integrity_check": integrity,
