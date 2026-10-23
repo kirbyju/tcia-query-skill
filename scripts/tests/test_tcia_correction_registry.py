@@ -21,6 +21,65 @@ spec.loader.exec_module(registry)
 
 
 class CorrectionIdentityTests(unittest.TestCase):
+    def test_procedural_policy_fingerprint_ignores_unrelated_module_edits(
+        self,
+    ) -> None:
+        policy = next(
+            item
+            for item in registry.CLINICAL_PROCEDURAL_POLICIES
+            if item["family"] == "ea1141_patient_diagnosis"
+        )
+        source_path = registry.DEFAULT_CLINICAL_MODULE
+        source = source_path.read_text(encoding="utf-8")
+        base_module = registry.load_module(source_path)
+        base_fingerprint, constants = registry.clinical_procedural_policy_fingerprint(
+            base_module, source_path, policy
+        )
+        self.assertEqual(constants, ["EA1141_GRADE", "EA1141_HANDLED_COLUMNS"])
+        with tempfile.TemporaryDirectory() as directory:
+            unrelated_path = Path(directory) / "unrelated.py"
+            unrelated_path.write_text(
+                source + "\nUNRELATED_TEST_SENTINEL = 'changed'\n",
+                encoding="utf-8",
+            )
+            unrelated_module = registry.load_module(unrelated_path)
+            unrelated_fingerprint, _ = (
+                registry.clinical_procedural_policy_fingerprint(
+                    unrelated_module, unrelated_path, policy
+                )
+            )
+            self.assertEqual(unrelated_fingerprint, base_fingerprint)
+
+            relevant_path = Path(directory) / "relevant.py"
+            changed = source.replace(
+                '"3": "Grade III",', '"3": "Grade III changed",', 1
+            )
+            self.assertNotEqual(changed, source)
+            relevant_path.write_text(changed, encoding="utf-8")
+            relevant_module = registry.load_module(relevant_path)
+            relevant_fingerprint, _ = (
+                registry.clinical_procedural_policy_fingerprint(
+                    relevant_module, relevant_path, policy
+                )
+            )
+            self.assertNotEqual(relevant_fingerprint, base_fingerprint)
+
+            function_path = Path(directory) / "function.py"
+            function_changed = source.replace(
+                'source_id = "tcia-derived:ea1141:screening-pathology"',
+                'source_id = "tcia-derived:ea1141:screening-pathology-v2"',
+                1,
+            )
+            self.assertNotEqual(function_changed, source)
+            function_path.write_text(function_changed, encoding="utf-8")
+            function_module = registry.load_module(function_path)
+            function_fingerprint, _ = (
+                registry.clinical_procedural_policy_fingerprint(
+                    function_module, function_path, policy
+                )
+            )
+            self.assertNotEqual(function_fingerprint, base_fingerprint)
+
     @staticmethod
     def mark_registry_source_verified(db: Path) -> None:
         with sqlite3.connect(db) as conn:

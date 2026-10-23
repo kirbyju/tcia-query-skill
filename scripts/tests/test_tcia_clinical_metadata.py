@@ -23,6 +23,113 @@ SPEC.loader.exec_module(CLINICAL)
 
 
 class ClinicalMetadataTest(unittest.TestCase):
+    def test_nested_ldct_zip_tables_and_case_column(self) -> None:
+        inner = io.BytesIO()
+        with zipfile.ZipFile(inner, "w") as archive:
+            archive.writestr(
+                "Neuro_v11 2026.csv",
+                "Case,SeriesUID,Finding\nN001,1.2.3,normal\n",
+            )
+            archive.writestr("~$ignored.xlsx", b"not an xlsx")
+        outer = io.BytesIO()
+        with zipfile.ZipFile(outer, "w") as archive:
+            archive.writestr("CR_Head_v4 2026_07_21.zip", inner.getvalue())
+        tables = CLINICAL.read_tables(outer.getvalue(), "ldct.zip")
+        self.assertEqual(len(tables), 1)
+        table_name, frame = tables[0]
+        self.assertIn("CR_Head_v4 2026_07_21.zip", table_name)
+        self.assertIn("Neuro_v11 2026.csv", table_name)
+        self.assertEqual(
+            CLINICAL.choose_subject_column(
+                frame.columns, "LDCT-and-Projection-data"
+            ),
+            "Case",
+        )
+        self.assertEqual(next(frame.iterrows())[1]["Case"], "N001")
+
+    def test_ldct_neuro_rows_require_exact_general_commons_series_match(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            controlled_path = root / "controlled.sqlite"
+            with sqlite3.connect(controlled_path) as controlled:
+                controlled.execute(
+                    """CREATE TABLE radiology_series (
+                           short_title TEXT, subject_id TEXT, series_id TEXT
+                       )"""
+                )
+                controlled.executemany(
+                    "INSERT INTO radiology_series VALUES (?, ?, ?)",
+                    [
+                        ("LDCT-and-Projection-data", "N001", "1.2.3"),
+                        ("LDCT-and-Projection-data", "N002", "1.2.4"),
+                        ("OTHER", "N999", "9.9.9"),
+                    ],
+                )
+            conn = CLINICAL.init_db(root / "clinical.sqlite", replace=True)
+            loaded = CLINICAL.load_ldct_general_commons_imaging_subjects(
+                conn, controlled_path
+            )
+            self.assertEqual(loaded["status"], "loaded")
+            self.assertEqual(loaded["series"], 2)
+            self.assertEqual(loaded["subjects"], 2)
+            self.assertRegex(loaded["pair_sha256"], r"^[0-9a-f]{64}$")
+            CLINICAL.insert_source(
+                conn,
+                source_id="tcia-download:ldct:42661",
+                source_kind="tcia_clinical_download",
+                short_title="LDCT-and-Projection-data",
+                source_signature_value="fixture",
+            )
+            for row_number, (case, series_uid) in enumerate(
+                (("L001", "7.1"), ("C001", "8.1"), ("N001", "1.2.3")),
+                2,
+            ):
+                CLINICAL.insert_row_and_facts(
+                    conn,
+                    source_id="tcia-download:ldct:42661",
+                    source_kind="tcia_clinical_download",
+                    short_title="LDCT-and-Projection-data",
+                    subject_id=case,
+                    table_name="nested.xlsx::Sheet1",
+                    row_number=row_number,
+                    row={"Case": case, "SeriesUID": series_uid},
+                    facts=[],
+                    has_imaging=False,
+                )
+            result = CLINICAL.audit_ldct_official_cases(conn, controlled_path)
+            self.assertEqual(
+                result["subjects"],
+                {"abdomen": 1, "chest": 1, "head_neuro": 1},
+            )
+            self.assertEqual(result["general_commons_exact_matches"], 1)
+            self.assertEqual(result["promoted_imaging_subjects"], 1)
+            self.assertEqual(
+                [
+                    row[0]
+                    for row in conn.execute(
+                        """SELECT subject_id FROM clinical_imaging_subjects
+                           ORDER BY subject_id"""
+                    )
+                ],
+                ["N001"],
+            )
+            self.assertEqual(
+                conn.execute(
+                    "SELECT has_imaging FROM clinical_rows WHERE subject_id='N001'"
+                ).fetchone()[0],
+                1,
+            )
+            conn.execute(
+                """UPDATE clinical_rows SET row_json=?
+                   WHERE subject_id='N001'""",
+                (CLINICAL.json_dumps({"Case": "N001", "SeriesUID": "bad"}),),
+            )
+            with self.assertRaisesRegex(RuntimeError, "do not match"):
+                CLINICAL.audit_ldct_official_cases(conn, controlled_path)
+            conn.close()
+
     def test_manifest_separates_source_fetch_health_from_ingest_coverage(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

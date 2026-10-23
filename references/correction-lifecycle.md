@@ -146,6 +146,13 @@ python3 scripts/tcia_correction_registry.py add-waiver \
 an identical link is a no-op. Reusing a fingerprint with a different tag,
 decision set, source health, or change-report digest fails without mutation.
 
+Reviewed procedural clinical policies are fingerprinted at policy scope. The
+fingerprint contains the canonical AST of the named derivation function, the
+declared policy resolution, and only the constants inventoried for that policy
+family. An unrelated edit elsewhere in `tcia_clinical_metadata.py` therefore
+does not create a new correction decision or effect revision; changing the
+function or one of its governing constants does.
+
 ## Semantic change reporting
 
 `scripts/tcia_metadata_change_report.py` now streams complete keyed-row digests

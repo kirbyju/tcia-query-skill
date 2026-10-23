@@ -265,6 +265,7 @@ jobs:
           fi
           python scripts/tcia_clinical_metadata.py build \
             --snapshot-db dist/tcia_snapshot.sqlite \
+            --controlled-db dist/controlled_access_metadata.sqlite \
             --out dist/clinical_metadata.sqlite \
             --gzip-out dist/clinical_metadata.sqlite.gz \
             --manifest-out dist/clinical_metadata_manifest.json \

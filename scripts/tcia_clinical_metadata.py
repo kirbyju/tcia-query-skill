@@ -619,6 +619,9 @@ SUBJECT_COLUMN_OVERRIDES = {
     "braintrgammaknife": {"uniqueptid"},
     "remind": {"casenumber"},
     "tcgalggmask": {"tumor"},
+    # The reviewed LDCT package contains abdomen, chest, and neuro workbooks
+    # nested inside three ZIP files. All three use `Case` as the patient ID.
+    "ldctandprojectiondata": {"case"},
 }
 
 # Increment only the affected official downloads when a reviewed identifier
@@ -628,6 +631,7 @@ SUBJECT_COLUMN_OVERRIDES = {
 OFFICIAL_SOURCE_TRANSFORM_VERSIONS = {
     "hcctaceseg": 1,
     "headneckradiomicshn1": 1,
+    "ldctandprojectiondata": 1,
     "tompeicmmd": 1,
     "ucsdptgbm": 1,
     "ucsdvslongitudinal": 1,
@@ -1640,6 +1644,24 @@ def prepare_official_table(
     short_title: str, table_name: str, frame: Any
 ) -> Any:
     """Normalize a reviewed multi-row header without altering source cells."""
+    if (
+        normalize_name(short_title) == "ldctandprojectiondata"
+        and len(frame.index) >= 2
+        and any(normalize_name(value) == "case" for value in frame.iloc[0])
+    ):
+        headers: list[str] = []
+        counts: dict[str, int] = {}
+        for index, value in enumerate(frame.iloc[0]):
+            header = clean_value(value) or clean_value(frame.columns[index])
+            header = header or f"column_{index + 1}"
+            normalized = normalize_name(header) or f"column{index + 1}"
+            counts[normalized] = counts.get(normalized, 0) + 1
+            if counts[normalized] > 1:
+                header = f"{header}_{counts[normalized]}"
+            headers.append(header)
+        prepared = frame.iloc[1:].copy()
+        prepared.columns = headers
+        return prepared.reset_index(drop=True)
     if (
         normalize_name(short_title) == "tompeicmmd"
         and "lesiondetailssheet" in normalize_name(table_name)
@@ -3779,31 +3801,42 @@ def read_delimited(
 
 
 def read_tables(
-    data: bytes, name: str, *, deduplicate_headers: bool = False
+    data: bytes,
+    name: str,
+    *,
+    deduplicate_headers: bool = False,
+    _archive_depth: int = 0,
 ) -> list[tuple[str, Any]]:
     suffix = Path(name.split("?", 1)[0]).suffix.lower()
     # XLSX files are ZIP containers too, so magic-byte detection alone would
     # incorrectly treat their internal XML parts as a clinical package.
     if suffix == ".zip":
+        if _archive_depth >= 4:
+            raise RuntimeError(f"nested ZIP depth exceeds safety limit: {name}")
         tables: list[tuple[str, Any]] = []
         with zipfile.ZipFile(io.BytesIO(data)) as archive:
             for member in archive.namelist():
                 if member.endswith("/"):
                     continue
                 member_path = Path(member)
-                if "__MACOSX" in member_path.parts or member_path.name.startswith(
-                    "._"
+                if (
+                    "__MACOSX" in member_path.parts
+                    or member_path.name.startswith("._")
+                    or member_path.name.startswith("~$")
                 ):
                     continue
                 member_suffix = Path(member).suffix.lower()
-                if member_suffix not in {".csv", ".tsv", ".tab", ".xls", ".xlsx"}:
+                if member_suffix not in {
+                    ".zip", ".csv", ".tsv", ".tab", ".xls", ".xlsx"
+                }:
                     continue
                 member_data = archive.read(member)
                 tables.extend(
                     read_tables(
                         member_data,
-                        member,
+                        f"{name}!/{member}",
                         deduplicate_headers=deduplicate_headers,
+                        _archive_depth=_archive_depth + 1,
                     )
                 )
         return tables
@@ -3825,6 +3858,151 @@ def read_tables(
         )
         return [(f"{name}::{sheet}", frame) for sheet, frame in sheets.items()]
     return []
+
+
+def load_ldct_general_commons_imaging_subjects(
+    conn: sqlite3.Connection, controlled_db: Path | None
+) -> dict[str, Any]:
+    """Load exact LDCT head/neuro imaging identities from public GC metadata."""
+    result: dict[str, Any] = {
+        "status": "not_configured",
+        "series": 0,
+        "subjects": 0,
+    }
+    if controlled_db is None:
+        return result
+    if not controlled_db.exists():
+        raise FileNotFoundError(f"controlled metadata database not found: {controlled_db}")
+    with sqlite3.connect(f"file:{controlled_db}?mode=ro", uri=True) as controlled:
+        table = controlled.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='radiology_series'"
+        ).fetchone()
+        if table is None:
+            raise RuntimeError("controlled metadata database lacks radiology_series")
+        rows = controlled.execute(
+            """SELECT subject_id, series_id
+               FROM radiology_series
+               WHERE short_title = 'LDCT-and-Projection-data'
+                 AND subject_id IS NOT NULL AND series_id IS NOT NULL
+               ORDER BY subject_id, series_id"""
+        ).fetchall()
+    neuro_rows = [
+        (clean_value(subject_id), clean_value(series_id))
+        for subject_id, series_id in rows
+        if re.fullmatch(r"N\d{3}", clean_value(subject_id))
+    ]
+    if not neuro_rows:
+        raise RuntimeError("controlled metadata has no LDCT head/neuro series")
+    series_owners: dict[str, str] = {}
+    for subject_id, series_id in neuro_rows:
+        prior = series_owners.setdefault(series_id, subject_id)
+        if prior != subject_id:
+            raise RuntimeError(
+                f"LDCT controlled series {series_id} maps to both {prior} and {subject_id}"
+            )
+    result.update(
+        status="loaded",
+        series=len(series_owners),
+        subjects=len(set(series_owners.values())),
+        pair_sha256=sha256_bytes(
+            json_dumps(sorted(set(neuro_rows))).encode("utf-8")
+        ),
+    )
+    return result
+
+
+def audit_ldct_official_cases(
+    conn: sqlite3.Connection, controlled_db: Path | None
+) -> dict[str, Any]:
+    """Audit all three LDCT workbooks and exact-match neuro rows to GC series."""
+    rows = conn.execute(
+        """SELECT subject_id, row_json
+           FROM clinical_rows
+           WHERE short_title = 'LDCT-and-Projection-data'
+             AND source_id LIKE 'tcia-download:%'
+           ORDER BY subject_id, source_row_id"""
+    ).fetchall()
+    groups = {"abdomen": set(), "chest": set(), "head_neuro": set()}
+    neuro_pairs: list[tuple[str, str]] = []
+    for subject_id, row_json in rows:
+        subject_id = clean_value(subject_id)
+        if re.fullmatch(r"L\d{3}", subject_id):
+            groups["abdomen"].add(subject_id)
+        elif re.fullmatch(r"C\d{3}", subject_id):
+            groups["chest"].add(subject_id)
+        elif re.fullmatch(r"N\d{3}", subject_id):
+            groups["head_neuro"].add(subject_id)
+            record = json.loads(row_json)
+            series_ids = [
+                clean_value(value)
+                for key, value in record.items()
+                if normalize_name(key) == "seriesuid" and clean_value(value)
+            ]
+            if len(series_ids) != 1:
+                raise RuntimeError(
+                    f"LDCT neuro row for {subject_id} lacks one exact SeriesUID"
+                )
+            neuro_pairs.append((subject_id, series_ids[0]))
+    result: dict[str, Any] = {
+        "status": "no_rows" if not rows else "audited",
+        "rows": len(rows),
+        "subjects": {name: len(values) for name, values in groups.items()},
+        "neuro_rows": len(neuro_pairs),
+        "neuro_series": len({series_id for _, series_id in neuro_pairs}),
+    }
+    download_seen = bool(
+        conn.execute(
+            """SELECT 1 FROM clinical_downloads
+               WHERE short_title = 'LDCT-and-Projection-data'"""
+        ).fetchone()
+    )
+    if controlled_db is not None and download_seen and not rows:
+        raise RuntimeError(
+            "LDCT clinical download produced no abdomen, chest, or neuro rows"
+        )
+    missing_groups = [name for name, values in groups.items() if not values]
+    if rows and missing_groups:
+        raise RuntimeError(
+            "LDCT clinical package is missing case groups: "
+            + ", ".join(missing_groups)
+        )
+    if not rows or controlled_db is None:
+        return result
+    with sqlite3.connect(f"file:{controlled_db}?mode=ro", uri=True) as controlled:
+        exact_pairs = {
+            (clean_value(subject_id), clean_value(series_id))
+            for subject_id, series_id in controlled.execute(
+                """SELECT subject_id, series_id FROM radiology_series
+                   WHERE short_title = 'LDCT-and-Projection-data'"""
+            )
+        }
+    missing = sorted(set(neuro_pairs) - exact_pairs)
+    if missing:
+        raise RuntimeError(
+            "LDCT neuro clinical rows do not match General Commons metadata: "
+            + ", ".join(f"{subject}/{series}" for subject, series in missing[:5])
+        )
+    matched_subjects = sorted(groups["head_neuro"])
+    for subject_id in matched_subjects:
+        subject_key = f"ldctandprojectiondata:{normalize_subject(subject_id)}"
+        conn.execute(
+            """INSERT OR IGNORE INTO clinical_imaging_subjects
+               (subject_key, short_title, subject_id, imaging_source)
+               VALUES (?, 'LDCT-and-Projection-data', ?,
+                       'general_commons_series_uid_match')""",
+            (subject_key, subject_id),
+        )
+    conn.execute(
+        """UPDATE clinical_rows SET has_imaging = 1
+           WHERE short_title = 'LDCT-and-Projection-data'
+             AND subject_key IN (
+                 SELECT subject_key FROM clinical_imaging_subjects
+                 WHERE imaging_source = 'general_commons_series_uid_match'
+             )"""
+    )
+    result["general_commons_exact_matches"] = len(neuro_pairs)
+    result["promoted_imaging_subjects"] = len(matched_subjects)
+    return result
 
 
 def ct_colonography_workbook_facts(
@@ -8122,6 +8300,14 @@ def build(args: argparse.Namespace) -> None:
     out = Path(args.out)
     conn = init_db(out, replace=args.replace)
     allowed_short_titles = visible_tcia_short_titles(snapshot_db)
+    controlled_db_value = getattr(args, "controlled_db", None)
+    controlled_db = Path(controlled_db_value) if controlled_db_value else None
+    ldct_controlled_result = (
+        load_ldct_general_commons_imaging_subjects(conn, controlled_db)
+        if "LDCT-and-Projection-data" in allowed_short_titles
+        else {"status": "dataset_not_visible", "series": 0, "subjects": 0}
+    )
+    insert_meta(conn, "ldct_general_commons_imaging_result", ldct_controlled_result)
     previous_db = Path(args.previous_db) if args.previous_db else None
     from tcia_dicom_source_scope import download_candidates, resolve_scopes, diagnostics_only, fetch_nbia_series
     scope_candidates, _ = download_candidates(snapshot_db)
@@ -8292,6 +8478,10 @@ def build(args: argparse.Namespace) -> None:
             ),
         )
         conn.commit()
+
+    ldct_official_result = audit_ldct_official_cases(conn, controlled_db)
+    insert_meta(conn, "ldct_official_case_audit", ldct_official_result)
+    conn.commit()
 
     ivygap_result = ingest_ivygap_external_clinical(
         conn,
@@ -8510,6 +8700,8 @@ def build(args: argparse.Namespace) -> None:
                     source_fingerprints,
                     download_fingerprints,
                     inference_fingerprints,
+                    ldct_controlled_result,
+                    ldct_official_result,
                     ({
                         "policy_version": manifest_scope["policy_version"],
                         "idc_version": manifest_scope["idc_version"],
@@ -8844,6 +9036,13 @@ def parse_args() -> argparse.Namespace:
 
     build_parser = subparsers.add_parser("build")
     build_parser.add_argument("--snapshot-db", default=str(DEFAULT_SNAPSHOT_DB))
+    build_parser.add_argument(
+        "--controlled-db",
+        help=(
+            "Controlled-access metadata SQLite used to exact-match public "
+            "LDCT head/neuro clinical rows to General Commons series metadata."
+        ),
+    )
     build_parser.add_argument("--out", default=str(DEFAULT_DB_PATH))
     build_parser.add_argument("--gzip-out")
     build_parser.add_argument("--manifest-out")

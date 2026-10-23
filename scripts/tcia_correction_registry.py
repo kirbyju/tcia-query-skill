@@ -9,6 +9,7 @@ effects, validations, release linkage, and explicitly scoped waivers.
 from __future__ import annotations
 
 import argparse
+import ast
 import csv
 import datetime as dt
 import gzip
@@ -1547,6 +1548,48 @@ def load_module(path: Path) -> Any:
     return module
 
 
+def clinical_procedural_policy_fingerprint(
+    module: Any, module_path: Path, policy: dict[str, Any]
+) -> tuple[str, list[str]]:
+    """Fingerprint only the function and constants that implement one policy."""
+    function_name = str(policy["function"])
+    tree = ast.parse(module_path.read_text(encoding="utf-8"), filename=str(module_path))
+    matches = [
+        node
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name == function_name
+    ]
+    if len(matches) != 1:
+        raise RuntimeError(
+            f"expected one top-level clinical policy function {function_name}; "
+            f"found {len(matches)}"
+        )
+    family = str(policy["family"])
+    constant_names = list(CLINICAL_POLICY_INVENTORY[family][1])
+    function_node = matches[0]
+    if (
+        function_node.body
+        and isinstance(function_node.body[0], ast.Expr)
+        and isinstance(function_node.body[0].value, ast.Constant)
+        and isinstance(function_node.body[0].value.value, str)
+    ):
+        function_node.body = function_node.body[1:]
+    payload = {
+        "schema": "clinical-procedural-policy-fingerprint-v1",
+        "family": family,
+        "function": function_name,
+        "function_ast": ast.dump(
+            function_node, annotate_fields=True, include_attributes=False
+        ),
+        "constants": {
+            name: canonicalize(getattr(module, name)) for name in constant_names
+        },
+        "declared_resolution": canonicalize(policy["resolution"]),
+    }
+    return digest(payload), constant_names
+
+
 def migrate_clinical_decisions(conn: sqlite3.Connection, module_path: Path) -> dict[str, int]:
     module = load_module(module_path)
     counts: dict[str, int] = {}
@@ -1627,7 +1670,6 @@ def migrate_clinical_decisions(conn: sqlite3.Connection, module_path: Path) -> d
                 }], policy_version="clinical-normalization-v1",
             )
         counts[constant] = len(items)
-    module_sha256 = digest(module_path.read_bytes())
     for policy in CLINICAL_PROCEDURAL_POLICIES:
         family = str(policy["family"])
         function = str(policy["function"])
@@ -1635,6 +1677,9 @@ def migrate_clinical_decisions(conn: sqlite3.Connection, module_path: Path) -> d
         rationale = (
             f"Reviewed production clinical derivation {function} for {short_title}; "
             "raw clinical rows and facts remain unchanged."
+        )
+        policy_sha256, policy_constants = clinical_procedural_policy_fingerprint(
+            module, module_path, policy
         )
         make_reviewed_decision(
             conn, source_kind="clinical_derivation_policy",
@@ -1645,7 +1690,8 @@ def migrate_clinical_decisions(conn: sqlite3.Connection, module_path: Path) -> d
             resolution={
                 "family": family, "function": function,
                 "algorithm": canonicalize(policy["resolution"]),
-                "module_sha256": module_sha256,
+                "policy_fingerprint_sha256": policy_sha256,
+                "policy_constants": policy_constants,
             },
             scope_extra={
                 "affected_artifact": "clinical",
@@ -1671,7 +1717,8 @@ def migrate_clinical_decisions(conn: sqlite3.Connection, module_path: Path) -> d
                 "source_record_id": function,
                 "source_field": f"scripts/tcia_clinical_metadata.py::{function}",
                 "excerpt": rationale,
-                "module_sha256": module_sha256,
+                "policy_fingerprint_sha256": policy_sha256,
+                "policy_constants": policy_constants,
             }],
             policy_version="clinical-derivation-v1",
         )

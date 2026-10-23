@@ -369,6 +369,18 @@ The identity audit and coverage counts are stored in
 `clinical_meta.ivygap_allen_clinical_result`. Matching the manifest establishes
 cohort identity only; it does not authorize access to the controlled images.
 
+`LDCT-and-Projection-data` publishes one open clinical package containing
+three nested ZIPs. The harvester descends those archives and promotes the
+reviewed `Case` column from the abdomen, chest, and neuro workbooks. In the
+current package this preserves 361 abdomen rows for 75 `L` cases, 101 chest
+rows for 52 `C` cases, and 89 neuro rows for 52 `N` cases. Abdomen and chest
+retain their public IDC imaging links. Neuro images are hosted in General
+Commons, so each neuro clinical row must match the public controlled-metadata
+SQLite by the exact `(Case, SeriesUID)` pair before it is image-linked. The
+current 89 neuro rows all match; the larger 99-subject General Commons imaging
+cohort does not imply clinical values for its 47 cases absent from the open
+workbook. Raw workbook values remain in `clinical_rows.row_json`.
+
 `VICTRE` is handled as a synthetic mixed cohort, not as 2,994 breast-cancer
 patients. IDC DICOM metadata supplies one image-linked row per virtual subject.
 The digital-mammography `SeriesDescription` encodes `pc` (signal absent) or
@@ -757,8 +769,8 @@ periodic forced validation.
 
 ## Parsing and quality limits
 
-The direct harvester reads CSV, TSV, XLS, XLSX, and supported tables inside ZIP
-files. It uses conservative subject-column and common-concept aliases. Tables
+The direct harvester reads CSV, TSV, XLS, XLSX, and supported tables inside
+bounded nested ZIP files. It uses conservative subject-column and common-concept aliases. Tables
 without a recognizable subject identifier are retained as warnings rather
 than being guessed into patient rows. IDC tables use their explicit
 `dicom_patient_id`, `clinical_index.column_label`, and `values` mappings.
