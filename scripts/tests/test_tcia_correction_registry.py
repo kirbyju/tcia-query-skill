@@ -377,8 +377,8 @@ class CorrectionIdentityTests(unittest.TestCase):
         payload = json.loads(source.read_text())
         batches = payload["aggregate_explanation_batches"]
         self.assertEqual(payload["schema_version"], 4)
-        self.assertEqual(len(batches), 56)
-        self.assertEqual(sum(batch["change_count"] for batch in batches), 711642)
+        self.assertEqual(len(batches), 66)
+        self.assertEqual(sum(batch["change_count"] for batch in batches), 925227)
         by_id = {batch["batch_id"]: batch for batch in batches}
         self.assertEqual(
             by_id["manifest-series-scope-clinical-facts-2026-10-21"]["change_kind_counts"],
@@ -444,6 +444,14 @@ class CorrectionIdentityTests(unittest.TestCase):
             by_id["lidc-annot-nlst501-aspera-route-participant-assets-2026-10-08"]["change_kind_counts"],
             {"added": 1002, "removed": 501},
         )
+        self.assertEqual(
+            by_id["reviewed-current-public-assets-2026-10-24"]["changes_sha256"],
+            "d5079b5ccd7ef1df706fc689a359aaf7e626370a9f1fb431f21bdcb80453eccc",
+        )
+        self.assertEqual(
+            by_id["reviewed-current-participants-2026-10-24"]["change_kind_counts"],
+            {"added": 87, "removed": 35536, "modified": 2973},
+        )
         filename_batch = by_id[
             "healthy-total-body-cts-nifti-filename-correction-2026-10-01"
         ]
@@ -460,7 +468,7 @@ class CorrectionIdentityTests(unittest.TestCase):
                          JOIN correction_decisions d USING(revision_id)
                         WHERE d.policy_version='semantic-aggregate-explanations-v1'"""
                 ).fetchall()
-            self.assertEqual(len(effects), 56)
+            self.assertEqual(len(effects), 66)
             self.assertTrue(all(row[1] == "added" for row in effects))
             self.assertTrue(all(row[2] and row[3] == "approved" for row in effects))
 

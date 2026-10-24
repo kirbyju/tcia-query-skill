@@ -925,6 +925,206 @@
         "no waiver or gate bypass",
         "no different row digest accepted"
       ]
+    },
+    {
+      "batch_id": "reviewed-current-participant-assets-2026-10-24",
+      "reviewer": "Codex, under requester-authorized release review",
+      "approved_at": "2026-10-24T14:04:53Z",
+      "rationale": "This exact full-table transition combines the previously reviewed dataset-scoped participant repairs with the approved current PathDB refresh. Added rows are bounded to reviewed LDCT/TOMPEI/UCSD/CPTAC scope; modified rows preserve the same underlying assets while correcting dataset-scoped ownership or evidence; removed rows retire derived clinical-only or superseded associations and do not delete source images or files.",
+      "evidence_id": "github-actions:40031025011:metadata_change_report_final",
+      "evidence": "Retained candidate run 40031025011 from producer 0026f21e35ae1256e8fc3138a7b2b690f8ceaeed; exact report SHA256 a9a86cdc45ac67e8b75388653a3bec6cf30971d11b2a3b9e517fad905e09a34b and queue SHA256 da3ad99d33c6791f7d028d0e7b2c6c551e0bdf5a2a6ebddb040a084a3f0e34a3. Dataset walkthrough covered all 17 queued scopes; the final approval added 366 CPTAC-CM slides across 87 subjects and 6 CPTAC-GBM slides across 3 existing subjects.",
+      "baseline_release_fingerprint": "ca1034fa1696b8ce2d2338a44cbc1b7ad21fcf8ce0385cb6ea3ef864d6a1d37b",
+      "artifact": "participant_inventory",
+      "entity_table": "participant_assets",
+      "change_count": 37463,
+      "change_kind_counts": {"added": 1924, "removed": 27452, "modified": 8087},
+      "changes_sha256": "d065c5c2eabe430c497b4fef9acf8f943bf2bceeae50631b97d2c4550573a046",
+      "negative_scope": [
+        "no physical image or file deletion",
+        "no bare-identifier cross-dataset ownership",
+        "no asset change outside the exact retained report",
+        "no different baseline or row digest accepted"
+      ]
+    },
+    {
+      "batch_id": "reviewed-acrin-ispy2-participant-equivalences-2026-10-24",
+      "reviewer": "Codex, under requester-authorized release review",
+      "approved_at": "2026-10-24T14:04:53Z",
+      "rationale": "Exactly 266 high-confidence equivalences reproduce the official ACRIN-ISPY2 clinical crosswalk. Both dataset-qualified endpoints are retained; this records finite source-supported equivalence and does not authorize same-ID matching elsewhere.",
+      "evidence_id": "github-actions:40031025011:metadata_change_report_final",
+      "evidence": "Retained candidate report SHA256 a9a86cdc45ac67e8b75388653a3bec6cf30971d11b2a3b9e517fad905e09a34b. Candidate inspection identifies all 266 rows as resolution_method official_acrin_ispy2_clinical_crosswalk with high confidence and evidence_source clinical_only_identity_repairs_v1.json.",
+      "baseline_release_fingerprint": "ca1034fa1696b8ce2d2338a44cbc1b7ad21fcf8ce0385cb6ea3ef864d6a1d37b",
+      "artifact": "participant_inventory",
+      "entity_table": "participant_equivalences",
+      "change_count": 266,
+      "change_kind_counts": {"added": 266},
+      "changes_sha256": "f3ea7ad1260a0b9582f54bb647bc10e4c21477e551e7414064f2291341420096",
+      "negative_scope": [
+        "no global same-identifier equivalence",
+        "no endpoint absent from the reviewed crosswalk",
+        "no participant merge or deletion",
+        "no different row digest accepted"
+      ]
+    },
+    {
+      "batch_id": "reviewed-current-participant-group-members-2026-10-24",
+      "reviewer": "Codex, under requester-authorized release review",
+      "approved_at": "2026-10-24T14:04:53Z",
+      "rationale": "Group-member rows are the deterministic projection of the exact reviewed participant identities and equivalences in this candidate. Removed memberships retire obsolete derived clinical-only/canonical keys, two modifications preserve corrected membership ownership, and 87 additions attach the approved new CPTAC-CM subjects to their curated groups.",
+      "evidence_id": "github-actions:40031025011:metadata_change_report_final",
+      "evidence": "Retained candidate report SHA256 a9a86cdc45ac67e8b75388653a3bec6cf30971d11b2a3b9e517fad905e09a34b and queue SHA256 da3ad99d33c6791f7d028d0e7b2c6c551e0bdf5a2a6ebddb040a084a3f0e34a3. Counts exactly reconcile to the reviewed participant transition; no additional identity source or inference was introduced.",
+      "baseline_release_fingerprint": "ca1034fa1696b8ce2d2338a44cbc1b7ad21fcf8ce0385cb6ea3ef864d6a1d37b",
+      "artifact": "participant_inventory",
+      "entity_table": "participant_group_members",
+      "change_count": 35625,
+      "change_kind_counts": {"added": 87, "removed": 35536, "modified": 2},
+      "changes_sha256": "cc5a3e73752d7b42a507dfa3c2b2b24bea7a6d58ccd7b3f224990bd8b028eda4",
+      "negative_scope": [
+        "no unsupported cross-dataset grouping",
+        "no physical participant deletion",
+        "no membership outside the reviewed participant transition",
+        "no different row digest accepted"
+      ]
+    },
+    {
+      "batch_id": "reviewed-current-participant-groups-2026-10-24",
+      "reviewer": "Codex, under requester-authorized release review",
+      "approved_at": "2026-10-24T14:04:53Z",
+      "rationale": "Participant-group rows are regenerated from the exact reviewed dataset-scoped identity graph. Obsolete singleton/derived keys are retired, while 87 approved CPTAC-CM subject groups and one deterministic grouping projection are added; the change does not assert new unreviewed person identity.",
+      "evidence_id": "github-actions:40031025011:metadata_change_report_final",
+      "evidence": "Retained candidate report SHA256 a9a86cdc45ac67e8b75388653a3bec6cf30971d11b2a3b9e517fad905e09a34b. The complete group and group-member counts reconcile with the exact participants/equivalences batches and the same baseline fingerprint.",
+      "baseline_release_fingerprint": "ca1034fa1696b8ce2d2338a44cbc1b7ad21fcf8ce0385cb6ea3ef864d6a1d37b",
+      "artifact": "participant_inventory",
+      "entity_table": "participant_groups",
+      "change_count": 35626,
+      "change_kind_counts": {"added": 88, "removed": 35538},
+      "changes_sha256": "eedf62685e5de948d8ea6e446df6e33051dfe0848933475e69d693f501245297",
+      "negative_scope": [
+        "no unsupported person-level merge",
+        "no bare-ID grouping across datasets",
+        "no group outside the exact reviewed identity graph",
+        "no different row digest accepted"
+      ]
+    },
+    {
+      "batch_id": "reviewed-current-participant-identifiers-2026-10-24",
+      "reviewer": "Codex, under requester-authorized release review",
+      "approved_at": "2026-10-24T14:04:53Z",
+      "rationale": "The exact identifier transition applies the reviewed NLST, CBIS-DDSM, clinical-only, LDCT, TOMPEI, UCSD, and CPTAC dataset-scoped mappings. Raw aliases and source evidence remain available; removed rows retire obsolete derived ownership and do not authorize global normalization or cross-dataset bare-ID matching.",
+      "evidence_id": "github-actions:40031025011:metadata_change_report_final",
+      "evidence": "Retained candidate report SHA256 a9a86cdc45ac67e8b75388653a3bec6cf30971d11b2a3b9e517fad905e09a34b and dataset queue SHA256 da3ad99d33c6791f7d028d0e7b2c6c551e0bdf5a2a6ebddb040a084a3f0e34a3. Every queued dataset was reviewed before approval; current CPTAC additions are restricted to official PathDB subject labels.",
+      "baseline_release_fingerprint": "ca1034fa1696b8ce2d2338a44cbc1b7ad21fcf8ce0385cb6ea3ef864d6a1d37b",
+      "artifact": "participant_inventory",
+      "entity_table": "participant_identifiers",
+      "change_count": 37333,
+      "change_kind_counts": {"added": 434, "removed": 27452, "modified": 9447},
+      "changes_sha256": "c36e2d07a65caf05ff5319ba40bce1cd100092e3c579a617e509165395b3b3e2",
+      "negative_scope": [
+        "no global identifier normalization",
+        "no cross-dataset bare-ID match",
+        "no loss of source aliases from reviewed mappings",
+        "no different row digest accepted"
+      ]
+    },
+    {
+      "batch_id": "reviewed-current-participant-identity-evidence-2026-10-24",
+      "reviewer": "Codex, under requester-authorized release review",
+      "approved_at": "2026-10-24T14:04:53Z",
+      "rationale": "Exactly 8,084 evidence rows make the reviewed dataset-scoped identity resolutions explicit. They document finite official crosswalk, path, case, and source relationships already used by the approved participant transition; they do not create a broader inference rule.",
+      "evidence_id": "github-actions:40031025011:metadata_change_report_final",
+      "evidence": "Retained candidate report SHA256 a9a86cdc45ac67e8b75388653a3bec6cf30971d11b2a3b9e517fad905e09a34b. Evidence additions reconcile exactly with the modified reviewed participants/identifiers/assets in the 17-entry dataset queue.",
+      "baseline_release_fingerprint": "ca1034fa1696b8ce2d2338a44cbc1b7ad21fcf8ce0385cb6ea3ef864d6a1d37b",
+      "artifact": "participant_inventory",
+      "entity_table": "participant_identity_evidence",
+      "change_count": 8084,
+      "change_kind_counts": {"added": 8084},
+      "changes_sha256": "e0d2c3dd9619abff5a523b38b4ee630768d7a9bfd4dc42f1ccbfe965abc4bd6b",
+      "negative_scope": [
+        "no unsupported identity assertion",
+        "no wildcard or global matching rule",
+        "no evidence outside the reviewed dataset scopes",
+        "no different row digest accepted"
+      ]
+    },
+    {
+      "batch_id": "reviewed-current-participants-2026-10-24",
+      "reviewer": "Codex, under requester-authorized release review",
+      "approved_at": "2026-10-24T14:04:53Z",
+      "rationale": "The exact participant transition applies the reviewed dataset-scoped canonicalization and clinical-only retirement work and adds 87 CPTAC-CM participants now represented by official PathDB slides. Removed rows are superseded derived identities, not a claim that people or source data disappeared; modified rows preserve dataset scope while correcting identity/evidence fields.",
+      "evidence_id": "github-actions:40031025011:metadata_change_report_final",
+      "evidence": "Retained candidate report SHA256 a9a86cdc45ac67e8b75388653a3bec6cf30971d11b2a3b9e517fad905e09a34b and queue SHA256 da3ad99d33c6791f7d028d0e7b2c6c551e0bdf5a2a6ebddb040a084a3f0e34a3. The final approval explicitly accepted the substantive CPTAC PathDB additions after all prior dataset scopes had been reviewed.",
+      "baseline_release_fingerprint": "ca1034fa1696b8ce2d2338a44cbc1b7ad21fcf8ce0385cb6ea3ef864d6a1d37b",
+      "artifact": "participant_inventory",
+      "entity_table": "participants",
+      "change_count": 38596,
+      "change_kind_counts": {"added": 87, "removed": 35536, "modified": 2973},
+      "changes_sha256": "aede5fb6309b0ac84ab4519c52929fe6f5f67fe9891e463db6be6828511ae1db",
+      "negative_scope": [
+        "no physical participant deletion claim",
+        "no unreviewed cross-dataset identity merge",
+        "no participant outside the exact retained report",
+        "no different row digest accepted"
+      ]
+    },
+    {
+      "batch_id": "reviewed-current-public-asset-participant-links-2026-10-24",
+      "reviewer": "Codex, under requester-authorized release review",
+      "approved_at": "2026-10-24T14:04:53Z",
+      "rationale": "Added and removed links are the exact reviewed TOMPEI-CMMD, HistologyHSI-BC-Recurrence, UCSD-BMETS-Longitudinal, and CPTAC projections. The two ICDC-Glioma modifications preserve canonical subjects 49E6 and 6E45 while recording bounded raw PathDB forms and reviewed correction provenance; no scientific identity regresses to spreadsheet notation.",
+      "evidence_id": "github-actions:40031025011:metadata_change_report_final",
+      "evidence": "Retained candidate report SHA256 a9a86cdc45ac67e8b75388653a3bec6cf30971d11b2a3b9e517fad905e09a34b and queue SHA256 da3ad99d33c6791f7d028d0e7b2c6c551e0bdf5a2a6ebddb040a084a3f0e34a3. The ICDC-safe producer has passing focused tests and full CI; the queue shows only two ICDC link modifications and no ICDC participant or asset identity change.",
+      "baseline_release_fingerprint": "ca1034fa1696b8ce2d2338a44cbc1b7ad21fcf8ce0385cb6ea3ef864d6a1d37b",
+      "artifact": "public_non_dicom",
+      "entity_table": "public_non_dicom_asset_participants",
+      "change_count": 9088,
+      "change_kind_counts": {"added": 8678, "removed": 408, "modified": 2},
+      "changes_sha256": "10130408eb916e5914c4155d2662bc1610ba3ff7d17da1801f95e0f34f33249e",
+      "negative_scope": [
+        "no ICDC canonical subject regression",
+        "no participant link inferred from a bare identifier",
+        "no link outside the reviewed dataset scopes",
+        "no different row digest accepted"
+      ]
+    },
+    {
+      "batch_id": "reviewed-current-public-assets-2026-10-24",
+      "reviewer": "Codex, under requester-authorized release review",
+      "approved_at": "2026-10-24T14:04:53Z",
+      "rationale": "The exact public-asset batch adds the reviewed TOMPEI-CMMD and UCSD assets plus 372 current official PathDB slides (366 CPTAC-CM and 6 CPTAC-GBM). Modified rows are the reviewed HistologyHSI reconciliation and one current package-summary update for each CPTAC dataset; no unrelated route, access, or source file is approved.",
+      "evidence_id": "github-actions:40031025011:metadata_change_report_final",
+      "evidence": "Retained candidate report SHA256 a9a86cdc45ac67e8b75388653a3bec6cf30971d11b2a3b9e517fad905e09a34b and queue SHA256 da3ad99d33c6791f7d028d0e7b2c6c551e0bdf5a2a6ebddb040a084a3f0e34a3. Exact queue counts are TOMPEI-CMMD 1,385 additions, UCSD-BMETS-Longitudinal 1,065 additions, CPTAC-CM 366 additions plus one modification, CPTAC-GBM 6 additions plus one modification, and HistologyHSI-BC-Recurrence 5,858 modifications.",
+      "baseline_release_fingerprint": "ca1034fa1696b8ce2d2338a44cbc1b7ad21fcf8ce0385cb6ea3ef864d6a1d37b",
+      "artifact": "public_non_dicom",
+      "entity_table": "public_non_dicom_assets",
+      "change_count": 8682,
+      "change_kind_counts": {"added": 2822, "modified": 5860},
+      "changes_sha256": "d5079b5ccd7ef1df706fc689a359aaf7e626370a9f1fb431f21bdcb80453eccc",
+      "negative_scope": [
+        "no unrelated public asset or access-route change",
+        "no PathDB addition outside CPTAC-CM or CPTAC-GBM",
+        "no physical-file deletion",
+        "no different row digest accepted"
+      ]
+    },
+    {
+      "batch_id": "reviewed-current-public-image-metadata-2026-10-24",
+      "reviewer": "Codex, under requester-authorized release review",
+      "approved_at": "2026-10-24T14:04:53Z",
+      "rationale": "Image-metadata additions are the deterministic detail projection for exactly the 2,822 approved new public assets: 1,385 TOMPEI-CMMD annotations, 1,065 UCSD-BMETS-Longitudinal assets, and 372 CPTAC PathDB slides. No pre-existing image metadata is modified or removed.",
+      "evidence_id": "github-actions:40031025011:metadata_change_report_final",
+      "evidence": "Retained candidate report SHA256 a9a86cdc45ac67e8b75388653a3bec6cf30971d11b2a3b9e517fad905e09a34b. Added image-metadata count exactly equals the approved public-asset additions and contains no modification/removal kind.",
+      "baseline_release_fingerprint": "ca1034fa1696b8ce2d2338a44cbc1b7ad21fcf8ce0385cb6ea3ef864d6a1d37b",
+      "artifact": "public_non_dicom",
+      "entity_table": "public_non_dicom_image_metadata",
+      "change_count": 2822,
+      "change_kind_counts": {"added": 2822},
+      "changes_sha256": "f3b80f507f95d24e413cb43457d8a238897577f6bc4972a1ca27c40d3b451ecc",
+      "negative_scope": [
+        "no existing image metadata modification or removal",
+        "no metadata outside the exact approved asset additions",
+        "no unrelated geometry refresh approval",
+        "no different row digest accepted"
+      ]
     }
   ],
   "explanation_batches": [
