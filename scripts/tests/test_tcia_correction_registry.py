@@ -378,7 +378,7 @@ class CorrectionIdentityTests(unittest.TestCase):
         batches = payload["aggregate_explanation_batches"]
         self.assertEqual(payload["schema_version"], 4)
         self.assertEqual(len(batches), 66)
-        self.assertEqual(sum(batch["change_count"] for batch in batches), 925227)
+        self.assertEqual(sum(batch["change_count"] for batch in batches), 925228)
         by_id = {batch["batch_id"]: batch for batch in batches}
         self.assertEqual(
             by_id["manifest-series-scope-clinical-facts-2026-10-21"]["change_kind_counts"],
@@ -446,7 +446,7 @@ class CorrectionIdentityTests(unittest.TestCase):
         )
         self.assertEqual(
             by_id["reviewed-current-public-assets-2026-10-24"]["changes_sha256"],
-            "d5079b5ccd7ef1df706fc689a359aaf7e626370a9f1fb431f21bdcb80453eccc",
+            "dade363c9bddd443f646e7839f7f891cac39f21e3f4601f1660f7f2ccfc3844d",
         )
         self.assertEqual(
             by_id["reviewed-current-participants-2026-10-24"]["change_kind_counts"],
