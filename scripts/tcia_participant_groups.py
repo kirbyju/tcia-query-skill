@@ -4,6 +4,7 @@ from __future__ import annotations
 from collections import defaultdict
 import hashlib
 import json
+import re
 from pathlib import Path
 import sqlite3
 
@@ -60,7 +61,9 @@ CREATE TABLE participant_issue_dispositions (
 
 
 def build_groups(conn: sqlite3.Connection, dataset_species: dict[tuple[str, str], str],
-                 *, review_reference: Path = REVIEW_REFERENCE) -> dict[str, int]:
+                 *, review_reference: Path = REVIEW_REFERENCE,
+                 participant_species: dict[str, str] | None = None,
+                 tcga_source_groups: dict[tuple[str, str, str], list[str]] | None = None) -> dict[str, int]:
     """Consolidate only supported edges; reject an entire conflicting component."""
     people = {r['participant_key']: dict(r) for r in conn.execute('SELECT * FROM participants')}
     parent = {k: k for k in people}
@@ -113,6 +116,28 @@ def build_groups(conn: sqlite3.Connection, dataset_species: dict[tuple[str, str]
             parent[max(a, b)] = min(a, b)
         candidates.append((kind, edge_id, left, right, row['resolution_method']))
 
+    # Original GDC TCGA cases can underlie multiple TCIA Analysis Results even
+    # when their original project is not a TCIA-published Collection. These
+    # finite, independently source-confirmed anchors create no Collection rows.
+    for anchor, keys in sorted((tcga_source_groups or {}).items()):
+        members = sorted(set(keys))
+        valid = (len(anchor) == 3 and anchor[0] == 'GDC_TCGA'
+                 and re.fullmatch(r'TCGA-[A-Z0-9]+', anchor[1])
+                 and re.fullmatch(r'TCGA-[A-Z0-9]{2}-[A-Z0-9]{4}', anchor[2])
+                 and all(k in people and people[k]['dataset_type'] == 'Analysis Result'
+                         and people[k]['display_participant_id'] == anchor[2] for k in members))
+        if not valid:
+            reviews.append(('tcga_original_source', hashlib.sha256(json.dumps(anchor).encode()).hexdigest(),
+                            'rejected', 'invalid_tcga_source_anchor'))
+            continue
+        for left, right in zip(members, members[1:]):
+            a, b = find(left), find(right)
+            if a != b:
+                parent[max(a, b)] = min(a, b)
+            edge_id = hashlib.sha256(json.dumps([anchor, left, right]).encode()).hexdigest()
+            candidates.append(('tcga_original_source', edge_id, left, right,
+                               'official_tcga_original_source_identity'))
+
     components = defaultdict(list)
     for key in sorted(people):
         components[find(key)].append(key)
@@ -138,8 +163,9 @@ def build_groups(conn: sqlite3.Connection, dataset_species: dict[tuple[str, str]
     for root, component in sorted(components.items()):
         for members in ([[k] for k in component] if root in conflicts else [component]):
             group_id = hashlib.sha256(json.dumps(members).encode()).hexdigest()
-            labels = {label.strip() for k in members for label in dataset_species.get(
-                (people[k]['dataset_type'], people[k]['short_title']), '').split(';') if label.strip()}
+            labels = {label.strip() for k in members for label in (participant_species or {}).get(
+                k, dataset_species.get((people[k]['dataset_type'], people[k]['short_title']), '')
+            ).split(';') if label.strip()}
             categories = {'human' if s == 'Human' else 'animal' if s in {'Canine', 'Mouse'} else
                           'phantom' if s in {'Physical Phantom', 'Computational Phantom'} else 'unclassified' for s in labels}
             if all(people[k]['short_title'] in BENCHMARKS for k in members):

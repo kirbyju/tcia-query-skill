@@ -85,5 +85,29 @@ class ParticipantGroupTests(unittest.TestCase):
         self.db.execute('DELETE FROM participant_group_members WHERE participant_key=?',(a,))
         self.assertEqual(len(validate_groups(self.db)),2)
 
+    def test_explicit_external_tcga_source_anchor_deduplicates_results_without_fake_collection(self):
+        a = self.person('TIL-WSI-TCGA', 'TCGA-AA-0001', kind='Analysis Result')
+        b = self.person('Pan-Cancer-Nuclei-Seg', 'TCGA-AA-0001', kind='Analysis Result')
+        unrelated = self.person('Unrelated', 'TCGA-AA-0001', kind='Analysis Result')
+        anchors = {('GDC_TCGA', 'TCGA-PAAD', 'TCGA-AA-0001'): [a, b]}
+        result = build_groups(self.db, self.species, tcga_source_groups=anchors)
+        self.assertEqual(result['participant_groups'], 2)
+        groups = dict(self.db.execute('SELECT participant_key,participant_group_id FROM participant_group_members'))
+        self.assertEqual(groups[a], groups[b])
+        self.assertNotEqual(groups[a], groups[unrelated])
+        self.assertEqual(self.db.execute("SELECT COUNT(*) FROM participants WHERE dataset_type='Collection'").fetchone()[0], 0)
+        self.assertEqual(validate_groups(self.db), [])
+
+    def test_external_tcga_anchor_rejects_bare_id_or_wrong_participant(self):
+        a = self.person('A', '1', kind='Analysis Result')
+        b = self.person('B', '1', kind='Analysis Result')
+        result = build_groups(self.db, self.species,
+            tcga_source_groups={('GDC_TCGA', 'TCGA-PAAD', '1'): [a, b]})
+        self.assertEqual(result['participant_groups'], 2)
+        self.assertEqual(result['rejected_group_links'], 1)
+        result = build_groups(self.db, self.species,
+            tcga_source_groups={('GDC_TCGA', 'TCGA-PAAD', 'TCGA-AA-0001'): [a, b]})
+        self.assertEqual(result['participant_groups'], 2)
+
 
 if __name__=='__main__':unittest.main()

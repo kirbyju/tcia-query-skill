@@ -1,0 +1,130 @@
+{
+  "reviewed_at": "2026-10-25",
+  "baseline_release_fingerprint": "171f50880bb668eae21dd505a8de71bb68e4bd4a840966c378528c762a70fbe2",
+  "work_item": "WORK-0045",
+  "state": "local implementation; publication and deployment not performed",
+  "reviewed_datasets": 33,
+  "datasets_with_supported_imports": 32,
+  "datasets_with_counts_matching_published_aggregate": 28,
+  "datasets_with_partial_imports": 4,
+  "datasets_without_imports": 1,
+  "dataset_memberships": 17532,
+  "manual_review": [
+    {
+      "published": 4759,
+      "verified": 4751,
+      "reason": "The Box archive v1 representations each contain 5202 maps for 4751 distinct TCGA participant barcodes. The browser contains 4505 of these patients; a separate clustering-metadata ZIP contains 4704 patients. The published 4759 count exceeds the map archive v1 case count by eight. The archive v2 representation has a different cohort and is retained as a separate source variant rather than silently unioned.",
+      "question": "Reconcile the published 4759 patient aggregate with the 4751 v1 map cases and review the ten known TCGA case IDs absent from current IDC original SM metadata. Participant source-lineage linkage is implemented; do not invent eight participants or union different map versions.",
+      "short_title": "TIL-WSI-TCGA",
+      "tcia_page": "https://www.cancerimagingarchive.net/analysis-result/til-wsi-tcga/",
+      "reviewed_on": "2026-10-27",
+      "source_linkage": {
+        "source_namespace": "GDC TCGA participant barcode",
+        "tcga_collection_matches_deduplicated": 4103,
+        "source_cases_without_current_tcia_collection_participant": 648,
+        "external_projects_not_tcia_published": {
+          "TCGA-PAAD": 170,
+          "TCGA-SKCM": 406,
+          "TCGA-UVM": 63
+        },
+        "other_cases_absent_from_current_tcia_source_inventory": 9,
+        "current_idc_original_sm_confirmed": 4741,
+        "not_in_current_idc_original_sm": 10,
+        "shared_til_pan_cancer_cases_deduplicated": 4153,
+        "fake_tcia_collections_created": 0,
+        "source_matches_not_deduplicated": 0
+      }
+    },
+    {
+      "published": 5204,
+      "verified": 4635,
+      "reason": "The union of four official QC/slide/patch lists establishes 4,635 TCGA cases. The verified-WSI list alone has 4,186 cases versus its listed 4,187; the overall dataset lists 5,204. Lists contain overlapping subsets and QC-failure rows, which remain source membership evidence.",
+      "question": "Confirm the full package participant list and intended QC subset policy, and reconcile the 5,204 overall / 4,187 verified-subset aggregates. Do not fabricate the 569-count difference or remove published subjects solely for a QC flag.",
+      "short_title": "Pan-Cancer-Nuclei-Seg",
+      "tcia_page": "https://www.cancerimagingarchive.net/analysis-result/pan-cancer-nuclei-seg/"
+    }
+  ],
+  "resolved_reviews": [
+    {
+      "published": 9,
+      "verified": 9,
+      "reason": "The metadata identifies eight synthetic image sets (MRI-DIR-T1_1 through T1_4 and T2_1 through T2_4) plus MRI-DIR-zzmeatphantom. The narrative describes porcine phantom material and synthetic images derived from 28 patients. All 61 metadata rows are labeled Homo sapiens, which conflicts with interpreting the nine IDs as nine people.",
+      "question": "Agree on the inventory grain and classification: count eight computational phantom/model identities and one physical phantom, or use another documented policy. Do not add nine human subjects or infer 28 new participants.",
+      "short_title": "MRI-DIR",
+      "tcia_page": "https://www.cancerimagingarchive.net/collection/mri-dir/",
+      "approved_on": "2026-10-27",
+      "decision": "User approved eight computational phantoms and one physical phantom; zero human participants. Original Homo sapiens source metadata preserved.",
+      "state": "implemented locally; not published"
+    }
+  ],
+  "deferred_followups": [
+    {
+      "published": 490,
+      "verified": 0,
+      "reason": "The controlled download still points to a legacy .tcia manifest containing series UIDs; no public patient-level metadata spreadsheet is linked. The current GC/CTDC importer does not ingest this legacy route.",
+      "question": "Identify an approved public patient/series crosswalk or current GC/CTDC metadata manifest for these 490 subjects. No controlled image retrieval or credentials are needed for this review.",
+      "short_title": "NSCLC-Cetuximab",
+      "tcia_page": "https://www.cancerimagingarchive.net/collection/nsclc-cetuximab/",
+      "state": "deferred pending CTDC re-release; annotation metadata follow-up remains open",
+      "clarified_on": "2026-10-27",
+      "authority": "User clarification in this chat",
+      "source_status": "NSCLC-Cetuximab has not yet been re-released in CTDC; re-release expected soon, with no confirmed date.",
+      "annotation_status": "Related Analysis Result annotation data may remain in NBIA for several more months; eventual CTDC submission is planned. Availability and participant mapping are not yet verified.",
+      "next_action": "At CTDC re-release, inspect the current official patient/series metadata and import supported Collection membership. Separately identify any NBIA Analysis Result annotations and validate an explicit source-patient crosswalk; preserve their own dataset scope and access terms. Do not treat potential annotations as complete source imaging coverage.",
+      "metadata_check": "A focused check of narrative/source fields in the pinned October 21 catalog found no explicit named Analysis Result link for NSCLC-Cetuximab/RTOG-0617. This does not establish current NBIA absence."
+    },
+    {
+      "published": 544,
+      "verified": 542,
+      "reason": "Source-reference matches establish 542 participants, while the Collection lists 544. The annotation cohort itself also lists 542.",
+      "question": "Obtain a current patient-level source inventory for the two remaining Collection subjects, or confirm the inventory should remain explicitly partial.",
+      "short_title": "AREN0532",
+      "tcia_page": "https://www.cancerimagingarchive.net/collection/aren0532/",
+      "state": "expected partial Collection coverage pending CTDC re-release",
+      "clarified_on": "2026-10-27",
+      "authority": "User clarification in this chat",
+      "source_status": "Source Collection not yet re-released in CTDC; open-access annotation Analysis Result remains available in NBIA.",
+      "decision": "Retain the finite source-supported subset and annotation inventory as separate dataset scopes with documented links. Treat the aggregate difference as expected partial coverage pending the source re-release, not an established identifier-mapping error.",
+      "next_action": "Reconcile the complete Collection patient inventory against official CTDC metadata after re-release. Preserve NBIA annotation access and provenance independently."
+    },
+    {
+      "published": 1299,
+      "verified": 1281,
+      "reason": "Source-reference matches establish the 1,281 annotated subjects, versus 1,299 in the Collection.",
+      "question": "Obtain the source patient list for the additional 18 subjects, or confirm partial coverage pending migration metadata.",
+      "short_title": "S0819",
+      "tcia_page": "https://www.cancerimagingarchive.net/collection/s0819/",
+      "state": "expected partial Collection coverage pending CTDC re-release",
+      "clarified_on": "2026-10-27",
+      "authority": "User clarification in this chat",
+      "source_status": "Source Collection not yet re-released in CTDC; open-access annotation Analysis Result remains available in NBIA.",
+      "decision": "Retain the finite source-supported subset and annotation inventory as separate dataset scopes with documented links. Treat the aggregate difference as expected partial coverage pending the source re-release, not an established identifier-mapping error.",
+      "next_action": "Reconcile the complete Collection patient inventory against official CTDC metadata after re-release. Preserve NBIA annotation access and provenance independently."
+    }
+  ],
+  "collection_release_policy": {
+    "confirmed_on": "2026-10-27",
+    "authority": "User clarification in this chat",
+    "collections": [
+      "AREN0532",
+      "AREN0533",
+      "AREN0534",
+      "S0819"
+    ],
+    "source_release_state": "not yet re-released in CTDC",
+    "annotation_state": "open-access Analysis Result annotations remain available in NBIA",
+    "policy": "Separate Collection and Analysis Result inventories; retain verified source-reference links and partial Collection coverage. Reconcile full Collection membership when CTDC metadata is released."
+  },
+  "tcga_current_source_coverage_review": {
+    "TCGA-E2-A1IP": "TCGA-BRCA",
+    "TCGA-PN-A8M9": "TCGA-CESC",
+    "TCGA-F4-6857": "TCGA-COAD",
+    "TCGA-35-3621": "TCGA-LUAD",
+    "TCGA-33-4579": "TCGA-LUSC",
+    "TCGA-66-2746": "TCGA-LUSC",
+    "TCGA-66-2751": "TCGA-LUSC",
+    "TCGA-66-2752": "TCGA-LUSC",
+    "TCGA-O2-A5IC": "TCGA-LUSC",
+    "TCGA-GN-A261": "TCGA-SKCM"
+  }
+}

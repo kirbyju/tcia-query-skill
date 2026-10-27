@@ -2337,7 +2337,30 @@ def build_participant_groups(conn: sqlite3.Connection, snapshot_db: Path) -> dic
         species = "species" if "species" in columns else "'' AS species"
         labels = {(r['dataset_type'], r['short_title']): str(r['species'] or '')
                   for r in source.execute(f"SELECT dataset_type,short_title,{species} FROM agent_datasets")}
-    return build_groups(conn, labels)
+    # Some Analysis Result pages omit species despite explicit human participant
+    # metadata. Apply only finite reviewed labels for inventories actually used.
+    from tcia_missing_inventory_repairs import load as load_missing_inventory
+    reviewed, _ = load_missing_inventory()
+    participant_species = {}
+    for recipe in reviewed['recipes']:
+        scope = (recipe['dataset_type'], recipe['short_title'])
+        for identifier, classification in recipe.get('participant_species', {}).items():
+            key = participant_key(*scope, identifier)
+            if conn.execute(
+                "SELECT 1 FROM participant_assets WHERE participant_key=? "
+                "AND source_artifact='reviewed_missing_participant_inventories_v1'", (key,),
+            ).fetchone():
+                participant_species[key] = classification
+        if not labels.get(scope) and conn.execute(
+            "SELECT 1 FROM participants p JOIN participant_assets a USING(participant_key) "
+            "WHERE p.dataset_type=? AND p.short_title=? "
+            "AND a.source_artifact='reviewed_missing_participant_inventories_v1' LIMIT 1", scope,
+        ).fetchone():
+            labels[scope] = recipe['species']
+    from tcia_missing_inventory_repairs import tcga_source_groups
+    import sys
+    return build_groups(conn, labels, participant_species=participant_species,
+                        tcga_source_groups=tcga_source_groups(conn, api=sys.modules[__name__]))
 
 
 def build_database(
@@ -2381,10 +2404,13 @@ def build_database(
                 include_clinical_values=include_clinical_values,
             ),
         }
+        import sys
+        from tcia_missing_inventory_repairs import ingest as ingest_missing_inventory
+        counts['reviewed_missing_inventory_rows'] = ingest_missing_inventory(
+            conn, snapshot_db, api=sys.modules[__name__])
         counts["authoritative_dataset_identities"] = (
             require_authoritative_dataset_identities(conn, dataset_types)
         )
-        import sys
         from tcia_reviewed_identity import apply as apply_reviewed_identity
         from tcia_reviewed_identity import apply_cbis_ddsm_aliases
         clinical_alias_counts = apply_clinical_participant_aliases(conn, clinical_db)
@@ -2411,6 +2437,9 @@ def build_database(
             dataset_types=dataset_types,
         )
         counts.update({f"source_links_{key}": value for key, value in source_links.items()})
+        from tcia_missing_inventory_repairs import link_sources as link_missing_inventory_sources
+        counts['reviewed_missing_inventory_source_links'] = link_missing_inventory_sources(
+            conn, snapshot_db, api=sys.modules[__name__])
         brats_links = apply_brats_source_collection_links(conn)
         counts.update({f"brats_{key}": value for key, value in brats_links.items()})
         counts['reviewed_identity_links'] = apply_reviewed_identity(
