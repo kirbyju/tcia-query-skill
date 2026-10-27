@@ -101,6 +101,11 @@ class MissingInventoryRepairsTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'source digest mismatch'):
             repairs.regenerate(self.root, reference=self.reference, inventory=self.csv)
 
+    def test_generated_inventory_uses_git_stable_lf_line_endings(self):
+        self.assertNotIn(b'\r\n', self.csv.read_bytes())
+        metadata = json.loads(self.reference.read_text())
+        self.assertEqual(metadata['inventory_sha256'], repairs.digest(self.csv))
+
     def test_parent_membership_requires_exact_referenced_series(self):
         (self.root / 'parent.tcia').write_text('downloadServerUrl=https://example.org\n1.2.3\n')
         recipe = {'kind': 'referenced_manifest', 'source_files': ['subjects.csv', 'parent.tcia']}

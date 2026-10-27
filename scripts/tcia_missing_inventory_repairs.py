@@ -138,7 +138,7 @@ def regenerate(source_dir, *, reference=REFERENCE, inventory=INVENTORY):
         recipe['participant_count'] = len(seen)
     rows.sort(key=lambda r: tuple(r[k] for k in FIELDS))
     with inventory.open('w', newline='', encoding='utf-8') as handle:
-        writer = csv.DictWriter(handle, fieldnames=FIELDS)
+        writer = csv.DictWriter(handle, fieldnames=FIELDS, lineterminator='\n')
         writer.writeheader()
         writer.writerows(rows)
     counts = {}
