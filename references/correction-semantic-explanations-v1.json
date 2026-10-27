@@ -1125,6 +1125,176 @@
         "no unrelated geometry refresh approval",
         "no different row digest accepted"
       ]
+    },
+    {
+      "batch_id": "reviewed-missing-inventories-participants-2026-10-27",
+      "reviewer": "Codex, under requester-authorized release review",
+      "approved_at": "2026-10-27T19:33:19.942904+00:00",
+      "rationale": "Add exactly 17,532 dataset-scoped memberships from 32 reviewed datasets. Re-extraction from every original hash-pinned supporting file reproduces the committed finite CSV byte for byte. No existing participant row changes.",
+      "evidence_id": "github-actions:40560137621:metadata_change_report_final",
+      "evidence": "Candidate run 40560137621; frozen producer 3d0045d6259fdff0da25e37f7408f4bcd54e5556; report SHA256 565c8e16144de62addb6412a0ce285f9483787fca20a42f62c9b2e516ca46bbf; baseline ; research PI SHA256 22582b242b686a96343278dbcb61d914acea2e6973179adee25c52ca01421e10; audit SHA256 1b1443047e510c65df1460025fe305a4fdb3a0095fb8a87e85ffcb07475b822c; source CSV SHA256 9921e6de027c42d10635583b2a7a83cb38745a7e9ec1099c31839c52388c2de3; independent complete row/source review receipt SHA256 26fc9c65df18ec13707b6a5469cb2d51e9d3c8508a09d05efd036d40570995f9; independent full added audit-payload parity receipt SHA256 c083a14ee326989a7db92f1ca9e4150587f69d6bf7c5b265750203bc103fc23c. All 130265 semantic changes exactly verified across seven tables, with whole-table parity against the independently rebased projection. Final curated totals: 89209 Human,440 Canine,378 Mouse,559 Benchmark,3034 Computational Phantom,409 Physical Phantom,742 Unknown;94771 overall. Original support files re-extracted locally without image payload transfers.",
+      "baseline_release_fingerprint": "",
+      "artifact": "participant_inventory",
+      "entity_table": "participants",
+      "change_count": 17532,
+      "change_kind_counts": {
+        "added": 17532
+      },
+      "changes_sha256": "cc50cc8d557ddf52bfdb5d8c37880b571e96979cc5cb4ac318ea828d31c5ac51",
+      "negative_scope": [
+        "no different primary key or row digest accepted",
+        "no clinical facts or image availability inferred from membership metadata",
+        "no generic bare-ID cross-dataset merge",
+        "no source Collection invented for external TCGA projects",
+        "no unresolved TIL aggregate, Pan coverage or CTDC availability exception declared resolved",
+        "no unrelated artifact semantic changes approved"
+      ]
+    },
+    {
+      "batch_id": "reviewed-missing-inventories-participant-identifiers-2026-10-27",
+      "reviewer": "Codex, under requester-authorized release review",
+      "approved_at": "2026-10-27T19:33:19.943175+00:00",
+      "rationale": "Add exactly one dataset-scoped identifier for each of the 17,532 source-listed memberships. Complete research rows and their complete companion provenance JSON match the independently rebased source projection. No bare-ID cross-dataset inference.",
+      "evidence_id": "github-actions:40560137621:metadata_change_report_final",
+      "evidence": "Candidate run 40560137621; frozen producer 3d0045d6259fdff0da25e37f7408f4bcd54e5556; report SHA256 565c8e16144de62addb6412a0ce285f9483787fca20a42f62c9b2e516ca46bbf; baseline ; research PI SHA256 22582b242b686a96343278dbcb61d914acea2e6973179adee25c52ca01421e10; audit SHA256 1b1443047e510c65df1460025fe305a4fdb3a0095fb8a87e85ffcb07475b822c; source CSV SHA256 9921e6de027c42d10635583b2a7a83cb38745a7e9ec1099c31839c52388c2de3; independent complete row/source review receipt SHA256 26fc9c65df18ec13707b6a5469cb2d51e9d3c8508a09d05efd036d40570995f9; independent full added audit-payload parity receipt SHA256 c083a14ee326989a7db92f1ca9e4150587f69d6bf7c5b265750203bc103fc23c. All 130265 semantic changes exactly verified across seven tables, with whole-table parity against the independently rebased projection. Final curated totals: 89209 Human,440 Canine,378 Mouse,559 Benchmark,3034 Computational Phantom,409 Physical Phantom,742 Unknown;94771 overall. Original support files re-extracted locally without image payload transfers.",
+      "baseline_release_fingerprint": "",
+      "artifact": "participant_inventory",
+      "entity_table": "participant_identifiers",
+      "change_count": 17532,
+      "change_kind_counts": {
+        "added": 17532
+      },
+      "changes_sha256": "029b3c829d67f63958c7d21c23247e65fa37da5e0d934d3d54f1f501f06e083d",
+      "negative_scope": [
+        "no different primary key or row digest accepted",
+        "no clinical facts or image availability inferred from membership metadata",
+        "no generic bare-ID cross-dataset merge",
+        "no source Collection invented for external TCGA projects",
+        "no unresolved TIL aggregate, Pan coverage or CTDC availability exception declared resolved",
+        "no unrelated artifact semantic changes approved"
+      ]
+    },
+    {
+      "batch_id": "reviewed-missing-inventories-participant-assets-2026-10-27",
+      "reviewer": "Codex, under requester-authorized release review",
+      "approved_at": "2026-10-27T19:33:19.943178+00:00",
+      "rationale": "Add exactly 23,458 source-bound metadata membership assets. Every new asset is participant_metadata/metadata_only, with no study, series or file count and no file-level image metadata. Full companion provenance matches the source extraction; controlled download labels are preserved.",
+      "evidence_id": "github-actions:40560137621:metadata_change_report_final",
+      "evidence": "Candidate run 40560137621; frozen producer 3d0045d6259fdff0da25e37f7408f4bcd54e5556; report SHA256 565c8e16144de62addb6412a0ce285f9483787fca20a42f62c9b2e516ca46bbf; baseline ; research PI SHA256 22582b242b686a96343278dbcb61d914acea2e6973179adee25c52ca01421e10; audit SHA256 1b1443047e510c65df1460025fe305a4fdb3a0095fb8a87e85ffcb07475b822c; source CSV SHA256 9921e6de027c42d10635583b2a7a83cb38745a7e9ec1099c31839c52388c2de3; independent complete row/source review receipt SHA256 26fc9c65df18ec13707b6a5469cb2d51e9d3c8508a09d05efd036d40570995f9; independent full added audit-payload parity receipt SHA256 c083a14ee326989a7db92f1ca9e4150587f69d6bf7c5b265750203bc103fc23c. All 130265 semantic changes exactly verified across seven tables, with whole-table parity against the independently rebased projection. Final curated totals: 89209 Human,440 Canine,378 Mouse,559 Benchmark,3034 Computational Phantom,409 Physical Phantom,742 Unknown;94771 overall. Original support files re-extracted locally without image payload transfers.",
+      "baseline_release_fingerprint": "",
+      "artifact": "participant_inventory",
+      "entity_table": "participant_assets",
+      "change_count": 23458,
+      "change_kind_counts": {
+        "added": 23458
+      },
+      "changes_sha256": "7ae7c5b128ebdfffb16cf943fdd8b9900d0710c44385de453dc58fc1981c497b",
+      "negative_scope": [
+        "no different primary key or row digest accepted",
+        "no clinical facts or image availability inferred from membership metadata",
+        "no generic bare-ID cross-dataset merge",
+        "no source Collection invented for external TCGA projects",
+        "no unresolved TIL aggregate, Pan coverage or CTDC availability exception declared resolved",
+        "no unrelated artifact semantic changes approved"
+      ]
+    },
+    {
+      "batch_id": "reviewed-missing-inventories-participant-identity-evidence-2026-10-27",
+      "reviewer": "Codex, under requester-authorized release review",
+      "approved_at": "2026-10-27T19:33:19.943180+00:00",
+      "rationale": "Add exactly 19,963 source-link evidence rows reproduced by applying existing dataset relationships and the finite reviewed crosswalk to the new source scopes. Complete row and companion JSON parity with the independent projection excludes unrelated identity changes.",
+      "evidence_id": "github-actions:40560137621:metadata_change_report_final",
+      "evidence": "Candidate run 40560137621; frozen producer 3d0045d6259fdff0da25e37f7408f4bcd54e5556; report SHA256 565c8e16144de62addb6412a0ce285f9483787fca20a42f62c9b2e516ca46bbf; baseline ; research PI SHA256 22582b242b686a96343278dbcb61d914acea2e6973179adee25c52ca01421e10; audit SHA256 1b1443047e510c65df1460025fe305a4fdb3a0095fb8a87e85ffcb07475b822c; source CSV SHA256 9921e6de027c42d10635583b2a7a83cb38745a7e9ec1099c31839c52388c2de3; independent complete row/source review receipt SHA256 26fc9c65df18ec13707b6a5469cb2d51e9d3c8508a09d05efd036d40570995f9; independent full added audit-payload parity receipt SHA256 c083a14ee326989a7db92f1ca9e4150587f69d6bf7c5b265750203bc103fc23c. All 130265 semantic changes exactly verified across seven tables, with whole-table parity against the independently rebased projection. Final curated totals: 89209 Human,440 Canine,378 Mouse,559 Benchmark,3034 Computational Phantom,409 Physical Phantom,742 Unknown;94771 overall. Original support files re-extracted locally without image payload transfers.",
+      "baseline_release_fingerprint": "",
+      "artifact": "participant_inventory",
+      "entity_table": "participant_identity_evidence",
+      "change_count": 19963,
+      "change_kind_counts": {
+        "added": 19963
+      },
+      "changes_sha256": "80e0f365de957efece2ddbf746664d605b87fbbff01e8dca805c6989012825b7",
+      "negative_scope": [
+        "no different primary key or row digest accepted",
+        "no clinical facts or image availability inferred from membership metadata",
+        "no generic bare-ID cross-dataset merge",
+        "no source Collection invented for external TCGA projects",
+        "no unresolved TIL aggregate, Pan coverage or CTDC availability exception declared resolved",
+        "no unrelated artifact semantic changes approved"
+      ]
+    },
+    {
+      "batch_id": "reviewed-missing-inventories-participant-source-links-2026-10-27",
+      "reviewer": "Codex, under requester-authorized release review",
+      "approved_at": "2026-10-27T19:33:19.943183+00:00",
+      "rationale": "Add exactly 12,943 source-reference links reproduced from the finite annotation/parent membership crosswalk and original TCGA project/case lineage. Retain missing-current-source status and never manufacture TCIA Collections for external GDC projects. Complete rows and companion JSON match the projection.",
+      "evidence_id": "github-actions:40560137621:metadata_change_report_final",
+      "evidence": "Candidate run 40560137621; frozen producer 3d0045d6259fdff0da25e37f7408f4bcd54e5556; report SHA256 565c8e16144de62addb6412a0ce285f9483787fca20a42f62c9b2e516ca46bbf; baseline ; research PI SHA256 22582b242b686a96343278dbcb61d914acea2e6973179adee25c52ca01421e10; audit SHA256 1b1443047e510c65df1460025fe305a4fdb3a0095fb8a87e85ffcb07475b822c; source CSV SHA256 9921e6de027c42d10635583b2a7a83cb38745a7e9ec1099c31839c52388c2de3; independent complete row/source review receipt SHA256 26fc9c65df18ec13707b6a5469cb2d51e9d3c8508a09d05efd036d40570995f9; independent full added audit-payload parity receipt SHA256 c083a14ee326989a7db92f1ca9e4150587f69d6bf7c5b265750203bc103fc23c. All 130265 semantic changes exactly verified across seven tables, with whole-table parity against the independently rebased projection. Final curated totals: 89209 Human,440 Canine,378 Mouse,559 Benchmark,3034 Computational Phantom,409 Physical Phantom,742 Unknown;94771 overall. Original support files re-extracted locally without image payload transfers.",
+      "baseline_release_fingerprint": "",
+      "artifact": "participant_inventory",
+      "entity_table": "participant_source_links",
+      "change_count": 12943,
+      "change_kind_counts": {
+        "added": 12943
+      },
+      "changes_sha256": "697236a4db464ad4b43febca4705dc68ac002425e42692adb500f3b35b87073d",
+      "negative_scope": [
+        "no different primary key or row digest accepted",
+        "no clinical facts or image availability inferred from membership metadata",
+        "no generic bare-ID cross-dataset merge",
+        "no source Collection invented for external TCGA projects",
+        "no unresolved TIL aggregate, Pan coverage or CTDC availability exception declared resolved",
+        "no unrelated artifact semantic changes approved"
+      ]
+    },
+    {
+      "batch_id": "reviewed-missing-inventories-participant-groups-2026-10-27",
+      "reviewer": "Codex, under requester-authorized release review",
+      "approved_at": "2026-10-27T19:33:19.943184+00:00",
+      "rationale": "Rebuild the exact curated groups after finite source imports and TCGA original-case deduplication: 10,293 groups added and 5,051 replaced; all resulting groups match the independent current-baseline projection. No existing identities split or merge. MRI-DIR contributes only eight computational and one physical phantom; MIDI contributes 538 benchmark identities. Net unique human increase is 4,695.",
+      "evidence_id": "github-actions:40560137621:metadata_change_report_final",
+      "evidence": "Candidate run 40560137621; frozen producer 3d0045d6259fdff0da25e37f7408f4bcd54e5556; report SHA256 565c8e16144de62addb6412a0ce285f9483787fca20a42f62c9b2e516ca46bbf; baseline ; research PI SHA256 22582b242b686a96343278dbcb61d914acea2e6973179adee25c52ca01421e10; audit SHA256 1b1443047e510c65df1460025fe305a4fdb3a0095fb8a87e85ffcb07475b822c; source CSV SHA256 9921e6de027c42d10635583b2a7a83cb38745a7e9ec1099c31839c52388c2de3; independent complete row/source review receipt SHA256 26fc9c65df18ec13707b6a5469cb2d51e9d3c8508a09d05efd036d40570995f9; independent full added audit-payload parity receipt SHA256 c083a14ee326989a7db92f1ca9e4150587f69d6bf7c5b265750203bc103fc23c. All 130265 semantic changes exactly verified across seven tables, with whole-table parity against the independently rebased projection. Final curated totals: 89209 Human,440 Canine,378 Mouse,559 Benchmark,3034 Computational Phantom,409 Physical Phantom,742 Unknown;94771 overall. Original support files re-extracted locally without image payload transfers.",
+      "baseline_release_fingerprint": "",
+      "artifact": "participant_inventory",
+      "entity_table": "participant_groups",
+      "change_count": 15344,
+      "change_kind_counts": {
+        "added": 10293,
+        "removed": 5051
+      },
+      "changes_sha256": "286575d43de6c8ce20b941617840d6ea4ea550522df102b7560b8ca02f583fd5",
+      "negative_scope": [
+        "no different primary key or row digest accepted",
+        "no clinical facts or image availability inferred from membership metadata",
+        "no generic bare-ID cross-dataset merge",
+        "no source Collection invented for external TCGA projects",
+        "no unresolved TIL aggregate, Pan coverage or CTDC availability exception declared resolved",
+        "no unrelated artifact semantic changes approved"
+      ]
+    },
+    {
+      "batch_id": "reviewed-missing-inventories-participant-group-members-2026-10-27",
+      "reviewer": "Codex, under requester-authorized release review",
+      "approved_at": "2026-10-27T19:33:19.943186+00:00",
+      "rationale": "Attach all 17,532 imported dataset memberships and update 5,961 existing group assignments to their exact recomputed deterministic group IDs. Entire group-members table matches the independent current-baseline projection; every pre-existing identity relationship is preserved. All 4,153 shared TIL/Pan source cases deduplicate through finite original TCGA project/case anchors.",
+      "evidence_id": "github-actions:40560137621:metadata_change_report_final",
+      "evidence": "Candidate run 40560137621; frozen producer 3d0045d6259fdff0da25e37f7408f4bcd54e5556; report SHA256 565c8e16144de62addb6412a0ce285f9483787fca20a42f62c9b2e516ca46bbf; baseline ; research PI SHA256 22582b242b686a96343278dbcb61d914acea2e6973179adee25c52ca01421e10; audit SHA256 1b1443047e510c65df1460025fe305a4fdb3a0095fb8a87e85ffcb07475b822c; source CSV SHA256 9921e6de027c42d10635583b2a7a83cb38745a7e9ec1099c31839c52388c2de3; independent complete row/source review receipt SHA256 26fc9c65df18ec13707b6a5469cb2d51e9d3c8508a09d05efd036d40570995f9; independent full added audit-payload parity receipt SHA256 c083a14ee326989a7db92f1ca9e4150587f69d6bf7c5b265750203bc103fc23c. All 130265 semantic changes exactly verified across seven tables, with whole-table parity against the independently rebased projection. Final curated totals: 89209 Human,440 Canine,378 Mouse,559 Benchmark,3034 Computational Phantom,409 Physical Phantom,742 Unknown;94771 overall. Original support files re-extracted locally without image payload transfers.",
+      "baseline_release_fingerprint": "",
+      "artifact": "participant_inventory",
+      "entity_table": "participant_group_members",
+      "change_count": 23493,
+      "change_kind_counts": {
+        "added": 17532,
+        "modified": 5961
+      },
+      "changes_sha256": "9c917220c9e080b227ea78c1132cdfaf1352ad97321394433c5755276f5667bc",
+      "negative_scope": [
+        "no different primary key or row digest accepted",
+        "no clinical facts or image availability inferred from membership metadata",
+        "no generic bare-ID cross-dataset merge",
+        "no source Collection invented for external TCGA projects",
+        "no unresolved TIL aggregate, Pan coverage or CTDC availability exception declared resolved",
+        "no unrelated artifact semantic changes approved"
+      ]
     }
   ],
   "explanation_batches": [
