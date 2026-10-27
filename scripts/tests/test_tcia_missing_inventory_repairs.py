@@ -119,7 +119,10 @@ class MissingInventoryRepairsTest(unittest.TestCase):
             repairs.recipe_members({'kind': 'til_browser', 'source_files': ['til.json']}, self.root)
 
     def test_midi_mapping_requires_bijection_and_exact_curated_patient_set(self):
-        from openpyxl import Workbook
+        try:
+            from openpyxl import Workbook
+        except ImportError:
+            self.skipTest('Optional workbook fixture requires openpyxl')
         workbook = Workbook()
         sheet = workbook.active
         sheet.title = 'Metadata'
