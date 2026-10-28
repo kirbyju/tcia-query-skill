@@ -1295,6 +1295,182 @@
         "no unresolved TIL aggregate, Pan coverage or CTDC availability exception declared resolved",
         "no unrelated artifact semantic changes approved"
       ]
+    },
+    {
+      "batch_id": "reviewed-idc-presence-til-pan-participants-2026-10-28",
+      "reviewer": "Codex, under requester-authorized release review",
+      "approved_at": "2026-10-28T15:20:34.770732+00:00",
+      "rationale": "Exact approved IDC-present TIL/Pan membership selection:663 added and17 removed dataset-scoped memberships; all other datasets unchanged.",
+      "evidence_id": "independent-local-source-build:8e4c23026366f72e212c7e27e221a67250ec4c7a:2026-10-28",
+      "evidence": "Current published baseline b76cf1c5b2f5f431d3ce028ed23fd43dd496faba61f106a2f744ce244bd3fa3c; exact report 38ef1ee038692028b85fbda6fbfac74270162eb224acaeaca2d568618eaf5eb0; independent receipt SHA256 1fce78c4d49c39d377d7f9d672b6421e54480749a1b1d4ec8c63c25f5a354980; research PI SHA256 278256dcfdc4e7956eb6ac105a910a8918bbd77b69454fc51f0773269336a78f; CSV SHA256 aeee225a4aff4b5096eab55b9e44c2cd5cc40acb36fe1957cdb65be20441ac29; source reference SHA256 6ab4a43f004d5d20ec56b1db40976ea9b1d1d04fdb259939b6a31aebb8c05d28. Full382-test suite,25 focused checks, complete PI rebuild/integrity/FKs, original-source re-extraction, and exact non-target identity-preservation checks passed. User-approved cohorts TIL4820/exclude10 and Pan5212/exclude8; exclusions overlap by5 IDs. Expected changes reviewed against verified current published research and audit components. No immediate release requested: next normal source run must reproduce these exact effects or fail closed.",
+      "baseline_release_fingerprint": "b76cf1c5b2f5f431d3ce028ed23fd43dd496faba61f106a2f744ce244bd3fa3c",
+      "artifact": "participant_inventory",
+      "entity_table": "participants",
+      "change_count": 680,
+      "change_kind_counts": {
+        "added": 663,
+        "removed": 17
+      },
+      "changes_sha256": "f66af192855499f78bcdbd04fce835244c8896af8500a61f3f1ed8a73b0a1250",
+      "negative_scope": [
+        "no different row/key/digest or baseline accepted",
+        "no unrelated participant or clinical change approved",
+        "no other-dataset identity split or merge",
+        "no source-image availability or QC inferred from membership",
+        "no fabricated TCIA source endpoint",
+        "no geometry/source-health waiver"
+      ]
+    },
+    {
+      "batch_id": "reviewed-idc-presence-til-pan-participant-identifiers-2026-10-28",
+      "reviewer": "Codex, under requester-authorized release review",
+      "approved_at": "2026-10-28T15:20:34.771000+00:00",
+      "rationale": "Add/remove only the exact identifiers for the approved TIL/Pan selection; no raw-ID global matching or other-dataset alias changes.",
+      "evidence_id": "independent-local-source-build:8e4c23026366f72e212c7e27e221a67250ec4c7a:2026-10-28",
+      "evidence": "Current published baseline b76cf1c5b2f5f431d3ce028ed23fd43dd496faba61f106a2f744ce244bd3fa3c; exact report 38ef1ee038692028b85fbda6fbfac74270162eb224acaeaca2d568618eaf5eb0; independent receipt SHA256 1fce78c4d49c39d377d7f9d672b6421e54480749a1b1d4ec8c63c25f5a354980; research PI SHA256 278256dcfdc4e7956eb6ac105a910a8918bbd77b69454fc51f0773269336a78f; CSV SHA256 aeee225a4aff4b5096eab55b9e44c2cd5cc40acb36fe1957cdb65be20441ac29; source reference SHA256 6ab4a43f004d5d20ec56b1db40976ea9b1d1d04fdb259939b6a31aebb8c05d28. Full382-test suite,25 focused checks, complete PI rebuild/integrity/FKs, original-source re-extraction, and exact non-target identity-preservation checks passed. User-approved cohorts TIL4820/exclude10 and Pan5212/exclude8; exclusions overlap by5 IDs. Expected changes reviewed against verified current published research and audit components. No immediate release requested: next normal source run must reproduce these exact effects or fail closed.",
+      "baseline_release_fingerprint": "b76cf1c5b2f5f431d3ce028ed23fd43dd496faba61f106a2f744ce244bd3fa3c",
+      "artifact": "participant_inventory",
+      "entity_table": "participant_identifiers",
+      "change_count": 680,
+      "change_kind_counts": {
+        "added": 663,
+        "removed": 17
+      },
+      "changes_sha256": "3f46bc96054afe503966c8984f9d4ba3ee933defc5d670d86fa38b00d7ec15de",
+      "negative_scope": [
+        "no different row/key/digest or baseline accepted",
+        "no unrelated participant or clinical change approved",
+        "no other-dataset identity split or merge",
+        "no source-image availability or QC inferred from membership",
+        "no fabricated TCIA source endpoint",
+        "no geometry/source-health waiver"
+      ]
+    },
+    {
+      "batch_id": "reviewed-idc-presence-til-pan-participant-assets-2026-10-28",
+      "reviewer": "Codex, under requester-authorized release review",
+      "approved_at": "2026-10-28T15:20:34.771206+00:00",
+      "rationale": "5275 metadata-only membership assets added and20 removed. New Pan package evidence does not invent image or file counts, availability, QC success, or authorization.",
+      "evidence_id": "independent-local-source-build:8e4c23026366f72e212c7e27e221a67250ec4c7a:2026-10-28",
+      "evidence": "Current published baseline b76cf1c5b2f5f431d3ce028ed23fd43dd496faba61f106a2f744ce244bd3fa3c; exact report 38ef1ee038692028b85fbda6fbfac74270162eb224acaeaca2d568618eaf5eb0; independent receipt SHA256 1fce78c4d49c39d377d7f9d672b6421e54480749a1b1d4ec8c63c25f5a354980; research PI SHA256 278256dcfdc4e7956eb6ac105a910a8918bbd77b69454fc51f0773269336a78f; CSV SHA256 aeee225a4aff4b5096eab55b9e44c2cd5cc40acb36fe1957cdb65be20441ac29; source reference SHA256 6ab4a43f004d5d20ec56b1db40976ea9b1d1d04fdb259939b6a31aebb8c05d28. Full382-test suite,25 focused checks, complete PI rebuild/integrity/FKs, original-source re-extraction, and exact non-target identity-preservation checks passed. User-approved cohorts TIL4820/exclude10 and Pan5212/exclude8; exclusions overlap by5 IDs. Expected changes reviewed against verified current published research and audit components. No immediate release requested: next normal source run must reproduce these exact effects or fail closed.",
+      "baseline_release_fingerprint": "b76cf1c5b2f5f431d3ce028ed23fd43dd496faba61f106a2f744ce244bd3fa3c",
+      "artifact": "participant_inventory",
+      "entity_table": "participant_assets",
+      "change_count": 5295,
+      "change_kind_counts": {
+        "added": 5275,
+        "removed": 20
+      },
+      "changes_sha256": "7811a857fdaee7e2925675190fbf55f9c95920cf00fba8c6441a3acae43212ca",
+      "negative_scope": [
+        "no different row/key/digest or baseline accepted",
+        "no unrelated participant or clinical change approved",
+        "no other-dataset identity split or merge",
+        "no source-image availability or QC inferred from membership",
+        "no fabricated TCIA source endpoint",
+        "no geometry/source-health waiver"
+      ]
+    },
+    {
+      "batch_id": "reviewed-idc-presence-til-pan-participant-identity-evidence-2026-10-28",
+      "reviewer": "Codex, under requester-authorized release review",
+      "approved_at": "2026-10-28T15:20:34.771391+00:00",
+      "rationale": "Exact source identity evidence for the finite approved TCGA project/case mappings. Ten duplicated BRCA/LUAD package paths resolve only to IDC-confirmed TCGA-LUAD; other source relationships preserved.",
+      "evidence_id": "independent-local-source-build:8e4c23026366f72e212c7e27e221a67250ec4c7a:2026-10-28",
+      "evidence": "Current published baseline b76cf1c5b2f5f431d3ce028ed23fd43dd496faba61f106a2f744ce244bd3fa3c; exact report 38ef1ee038692028b85fbda6fbfac74270162eb224acaeaca2d568618eaf5eb0; independent receipt SHA256 1fce78c4d49c39d377d7f9d672b6421e54480749a1b1d4ec8c63c25f5a354980; research PI SHA256 278256dcfdc4e7956eb6ac105a910a8918bbd77b69454fc51f0773269336a78f; CSV SHA256 aeee225a4aff4b5096eab55b9e44c2cd5cc40acb36fe1957cdb65be20441ac29; source reference SHA256 6ab4a43f004d5d20ec56b1db40976ea9b1d1d04fdb259939b6a31aebb8c05d28. Full382-test suite,25 focused checks, complete PI rebuild/integrity/FKs, original-source re-extraction, and exact non-target identity-preservation checks passed. User-approved cohorts TIL4820/exclude10 and Pan5212/exclude8; exclusions overlap by5 IDs. Expected changes reviewed against verified current published research and audit components. No immediate release requested: next normal source run must reproduce these exact effects or fail closed.",
+      "baseline_release_fingerprint": "b76cf1c5b2f5f431d3ce028ed23fd43dd496faba61f106a2f744ce244bd3fa3c",
+      "artifact": "participant_inventory",
+      "entity_table": "participant_identity_evidence",
+      "change_count": 1261,
+      "change_kind_counts": {
+        "added": 1247,
+        "removed": 14
+      },
+      "changes_sha256": "15f123ebfaca6b884a9119a8da20238a1f085e3b4cd521721e90e1632b3761b0",
+      "negative_scope": [
+        "no different row/key/digest or baseline accepted",
+        "no unrelated participant or clinical change approved",
+        "no other-dataset identity split or merge",
+        "no source-image availability or QC inferred from membership",
+        "no fabricated TCIA source endpoint",
+        "no geometry/source-health waiver"
+      ]
+    },
+    {
+      "batch_id": "reviewed-idc-presence-til-pan-participant-source-links-2026-10-28",
+      "reviewer": "Codex, under requester-authorized release review",
+      "approved_at": "2026-10-28T15:20:34.771547+00:00",
+      "rationale": "663 finite new TCGA source links and14 retired links from excluded memberships. GDC projects lacking TCIA Collection endpoints retain external-source status; no TCIA Collections fabricated.",
+      "evidence_id": "independent-local-source-build:8e4c23026366f72e212c7e27e221a67250ec4c7a:2026-10-28",
+      "evidence": "Current published baseline b76cf1c5b2f5f431d3ce028ed23fd43dd496faba61f106a2f744ce244bd3fa3c; exact report 38ef1ee038692028b85fbda6fbfac74270162eb224acaeaca2d568618eaf5eb0; independent receipt SHA256 1fce78c4d49c39d377d7f9d672b6421e54480749a1b1d4ec8c63c25f5a354980; research PI SHA256 278256dcfdc4e7956eb6ac105a910a8918bbd77b69454fc51f0773269336a78f; CSV SHA256 aeee225a4aff4b5096eab55b9e44c2cd5cc40acb36fe1957cdb65be20441ac29; source reference SHA256 6ab4a43f004d5d20ec56b1db40976ea9b1d1d04fdb259939b6a31aebb8c05d28. Full382-test suite,25 focused checks, complete PI rebuild/integrity/FKs, original-source re-extraction, and exact non-target identity-preservation checks passed. User-approved cohorts TIL4820/exclude10 and Pan5212/exclude8; exclusions overlap by5 IDs. Expected changes reviewed against verified current published research and audit components. No immediate release requested: next normal source run must reproduce these exact effects or fail closed.",
+      "baseline_release_fingerprint": "b76cf1c5b2f5f431d3ce028ed23fd43dd496faba61f106a2f744ce244bd3fa3c",
+      "artifact": "participant_inventory",
+      "entity_table": "participant_source_links",
+      "change_count": 677,
+      "change_kind_counts": {
+        "added": 663,
+        "removed": 14
+      },
+      "changes_sha256": "dccdde3594462943d2e93102981cbba21a5655376a39e218bf486cc8eb327717",
+      "negative_scope": [
+        "no different row/key/digest or baseline accepted",
+        "no unrelated participant or clinical change approved",
+        "no other-dataset identity split or merge",
+        "no source-image availability or QC inferred from membership",
+        "no fabricated TCIA source endpoint",
+        "no geometry/source-health waiver"
+      ]
+    },
+    {
+      "batch_id": "reviewed-idc-presence-til-pan-participant-groups-2026-10-28",
+      "reviewer": "Codex, under requester-authorized release review",
+      "approved_at": "2026-10-28T15:20:34.771710+00:00",
+      "rationale": "Exact deterministic grouping after both approved selections.661 added and674 replaced groups give13 fewer unique human identities,89196 human/94758 overall. No identity split/merge among unaffected datasets.",
+      "evidence_id": "independent-local-source-build:8e4c23026366f72e212c7e27e221a67250ec4c7a:2026-10-28",
+      "evidence": "Current published baseline b76cf1c5b2f5f431d3ce028ed23fd43dd496faba61f106a2f744ce244bd3fa3c; exact report 38ef1ee038692028b85fbda6fbfac74270162eb224acaeaca2d568618eaf5eb0; independent receipt SHA256 1fce78c4d49c39d377d7f9d672b6421e54480749a1b1d4ec8c63c25f5a354980; research PI SHA256 278256dcfdc4e7956eb6ac105a910a8918bbd77b69454fc51f0773269336a78f; CSV SHA256 aeee225a4aff4b5096eab55b9e44c2cd5cc40acb36fe1957cdb65be20441ac29; source reference SHA256 6ab4a43f004d5d20ec56b1db40976ea9b1d1d04fdb259939b6a31aebb8c05d28. Full382-test suite,25 focused checks, complete PI rebuild/integrity/FKs, original-source re-extraction, and exact non-target identity-preservation checks passed. User-approved cohorts TIL4820/exclude10 and Pan5212/exclude8; exclusions overlap by5 IDs. Expected changes reviewed against verified current published research and audit components. No immediate release requested: next normal source run must reproduce these exact effects or fail closed.",
+      "baseline_release_fingerprint": "b76cf1c5b2f5f431d3ce028ed23fd43dd496faba61f106a2f744ce244bd3fa3c",
+      "artifact": "participant_inventory",
+      "entity_table": "participant_groups",
+      "change_count": 1335,
+      "change_kind_counts": {
+        "added": 661,
+        "removed": 674
+      },
+      "changes_sha256": "15b0c5e75a09e964411233d25817b7f54b445385d8d27f06ba0762764fe6b94a",
+      "negative_scope": [
+        "no different row/key/digest or baseline accepted",
+        "no unrelated participant or clinical change approved",
+        "no other-dataset identity split or merge",
+        "no source-image availability or QC inferred from membership",
+        "no fabricated TCIA source endpoint",
+        "no geometry/source-health waiver"
+      ]
+    },
+    {
+      "batch_id": "reviewed-idc-presence-til-pan-participant-group-members-2026-10-28",
+      "reviewer": "Codex, under requester-authorized release review",
+      "approved_at": "2026-10-28T15:20:34.771878+00:00",
+      "rationale": "Exact member assignments after663 additions,17 removals and1333 deterministic group-ID updates. All available TCIA source matches deduplicate and unaffected datasets preserve identity relationships.",
+      "evidence_id": "independent-local-source-build:8e4c23026366f72e212c7e27e221a67250ec4c7a:2026-10-28",
+      "evidence": "Current published baseline b76cf1c5b2f5f431d3ce028ed23fd43dd496faba61f106a2f744ce244bd3fa3c; exact report 38ef1ee038692028b85fbda6fbfac74270162eb224acaeaca2d568618eaf5eb0; independent receipt SHA256 1fce78c4d49c39d377d7f9d672b6421e54480749a1b1d4ec8c63c25f5a354980; research PI SHA256 278256dcfdc4e7956eb6ac105a910a8918bbd77b69454fc51f0773269336a78f; CSV SHA256 aeee225a4aff4b5096eab55b9e44c2cd5cc40acb36fe1957cdb65be20441ac29; source reference SHA256 6ab4a43f004d5d20ec56b1db40976ea9b1d1d04fdb259939b6a31aebb8c05d28. Full382-test suite,25 focused checks, complete PI rebuild/integrity/FKs, original-source re-extraction, and exact non-target identity-preservation checks passed. User-approved cohorts TIL4820/exclude10 and Pan5212/exclude8; exclusions overlap by5 IDs. Expected changes reviewed against verified current published research and audit components. No immediate release requested: next normal source run must reproduce these exact effects or fail closed.",
+      "baseline_release_fingerprint": "b76cf1c5b2f5f431d3ce028ed23fd43dd496faba61f106a2f744ce244bd3fa3c",
+      "artifact": "participant_inventory",
+      "entity_table": "participant_group_members",
+      "change_count": 2013,
+      "change_kind_counts": {
+        "added": 663,
+        "modified": 1333,
+        "removed": 17
+      },
+      "changes_sha256": "9d125879dcb17b5f755795b3ef6e4dd4d1b8aa455b50596b037b9587602f663b",
+      "negative_scope": [
+        "no different row/key/digest or baseline accepted",
+        "no unrelated participant or clinical change approved",
+        "no other-dataset identity split or merge",
+        "no source-image availability or QC inferred from membership",
+        "no fabricated TCIA source endpoint",
+        "no geometry/source-health waiver"
+      ]
     }
   ],
   "explanation_batches": [
