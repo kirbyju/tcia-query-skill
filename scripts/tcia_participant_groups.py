@@ -202,7 +202,14 @@ def build_groups(conn: sqlite3.Connection, dataset_species: dict[tuple[str, str]
                     and row['issue_code'] == cohort['issue_code'] and len(keys) == 1
                     and row['raw_identifier'].casefold() in {i.casefold() for i in cohort['identifiers']}
                     and not conn.execute("SELECT 1 FROM participant_source_links WHERE analysis_result_participant_key=? AND link_status='linked_source_collection'", (next(iter(keys)),)).fetchone()):
-                    disposition, evidence = 'explained_annotation_only', review_reference.name
+                    reviewed_dispositions = {
+                        'explained_annotation_only_source_images_unavailable': 'explained_annotation_only',
+                        'accepted_unknown_source_identity': 'accepted_unknown_source_identity',
+                    }
+                    classification = cohort.get('classification')
+                    if classification not in reviewed_dispositions:
+                        raise ValueError('Unsupported reviewed participant issue classification')
+                    disposition, evidence = reviewed_dispositions[classification], review_reference.name
         conn.execute('INSERT INTO participant_issue_dispositions VALUES (?,?,?,?)',
                      (row['issue_id'], row['status'], disposition, evidence))
     return {'participant_groups': len(group_rows), 'duplicate_memberships_removed': len(people) - len(group_rows),

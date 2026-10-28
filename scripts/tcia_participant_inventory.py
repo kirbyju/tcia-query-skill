@@ -2457,8 +2457,8 @@ def build_database(
         counts.update(build_participant_groups(conn, snapshot_db))
         from tcia_participant_groups import REVIEW_REFERENCE
         record_source(conn, 'reviewed_participant_issue_dispositions', REVIEW_REFERENCE, True,
-                      conn.execute("SELECT COUNT(*) FROM participant_issue_dispositions WHERE disposition='explained_annotation_only'").fetchone()[0],
-                      'Finite reviewed annotation-only coverage dispositions; source issues retained.')
+                      conn.execute("SELECT COUNT(*) FROM participant_issue_dispositions WHERE disposition IN ('explained_annotation_only','accepted_unknown_source_identity')").fetchone()[0],
+                      'Finite reviewed annotation-only and accepted-unknown dispositions; source issues retained.')
         metadata = {
             "schema_version": SCHEMA_VERSION,
             "curated_participant_index_version": 1,

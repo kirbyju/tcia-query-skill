@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "reviewed_at": "2026-10-19",
+  "reviewed_at": "2026-10-28",
   "cohorts": [
     {
       "classification": "explained_annotation_only_source_images_unavailable",
@@ -45,6 +45,29 @@
         }
       ],
       "issue_code": "source_collection_participant_not_current"
+    },
+    {
+      "classification": "accepted_unknown_source_identity",
+      "dataset_type": "Analysis Result",
+      "short_title": "RSNA-ASNR-MICCAI-BraTS-2021",
+      "identifiers": [
+        "BraTS2021_00051"
+      ],
+      "issue_code": "brats_source_collection_participant_not_current",
+      "note": "User decision2026-10-28: source identity is unknown and will not be confirmable; no further confirmation follow-up. Retain the BraTS participant and original workbook-reported UCSF-PDGM-0006 mapping as source provenance, without asserting a verified current source match or merging another participant. This accepts the limitation; it does not resolve the identity. WORK-0028 may close.",
+      "sources": [
+        {
+          "kind": "user_decision",
+          "date": "2026-10-28",
+          "authority": "Explicit instruction in this chat"
+        },
+        {
+          "url": "https://www.cancerimagingarchive.net/wp-content/uploads/BraTS2021_MappingToTCIA.xlsx",
+          "sha256": "223243c5821c282e90da980ba38d860ab2d2a597d1f4f1800ebe227329a2dc0b",
+          "locator": "TCIA sheet,row41:BraTS2021_00051,sourceUCSF-PDGM/rawID6"
+        }
+      ],
+      "review_sha256": "f5dc3c7f6ba24f62b2f9db78e843fa1ab4644b59cc4f78335d35b437044b02f3"
     }
   ]
 }

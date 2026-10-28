@@ -85,6 +85,19 @@ class ParticipantGroupTests(unittest.TestCase):
         self.db.execute('DELETE FROM participant_group_members WHERE participant_key=?',(a,))
         self.assertEqual(len(validate_groups(self.db)),2)
 
+    def test_accepted_unknown_brats_source_retains_unresolved_evidence_without_merge(self):
+        key = self.person('RSNA-ASNR-MICCAI-BraTS-2021', 'BraTS2021_00051', kind='Analysis Result')
+        self.db.execute('INSERT INTO participant_link_issues VALUES (?,?,?,?,?,?,?,?)',
+                        ('unknown-brats','Analysis Result','RSNA-ASNR-MICCAI-BraTS-2021',
+                         'BraTS2021_00051','brats_source_collection_participant_not_current',
+                         'open','Original workbook source endpoint absent','{}'))
+        build_groups(self.db,self.species)
+        self.assertEqual(self.db.execute('SELECT disposition FROM participant_issue_dispositions').fetchone()[0],
+                         'accepted_unknown_source_identity')
+        self.assertEqual(self.db.execute('SELECT status FROM participant_link_issues').fetchone()[0],'open')
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM participant_group_members WHERE participant_key=?',(key,)).fetchone()[0],1)
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM participant_source_links').fetchone()[0],0)
+
     def test_explicit_external_tcga_source_anchor_deduplicates_results_without_fake_collection(self):
         a = self.person('TIL-WSI-TCGA', 'TCGA-AA-0001', kind='Analysis Result')
         b = self.person('Pan-Cancer-Nuclei-Seg', 'TCGA-AA-0001', kind='Analysis Result')

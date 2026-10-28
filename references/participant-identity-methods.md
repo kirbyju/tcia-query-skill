@@ -34,7 +34,12 @@ reference filename. The source input hash is also recorded in
 `participant_inventory_sources`.
 
 Missing current cross-dataset endpoints are recorded as review issues, never
-invented. BraTS2021_00051 remains unresolved; the four TCGA-GBM-QI annotation-
+invented. BraTS2021_00051 has an accepted unknown source identity: on2026-10-28
+the user confirmed that its current source cannot be determined and no further
+confirmation is planned. WORK-0028 is closed by accepting that limitation, not
+by resolving or merging the identity. The original workbook mapping remains
+provenance; the staff disposition is `accepted_unknown_source_identity`.
+The four TCGA-GBM-QI annotation-
 only participants remain retained despite unavailable source images. MIDI-B's
 538 documented input/output pairs do not establish additional archive people;
 an original-source participant crosswalk is unavailable. Negative overlap
@@ -83,7 +88,8 @@ when methodology is requested.
 
 `participant_group_link_review` records accepted/rejected edges and reasons.
 `participant_issue_dispositions` preserves the source status separately from
-`source_resolved`, `resolved_by_reviewed_mapping`, `explained_annotation_only`, and
+`source_resolved`, `resolved_by_reviewed_mapping`, `explained_annotation_only`,
+`accepted_unknown_source_identity`, and
 `actionable`. The finite annotation-only review is bound to
 `reviewed-participant-issue-dispositions.json`, whose hash is recorded in inventory
 sources. These dispositions do not change participant groups or assert new people.
