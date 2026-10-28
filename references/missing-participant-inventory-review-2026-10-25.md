@@ -157,3 +157,34 @@ The exclusions apply to TIL membership. They do not delete unrelated source
 records, change upstream data, or imply that the Box maps are missing. This
 resolves the TIL inventory decision; Pan-Cancer and CTDC follow-ups remain open.
 Implementation is local until a new validated artifact release is published.
+
+## October 28 approved Pan-Cancer inventory policy
+
+The complete filename-only listing of all 14 polygon directories in the
+open Faspex package establishes 5,200 distinct TCGA cases in 6,142 slide-named
+entries. The manual-patch crosswalk adds 20 cases, giving 5,220 documented
+memberships. In current IDC v25 / index 25.0.5, 5,212 have pathology images;
+742 also have radiology images. A second query across all IDC collections
+and modalities finds no records for the eight excluded cases. The user
+approved **5,212 included participants** and the eight explicit exclusions,
+using the same IDC-presence policy as TIL. Of these, 5,196 are documented in
+the whole-slide package and 16 additionally occur in the manual-patch table.
+QC status remains separate from dataset membership.
+
+Ten exact slide names occur under both BRCA and LUAD package folders. Their
+original IDC project is unambiguously TCGA-LUAD. The recipe preserves each
+original directory locator and permits only those ten exact, reviewed
+case/project exceptions. It never creates duplicate BRCA identities.
+
+All 14 directory listings, the package/source binding, and the IDC comparison
+are hash-pinned. Both package and original supporting-text recipes apply
+finite source-complete selections, so the eight exclusions cannot return
+through another supporting file. This adds 584 and removes seven Pan-Cancer
+memberships relative to the published inventory, net +577; no new unique
+human count is inferred from those dataset memberships. Source-reported
+aggregates (5,204 overall and 4,187 verified-subset) remain unchanged as raw
+source metadata. No image or segmentation payloads were transferred.
+
+TIL and Pan-Cancer manual reviews are resolved. Combined atomic artifact
+publication and the agreed user-managed server update remain separate steps;
+CTDC re-release follow-ups remain deferred.

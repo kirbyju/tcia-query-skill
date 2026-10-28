@@ -90,9 +90,35 @@ def recipe_members(recipe, source_dir):
         return [(r['id_new'], f'row:{n};id_old:{r["id_old"]};column:id_new')
                 for n, r in enumerate(rows, 2)]
     if kind == 'tcga_text':
-        return [(m[0], f'line:{n};TCGA_case_barcode')
+        members = [(m[0], f'line:{n};TCGA_case_barcode')
                 for n, line in enumerate(path.read_text().splitlines(), 1)
                 for m in TCGA.finditer(line)]
+        return reviewed_tcga_selection(recipe, members)
+    if kind == 'pan_package_directory':
+        data = json.loads(path.read_text())
+        if (data.get('metadata_only') is not True
+                or data.get('complete_polygon_directories') != 14
+                or len(data['entries']) != recipe['package_entry_count']):
+            raise ValueError('Pan-Cancer package directory coverage mismatch')
+        members = []
+        exceptions = recipe.get('directory_project_exceptions', {})
+        consumed = set()
+        for entry in data['entries']:
+            match = re.fullmatch(r'/data-files/([a-z]+)_polygon/'
+                                 r'(TCGA-[A-Z0-9]{2}-[A-Z0-9]{4})-[^/]+\.svs\.tar\.gz', entry)
+            if not match:
+                raise ValueError('Pan-Cancer package path is not a reviewed slide locator')
+            project = (recipe['tcga_projects'].get(match[2])
+                       or recipe.get('excluded_participants', {}).get(match[2]))
+            folder_project = 'TCGA-' + match[1].upper()
+            if folder_project != project:
+                if exceptions.get(entry) != project:
+                    raise ValueError('Pan-Cancer package case/project mismatch')
+                consumed.add(entry)
+            members.append((match[2], 'package-entry:' + entry))
+        if consumed != set(exceptions):
+            raise ValueError('Pan-Cancer package has unused project exceptions')
+        return reviewed_tcga_selection(recipe, members)
     if kind == 'til_browser':
         grid = json.loads(path.read_text())['imageGrid']
         if grid.get('paginate') is not False:
@@ -132,6 +158,18 @@ def recipe_members(recipe, source_dir):
             raise ValueError('TIL archive selection does not match reviewed participant coverage')
         return members
     raise ValueError(f'Unknown reviewed recipe: {kind}')
+
+
+def reviewed_tcga_selection(recipe, members):
+    """Apply only a finite, source-complete, explicitly reviewed IDC selection."""
+    if not recipe.get('idc_presence_review'):
+        return members
+    excluded = recipe.get('excluded_participants', {})
+    included = set(recipe.get('tcga_projects', {}))
+    if (included & set(excluded)
+            or {pid for pid, _ in members} != included | set(excluded)):
+        raise ValueError('Reviewed TCGA selection differs from complete source membership')
+    return [(pid, locator) for pid, locator in members if pid not in excluded]
 
 
 def regenerate(source_dir, *, reference=REFERENCE, inventory=INVENTORY):
@@ -204,26 +242,27 @@ def load(reference=REFERENCE, inventory=INVENTORY):
                            for pid, project in recipe['tcga_projects'].items())
                     or not metadata.get('tcga_source_evidence')):
                 raise ValueError('TCGA source mapping lacks finite evidence coverage')
-        if recipe.get('excluded_participants'):
+        if recipe.get('excluded_participants') or recipe.get('idc_presence_review'):
+            excluded = recipe.get('excluded_participants', {})
             included = set(recipe.get('tcga_projects', {}))
             if (not recipe.get('idc_presence_review')
-                    or included & set(recipe['excluded_participants'])
+                    or included & set(excluded)
                     or set(recipe.get('tcga_current_source_ids', [])) != included):
-                raise ValueError('TIL participant exclusions lack complete reviewed IDC coverage')
+                raise ValueError('Participant exclusions lack complete reviewed IDC coverage')
             review = recipe['idc_presence_review']
             evidence = ROOT / review['evidence_file']
             if (digest(evidence) != review['evidence_sha256']
                     or review['included_cases'] != len(included)
-                    or review['excluded_cases'] != len(recipe['excluded_participants'])
-                    or review['box_unique_cases'] != len(included) + len(recipe['excluded_participants'])):
-                raise ValueError('TIL reviewed IDC evidence digest or coverage mismatch')
+                    or review['excluded_cases'] != len(excluded)
+                    or review.get('source_unique_cases', review.get('box_unique_cases')) != len(included) + len(excluded)):
+                raise ValueError('Reviewed IDC evidence digest or coverage mismatch')
             receipt = json.loads(evidence.read_text())
             comparison = next(row for row in receipt['comparison']['rows']
-                              if row['source'] == 'box_all_maps')
-            if (set(comparison['no_imaging']) != set(recipe['excluded_participants'])
+                              if row['source'] == review.get('comparison_source', 'box_all_maps'))
+            if (set(comparison['no_imaging'] or []) != set(excluded)
                     or comparison['patients'] - comparison['neither'] != len(included)
                     or receipt['missing_all_idc_collections']['rows']):
-                raise ValueError('TIL exclusions differ from the exact reviewed IDC query')
+                raise ValueError('Exclusions differ from the exact reviewed IDC query')
         if recipe.get('participant_species'):
             identifiers = {r['participant_id'] for identity, r in actual.items() if identity[:3] == key}
             if (set(recipe['participant_species']) != identifiers

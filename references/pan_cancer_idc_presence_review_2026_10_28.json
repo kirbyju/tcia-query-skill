@@ -1,0 +1,203 @@
+{
+  "checked_at": "2026-10-28",
+  "idc_version": "v25",
+  "idc_index_data_version": "25.0.5",
+  "comparison": {
+    "columns": [
+      "source",
+      "patients",
+      "pathology",
+      "radiology",
+      "both",
+      "neither",
+      "no_imaging"
+    ],
+    "rows": [
+      {
+        "source": "all_documented",
+        "patients": 5220,
+        "pathology": 5212,
+        "radiology": 742,
+        "both": 742,
+        "neither": 8,
+        "no_imaging": [
+          "TCGA-35-3621",
+          "TCGA-BR-4194",
+          "TCGA-BR-4195",
+          "TCGA-BR-4375",
+          "TCGA-E2-A1IP",
+          "TCGA-F4-6857",
+          "TCGA-GN-A261",
+          "TCGA-PN-A8M9"
+        ]
+      },
+      {
+        "source": "manual_only",
+        "patients": 20,
+        "pathology": 16,
+        "radiology": 0,
+        "both": 0,
+        "neither": 4,
+        "no_imaging": [
+          "TCGA-BR-4194",
+          "TCGA-BR-4195",
+          "TCGA-BR-4375",
+          "TCGA-PN-A8M9"
+        ]
+      },
+      {
+        "source": "manual_patches",
+        "patients": 1111,
+        "pathology": 1107,
+        "radiology": 160,
+        "both": 160,
+        "neither": 4,
+        "no_imaging": [
+          "TCGA-BR-4194",
+          "TCGA-BR-4195",
+          "TCGA-BR-4375",
+          "TCGA-PN-A8M9"
+        ]
+      },
+      {
+        "source": "new_package_memberships",
+        "patients": 585,
+        "pathology": 584,
+        "radiology": 51,
+        "both": 51,
+        "neither": 1,
+        "no_imaging": [
+          "TCGA-F4-6857"
+        ]
+      },
+      {
+        "source": "package",
+        "patients": 5200,
+        "pathology": 5196,
+        "radiology": 742,
+        "both": 742,
+        "neither": 4,
+        "no_imaging": [
+          "TCGA-35-3621",
+          "TCGA-E2-A1IP",
+          "TCGA-F4-6857",
+          "TCGA-GN-A261"
+        ]
+      },
+      {
+        "source": "region_qc",
+        "patients": 4248,
+        "pathology": 4245,
+        "radiology": 672,
+        "both": 672,
+        "neither": 3,
+        "no_imaging": [
+          "TCGA-35-3621",
+          "TCGA-E2-A1IP",
+          "TCGA-GN-A261"
+        ]
+      },
+      {
+        "source": "verified",
+        "patients": 4186,
+        "pathology": 4183,
+        "radiology": 672,
+        "both": 672,
+        "neither": 3,
+        "no_imaging": [
+          "TCGA-35-3621",
+          "TCGA-E2-A1IP",
+          "TCGA-GN-A261"
+        ]
+      },
+      {
+        "source": "wsi_qc",
+        "patients": 1016,
+        "pathology": 1016,
+        "radiology": 112,
+        "both": 112,
+        "neither": 0,
+        "no_imaging": null
+      }
+    ],
+    "row_count": 8,
+    "truncated": false,
+    "max_rows": 20
+  },
+  "missing_all_idc_collections": {
+    "columns": [
+      "PatientID",
+      "collection_id",
+      "Modality",
+      "series"
+    ],
+    "rows": [],
+    "row_count": 0,
+    "truncated": false,
+    "max_rows": 100
+  },
+  "cross_folder_project_conflicts": {
+    "columns": [
+      "PatientID",
+      "collection_id",
+      "modalities"
+    ],
+    "rows": [
+      {
+        "PatientID": "TCGA-05-4245",
+        "collection_id": "tcga_luad",
+        "modalities": "SM"
+      },
+      {
+        "PatientID": "TCGA-05-4249",
+        "collection_id": "tcga_luad",
+        "modalities": "SM"
+      },
+      {
+        "PatientID": "TCGA-05-4250",
+        "collection_id": "tcga_luad",
+        "modalities": "SM"
+      },
+      {
+        "PatientID": "TCGA-05-4382",
+        "collection_id": "tcga_luad",
+        "modalities": "SM"
+      },
+      {
+        "PatientID": "TCGA-05-4384",
+        "collection_id": "tcga_luad",
+        "modalities": "SM"
+      },
+      {
+        "PatientID": "TCGA-05-4390",
+        "collection_id": "tcga_luad",
+        "modalities": "SM"
+      },
+      {
+        "PatientID": "TCGA-05-4395",
+        "collection_id": "tcga_luad",
+        "modalities": "SM"
+      },
+      {
+        "PatientID": "TCGA-05-4396",
+        "collection_id": "tcga_luad",
+        "modalities": "SM"
+      },
+      {
+        "PatientID": "TCGA-05-4397",
+        "collection_id": "tcga_luad",
+        "modalities": "SM"
+      },
+      {
+        "PatientID": "TCGA-05-4398",
+        "collection_id": "tcga_luad",
+        "modalities": "SM"
+      }
+    ],
+    "row_count": 10,
+    "truncated": false,
+    "max_rows": 30
+  },
+  "scope": "All14 successful polygon directory listings plus four official QC/slide/manual-patch lists; exact TCGA patient barcodes matched against original and derived IDC TCGA pathology/radiology, with all-collection negative check. No payload integrity claim.",
+  "policy_recommendation": "Using the user-approved TIL IDC-presence rule would include5212 and exclude8; awaiting Pan-Cancer review disposition."
+}

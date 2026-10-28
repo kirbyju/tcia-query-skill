@@ -2,23 +2,14 @@
   "reviewed_at": "2026-10-25",
   "baseline_release_fingerprint": "171f50880bb668eae21dd505a8de71bb68e4bd4a840966c378528c762a70fbe2",
   "work_item": "WORK-0045",
-  "state": "October27 batch published; October28 TIL follow-up implemented locally, publication pending",
+  "state": "All33 reviewed; TIL/Pan decisions approved; combined artifact publication pending",
   "reviewed_datasets": 33,
   "datasets_with_supported_imports": 32,
   "datasets_with_counts_matching_published_aggregate": 28,
-  "datasets_with_partial_imports": 3,
+  "datasets_with_partial_imports": 2,
   "datasets_without_imports": 1,
-  "dataset_memberships": 17601,
-  "manual_review": [
-    {
-      "published": 5204,
-      "verified": 4635,
-      "reason": "The union of four official QC/slide/patch lists establishes 4,635 TCGA cases. The verified-WSI list alone has 4,186 cases versus its listed 4,187; the overall dataset lists 5,204. Lists contain overlapping subsets and QC-failure rows, which remain source membership evidence.",
-      "question": "Confirm the full package participant list and intended QC subset policy, and reconcile the 5,204 overall / 4,187 verified-subset aggregates. Do not fabricate the 569-count difference or remove published subjects solely for a QC flag.",
-      "short_title": "Pan-Cancer-Nuclei-Seg",
-      "tcia_page": "https://www.cancerimagingarchive.net/analysis-result/pan-cancer-nuclei-seg/"
-    }
-  ],
+  "dataset_memberships": 18178,
+  "manual_review": [],
   "resolved_reviews": [
     {
       "published": 9,
@@ -66,6 +57,40 @@
         "TCGA-F4-6857": "TCGA-COAD",
         "TCGA-GN-A261": "TCGA-SKCM",
         "TCGA-O2-A5IC": "TCGA-LUSC",
+        "TCGA-PN-A8M9": "TCGA-CESC"
+      }
+    },
+    {
+      "published": 5204,
+      "verified": 5212,
+      "reason": "Complete package metadata establishes5200 cases; manual-patch crosswalk adds20, giving5220 documented cases. Current IDC confirms5212; eight explicitly excluded. Original source aggregates are retained unchanged.",
+      "short_title": "Pan-Cancer-Nuclei-Seg",
+      "tcia_page": "https://www.cancerimagingarchive.net/analysis-result/pan-cancer-nuclei-seg/",
+      "reviewed_on": "2026-10-28",
+      "decision": "Include documented whole-slide-result and manual-patch patients only when their TCGA identifier occurs in current IDC radiology or pathology. Exclude the eight unmatched IDs. Preserve QC and original directory provenance separately; do not infer new identities from mislabeled project folders.",
+      "state": "approved and implemented locally; combined TIL/Pan publication pending",
+      "idc_presence_review": {
+        "approved_on": "2026-10-28",
+        "authority": "User approval in this chat",
+        "scope": "Pan-Cancer-Nuclei-Seg dataset membership",
+        "decision": "Include documented whole-slide-result and manual-patch patients only when their TCGA identifier occurs in current IDC radiology or pathology. Exclude the eight unmatched IDs. Preserve QC and original directory provenance separately; do not infer new identities from mislabeled project folders.",
+        "idc_version": "v25",
+        "idc_index_data_version": "25.0.5",
+        "comparison_source": "package",
+        "source_unique_cases": 5200,
+        "included_cases": 5196,
+        "excluded_cases": 4,
+        "evidence_file": "references/pan_cancer_idc_presence_review_2026_10_28.json",
+        "evidence_sha256": "ea75038ac5c15ab5a0e9cf16906ad04cef68d16d16d2ab6db9ed1ce2eb0a50f2"
+      },
+      "excluded_participants": {
+        "TCGA-35-3621": "TCGA-LUAD",
+        "TCGA-BR-4194": "TCGA-STAD",
+        "TCGA-BR-4195": "TCGA-STAD",
+        "TCGA-BR-4375": "TCGA-STAD",
+        "TCGA-E2-A1IP": "TCGA-BRCA",
+        "TCGA-F4-6857": "TCGA-COAD",
+        "TCGA-GN-A261": "TCGA-SKCM",
         "TCGA-PN-A8M9": "TCGA-CESC"
       }
     }
@@ -139,5 +164,16 @@
     "TCGA-GN-A261": "TCGA-SKCM",
     "TCGA-O2-A5IC": "TCGA-LUSC",
     "TCGA-PN-A8M9": "TCGA-CESC"
-  }
+  },
+  "excluded_pan_cancer_participants": {
+    "TCGA-35-3621": "TCGA-LUAD",
+    "TCGA-BR-4194": "TCGA-STAD",
+    "TCGA-BR-4195": "TCGA-STAD",
+    "TCGA-BR-4375": "TCGA-STAD",
+    "TCGA-E2-A1IP": "TCGA-BRCA",
+    "TCGA-F4-6857": "TCGA-COAD",
+    "TCGA-GN-A261": "TCGA-SKCM",
+    "TCGA-PN-A8M9": "TCGA-CESC"
+  },
+  "datasets_with_reviewed_idc_selection": 2
 }

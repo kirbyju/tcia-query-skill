@@ -148,7 +148,7 @@ class MissingInventoryRepairsTest(unittest.TestCase):
         self.assertEqual(counts['AREN0532'], 542)
         self.assertEqual(counts['S0819'], 1281)
         self.assertEqual(counts['TIL-WSI-TCGA'], 4820)
-        self.assertEqual(counts['Pan-Cancer-Nuclei-Seg'], 4635)
+        self.assertEqual(counts['Pan-Cancer-Nuclei-Seg'], 5212)
         self.assertEqual(counts['MRI-DIR'], 9)
         self.assertNotIn('NSCLC-Cetuximab', counts)
         # Bare equal identifiers in unrelated scopes are never source links.
@@ -199,6 +199,41 @@ class MissingInventoryRepairsTest(unittest.TestCase):
         self.assertFalse(included & set(recipe['excluded_participants']))
         self.assertEqual(included, set(recipe['tcga_current_source_ids']))
         self.assertEqual(included, set(recipe['tcga_projects']))
+
+    def test_pan_package_requires_exact_reviewed_project_exception(self):
+        entries = [
+            '/data-files/brca_polygon/TCGA-AA-0001-01Z-00-DX1.a.svs.tar.gz',
+            '/data-files/luad_polygon/TCGA-AA-0001-01Z-00-DX1.a.svs.tar.gz',
+            '/data-files/brca_polygon/TCGA-AA-0002-01Z-00-DX1.b.svs.tar.gz']
+        data = {'metadata_only': True, 'complete_polygon_directories': 14, 'entries': entries}
+        (self.root / 'directory.json').write_text(json.dumps(data))
+        recipe = {'kind': 'pan_package_directory', 'source_files': ['directory.json'],
+                  'package_entry_count': 3, 'tcga_projects': {'TCGA-AA-0001': 'TCGA-LUAD'},
+                  'excluded_participants': {'TCGA-AA-0002': 'TCGA-BRCA'},
+                  'idc_presence_review': {'authority': 'user-approved finite test policy'},
+                  'directory_project_exceptions': {entries[0]: 'TCGA-LUAD'}}
+        members = repairs.recipe_members(recipe, self.root)
+        self.assertEqual({pid for pid, _ in members}, {'TCGA-AA-0001'})
+        recipe['directory_project_exceptions'] = {}
+        with self.assertRaisesRegex(ValueError, 'case/project mismatch'):
+            repairs.recipe_members(recipe, self.root)
+        recipe['directory_project_exceptions'] = {entries[0]: 'TCGA-LUAD', 'unseen-path': 'TCGA-LUAD'}
+        with self.assertRaisesRegex(ValueError, 'unused project exceptions'):
+            repairs.recipe_members(recipe, self.root)
+
+    def test_reviewed_pan_policy_tracks_only_idc_present_cases(self):
+        metadata, rows = repairs.load()
+        recipes = [r for r in metadata['recipes'] if r['short_title'] == 'Pan-Cancer-Nuclei-Seg']
+        included = {r['participant_id'] for r in rows if r['short_title'] == 'Pan-Cancer-Nuclei-Seg'}
+        excluded = set().union(*(set(r.get('excluded_participants', {})) for r in recipes))
+        self.assertEqual(len(included), 5212)
+        self.assertEqual(len(excluded), 8)
+        self.assertFalse(included & excluded)
+        package = next(r for r in recipes if r['kind'] == 'pan_package_directory')
+        self.assertEqual(package['participant_count'], 5196)
+        self.assertEqual(len(package['directory_project_exceptions']), 10)
+        self.assertTrue(all(project == 'TCGA-LUAD'
+                            for project in package['directory_project_exceptions'].values()))
 
     def test_approved_mri_dir_policy_overrides_source_human_label_per_identity(self):
         metadata, _ = repairs.load()
