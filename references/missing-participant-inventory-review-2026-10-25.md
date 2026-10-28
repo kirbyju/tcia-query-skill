@@ -50,7 +50,7 @@ The live curated summary and dataset coverage endpoints identified these exact 3
 | [S0819](https://www.cancerimagingarchive.net/collection/s0819/) | 1299 | 1,281 | Partial; CTDC re-release dependency confirmed | annotation PatientID + referenced series in source manifest |
 | [S0819-Tumor-Annotations](https://www.cancerimagingarchive.net/analysis-result/s0819-tumor-annotations/) | 1281 | 1,281 | Supported import; aggregate matches | patient-level CSV |
 | [TCGA-GBM-Radiogenomics](https://www.cancerimagingarchive.net/analysis-result/tcga-gbm-radiogenomics/) | 75 | 75 | Supported import; aggregate matches | CombinedRadiologyPredictors workbook sheet |
-| [TIL-WSI-TCGA](https://www.cancerimagingarchive.net/analysis-result/til-wsi-tcga/) | 4759 | 4,751 | Archive v1 verified; aggregate differs by eight | Box archive central directory + TCGA case/source linkage |
+| [TIL-WSI-TCGA](https://www.cancerimagingarchive.net/analysis-result/til-wsi-tcga/) | 4759 | 4,820 | Approved IDC-matched cohort; ten excluded | All Box map folders + IDC radiology/pathology identifiers |
 
 ## Walkthrough queue
 
@@ -125,3 +125,35 @@ Participant IDs are the participant portion of the TCGA slide barcode, following
 - Nine additional historical source cases belong to TCIA-published TCGA projects but are absent from their current participant inventories. In total ten v1 cases lack current original-SM IDC matches, including one SKCM case. Their exact IDs remain in the QC ledger; absence is not interpreted as a new unrelated person or proof that all source data is absent.
 - All 4,751 retain explicit original TCGA project/case lineage. Finite original-source anchors also group the 4,153 case IDs shared with Pan-Cancer-Nuclei-Seg exactly once. This is a documented TCGA namespace crosswalk, not an archive-wide bare-ID join.
 - The full local candidate passes integrity, foreign keys and participant/group validation with zero rejected group links. These source changes remain unpublished, and the normal semantic release gate is still required.
+
+## October 28 approved TIL inventory policy (supersedes the v1-only selection)
+
+TIL-WSI-TCGA has one TCIA dataset release. The `v1` and `v2` names identify
+internal map representations in the same Box archive, not TCIA release versions.
+The complete browser index contains 4,505 patients (4,520 slide rows), all of
+whom occur in Box and match IDC pathology PatientIDs. The union of all three
+Box map folders contains 4,830 distinct TCGA participant barcodes, including
+325 absent from the browser and 79 beyond the earlier v1-only inventory.
+
+The user approved inclusion of the **4,820** Box cases that match current IDC
+radiology or pathology identifiers, and exclusion of the ten cases absent from
+IDC. In IDC v25 / index 25.0.5, all 4,820 included cases have original pathology;
+452 also have original radiology. An independent query for the ten excluded
+IDs across all IDC collections and modalities returned no rows. The exact
+comparison and IDs are retained in
+`til_idc_presence_review_2026_10_28.json`; the recipe pins its SHA-256 and keeps
+excluded case/project IDs and the explicit user decision as provenance.
+
+Extraction now visits all three explicitly selected folders, validates each
+folder's file-entry count and every case/project pair, deduplicates participant
+barcodes, and applies the finite approved exclusion list. This adds 79 TIL
+memberships and removes ten relative to the October 27 inventory, for a net
+increase of 69 dataset memberships. Counts for other datasets are unchanged.
+Existing TCGA source identity links and original-project anchors still apply;
+this does not infer additional globally unique people or image/file counts.
+The TCIA page's reported 4,759 aggregate is preserved as source metadata.
+
+The exclusions apply to TIL membership. They do not delete unrelated source
+records, change upstream data, or imply that the Box maps are missing. This
+resolves the TIL inventory decision; Pan-Cancer and CTDC follow-ups remain open.
+Implementation is local until a new validated artifact release is published.

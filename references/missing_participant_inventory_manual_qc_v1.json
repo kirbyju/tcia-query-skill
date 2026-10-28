@@ -2,39 +2,14 @@
   "reviewed_at": "2026-10-25",
   "baseline_release_fingerprint": "171f50880bb668eae21dd505a8de71bb68e4bd4a840966c378528c762a70fbe2",
   "work_item": "WORK-0045",
-  "state": "local implementation; publication and deployment not performed",
+  "state": "October27 batch published; October28 TIL follow-up implemented locally, publication pending",
   "reviewed_datasets": 33,
   "datasets_with_supported_imports": 32,
   "datasets_with_counts_matching_published_aggregate": 28,
-  "datasets_with_partial_imports": 4,
+  "datasets_with_partial_imports": 3,
   "datasets_without_imports": 1,
-  "dataset_memberships": 17532,
+  "dataset_memberships": 17601,
   "manual_review": [
-    {
-      "published": 4759,
-      "verified": 4751,
-      "reason": "The Box archive v1 representations each contain 5202 maps for 4751 distinct TCGA participant barcodes. The browser contains 4505 of these patients; a separate clustering-metadata ZIP contains 4704 patients. The published 4759 count exceeds the map archive v1 case count by eight. The archive v2 representation has a different cohort and is retained as a separate source variant rather than silently unioned.",
-      "question": "Reconcile the published 4759 patient aggregate with the 4751 v1 map cases and review the ten known TCGA case IDs absent from current IDC original SM metadata. Participant source-lineage linkage is implemented; do not invent eight participants or union different map versions.",
-      "short_title": "TIL-WSI-TCGA",
-      "tcia_page": "https://www.cancerimagingarchive.net/analysis-result/til-wsi-tcga/",
-      "reviewed_on": "2026-10-27",
-      "source_linkage": {
-        "source_namespace": "GDC TCGA participant barcode",
-        "tcga_collection_matches_deduplicated": 4103,
-        "source_cases_without_current_tcia_collection_participant": 648,
-        "external_projects_not_tcia_published": {
-          "TCGA-PAAD": 170,
-          "TCGA-SKCM": 406,
-          "TCGA-UVM": 63
-        },
-        "other_cases_absent_from_current_tcia_source_inventory": 9,
-        "current_idc_original_sm_confirmed": 4741,
-        "not_in_current_idc_original_sm": 10,
-        "shared_til_pan_cancer_cases_deduplicated": 4153,
-        "fake_tcia_collections_created": 0,
-        "source_matches_not_deduplicated": 0
-      }
-    },
     {
       "published": 5204,
       "verified": 4635,
@@ -55,6 +30,44 @@
       "approved_on": "2026-10-27",
       "decision": "User approved eight computational phantoms and one physical phantom; zero human participants. Original Homo sapiens source metadata preserved.",
       "state": "implemented locally; not published"
+    },
+    {
+      "published": 4759,
+      "verified": 4820,
+      "reason": "All Box map folders contain4830 unique cases;4820 match current IDC radiology/pathology identifiers. The reported4759 count is preserved as source metadata, not used to fabricate or discard membership. Ten explicitly excluded IDs remain in decision provenance.",
+      "short_title": "TIL-WSI-TCGA",
+      "tcia_page": "https://www.cancerimagingarchive.net/analysis-result/til-wsi-tcga/",
+      "reviewed_on": "2026-10-28",
+      "decision": "Include unique patients across all three Box TIL-map folders only when their TCGA participant barcode appears in current IDC radiology or pathology. Exclude the ten named patients absent from all IDC collections and modalities; retain the exclusion decision as audit evidence. This is one TCIA dataset release, not separate dataset versions.",
+      "state": "approved and implemented locally; new artifact publication pending",
+      "idc_presence_review": {
+        "approved_on": "2026-10-28",
+        "authority": "User decision in this chat",
+        "scope": "TIL-WSI-TCGA dataset membership only",
+        "decision": "Include unique patients across all three Box TIL-map folders only when their TCGA participant barcode appears in current IDC radiology or pathology. Exclude the ten named patients absent from all IDC collections and modalities; retain the exclusion decision as audit evidence. This is one TCIA dataset release, not separate dataset versions.",
+        "idc_version": "v25",
+        "idc_index_data_version": "25.0.5",
+        "box_unique_cases": 4830,
+        "included_cases": 4820,
+        "excluded_cases": 10,
+        "pathology_matches": 4820,
+        "radiology_matches": 452,
+        "radiology_matches_also_have_pathology": true,
+        "evidence_file": "references/til_idc_presence_review_2026_10_28.json",
+        "evidence_sha256": "8d17a8ddb5f549981c7ae48be2ca4eb5627779e3976ec16aa6a92f1d92aa8ce3"
+      },
+      "excluded_participants": {
+        "TCGA-33-4579": "TCGA-LUSC",
+        "TCGA-35-3621": "TCGA-LUAD",
+        "TCGA-66-2746": "TCGA-LUSC",
+        "TCGA-66-2751": "TCGA-LUSC",
+        "TCGA-66-2752": "TCGA-LUSC",
+        "TCGA-E2-A1IP": "TCGA-BRCA",
+        "TCGA-F4-6857": "TCGA-COAD",
+        "TCGA-GN-A261": "TCGA-SKCM",
+        "TCGA-O2-A5IC": "TCGA-LUSC",
+        "TCGA-PN-A8M9": "TCGA-CESC"
+      }
     }
   ],
   "deferred_followups": [
@@ -115,16 +128,16 @@
     "annotation_state": "open-access Analysis Result annotations remain available in NBIA",
     "policy": "Separate Collection and Analysis Result inventories; retain verified source-reference links and partial Collection coverage. Reconcile full Collection membership when CTDC metadata is released."
   },
-  "tcga_current_source_coverage_review": {
-    "TCGA-E2-A1IP": "TCGA-BRCA",
-    "TCGA-PN-A8M9": "TCGA-CESC",
-    "TCGA-F4-6857": "TCGA-COAD",
-    "TCGA-35-3621": "TCGA-LUAD",
+  "excluded_til_participants": {
     "TCGA-33-4579": "TCGA-LUSC",
+    "TCGA-35-3621": "TCGA-LUAD",
     "TCGA-66-2746": "TCGA-LUSC",
     "TCGA-66-2751": "TCGA-LUSC",
     "TCGA-66-2752": "TCGA-LUSC",
+    "TCGA-E2-A1IP": "TCGA-BRCA",
+    "TCGA-F4-6857": "TCGA-COAD",
+    "TCGA-GN-A261": "TCGA-SKCM",
     "TCGA-O2-A5IC": "TCGA-LUSC",
-    "TCGA-GN-A261": "TCGA-SKCM"
+    "TCGA-PN-A8M9": "TCGA-CESC"
   }
 }

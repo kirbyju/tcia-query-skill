@@ -1,0 +1,191 @@
+{
+  "checked_at": "2026-10-28",
+  "idc_version": "v25",
+  "idc_index_data_version": "25.0.5",
+  "comparison": {
+    "columns": [
+      "source",
+      "patients",
+      "pathology_original",
+      "radiology_original",
+      "both_original",
+      "pathology_any",
+      "radiology_any",
+      "neither",
+      "no_pathology",
+      "no_imaging"
+    ],
+    "rows": [
+      {
+        "source": "TIL_maps_after_thres_v1",
+        "patients": 4751,
+        "pathology_original": 4741,
+        "radiology_original": 438,
+        "both_original": 438,
+        "pathology_any": 4741,
+        "radiology_any": 438,
+        "neither": 10,
+        "no_pathology": [
+          "TCGA-33-4579",
+          "TCGA-35-3621",
+          "TCGA-66-2746",
+          "TCGA-66-2751",
+          "TCGA-66-2752",
+          "TCGA-E2-A1IP",
+          "TCGA-F4-6857",
+          "TCGA-GN-A261",
+          "TCGA-O2-A5IC",
+          "TCGA-PN-A8M9"
+        ],
+        "no_imaging": [
+          "TCGA-33-4579",
+          "TCGA-35-3621",
+          "TCGA-66-2746",
+          "TCGA-66-2751",
+          "TCGA-66-2752",
+          "TCGA-E2-A1IP",
+          "TCGA-F4-6857",
+          "TCGA-GN-A261",
+          "TCGA-O2-A5IC",
+          "TCGA-PN-A8M9"
+        ]
+      },
+      {
+        "source": "TIL_maps_before_thres_v1",
+        "patients": 4751,
+        "pathology_original": 4741,
+        "radiology_original": 438,
+        "both_original": 438,
+        "pathology_any": 4741,
+        "radiology_any": 438,
+        "neither": 10,
+        "no_pathology": [
+          "TCGA-33-4579",
+          "TCGA-35-3621",
+          "TCGA-66-2746",
+          "TCGA-66-2751",
+          "TCGA-66-2752",
+          "TCGA-E2-A1IP",
+          "TCGA-F4-6857",
+          "TCGA-GN-A261",
+          "TCGA-O2-A5IC",
+          "TCGA-PN-A8M9"
+        ],
+        "no_imaging": [
+          "TCGA-33-4579",
+          "TCGA-35-3621",
+          "TCGA-66-2746",
+          "TCGA-66-2751",
+          "TCGA-66-2752",
+          "TCGA-E2-A1IP",
+          "TCGA-F4-6857",
+          "TCGA-GN-A261",
+          "TCGA-O2-A5IC",
+          "TCGA-PN-A8M9"
+        ]
+      },
+      {
+        "source": "TIL_maps_before_thres_v2",
+        "patients": 4670,
+        "pathology_original": 4660,
+        "radiology_original": 445,
+        "both_original": 445,
+        "pathology_any": 4660,
+        "radiology_any": 445,
+        "neither": 10,
+        "no_pathology": [
+          "TCGA-33-4579",
+          "TCGA-35-3621",
+          "TCGA-66-2746",
+          "TCGA-66-2751",
+          "TCGA-66-2752",
+          "TCGA-E2-A1IP",
+          "TCGA-F4-6857",
+          "TCGA-GN-A261",
+          "TCGA-O2-A5IC",
+          "TCGA-PN-A8M9"
+        ],
+        "no_imaging": [
+          "TCGA-33-4579",
+          "TCGA-35-3621",
+          "TCGA-66-2746",
+          "TCGA-66-2751",
+          "TCGA-66-2752",
+          "TCGA-E2-A1IP",
+          "TCGA-F4-6857",
+          "TCGA-GN-A261",
+          "TCGA-O2-A5IC",
+          "TCGA-PN-A8M9"
+        ]
+      },
+      {
+        "source": "box_all_maps",
+        "patients": 4830,
+        "pathology_original": 4820,
+        "radiology_original": 452,
+        "both_original": 452,
+        "pathology_any": 4820,
+        "radiology_any": 452,
+        "neither": 10,
+        "no_pathology": [
+          "TCGA-33-4579",
+          "TCGA-35-3621",
+          "TCGA-66-2746",
+          "TCGA-66-2751",
+          "TCGA-66-2752",
+          "TCGA-E2-A1IP",
+          "TCGA-F4-6857",
+          "TCGA-GN-A261",
+          "TCGA-O2-A5IC",
+          "TCGA-PN-A8M9"
+        ],
+        "no_imaging": [
+          "TCGA-33-4579",
+          "TCGA-35-3621",
+          "TCGA-66-2746",
+          "TCGA-66-2751",
+          "TCGA-66-2752",
+          "TCGA-E2-A1IP",
+          "TCGA-F4-6857",
+          "TCGA-GN-A261",
+          "TCGA-O2-A5IC",
+          "TCGA-PN-A8M9"
+        ]
+      },
+      {
+        "source": "browser",
+        "patients": 4505,
+        "pathology_original": 4505,
+        "radiology_original": 424,
+        "both_original": 424,
+        "pathology_any": 4505,
+        "radiology_any": 424,
+        "neither": 0,
+        "no_pathology": null,
+        "no_imaging": null
+      }
+    ],
+    "row_count": 5,
+    "truncated": false,
+    "max_rows": 20
+  },
+  "missing_all_idc_collections": {
+    "columns": [
+      "PatientID",
+      "collection_id",
+      "Modality",
+      "analysis_result_id",
+      "series"
+    ],
+    "rows": [],
+    "row_count": 0,
+    "truncated": false,
+    "max_rows": 100
+  },
+  "sources": {
+    "browser": "https://cancerimagingarchive.net/datascope/TCGA_TilMap/",
+    "box": "https://stonybrookmedicine.app.box.com/s/ecr7ba8czvqygw90iym0hwpnprrofoas",
+    "faq": "https://www.cancerimagingarchive.net/wp-content/uploads/LymPipeline-FAQ.pdf"
+  },
+  "scope": "Exact TCGA participant barcodes in complete browser main index and all three til_maps.zip folder variants; IDC original/derived imaging counted separately; no image payload transfer."
+}

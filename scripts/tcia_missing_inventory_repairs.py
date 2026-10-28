@@ -103,18 +103,33 @@ def recipe_members(recipe, source_dir):
         data = json.loads(path.read_text())
         if data.get('range_only') is not True:
             raise ValueError('TIL archive inventory lacks directory-only receipt')
-        prefix = recipe['archive_variant'] + '/'
-        files = [r for r in data['files'] if r['name'].startswith(prefix)
-                 and not r['name'].endswith('/')]
-        if len(files) != recipe['map_file_count']:
-            raise ValueError('TIL selected variant file count mismatch')
+        variants = recipe.get('archive_variants', [recipe.get('archive_variant')])
+        if not all(variants) or len(set(variants)) != len(variants):
+            raise ValueError('TIL archive folder selection is invalid')
+        excluded = recipe.get('excluded_participants', {})
+        if excluded and (not recipe.get('idc_presence_review')
+                         or set(excluded) & set(recipe['tcga_projects'])):
+            raise ValueError('TIL participant exclusions lack a disjoint reviewed decision')
         members = []
-        for entry in files:
-            match = re.fullmatch(re.escape(prefix) + r'([a-z]+)/'
-                                 r'(TCGA-[A-Z0-9]{2}-[A-Z0-9]{4})-[^/]+\.png', entry['name'])
-            if not match or recipe['tcga_projects'].get(match[2]) != 'TCGA-' + match[1].upper():
-                raise ValueError('TIL archive case/project mapping mismatch')
-            members.append((match[2], 'zip-entry:' + entry['name']))
+        observed = set()
+        for variant in variants:
+            prefix = variant + '/'
+            files = [r for r in data['files'] if r['name'].startswith(prefix)
+                     and not r['name'].endswith('/')]
+            expected_count = (recipe['map_file_counts'][variant] if 'archive_variants' in recipe
+                              else recipe['map_file_count'])
+            if len(files) != expected_count:
+                raise ValueError('TIL selected variant file count mismatch')
+            for entry in files:
+                match = re.fullmatch(re.escape(prefix) + r'([a-z]+)/'
+                                     r'(TCGA-[A-Z0-9]{2}-[A-Z0-9]{4})-[^/]+\.png', entry['name'])
+                if not match or (recipe['tcga_projects'].get(match[2]) or excluded.get(match[2])) != 'TCGA-' + match[1].upper():
+                    raise ValueError('TIL archive case/project mapping mismatch')
+                observed.add(match[2])
+                if match[2] not in excluded:
+                    members.append((match[2], 'zip-entry:' + entry['name']))
+        if observed != set(recipe['tcga_projects']) | set(excluded):
+            raise ValueError('TIL archive selection does not match reviewed participant coverage')
         return members
     raise ValueError(f'Unknown reviewed recipe: {kind}')
 
@@ -189,6 +204,26 @@ def load(reference=REFERENCE, inventory=INVENTORY):
                            for pid, project in recipe['tcga_projects'].items())
                     or not metadata.get('tcga_source_evidence')):
                 raise ValueError('TCGA source mapping lacks finite evidence coverage')
+        if recipe.get('excluded_participants'):
+            included = set(recipe.get('tcga_projects', {}))
+            if (not recipe.get('idc_presence_review')
+                    or included & set(recipe['excluded_participants'])
+                    or set(recipe.get('tcga_current_source_ids', [])) != included):
+                raise ValueError('TIL participant exclusions lack complete reviewed IDC coverage')
+            review = recipe['idc_presence_review']
+            evidence = ROOT / review['evidence_file']
+            if (digest(evidence) != review['evidence_sha256']
+                    or review['included_cases'] != len(included)
+                    or review['excluded_cases'] != len(recipe['excluded_participants'])
+                    or review['box_unique_cases'] != len(included) + len(recipe['excluded_participants'])):
+                raise ValueError('TIL reviewed IDC evidence digest or coverage mismatch')
+            receipt = json.loads(evidence.read_text())
+            comparison = next(row for row in receipt['comparison']['rows']
+                              if row['source'] == 'box_all_maps')
+            if (set(comparison['no_imaging']) != set(recipe['excluded_participants'])
+                    or comparison['patients'] - comparison['neither'] != len(included)
+                    or receipt['missing_all_idc_collections']['rows']):
+                raise ValueError('TIL exclusions differ from the exact reviewed IDC query')
         if recipe.get('participant_species'):
             identifiers = {r['participant_id'] for identity, r in actual.items() if identity[:3] == key}
             if (set(recipe['participant_species']) != identifiers
@@ -239,6 +274,8 @@ def ingest(conn, snapshot_db, *, api, reference=REFERENCE, inventory=INVENTORY):
                     'reviewed_at': metadata['reviewed_at'], 'metadata_only': True}
         if recipe.get('classification_review'):
             evidence['classification_review'] = recipe['classification_review']
+        if recipe.get('idc_presence_review'):
+            evidence['idc_presence_review'] = recipe['idc_presence_review']
         key = api.ensure_participant(conn, row['dataset_type'], row['short_title'],
             row['participant_id'], managed_system='tcia_wordpress',
             namespace=f'tcia_dataset:{row["short_title"]}',

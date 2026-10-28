@@ -147,7 +147,7 @@ class MissingInventoryRepairsTest(unittest.TestCase):
         self.assertEqual(counts['MIDI-B-Test-MIDI-B-Validation'], 538)
         self.assertEqual(counts['AREN0532'], 542)
         self.assertEqual(counts['S0819'], 1281)
-        self.assertEqual(counts['TIL-WSI-TCGA'], 4751)
+        self.assertEqual(counts['TIL-WSI-TCGA'], 4820)
         self.assertEqual(counts['Pan-Cancer-Nuclei-Seg'], 4635)
         self.assertEqual(counts['MRI-DIR'], 9)
         self.assertNotIn('NSCLC-Cetuximab', counts)
@@ -166,6 +166,39 @@ class MissingInventoryRepairsTest(unittest.TestCase):
         recipe['tcga_projects']['TCGA-AA-0001'] = 'TCGA-LUAD'
         with self.assertRaisesRegex(ValueError, 'case/project mapping mismatch'):
             repairs.recipe_members(recipe, self.root)
+
+    def test_explicit_all_folder_policy_excludes_only_reviewed_absent_cases(self):
+        data = {'range_only': True, 'files': [
+            {'name': 'v1/brca/TCGA-AA-0001-01Z-00-DX1.png'},
+            {'name': 'v2/brca/TCGA-AA-0001-01Z-00-DX1.png'},
+            {'name': 'v2/brca/TCGA-AA-0002-01Z-00-DX1.png'},
+            {'name': 'v2/brca/TCGA-AA-0003-01Z-00-DX1.png'}]}
+        (self.root / 'directory.json').write_text(json.dumps(data))
+        recipe = {'kind': 'til_zip_directory', 'source_files': ['directory.json'],
+                  'archive_variants': ['v1', 'v2'], 'map_file_counts': {'v1': 1, 'v2': 3},
+                  'tcga_projects': {'TCGA-AA-0001': 'TCGA-BRCA', 'TCGA-AA-0002': 'TCGA-BRCA'},
+                  'excluded_participants': {'TCGA-AA-0003': 'TCGA-BRCA'},
+                  'idc_presence_review': {'authority': 'user-approved finite test policy'}}
+        members = repairs.recipe_members(recipe, self.root)
+        self.assertEqual({pid for pid, _ in members}, {'TCGA-AA-0001', 'TCGA-AA-0002'})
+        self.assertIn(('TCGA-AA-0002', 'zip-entry:v2/brca/TCGA-AA-0002-01Z-00-DX1.png'), members)
+        recipe['excluded_participants']['TCGA-AA-0003'] = 'TCGA-LUAD'
+        with self.assertRaisesRegex(ValueError, 'case/project mapping mismatch'):
+            repairs.recipe_members(recipe, self.root)
+        recipe['excluded_participants']['TCGA-AA-0003'] = 'TCGA-BRCA'
+        recipe.pop('idc_presence_review')
+        with self.assertRaisesRegex(ValueError, 'exclusions lack'):
+            repairs.recipe_members(recipe, self.root)
+
+    def test_reviewed_til_policy_retains_exclusion_evidence_not_membership(self):
+        metadata, rows = repairs.load()
+        recipe = next(r for r in metadata['recipes'] if r['short_title'] == 'TIL-WSI-TCGA')
+        included = {r['participant_id'] for r in rows if r['short_title'] == 'TIL-WSI-TCGA'}
+        self.assertEqual(len(included), 4820)
+        self.assertEqual(len(recipe['excluded_participants']), 10)
+        self.assertFalse(included & set(recipe['excluded_participants']))
+        self.assertEqual(included, set(recipe['tcga_current_source_ids']))
+        self.assertEqual(included, set(recipe['tcga_projects']))
 
     def test_approved_mri_dir_policy_overrides_source_human_label_per_identity(self):
         metadata, _ = repairs.load()
