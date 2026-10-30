@@ -50,3 +50,20 @@ a rebuilt schema-10 bundle before using this capability; existing bundles remain
 compatible with existing tools. Staff issue responses add optional
 `current_disposition` and `disposition_evidence_reference` fields while retaining
 raw status/filter semantics. See `participant-identity-methods.md`.
+
+## Shared download-plan addition
+
+The unpublished shared-plan revision adds MCP `get_download_plan` and REST
+`GET /v2/datasets/{short_title}/download-plan`, plus collection-search
+`data_categories` and download `requirements_url`/compact routing codes.
+These are additive fields and a read-only operation. Clients should consume the
+shared plan rather than copy its interpretation rules. An SDK that needs the new
+endpoint reports its absence explicitly; it does not silently infer a substitute.
+This change does not deploy a server or publish a metadata/PyPI release.
+
+The unpublished participant-image examples also require the explicit public slide
+file descriptor fields in `Asset`: `imageUrl`, `download_file_name`,
+`download_representation`, and `download_access_basis`. These are derived by the
+read-only service for recognized public file records, preserve source URLs, and
+need a service code update. No new query route, payload proxy, or additional
+artifact-schema change is introduced by these descriptors.

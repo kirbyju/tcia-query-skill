@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TypeAlias
+from typing import TypeAlias, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
@@ -38,6 +38,7 @@ class DatasetSummary(PublicModel):
     resolved_access_level: str | None = None
     current_download_count: int | None = None
     subjects: int | None = None
+    data_categories: list[str] = Field(default_factory=list)
     download_data_types: TextValues = None
     download_file_types: TextValues = None
     external_resource_labels: list[str] = Field(default_factory=list)
@@ -147,6 +148,12 @@ class Download(PublicModel):
     license_url: str | None = None
     requirements_label: str | None = None
     requirements_text: str | None = None
+    requirements_url: str | None = None
+    software_requirement: Literal["none", "tcia_data_retriever", "aspera", "unknown"] = "unknown"
+    requirement_status: Literal["declared", "link_fallback", "unknown", "conflict"] = "unknown"
+    download_method: Literal[
+        "dicom_manifest", "tabular_manifest", "aspera_package", "direct_file", "unsupported"
+    ] = "unsupported"
     download_size: str | None = None
     download_size_unit: str | None = None
     subjects: int | None = None
@@ -218,6 +225,10 @@ class Asset(PublicModel):
     source_artifact: str | None = None
     source_version: str | None = None
     source_url: str | None = None
+    imageUrl: str | None = None
+    download_file_name: str | None = None
+    download_representation: Literal["public_pathology_slide_copy"] | None = None
+    download_access_basis: Literal["public_pathdb_file_inventory"] | None = None
     access_level: str | None = None
     access_route: str | None = None
     data_domain: str | None = None
@@ -583,6 +594,29 @@ class DatasetDetailResponse(PublicModel):
 class DownloadsResponse(PageResponse):
     short_title: str
     downloads: list[Download]
+
+
+class DownloadSoftware(PublicModel):
+    label: str
+    help_url: str
+    instructions: str
+
+
+class DownloadPlanScope(PublicModel):
+    inventory_groups: int = Field(ge=0)
+    selected_groups: int = Field(ge=0)
+    download_ids: list[str] | None = None
+    access_levels: list[str] | None = None
+
+
+class DownloadPlanResponse(PublicModel):
+    plan_version: Literal[1]
+    short_title: str
+    dataset_type: str
+    downloads: list[Download]
+    software: dict[str, DownloadSoftware]
+    scope: DownloadPlanScope
+    notes: list[str]
 
 
 class ParticipantsResponse(PageResponse):

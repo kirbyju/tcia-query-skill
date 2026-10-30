@@ -27,7 +27,12 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 
-SCHEMA_VERSION = 8
+try:
+    from tcia_download_requirements import CONTRACT_VERSION, resolve_download, software_catalog
+except ModuleNotFoundError:
+    from scripts.tcia_download_requirements import CONTRACT_VERSION, resolve_download, software_catalog
+
+SCHEMA_VERSION = 9
 DEFAULT_REPO = "kirbyju/tcia-query-skill"
 SNAPSHOT_ASSET = "tcia_snapshot.sqlite.gz"
 MANIFEST_ASSET = "tcia_snapshot_manifest.json"
@@ -1109,6 +1114,10 @@ def create_schema(conn: sqlite3.Connection) -> None:
             value TEXT NOT NULL
         );
 
+        CREATE TABLE download_software_requirements (
+            code TEXT PRIMARY KEY, label TEXT NOT NULL, help_url TEXT NOT NULL, instructions TEXT NOT NULL
+        );
+
         CREATE TABLE wordpress_records (
             source TEXT NOT NULL,
             id TEXT,
@@ -1148,6 +1157,9 @@ def create_schema(conn: sqlite3.Connection) -> None:
             requirements_label TEXT,
             requirements_url TEXT,
             requirements_text TEXT,
+            software_requirement TEXT NOT NULL REFERENCES download_software_requirements(code),
+            requirement_status TEXT NOT NULL,
+            download_method TEXT NOT NULL,
             download_size TEXT,
             download_size_unit TEXT,
             subjects TEXT,
@@ -1341,6 +1353,9 @@ def create_schema(conn: sqlite3.Connection) -> None:
             d.requirements_label,
             d.requirements_url,
             d.requirements_text,
+            d.software_requirement,
+            d.requirement_status,
+            d.download_method,
             d.download_size,
             d.download_size_unit,
             d.subjects,
@@ -1594,6 +1609,12 @@ def create_schema(conn: sqlite3.Connection) -> None:
         """
     )
 
+    conn.executemany(
+        "INSERT INTO download_software_requirements VALUES (?, ?, ?, ?)",
+        [(code, item["label"], item["help_url"], item["instructions"]) for code, item in software_catalog().items()],
+    )
+    conn.execute("INSERT INTO snapshot_meta VALUES (?, ?)", ("download_contract_version", str(CONTRACT_VERSION)))
+
 
 def insert_meta(conn: sqlite3.Connection, meta: dict[str, Any]) -> None:
     conn.executemany(
@@ -1664,6 +1685,7 @@ def insert_download_row(
     download: dict[str, Any],
     raw_record: dict[str, Any],
 ) -> None:
+    contract = resolve_download(download)
     search_values = [
         download.get("parent_source", ""),
         download.get("parent_short_title", ""),
@@ -1687,11 +1709,11 @@ def insert_download_row(
          parent_hidden, is_current_version, download_id, download_slug,
          download_title, download_url, download_metadata, search_url, date_updated,
          collection_status, description, license_label, license_url,
-         requirements_label, requirements_url, requirements_text, download_size,
+         requirements_label, requirements_url, requirements_text, software_requirement, requirement_status, download_method, download_size,
          download_size_unit, subjects, studies, series, images, download_types_json,
          data_types_json, file_types_json, external_resources_json, controlled_access,
          noncommercial_license, raw_json, search_text)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             download.get("parent_source", ""),
@@ -1715,6 +1737,9 @@ def insert_download_row(
             download.get("requirements_label", ""),
             download.get("requirements_url", ""),
             download.get("requirements_text", ""),
+            contract["software_requirement"],
+            contract["requirement_status"],
+            contract["download_method"],
             download.get("download_size", ""),
             download.get("download_size_unit", ""),
             download.get("subjects", ""),
@@ -2383,6 +2408,31 @@ def validate_snapshot_schema(conn: sqlite3.Connection) -> dict[str, Any]:
         raise RuntimeError(f"Snapshot is missing required agent views: {', '.join(missing_views)}")
     for view in REQUIRED_AGENT_VIEWS:
         conn.execute(f"SELECT * FROM {quote_identifier(view)} LIMIT 1").fetchall()
+    meta_rows = conn.execute("SELECT key, value FROM snapshot_meta").fetchall()
+    meta = {}
+    for key, value in meta_rows:
+        try:
+            meta[key] = json.loads(value)
+        except json.JSONDecodeError:
+            meta[key] = value
+    if meta.get("schema_version") != SCHEMA_VERSION:
+        raise RuntimeError(
+            f"Snapshot schema_version is {meta.get('schema_version')}; expected {SCHEMA_VERSION}."
+        )
+    if objects.get("download_software_requirements") != "table":
+        raise RuntimeError("Snapshot is missing the download software catalog")
+    catalog = {row[0] for row in conn.execute("SELECT code FROM download_software_requirements")}
+    if catalog != set(software_catalog()):
+        raise RuntimeError("Snapshot download software catalog is incomplete")
+    bad_contracts = conn.execute("SELECT COUNT(*) FROM agent_current_downloads WHERE software_requirement NOT IN (SELECT code FROM download_software_requirements) OR requirement_status NOT IN ('declared','link_fallback','unknown','conflict') OR download_method NOT IN ('dicom_manifest','tabular_manifest','aspera_package','direct_file','unsupported')").fetchone()[0]
+    if bad_contracts:
+        raise RuntimeError("Snapshot has invalid download requirement codes")
+    cursor = conn.execute("SELECT * FROM agent_current_downloads")
+    names = [column[0] for column in cursor.description]
+    for values in cursor:
+        row = dict(zip(names, values))
+        if any(row.get(key) != value for key, value in resolve_download(row).items()):
+            raise RuntimeError("Snapshot download requirements disagree with the shared contract")
     hidden_public_rows = {
         view: int(
             conn.execute(
@@ -2408,17 +2458,6 @@ def validate_snapshot_schema(conn: sqlite3.Connection) -> dict[str, Any]:
         raise RuntimeError(
             "Snapshot foreign-key violations (first 20): "
             + json_dumps([list(row) for row in foreign_key_violations])
-        )
-    meta_rows = conn.execute("SELECT key, value FROM snapshot_meta").fetchall()
-    meta = {}
-    for key, value in meta_rows:
-        try:
-            meta[key] = json.loads(value)
-        except json.JSONDecodeError:
-            meta[key] = value
-    if meta.get("schema_version") != SCHEMA_VERSION:
-        raise RuntimeError(
-            f"Snapshot schema_version is {meta.get('schema_version')}; expected {SCHEMA_VERSION}."
         )
     return {
         "schema_version": meta.get("schema_version"),
