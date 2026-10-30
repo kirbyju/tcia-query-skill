@@ -14,6 +14,9 @@ from base64 import urlsafe_b64decode, urlsafe_b64encode
 from hashlib import sha256
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit, unquote
+
+from scripts.tcia_download_requirements import CONTRACT_VERSION, resolve_download, software_catalog
 
 
 CONTROLLED_ACCESS_POLICY_URL = (
@@ -341,6 +344,7 @@ def compact_dataset(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
         "resolved_access_level": data.get("resolved_access_level", data.get("access_level")),
         "current_download_count": data.get("current_download_count"),
         "subjects": data.get("subjects"),
+        "data_categories": data.get("download_types") or [],
         "download_data_types": data.get("download_data_types"),
         "download_file_types": data.get("download_file_types"),
         "external_resource_labels": data.get("external_resource_labels"),
@@ -533,6 +537,9 @@ def compact_v1_release(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
 
 def compact_download(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
     data = normalize_row(row)
+    keys = ("software_requirement", "requirement_status", "download_method")
+    contract = ({key: data[key] for key in keys} if all(key in data for key in keys)
+                else resolve_download(data))
     return {
         "short_title": data.get("short_title"),
         "dataset_title": data.get("title"),
@@ -552,6 +559,8 @@ def compact_download(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
         "license_url": data.get("license_url"),
         "requirements_label": data.get("requirements_label"),
         "requirements_text": data.get("requirements_text"),
+        "requirements_url": data.get("requirements_url"),
+        **contract,
         "download_size": data.get("download_size"),
         "download_size_unit": data.get("download_size_unit"),
         "subjects": data.get("subjects"),
@@ -908,6 +917,41 @@ def normalize_v2_row(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
         }:
             output[key] = parse_multi_values(value)
     return output
+
+
+def public_asset_download(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
+    """Expose only a recognized public PathDB file route; retain raw source metadata."""
+    data = normalize_v2_row(row)
+    if (data.get("source_system") != "tcia_pathdb"
+        or data.get("asset_granularity") != "file"
+        or data.get("media_kind") != "whole_slide_image"
+        or str(data.get("file_format") or "").casefold() == "dicom"
+        or data.get("access_level") not in {None, "", "open", "public", "open_noncommercial"}
+        or data.get("controlled_access") is True):
+        return data
+    try:
+        source = urlsplit(str(data.get("source_url") or ""))
+        if (source.scheme not in {"http", "https"}
+            or source.hostname != "pathdb.cancerimagingarchive.net"
+            or source.port is not None or source.username or source.password
+            or source.query or source.fragment
+            or not source.path.startswith(("/system/files/wsi/", "/index.php/system/files/wsi/"))):
+            return data
+        name = unquote(source.path.rsplit("/", 1)[-1])
+        if (Path(name).suffix.casefold() not in {".svs", ".tif", ".tiff", ".ndpi", ".scn", ".bif"}
+            or any(part in {".", ".."} for part in unquote(source.path).split("/"))
+            or any(char in name for char in "/\\") or any(ord(c) < 32 for c in name)):
+            return data
+    except ValueError:
+        return data
+    data.update(
+        imageUrl=urlunsplit(("https", source.hostname, source.path, "", "")),
+        download_file_name=name,
+        download_representation="public_pathology_slide_copy",
+        download_access_basis="public_pathdb_file_inventory",
+        access_level=data.get("access_level") or "open",
+    )
+    return data
 
 
 class TciaQueryService:
@@ -2152,6 +2196,80 @@ class TciaQueryService:
         )
         result["short_title"] = short_title
         return result
+
+    def get_download_plan(
+        self,
+        short_title: str,
+        *,
+        dataset_type: str | None = None,
+        download_ids: list[str] | None = None,
+        access_levels: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Return the complete selected metadata plan; never probe/download payloads."""
+        if dataset_type not in {None, "collection", "analysis_result"}:
+            raise InvalidRequestError("dataset_type must be collection or analysis_result")
+        for name, values in (("download_ids", download_ids), ("access_levels", access_levels)):
+            if values is not None and (
+                not isinstance(values, list)
+                or not values
+                or any(not isinstance(v, str) or not v.strip() for v in values)
+            ):
+                raise InvalidRequestError(f"{name} must be a nonempty list of strings")
+        if access_levels is not None and set(access_levels) - {
+            "open",
+            "public",
+            "open_noncommercial",
+            "controlled",
+            "unknown",
+            "review_needed",
+        }:
+            raise InvalidRequestError("Unrecognized access level")
+        detail = self.get_dataset(short_title)
+        candidates = detail["datasets"]
+        if dataset_type is not None:
+            candidates = [
+                r
+                for r in candidates
+                if str(r.get("dataset_type", "")).casefold().replace(" ", "_") == dataset_type
+            ]
+        if len(candidates) != 1:
+            raise InvalidRequestError("Choose dataset_type to resolve this short title unambiguously")
+        dataset = candidates[0]
+        rows = [
+            r
+            for r in detail["current_downloads"]
+            if str(r.get("dataset_type", "")).casefold() == str(dataset["dataset_type"]).casefold()
+        ]
+        inventory_count = len(rows)
+        if download_ids is not None:
+            if set(download_ids) - {r["download_id"] for r in rows}:
+                raise InvalidRequestError(
+                    "A requested download ID is not in the current dataset inventory"
+                )
+            rows = [r for r in rows if r["download_id"] in download_ids]
+        if access_levels is not None:
+            levels = set(access_levels)
+            if levels & {"open", "public"}:
+                levels |= {"open", "public", "open_noncommercial"}
+            rows = [r for r in rows if r.get("access_level") in levels]
+        return {
+            "plan_version": CONTRACT_VERSION,
+            "short_title": dataset["short_title"],
+            "dataset_type": dataset["dataset_type"],
+            "downloads": rows,
+            "software": software_catalog({r["software_requirement"] for r in rows}),
+            "scope": {
+                "inventory_groups": inventory_count,
+                "selected_groups": len(rows),
+                "download_ids": download_ids,
+                "access_levels": access_levels,
+            },
+            "notes": [
+                "Software requirements describe the published download workflow. Supported TCIA Python manifest handling is an alternative where available.",
+                "Metadata only: local software, imaging-index coverage, credentials and transfer success have not been checked.",
+                "Controlled metadata does not grant payload access.",
+            ],
+        }
 
     def summarize_access(self, short_title: str) -> dict[str, Any]:
         dataset_payload = self.get_dataset(short_title)
@@ -3680,7 +3798,7 @@ class TciaQueryService:
                 params.extend(annotation_roles)
             sql += " ORDER BY lower(a.short_title), a.asset_id LIMIT ? OFFSET ?"
             params.extend([limit + 1, offset])
-            rows = [normalize_v2_row(row) for row in conn.execute(sql, params).fetchall()]
+            rows = [public_asset_download(row) for row in conn.execute(sql, params).fetchall()]
         result = page_envelope(
             "assets", rows, limit=limit, offset=offset, cursor_filters=cursor_filters
         )

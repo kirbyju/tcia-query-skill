@@ -702,3 +702,7 @@ scopes with `COUNT(DISTINCT participant_group_id)`. Dataset-scoped participant
 rows and keys retain their existing meaning. Use `get_participant_summary` for
 public counts, with visible-dataset filtering and inventory coverage notices.
 See `references/participant-identity-methods.md` for index and staff audit contracts.
+
+## Compact download requirements (snapshot schema 9)
+
+`agent_current_downloads` adds `software_requirement`, `requirement_status`, and `download_method`. `download_software_requirements` stores the four shared help entries once per artifact. `requirements_url` is retained alongside the existing source fields. See [download requirements](download-requirements.md) for the code meanings and shared REST/MCP plan. No wording-history table is added.

@@ -66,7 +66,7 @@ rollback selects a retained verified generation and also requires a restart.
 2. Use `search_datasets` for compact discovery. Follow a candidate with `get_dataset` for narrative, current downloads, license/access details, and related Analysis Results.
 3. Use `search_datacite_dois` and `get_datacite_doi` for DOI metadata, creators, and citation output (`apa`, `vancouver`, `chicago-author-date`, `bibtex`, or `ris`).
 4. Use `search_verified_publications` or `get_dataset_impact` for EndNote-verified analytical use; do not reinterpret these as mere mentions.
-5. Use download-level labels for modality, file type, access, and route decisions. Split mixed datasets into open and controlled components.
+5. Use `get_download_plan` (REST `/v2/datasets/{short_title}/download-plan`) for download-level software requirements, setup help, access, and route decisions. Read `references/download-requirements.md` for the compact codes and manifest convenience. Show software requirements separately from authorization; split mixed datasets into open and controlled components.
 6. Check related Analysis Results before saying a Collection lacks annotations, segmentations, labels, or ground truth.
 7. Use `get_participant_summary` for archive-wide or selected-dataset participant
    totals. Report the curated count directly, using `human_participant_count` when
@@ -84,6 +84,7 @@ rollback selects a retained verified generation and also requires a restart.
 
 | Request | Load and use |
 | --- | --- |
+| Download software requirements or manifest inputs | `references/download-requirements.md` |
 | Snapshot schema, SQL, releases, freshness | `references/schema.md`, `references/snapshots.md` |
 | Release bundle, Participant Inventory, public non-DICOM | `references/artifact-model.md` |
 | Browser-only or web-search use | `references/web-browser-llms.md` |

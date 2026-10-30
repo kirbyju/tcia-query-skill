@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import FastAPI, Query, Request
 from fastapi.exceptions import RequestValidationError
@@ -32,6 +32,7 @@ from .models import (
     DatasetVersionsResponse,
     DicomAnnotationsResponse,
     DownloadsResponse,
+    DownloadPlanResponse,
     HealthResponse,
     LinkIssuesResponse,
     ParticipantDetailResponse,
@@ -239,6 +240,23 @@ def create_app(service: TciaQueryService | None = None) -> FastAPI:
             requires_annotations=requires_annotations,
             cursor=cursor,
             limit=limit,
+        )
+
+    @app.get(
+        f"{V2_API_PREFIX}/datasets/{{short_title}}/download-plan",
+        response_model=DownloadPlanResponse, responses=PROBLEM_RESPONSES,
+    )
+    def v2_get_download_plan(
+        short_title: str,
+        dataset_type: Literal["collection", "analysis_result"] | None = None,
+        download_ids: Annotated[list[str] | None, Query()] = None,
+        access_levels: Annotated[list[str] | None, Query()] = None,
+    ) -> dict[str, Any]:
+        return S().get_download_plan(
+            short_title,
+            dataset_type=dataset_type,
+            download_ids=download_ids,
+            access_levels=access_levels,
         )
 
     @app.get(f"{V2_API_PREFIX}/datasets/{{short_title}}/access", response_model=AccessSummaryResponse)

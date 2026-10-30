@@ -13,7 +13,7 @@ import os
 from collections.abc import Callable
 from functools import wraps
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
@@ -40,6 +40,7 @@ from .models import (
     DatasetVersionsResponse,
     DicomAnnotationsResponse,
     DownloadsResponse,
+    DownloadPlanResponse,
     LinkIssuesResponse,
     ParticipantDetailResponse,
     ParticipantsResponse,
@@ -77,7 +78,8 @@ Recommended workflow:
    core, and any needed optional detail artifact.
 2. Use `search_datasets` for broad discovery. Use `get_dataset` for one short
    title, including current downloads and related Analysis Results.
-3. Use `summarize_access` before any download guidance. Creative Commons is
+3. Use `get_download_plan` for download requirements and shared software setup instructions.
+   Use `summarize_access` for the dataset access overview. Creative Commons is
    open access, Creative Commons NonCommercial is open with a noncommercial
    restriction, and controlled/restricted licenses require the TCIA policy:
    {CONTROLLED_ACCESS_POLICY_URL}
@@ -125,6 +127,7 @@ PUBLIC_V2_TOOL_NAMES = (
     "get_dataset_versions",
     "get_dataset_v1_releases",
     "get_current_downloads",
+    "get_download_plan",
     "summarize_access",
     "find_controlled_access_datasets",
     "get_controlled_access_files",
@@ -567,6 +570,27 @@ def get_current_downloads(
         requires_annotations=requires_annotations,
         cursor=cursor,
         limit=limit,
+    )
+
+
+@mcp.tool(annotations=QUERY_ANNOTATIONS, meta={"snapshot_local": True}, structured_output=True)
+@guard
+def get_download_plan(
+    short_title: str,
+    dataset_type: Literal["collection", "analysis_result"] | None = None,
+    download_ids: list[str] | None = None,
+    access_levels: list[str] | None = None,
+) -> DownloadPlanResponse:
+    """Plan selected dataset downloads with software help and access requirements.
+
+    This is metadata only. Show the referenced software instructions; do not infer
+    authorization or installed-tool readiness. Unknown/conflicting routes need review.
+    """
+    return service().get_download_plan(
+        short_title,
+        dataset_type=dataset_type,
+        download_ids=download_ids,
+        access_levels=access_levels,
     )
 
 

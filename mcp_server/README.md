@@ -40,6 +40,7 @@ Core MCP tools:
 - `get_dataset_versions`
 - `get_dataset_v1_releases`
 - `get_current_downloads`
+- `get_download_plan`
 - `summarize_access`
 - `find_dicom_annotations`
 - `get_participant_summary` — curated archive or selected-dataset totals and species breakdown (Participant Inventory schema 10+)
@@ -260,3 +261,28 @@ summary availability from the installed manifest. Older inventories retain their
 existing discovery APIs but cannot supply this summary. Staff can use
 `find_participant_link_issues` for source status plus `current_disposition`;
 see [identity methods](../references/participant-identity-methods.md).
+
+## Shared download plans
+
+`get_download_plan(short_title, dataset_type=None, download_ids=None, access_levels=None)`
+and `GET /v2/datasets/{short_title}/download-plan` share one read-only implementation.
+The complete selected metadata inventory is returned with `plan_version`, `scope`,
+`downloads`, and one `software` help dictionary. The three per-download codes are
+`software_requirement`, `requirement_status`, and `download_method`; `requirements_url`
+is now included in ordinary download responses. See
+[the compact contract](../references/download-requirements.md).
+
+Use `dataset_type` to disambiguate shared Collection/Analysis Result short titles.
+Unknown requested IDs fail; explicit access filters define a subset and its counts.
+`open` includes open/noncommercial downloads while retaining license conditions.
+No payloads, local manifests, keys, or signed URLs are handled by this service.
+Collection search also returns `data_categories` directly. The schema-9 builder
+persists the compact codes and four shared software definitions; earlier snapshots
+use the same resolver for compatibility. New source code and rebuilt artifacts
+must be published/installed and the service restarted before claiming deployment.
+
+
+Public non-DICOM whole-slide file responses now carry explicit `imageUrl` and
+`download_file_name` fields for recognized public PathDB file routes, alongside
+representation/access-basis codes. Raw source URLs remain unchanged. See
+`references/download-requirements.md` for the source/access/format restrictions.

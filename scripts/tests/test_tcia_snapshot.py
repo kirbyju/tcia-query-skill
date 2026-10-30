@@ -192,7 +192,7 @@ class SnapshotNormalizationTests(unittest.TestCase):
                 mock.patch.object(SNAPSHOT, "fetch_publication_records", return_value=[publication]),
             ):
                 manifest = SNAPSHOT.build_snapshot(db, quiet=True)
-            self.assertEqual(manifest["schema_version"], 8)
+            self.assertEqual(manifest["schema_version"], 9)
             self.assertEqual(manifest["counts"]["datacite_dois"], 1)
             self.assertEqual(manifest["counts"]["tcia_verified_analytical_publications"], 1)
             with sqlite3.connect(db) as conn:
