@@ -11,6 +11,18 @@ This protocol revision is independent of the TCIA V2 metadata bundle version and
 release fingerprint. MCP negotiation describes how a client talks to the server;
 `get_snapshot_info` describes which TCIA metadata generation the server queries.
 
+## Server 0.5.1: consistent multi-value fields
+
+Dataset search, detail, related-result and access-summary categorical attributes
+always return JSON arrays of strings, including singleton and empty values.
+This covers categories, download data/file types, external-resource labels,
+cancer types/locations, species, source collections, licenses, and programs.
+Download rows keep data/file/category/resource fields as arrays too. Source
+semicolon aggregates are parsed at the response boundary; embedded commas in a
+label remain intact. IDs, URLs, names, access labels, and prose remain scalars.
+The underlying snapshot source values are unchanged. This is one coordinated
+REST/MCP contract update, with no legacy-server compatibility layer in the SDK.
+
 ## Server 0.4.0
 
 This release adds citation and research-impact discovery to the immutable public snapshot.

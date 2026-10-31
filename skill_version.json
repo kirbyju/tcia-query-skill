@@ -14,18 +14,19 @@
     "mcp_server/__init__.py": "3531af790b6241d93749e07d49d8193c10816c02d542f7f953e43539a7decb1b",
     "mcp_server/__main__.py": "1c4a072b5351c80fd38b3e76d558ed25ad75ccb17d13876e2c3c59ff5a851366",
     "mcp_server/requirements.txt": "a089e9661a8e555d00aaf9a7cb37122f3f4d83069274d0914247af0b4803f70f",
-    "mcp_server/tcia_query_mcp/__init__.py": "2e36f590d19a69145c0914d690395d9e2b9ce0a23acb4aa89056777f72f9f0bb",
-    "mcp_server/tcia_query_mcp/models.py": "3c611960c06323b6e77a16153315ca26f6af73226ffbe69d4cb93eb637968ec2",
+    "mcp_server/tcia_query_mcp/__init__.py": "cfc30ab419d700ceb72d826f3d824cdb1ceaa936195b1abfae720187c2ecb97a",
+    "mcp_server/tcia_query_mcp/models.py": "8a3bd76fb6f64a337beec3f0373754c639b513544e5ac677808c9fce647fb434",
     "mcp_server/tcia_query_mcp/rest.py": "eef81c3a63b87502d20f0d158ef9b4d9baa05f9985c5e97b2341d951e9c8921d",
     "mcp_server/tcia_query_mcp/server.py": "bab45de771238fabadd75f41765a2722ba3578c96f433a5584c0ea379057df57",
-    "mcp_server/tcia_query_mcp/service.py": "0bf5f7fe12a3f5aee8dcfa316618dca901afc3c64d96bf8720ab6d3d144ffaf8",
+    "mcp_server/tcia_query_mcp/service.py": "e05fc9894463d2de22164d3a2989b8c465fef032fdc3adaceede3b9992c64e83",
+    "mcp_server/tests/test_dataset_value_lists.py": "a3d5f38bb01c081217ef2f9a19b0ca116589ffa7d810c0283c11a372bad769ab",
     "mcp_server/tests/test_download_plan.py": "3b25ffe30ab3e940c3477efbeb2064b1f7ce590f511684127f85481c7e69b17a",
     "mcp_server/tests/test_public_slide_downloads.py": "2469c1531d64725b0d60c94bb4449a12d07b1c37cf364ac732c113b8cbddff11",
     "mcp_server/tests/test_rest.py": "9ea2229afc085b6688475af7f7572e1c7f0416b3016c81d15415a0426b5dd70a",
     "mcp_server/tests/test_server.py": "34e8b2ed06310e41cd307d65f2e6b833ec77edceb1b7408297b2cbe525c90fb7",
     "mcp_server/tests/test_service.py": "2015d42a0b6063a1aa09956b8e03cebb5a057189043bf1a7aa83e84a0860e569",
     "references/README.md": "eacd2b25548cc91c21946e0d20b41809d738bc08161d7b1d0b2700e39e8ae428",
-    "references/api-upgrade-notes.md": "2cdf48d2d83c6d81a6004c18bebbd904792ee97ff1244f850947f2871b94f545",
+    "references/api-upgrade-notes.md": "297e915b20370966157d6277e9caf4d53b0eb854d3adc72bb54576b2e162a7ca",
     "references/artifact-model.md": "e97c0367d0ae29db970351f482762c3d94af222a33007cf192df5eaf7f2d817c",
     "references/aspera.md": "64fc04697a55ef2d3ba560ae7ca7540b9ab62f4af218b7556ceaaf2b52fcfc32",
     "references/brats2021_tcia_crosswalk_v1.csv": "ba986fab788ee8ad3ea7fa2354d2dae4495ccc8e387d5f341cfd740db4ffcd00",
@@ -180,6 +181,6 @@
     "scripts/tests/test_tcia_v2_staging.py": "dda82d5c65b8e03b543fc80c44f30acf47a6c29861b1565104e96c568399ec25"
   },
   "schema_version": 1,
-  "skill_version": "2026.10.30.2",
-  "updated_at_utc": "2026-10-30T17:53:14.233504+00:00"
+  "skill_version": "2026.10.31.1",
+  "updated_at_utc": "2026-10-31T11:55:04.144918+00:00"
 }
