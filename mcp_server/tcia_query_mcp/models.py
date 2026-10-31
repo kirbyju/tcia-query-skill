@@ -9,7 +9,6 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
 JsonScalar: TypeAlias = str | int | float | bool | None
 JsonObject: TypeAlias = dict[str, JsonValue]
-TextValues: TypeAlias = str | list[str] | None
 
 
 class PublicModel(BaseModel):
@@ -39,13 +38,13 @@ class DatasetSummary(PublicModel):
     current_download_count: int | None = None
     subjects: int | None = None
     data_categories: list[str] = Field(default_factory=list)
-    download_data_types: TextValues = None
-    download_file_types: TextValues = None
+    download_data_types: list[str] = Field(default_factory=list)
+    download_file_types: list[str] = Field(default_factory=list)
     external_resource_labels: list[str] = Field(default_factory=list)
-    cancer_types: TextValues = None
-    cancer_locations: TextValues = None
-    species: TextValues = None
-    source_collections: TextValues = None
+    cancer_types: list[str] = Field(default_factory=list)
+    cancer_locations: list[str] = Field(default_factory=list)
+    species: list[str] = Field(default_factory=list)
+    source_collections: list[str] = Field(default_factory=list)
 
 
 class DataCiteDOISummary(PublicModel):
@@ -111,7 +110,7 @@ class DatasetImpact(PublicModel):
 
 class DatasetDetail(DatasetSummary):
     hidden: bool | None = None
-    licenses: TextValues = None
+    licenses: list[str] = Field(default_factory=list)
     access_level: str | None = None
     controlled_access: bool | None = None
     noncommercial_license: bool | None = None
@@ -122,7 +121,7 @@ class DatasetDetail(DatasetSummary):
     external_resources: list[str] = Field(default_factory=list)
     has_tcia_clinical_download: bool | None = None
     has_external_clinical_resource: bool | None = None
-    program: str | None = None
+    program: list[str] = Field(default_factory=list)
     summary: str | None = None
     abstract: str | None = None
     detailed_description: str | None = None
