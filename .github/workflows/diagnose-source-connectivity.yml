@@ -1,0 +1,62 @@
+name: Diagnose public metadata connectivity
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Probe TCIA public metadata from this runner
+        run: |
+          python3 -u - <<'PY'
+          import concurrent.futures
+          import json
+          import socket
+          import subprocess
+          import time
+          import urllib.request
+
+          path = '/wp-content/uploads/GC_manifest_AAPM-RT-MAC_20260326.csv'
+          hosts = ['www.cancerimagingarchive.net', 'cancerimagingarchive.net']
+          for host in hosts:
+              try:
+                  print(json.dumps({'host': host, 'addresses': sorted({item[4][0] for item in socket.getaddrinfo(host,443)})}))
+              except Exception as error:
+                  print(json.dumps({'host': host, 'dns_error': repr(error)}))
+
+          def probe(host):
+              started = time.monotonic()
+              request = urllib.request.Request('https://' + host + path, headers={
+                  'User-Agent': 'tcia-controlled-access-metadata/0.1', 'Range': 'bytes=0-255'})
+              try:
+                  with urllib.request.urlopen(request,timeout=12) as response:
+                      result = {'host':host,'client':'urllib','status':response.status,
+                                'final_url':response.url,'bytes_read':len(response.read(256))}
+              except Exception as error:
+                  result = {'host':host,'client':'urllib','error':repr(error),
+                            'reason':repr(getattr(error,'reason',None))}
+              result['seconds'] = round(time.monotonic()-started,2)
+              print(json.dumps(result),flush=True)
+
+          def curl_probe(host,family):
+              command = ['curl',family,'--silent','--show-error','--location',
+                         '--connect-timeout','8','--max-time','12','--range','0-255',
+                         '--output','/dev/null','--write-out',
+                         'http=%{http_code} ip=%{remote_ip} elapsed=%{time_total} redirects=%{num_redirects}',
+                         'https://' + host + path]
+              result = subprocess.run(command,capture_output=True,text=True,timeout=15)
+              print(json.dumps({'host':host,'client':'curl','family':family,
+                                'exit_code':result.returncode,'result':result.stdout,
+                                'error':result.stderr}),flush=True)
+
+          with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
+              futures = [executor.submit(probe,host) for host in hosts]
+              futures += [executor.submit(curl_probe,host,family) for host in hosts for family in ['-4','-6']]
+              for future in futures:
+                  future.result()
+          PY
