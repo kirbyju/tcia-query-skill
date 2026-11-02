@@ -3875,7 +3875,7 @@ def load_ldct_general_commons_imaging_subjects(
         raise FileNotFoundError(f"controlled metadata database not found: {controlled_db}")
     with sqlite3.connect(f"file:{controlled_db}?mode=ro", uri=True) as controlled:
         table = controlled.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='radiology_series'"
+            "SELECT 1 FROM sqlite_master WHERE type IN ('table', 'view') AND name='radiology_series'"
         ).fetchone()
         if table is None:
             raise RuntimeError("controlled metadata database lacks radiology_series")

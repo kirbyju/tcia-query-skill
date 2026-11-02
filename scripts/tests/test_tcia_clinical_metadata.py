@@ -47,26 +47,35 @@ class ClinicalMetadataTest(unittest.TestCase):
         )
         self.assertEqual(next(frame.iterrows())[1]["Case"], "N001")
 
-    def test_ldct_neuro_rows_require_exact_general_commons_series_match(
-        self,
-    ) -> None:
+    def test_ldct_neuro_rows_require_exact_general_commons_series_match(self) -> None:
+        self.check_ldct_neuro_series_match(use_view=False)
+
+    def test_ldct_neuro_rows_accept_projection_view_and_reject_wrong_series(self) -> None:
+        self.check_ldct_neuro_series_match(use_view=True)
+
+    def check_ldct_neuro_series_match(self, *, use_view: bool) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             controlled_path = root / "controlled.sqlite"
             with sqlite3.connect(controlled_path) as controlled:
+                storage_name = "series_storage" if use_view else "radiology_series"
                 controlled.execute(
-                    """CREATE TABLE radiology_series (
+                    f"""CREATE TABLE {storage_name} (
                            short_title TEXT, subject_id TEXT, series_id TEXT
                        )"""
                 )
                 controlled.executemany(
-                    "INSERT INTO radiology_series VALUES (?, ?, ?)",
+                    f"INSERT INTO {storage_name} VALUES (?, ?, ?)",
                     [
                         ("LDCT-and-Projection-data", "N001", "1.2.3"),
                         ("LDCT-and-Projection-data", "N002", "1.2.4"),
                         ("OTHER", "N999", "9.9.9"),
                     ],
                 )
+                if use_view:
+                    controlled.execute(
+                        "CREATE VIEW radiology_series AS SELECT * FROM series_storage"
+                    )
             conn = CLINICAL.init_db(root / "clinical.sqlite", replace=True)
             loaded = CLINICAL.load_ldct_general_commons_imaging_subjects(
                 conn, controlled_path
