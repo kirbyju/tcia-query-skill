@@ -976,7 +976,9 @@ class TciaQueryService:
         public_non_dicom_db: str | os.PathLike[str] | None = None,
         bundle_manifest: str | os.PathLike[str] | None = None,
         skill_root: str | os.PathLike[str] | None = None,
+        idc_metadata: Any = None,
     ) -> None:
+        self._idc_metadata = idc_metadata
         self.skill_root = Path(skill_root) if skill_root else default_skill_root()
         v2_root = Path(
             os.environ.get("TCIA_V2_INSTALL_DIR", "")
@@ -3589,6 +3591,21 @@ class TciaQueryService:
             "count": 1,
             "identity_scope": "Dataset-scoped; no cross-dataset person identity is asserted.",
         }
+
+    def get_participant_download_plan(self, participant_keys, *, modality, file_format):
+        """Resolve a bounded public-image selection using verified TCIA identities.
+
+        IDC series metadata is queried remotely; no images or credentials pass
+        through this service. Non-DICOM planning uses TCIA's released metadata.
+        """
+        from .participant_downloads import plan
+        from .models import ParticipantDownloadPlanResponse
+        result = plan(self, participant_keys, modality=modality, file_format=file_format)
+        from pydantic import ValidationError
+        try:
+            return ParticipantDownloadPlanResponse.model_validate(result).model_dump(mode="json")
+        except ValidationError:
+            raise ServiceUnavailableError("Image metadata did not satisfy the shared planning contract") from None
 
     def get_participant_assets(self, participant_key: str, **filters: Any) -> dict[str, Any]:
         key = participant_key.strip()

@@ -226,3 +226,15 @@ Keep these server-local:
 - logs
 - actual `/etc/systemd/system/*.service` files
 - TLS certificates, auth config, firewall rules, domains, and secrets
+
+
+## Query API 0.6: participant image planning
+
+This is a service-code update; it does not require rebuilding the metadata bundle.
+Update source/dependencies and restart the REST/MCP processes using the normal
+operator procedure. Verify `POST /v2/participants/download-plan` in `/v2/openapi.json`
+and call a bounded public DICOM and non-DICOM plan before enabling the a9 notebook.
+Public DICOM planning needs outbound HTTPS to `api.imaging.datacommons.cancer.gov`;
+other snapshot-backed queries remain independent. Provider failures return 503.
+The service reads public metadata only and never accepts transfer credentials or
+proxies imaging payloads. Existing controlled-download authorization is unchanged.

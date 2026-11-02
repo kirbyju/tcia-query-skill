@@ -2,7 +2,9 @@
 
 This directory contains a read-only server surface for the TCIA query skill. It
 follows the same separation used by IDC-REST-MCP: one shared query service over
-SQLite release snapshots, plus thin protocol adapters for MCP and REST.
+SQLite release snapshots, plus thin protocol adapters for MCP and REST. Public participant image planning
+also makes bounded, version-checked reads of IDC metadata. No image payloads or
+credentials pass through this service.
 
 ```text
 tcia_query_mcp/service.py  # TCIA snapshot and sidecar query logic
@@ -41,6 +43,7 @@ Core MCP tools:
 - `get_dataset_v1_releases`
 - `get_current_downloads`
 - `get_download_plan`
+- `get_participant_download_plan` — shared public DICOM/non-DICOM image selection
 - `summarize_access`
 - `find_dicom_annotations`
 - `get_participant_summary` — curated archive or selected-dataset totals and species breakdown (Participant Inventory schema 10+)
@@ -60,7 +63,7 @@ Optional detail tools:
 - `get_clinical_facts`
 - `get_clinical_conflicts`
 
-The default public MCP surface contains these 24 supported tools. NIfTI,
+The default public MCP surface contains these 25 supported tools. NIfTI,
 pathology, and other public non-DICOM discovery uses
 `find_public_non_dicom_assets`. Set `requires_annotations=true` to select
 non-DICOM `segmentation`, `annotation`, and `annotation_snapshot` roles. This
@@ -97,7 +100,8 @@ responses; use `/v2/public-non-dicom/assets`.
   rejected, with variable provenance confined to named typed metadata objects.
 - Invalid limits/cursors are errors; limits are never silently clamped.
 - MCP tools advertise structured output and read-only, non-destructive,
-  idempotent, snapshot-local metadata.
+  idempotent metadata. All tools except participant download planning are
+  snapshot-local; the planner advertises external metadata access explicitly.
 - REST errors use RFC 9457-style `application/problem+json` documents with
   stable `code` and `retryable` fields.
 - `/v2/live` reports process liveness. `/v2/ready` validates the install
@@ -286,3 +290,27 @@ Public non-DICOM whole-slide file responses now carry explicit `imageUrl` and
 `download_file_name` fields for recognized public PathDB file routes, alongside
 representation/access-basis codes. Raw source URLs remain unchanged. See
 `references/download-requirements.md` for the source/access/format restrictions.
+
+## Participant image planning
+
+`POST /v2/participants/download-plan` and MCP `get_participant_download_plan` accept
+1–100 TCIA participant keys, one modality, and `file_format` (`DICOM` or `non-DICOM`).
+The service validates visible dataset-scoped identities rather than accepting bare
+patient identifiers. It returns rows, per-participant coverage (including zero
+matches), unresolved reasons, provider versions, and metadata snapshot identity.
+This first contract selects public data only; existing controlled-file inventory
+and authorized TDR download workflows remain separate.
+
+DICOM selection uses the official IDC REST service with bound SQL parameters over
+verified dataset DOIs, IDC participant identifiers and available collection mapping.
+Requests are bounded to 45 seconds per provider selection and 10,000 selected items;
+results are paged and versions checked before/after. A small process-local metadata
+cache expires after 60 seconds and is keyed by provider version and exact selection.
+An unavailable/truncated provider, changed data generation or invalid scope is an
+explicit error, never a zero-match response. Split selections that exceed limits.
+Non-DICOM selection reuses the released TCIA public-file routes and identity
+namespaces. Unsupported routes remain unresolved and block SDK transfers.
+
+The API does not accept credentials, proxy images, expose arbitrary upstream SQL,
+or infer image/segmentation relationships. `tcia_utils` sends the selected UIDs or
+file routes to the independently installed TDR engine for actual transfers.

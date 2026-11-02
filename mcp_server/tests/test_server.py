@@ -42,8 +42,9 @@ class McpToolSurfaceTests(unittest.IsolatedAsyncioTestCase):
                 self.assertTrue(tool.annotations.read_only_hint)
                 self.assertFalse(tool.annotations.destructive_hint)
                 self.assertTrue(tool.annotations.idempotent_hint)
-                self.assertFalse(tool.annotations.open_world_hint)
-                self.assertEqual(tool.meta["snapshot_local"], True)
+                external = tool.name == "get_participant_download_plan"
+                self.assertEqual(tool.annotations.open_world_hint, external)
+                self.assertEqual(tool.meta["snapshot_local"], not external)
                 self.assertIsNotNone(tool.output_schema)
                 self.assertNotIn("include_hidden", tool.input_schema.get("properties", {}))
 

@@ -33,6 +33,8 @@ from .models import (
     DicomAnnotationsResponse,
     DownloadsResponse,
     DownloadPlanResponse,
+    ParticipantDownloadPlanResponse,
+    PublicModel,
     HealthResponse,
     LinkIssuesResponse,
     ParticipantDetailResponse,
@@ -97,6 +99,12 @@ class SearchParticipantsRequest(BaseModel):
     modalities: list[str] | None = None
     limit: int = Field(default=25, ge=1, le=500)
     cursor: str | None = None
+
+
+class ParticipantDownloadPlanRequest(PublicModel):
+    participant_keys: list[str] = Field(min_length=1, max_length=100)
+    modality: str = Field(min_length=1, max_length=80)
+    file_format: Literal["DICOM", "non-DICOM"]
 
 
 PROBLEM_RESPONSES = {
@@ -258,6 +266,14 @@ def create_app(service: TciaQueryService | None = None) -> FastAPI:
             download_ids=download_ids,
             access_levels=access_levels,
         )
+
+    @app.post(
+        f"{V2_API_PREFIX}/participants/download-plan",
+        response_model=ParticipantDownloadPlanResponse, responses=PROBLEM_RESPONSES,
+        response_model_exclude_unset=True,
+    )
+    def v2_participant_download_plan(request: ParticipantDownloadPlanRequest) -> dict[str, Any]:
+        return S().get_participant_download_plan(**request.model_dump())
 
     @app.get(f"{V2_API_PREFIX}/datasets/{{short_title}}/access", response_model=AccessSummaryResponse)
     def v2_summarize_access(short_title: str) -> dict[str, Any]:

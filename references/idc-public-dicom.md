@@ -35,6 +35,20 @@ Current IDC references:
 6. Ask whether the user wants an agent-run download or a portable TCIA Data Retriever manifest before transferring payloads.
 7. If an expected public Series Instance UID is absent from IDC, report matched and missing counts. Load `nbia-public-dicom-fallback.md` only for the missing public subset or when the user explicitly requests NBIA.
 
+## Basic TCIA Participant Download Plans
+
+For a basic public image selection from an existing TCIA participant cohort, use
+MCP `get_participant_download_plan` or REST `POST /v2/participants/download-plan`
+when the deployed service advertises that route. Supply TCIA participant keys, a
+modality and DICOM/non-DICOM format. The shared service validates TCIA identity and
+uses IDC metadata for public DICOM series resolution. Review coverage, unresolved
+items and both metadata versions before transferring. This read-only planner can
+make external IDC requests; it is not entirely snapshot-local.
+
+Advanced DICOM relationships, acquisition queries and viewers remain with IDC's
+own surfaces. The basic planner does not infer segmentation/source relationships
+or grant controlled access. It returns a selection, not evidence of a transfer.
+
 ## Preview Before Download
 
 Ask the selected IDC surface for a currently supported viewer URL and use the returned URL. Do not manually construct an IDC viewer URL or assume which viewer product IDC currently supports. Use a representative study or series to help the user confirm modality, anatomy, scope, and relevant annotations before committing to a larger download.

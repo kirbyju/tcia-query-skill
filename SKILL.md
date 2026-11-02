@@ -126,6 +126,12 @@ rollback selects a retained verified generation and also requires a restart.
 - Do not install browser automation merely to show a viewer example; return a link unless browser interaction was requested.
 - Do not make medical, legal, regulatory, or suitability conclusions. Report metadata, evidence, uncertainty, and access terms.
 
+For basic public image downloads from an existing participant cohort, use the shared
+`get_participant_download_plan` tool or REST `/v2/participants/download-plan` where
+available. It validates TCIA identities and resolves DICOM through IDC metadata;
+review coverage, unresolved items and provider versions. Advanced IDC queries and
+viewers remain separate. See `references/idc-public-dicom.md` for the boundary.
+
 ## Answer Shape
 
 For discovery, prefer a compact ranked table with dataset, type, match reason, access/route, license, DOI, and caveats. For a specific dataset, include the TCIA page, current download-level evidence, related Analysis Results, and access route.
