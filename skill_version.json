@@ -112,7 +112,7 @@
     "scripts/tcia_clinical_metadata.py": "80c1d9d138c40f885cfd9c0278fcd1f92b6152d0d2ba8f40bcd05c683a8336b1",
     "scripts/tcia_clinical_only_repairs.py": "de41d31357a8e3a7975379dd51af45ba224664a6a5357dda7595309e73deac98",
     "scripts/tcia_compact_research.py": "0cf46be9dabaac286a626c8cccd32af16400cf97f98d5835b63ac51237b69833",
-    "scripts/tcia_controlled_access_metadata.py": "3cbcabe4e96ac643db0207976bcd0fa76321d5f550e360d83f93efadc607a932",
+    "scripts/tcia_controlled_access_metadata.py": "c3bd6806c88e3e218a6c2453d20b08f2c3d6559cd90d2416310e9a9482b74c8a",
     "scripts/tcia_correction_registry.py": "9881c0a550fcf1e5012031efdb7669289b77ee50ed753cdd9981354c5403cdeb",
     "scripts/tcia_create_data_retriever_csv.py": "ff351223974fba146ab2e6434b12891c7019c78eefed0d602b0d600f97ebe426",
     "scripts/tcia_diagnostic_status.py": "2fb5c296bc1a361814cc04d23e40553a10761fa8ff0fef7a45ccdec63f8c93c0",
@@ -183,6 +183,6 @@
     "scripts/tests/test_tcia_v2_staging.py": "e4c33f3dfd9b6d3ced7deecf8dc3fa6aa487737d42f90fe4522e39b40889bdf4"
   },
   "schema_version": 1,
-  "skill_version": "2026.11.02.3",
-  "updated_at_utc": "2026-11-02T15:44:51.719014+00:00"
+  "skill_version": "2026.11.02.4",
+  "updated_at_utc": "2026-11-02T17:07:43.385621+00:00"
 }

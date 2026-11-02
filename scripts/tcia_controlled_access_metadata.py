@@ -1574,7 +1574,8 @@ def ingest_artifacts(
             fetched_bytes = path.stat().st_size if path is not None and path.exists() else 0
             print(
                 f"controlled artifact {artifact_index}/{artifact_total} done: "
-                f"status={status} bytes={fetched_bytes} elapsed_seconds={elapsed:.1f}",
+                f"status={status} bytes={fetched_bytes} elapsed_seconds={elapsed:.1f}"
+                + (f" error={json_dumps(error)}" if error else ""),
                 flush=True,
             )
             artifact_id = insert_artifact(

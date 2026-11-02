@@ -11,11 +11,18 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
       - name: Probe TCIA public metadata from this runner
         run: |
           python3 -u - <<'PY'
           import concurrent.futures
           import json
+          import hashlib
+          import pathlib
+          import sys
+          import tempfile
           import socket
           import subprocess
           import time
@@ -54,8 +61,22 @@ jobs:
                                 'exit_code':result.returncode,'result':result.stdout,
                                 'error':result.stderr}),flush=True)
 
-          with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
+          def builder_probe():
+              sys.path.insert(0,'scripts')
+              import tcia_controlled_access_metadata as controlled
+              with tempfile.TemporaryDirectory() as directory:
+                  started = time.monotonic()
+                  result,status,error = controlled.fetch_artifact(
+                      'https://' + hosts[0] + path,pathlib.Path(directory),False,
+                      attempts=1,socket_timeout_seconds=12,total_timeout_seconds=15)
+                  print(json.dumps({'client':'actual_builder_full_get','status':status,
+                                    'error':error,'seconds':round(time.monotonic()-started,2),
+                                    'bytes':result.stat().st_size if result else 0,
+                                    'sha256':hashlib.sha256(result.read_bytes()).hexdigest() if result else None}),flush=True)
+
+          with concurrent.futures.ThreadPoolExecutor(max_workers=7) as executor:
               futures = [executor.submit(probe,host) for host in hosts]
+              futures.append(executor.submit(builder_probe))
               futures += [executor.submit(curl_probe,host,family) for host in hosts for family in ['-4','-6']]
               for future in futures:
                   future.result()
