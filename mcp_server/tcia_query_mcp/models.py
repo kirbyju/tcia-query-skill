@@ -786,3 +786,67 @@ class ParticipantSummaryResponse(PublicModel):
     release_fingerprint: str
     count_basis: str
     notices: list[str]
+
+
+class ParticipantPlanItem(Asset):
+    participant_key: str
+    participant_id: str
+    dataset_type: str
+    short_title: str
+    provider: Literal['TCIA', 'IDC']
+    provider_version: str | None = None
+    source_doi: str | None = None
+    source_patient_id: str | None = None
+    collection_id: str | None = None
+    study_instance_uid: str | None = None
+    series_instance_uid: str | None = Field(default=None, pattern=r'^[0-9]+(?:\.[0-9]+)+$')
+    instance_count: int | None = Field(default=None, ge=0)
+    license_label: str | None = None
+    python_supported: bool
+    download_method: Literal['dicom_manifest', 'direct_file']
+    download_id: str
+    download_representation: Literal['public_dicom_series', 'public_pathology_slide_copy'] | None = None
+
+
+class ParticipantPlanCoverage(PublicModel):
+    participant_key: str
+    dataset_type: str
+    short_title: str
+    participant_id: str
+    matching_items: int = Field(ge=0)
+    downloadable_items: int = Field(ge=0)
+    state: Literal['matched', 'no_matches', 'unresolved']
+
+
+class ParticipantPlanIssue(PublicModel):
+    participant_key: str
+    short_title: str
+    participant_id: str
+    reason: str
+
+
+class ImagingProviderVersion(PublicModel):
+    idc_version: str
+    idc_index_data_version: str
+    api_version: str
+    build: str | None = None
+
+
+class ParticipantPlanScope(PublicModel):
+    modality: str
+    file_format: Literal['DICOM', 'non-DICOM']
+    requested_participants: int = Field(ge=0)
+    selected_items: int = Field(ge=0)
+    metadata_snapshot: str | None = None
+    access_levels: list[Literal['open']]
+    scope_note: str
+
+
+class ParticipantDownloadPlanResponse(PublicModel):
+    plan_version: Literal[1]
+    rows: list[ParticipantPlanItem]
+    coverage: list[ParticipantPlanCoverage]
+    unresolved: list[ParticipantPlanIssue]
+    providers: dict[str, ImagingProviderVersion]
+    scope: ParticipantPlanScope
+    complete: bool

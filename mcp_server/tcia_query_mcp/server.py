@@ -41,6 +41,7 @@ from .models import (
     DicomAnnotationsResponse,
     DownloadsResponse,
     DownloadPlanResponse,
+    ParticipantDownloadPlanResponse,
     LinkIssuesResponse,
     ParticipantDetailResponse,
     ParticipantsResponse,
@@ -78,12 +79,15 @@ Recommended workflow:
    core, and any needed optional detail artifact.
 2. Use `search_datasets` for broad discovery. Use `get_dataset` for one short
    title, including current downloads and related Analysis Results.
-3. Use `get_download_plan` for download requirements and shared software setup instructions.
+3. Use `get_download_plan` for dataset download requirements. For images from an
+   existing cohort, use `get_participant_download_plan`; review coverage, unresolved
+   routes and provider versions. It can read external IDC metadata and never
+   transfers images or credentials.
    Use `summarize_access` for the dataset access overview. Creative Commons is
    open access, Creative Commons NonCommercial is open with a noncommercial
    restriction, and controlled/restricted licenses require the TCIA policy:
    {CONTROLLED_ACCESS_POLICY_URL}
-4. For public DICOM downloads or viewers, use IDC/idc-index after TCIA
+4. For advanced public DICOM exploration or viewers, use IDC after TCIA
    provenance and access are confirmed. Do not generate public viewer/download
    routes for controlled-access data.
 5. Use `get_dataset_versions` and `get_dataset_v1_releases` for release-history
@@ -128,6 +132,7 @@ PUBLIC_V2_TOOL_NAMES = (
     "get_dataset_v1_releases",
     "get_current_downloads",
     "get_download_plan",
+    "get_participant_download_plan",
     "summarize_access",
     "find_controlled_access_datasets",
     "get_controlled_access_files",
@@ -591,6 +596,27 @@ def get_download_plan(
         dataset_type=dataset_type,
         download_ids=download_ids,
         access_levels=access_levels,
+    )
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=True),
+    meta={"snapshot_local": False, "external_metadata": "IDC REST for public DICOM; no payload transfers"},
+    structured_output=True,
+)
+@guard
+def get_participant_download_plan(
+    participant_keys: list[str], modality: str, file_format: Literal["DICOM", "non-DICOM"],
+) -> ParticipantDownloadPlanResponse:
+    """Plan exact public images for up to 100 TCIA participant keys.
+
+    Validate TCIA participant identity first. DICOM metadata comes from IDC's
+    versioned REST service; non-DICOM metadata comes from the installed TCIA
+    inventory. Show coverage and unresolved items. This does not download data,
+    handle credentials, infer segmentation relationships, or grant controlled access.
+    """
+    return service().get_participant_download_plan(
+        participant_keys, modality=modality, file_format=file_format,
     )
 
 
