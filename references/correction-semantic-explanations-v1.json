@@ -1471,6 +1471,48 @@
         "no fabricated TCIA source endpoint",
         "no geometry/source-health waiver"
       ]
+    },
+    {
+      "batch_id": "compact-schema-nine-metadata-alias-projection-2026-11-02",
+      "reviewer": "Codex, under requester-authorized storage compaction and release review",
+      "approved_at": "2026-11-02T19:20:15Z",
+      "evidence_id": "github-actions:41490652317:metadata_change_report_final",
+      "evidence": "Retained original producer d2e16afe42d7935ddb0c3b73a0610f1e66c09687; exact baseline 35e58c4b193c51a593e2a688f9793a27af2ca0c68c4cd8f8600535ec2a20e11b. Every gated before/after row digest independently reproduced from hash-verified candidate and published baseline SQLite files. Complete review receipt SHA256 0fc837559c95f9372bfd80e8992d43af75ecdde4398ed3585749dd1b99366cd3; report SHA256 a83fd1e5265754f0ef09bbb1271a401c5c024b1d335510439d6e72d5c8fe29eb. No blanket waiver or producer/payload replacement.",
+      "rationale": "All 171502 reported modifications are comparison-only short_title projections: 171374 stored Bone-Marrow-Cytomorphology aliases already map to Bone-Marrow-Cytomorphology_MLL_Helmholtz_Fraunhofer in the unchanged asset identities, and 128 CPTAC-non-CCRCC aliases already map to CPTAC-CCRCC. The new agent-backed comparison projects those existing canonical asset titles. For every row, reconstructed metadata JSON, field source IDs, all other stored metadata columns, and both complete report row digests were independently checked. Stored aliases and user-facing agent values are retained; this review makes no new dataset or participant identity assertion.",
+      "artifact": "public_non_dicom",
+      "entity_table": "public_non_dicom_image_metadata",
+      "change_count": 171502,
+      "change_kind_counts": {
+        "modified": 171502
+      },
+      "changes_sha256": "d94badc744316fca4eb7c9394bc19b631dd35e8f4494a9d97b7c7a30c772367f",
+      "negative_scope": [
+        "no metadata value or provenance change",
+        "no new dataset identity mapping",
+        "no source alias deletion",
+        "no approval of unrelated metadata rows"
+      ]
+    },
+    {
+      "batch_id": "compact-schema-nine-participant-source-version-2026-11-02",
+      "reviewer": "Codex, under requester-authorized storage compaction and release review",
+      "approved_at": "2026-11-02T19:20:15Z",
+      "evidence_id": "github-actions:41490652317:metadata_change_report_final",
+      "evidence": "Retained original producer d2e16afe42d7935ddb0c3b73a0610f1e66c09687; exact baseline 35e58c4b193c51a593e2a688f9793a27af2ca0c68c4cd8f8600535ec2a20e11b. Every gated before/after row digest independently reproduced from hash-verified candidate and published baseline SQLite files. Complete review receipt SHA256 0fc837559c95f9372bfd80e8992d43af75ecdde4398ed3585749dd1b99366cd3; report SHA256 a83fd1e5265754f0ef09bbb1271a401c5c024b1d335510439d6e72d5c8fe29eb. No blanket waiver or producer/payload replacement.",
+      "rationale": "All 29788 modified participant asset rows have source_artifact public_non_dicom_metadata and change only source_version from schema-v8 to schema-v9, reflecting the requester-authorized compact storage schema. Every other column and every complete before/after report digest was checked. Availability, participant identity, file counts, sizes, routes, access, and geometry summaries are unchanged.",
+      "artifact": "participant_inventory",
+      "entity_table": "participant_assets",
+      "change_count": 29788,
+      "change_kind_counts": {
+        "modified": 29788
+      },
+      "changes_sha256": "a7d6ab4d1f0eec6c39c76322cff4b9265a63a5764dafa8af6d221bf214532810",
+      "negative_scope": [
+        "no availability or count change",
+        "no access or route change",
+        "no participant identity change",
+        "no approval of other version transitions"
+      ]
     }
   ],
   "explanation_batches": [

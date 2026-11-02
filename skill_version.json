@@ -40,7 +40,7 @@
     "references/correction-assertions-v1.json": "bc18f600242fcecb8e046930fad6418db294d96871ed67450eee2cb8c6b758ba",
     "references/correction-lifecycle.md": "acbb74f68822f3ece08d701a0759a967b325787f694cf5a32df41812f6a64264",
     "references/correction-registry-v1.schema.json": "c9c3b967a3c90a99f7aaf828590a87678744a110aef95b762ef72464b59f91af",
-    "references/correction-semantic-explanations-v1.json": "4c02bffc7a79fd27b1e5d8b36dd230b8b708818e0e103ef036fddbc779b0767f",
+    "references/correction-semantic-explanations-v1.json": "649b562bcfe450cadcc1b34ec05756ccd166abf5ff19a198971d2c430a8d6416",
     "references/cptac_gbm_codex_inventory_v1.csv": "650f0c09da49a17ba58f10d861a0b80519e5aeeeaf745186f542e80ea19ada4d",
     "references/cptac_gbm_codex_inventory_v1.json": "6515bf199d8e84e28d48e6bf7b2ee0bceeeee66d41e719bf31d02c6befe94c00",
     "references/datacite-doi-relationships.md": "c47670a13b47701a6a3a39962b42e2afa67c5c34c13e9aa5cc15c5f34fc5c3db",
@@ -53,7 +53,7 @@
     "references/histology_hsi_participant_links_v1.csv": "d5b63960a3c3e5078c35bc2393daabc7cb6417515daadfaf71f55e2b1b9de464",
     "references/histology_hsi_participant_links_v1.json": "53e4451fc3e71a85c9817799084c3d639824e166d8ec1500777f4a8b65af2015",
     "references/idc-public-dicom.md": "2c82815b34adfc1750d97addef6920d6fb56102a79de685268094cd601b56c42",
-    "references/maintainer-operations.md": "24e26463fdca8beba78629546a6614ca1e3c4675b36183e2e7aaa1983667f536",
+    "references/maintainer-operations.md": "a8b37e526f3d55a79707340a43a0590ae3929a25b949b62d1c3a5bbae2135b87",
     "references/missing-participant-inventory-review-2026-10-25.md": "bd0142db99a05e7226138d1e1c07e49b30b6ce271baf7203fb5053e773a1bc67",
     "references/missing_participant_inventory_manual_qc_v1.json": "86655ced1411599b53851f4c2bbf0f0efb74eb85d12410f912cca0924b63e168",
     "references/nbia-public-dicom-fallback.md": "530de4e4e6f0cf804cf5dbdd460483aedc5b3a8f9c294736afa63ff3ee2dcdd6",
@@ -153,7 +153,7 @@
     "scripts/tests/test_tcia_clinical_only_repairs.py": "87c94dabc0c124c5f69460fa7f7c0d34e0bd57c7c4e38ad767a7ce1822eacc55",
     "scripts/tests/test_tcia_compact_research.py": "2b00fda8f501508bf492f2113c4e3c85f06104d18849b856b0d196cad7104c2e",
     "scripts/tests/test_tcia_controlled_access_metadata.py": "9fd9f8b1ff732d7f2ce02eaf30480e052f4b80b9217f435bdc012adfb2a137f2",
-    "scripts/tests/test_tcia_correction_registry.py": "ec154c8fb7d6a2b94f90c4e15fe00ceef74cfb8885dfa97750c45a58db9e4dad",
+    "scripts/tests/test_tcia_correction_registry.py": "e2ecc4f09d0a8d8d7f18dc543b30b422112200b3fdc7c7964f1e96690fb7df28",
     "scripts/tests/test_tcia_diagnostic_status.py": "a00104b045e32288b56d43139f3ec9f9bb89926eac677dd356b07f97436397f5",
     "scripts/tests/test_tcia_dicom_source_scope.py": "80531d71e05c94c954d57d378446cd6f2364a83df955bc7b557b164403b7e984",
     "scripts/tests/test_tcia_download_requirements.py": "00ebeae856885bc066e5fa274bb5aa4e3d7adaa240dbc744e653b247056a65b8",
@@ -183,6 +183,6 @@
     "scripts/tests/test_tcia_v2_staging.py": "e4c33f3dfd9b6d3ced7deecf8dc3fa6aa487737d42f90fe4522e39b40889bdf4"
   },
   "schema_version": 1,
-  "skill_version": "2026.11.02.4",
-  "updated_at_utc": "2026-11-02T17:07:43.385621+00:00"
+  "skill_version": "2026.11.02.5",
+  "updated_at_utc": "2026-11-02T19:22:19.380888+00:00"
 }
