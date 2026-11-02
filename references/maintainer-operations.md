@@ -396,3 +396,27 @@ compatibility contracts. Preserve them in commands, endpoints, configuration,
 release assets, and migration notes. In general public prose, describe the
 REST service, release bundle, installer, and artifacts without embedding a
 version number unless the version distinction is material to the task.
+
+
+### November 2 compact schema candidate review
+
+Retained candidate run `41490652317`, produced by `d2e16afe42d7935ddb0c3b73a0610f1e66c09687`
+against baseline `35e58c4b193c51a593e2a688f9793a27af2ca0c68c4cd8f8600535ec2a20e11b`, passed assembly and artifact
+checks but stopped at the exact semantic gate. Independent complete row review
+verified all 201,290 reported changes against the actual hash-verified SQLite files.
+
+The 171,502 image-metadata report differences project existing canonical asset
+titles instead of two retained metadata aliases: 171,374 Bone-Marrow-Cytomorphology
+rows and 128 CPTAC-non-CCRCC rows. All stored metadata columns, reconstructed JSON,
+and provenance are otherwise identical. The 29,788 participant-asset rows change
+only `source_version` from `schema-v8` to `schema-v9`; their identities, counts,
+bytes, access, geometry and routes are identical. No mapping or data correction is
+authorized by this review. Both exact full-table change-set digests and every
+reported before/after row hash were verified; two finite declarations cover only
+these transitions. The original producer and candidate payloads remain unchanged.
+
+Complete independent review receipt SHA-256:
+`0fc837559c95f9372bfd80e8992d43af75ecdde4398ed3585749dd1b99366cd3`. Retained report SHA-256:
+`a83fd1e5265754f0ef09bbb1271a401c5c024b1d335510439d6e72d5c8fe29eb`. Resume this retained candidate through the
+existing append-only semantic-review contract, then require normal bundle,
+component, provenance and publication validation.
