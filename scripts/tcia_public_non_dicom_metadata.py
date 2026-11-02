@@ -88,7 +88,7 @@ DEFAULT_RELEASE_TAG = "tcia-metadata-v2-latest"
 DEFAULT_REPOSITORY = "kirbyju/tcia-query-skill"
 DB_ASSET = "public_non_dicom_metadata.sqlite.gz"
 MANIFEST_ASSET = "public_non_dicom_metadata_manifest.json"
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 
 def load_correction_assertions(
@@ -7233,7 +7233,7 @@ def build_database(
             schema_row = conn.execute(
                 "SELECT value FROM artifact_meta WHERE key='schema_version'"
             ).fetchone()
-            if not schema_row or int(schema_row[0]) not in {7, SCHEMA_VERSION}:
+            if not schema_row or int(schema_row[0]) not in {7, 8, SCHEMA_VERSION}:
                 raise RuntimeError("V2 baseline schema does not match the current builder")
             ensure_geometry_schema(conn)
             conn.execute("DELETE FROM artifact_meta")

@@ -147,7 +147,7 @@ def plan_jobs(
             conn.execute(
                 f"""
                 SELECT a.*
-                FROM public_non_dicom_assets a
+                FROM agent_public_non_dicom_assets a
                 WHERE upper(a.file_format) IN ({placeholders})
                   {dataset_clause}
                 ORDER BY a.short_title, a.download_id, a.asset_granularity,

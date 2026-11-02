@@ -26,6 +26,12 @@ except ModuleNotFoundError:
     from scripts import tcia_public_non_dicom_metadata as public_non_dicom
 
 
+try:
+    import tcia_compact_research as compact_research
+except ModuleNotFoundError:
+    from scripts import tcia_compact_research as compact_research
+
+
 AUDIT_SCHEMA_VERSION = 2
 COMPACT_AUDIT_SCHEMA_VERSION = 3
 
@@ -326,9 +332,10 @@ def create_research_projection(
                 "WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY rowid"
             )
         )
-        for _, sql in tables:
+        for table, sql in tables:
             if sql:
-                conn.execute(str(sql))
+                conn.execute(compact_research.table_sql(str(table), str(sql))
+                             if artifact == "public_non_dicom" else str(sql))
         audit_tables = set(config["audit_tables"])
         json_fields = config["json_fields"]
         copied: dict[str, int] = {}
@@ -354,11 +361,13 @@ def create_research_projection(
                     select_parts.append(quote_identifier(column))
             column_sql = ", ".join(quote_identifier(column) for column in columns)
             select_sql = ", ".join(select_parts)
-            conn.execute(
-                f"INSERT INTO main.{quote_identifier(table)} ({column_sql}) "
-                f"SELECT {select_sql} FROM source.{quote_identifier(table)}",
-                params,
-            )
+            if artifact == "public_non_dicom":
+                compact_research.copy_projection(conn, table, columns, replacements)
+            else:
+                conn.execute(
+                    f"INSERT INTO main.{quote_identifier(table)} ({column_sql}) "
+                    f"SELECT {select_sql} FROM source.{quote_identifier(table)}", params,
+                )
             copied[table] = int(
                 conn.execute(
                     f"SELECT COUNT(*) FROM main.{quote_identifier(table)}"
@@ -380,8 +389,18 @@ def create_research_projection(
                 "ORDER BY CASE type WHEN 'index' THEN 0 WHEN 'trigger' THEN 1 ELSE 2 END, rowid"
             )
         )
-        for _, _, sql in schema_objects:
-            conn.execute(str(sql))
+        asset_columns = [str(row[1]) for row in conn.execute(
+            "PRAGMA source.table_info(public_non_dicom_assets)")]
+        for object_type, _, sql in schema_objects:
+            conn.execute(compact_research.view_sql(conn, str(sql), asset_columns)
+                         if artifact == "public_non_dicom" and object_type == "view"
+                         else str(sql))
+        if artifact == "public_non_dicom":
+            conn.execute(
+                "UPDATE artifact_meta SET value=? WHERE key='schema_version' AND CAST(value AS INTEGER)>=8",
+                (str(public_non_dicom.SCHEMA_VERSION),),
+            )
+            conn.execute("INSERT OR REPLACE INTO artifact_meta VALUES ('research_storage_contract', 'compact_locations_metadata_v1')")
         conn.commit()
         conn.execute("DETACH DATABASE source")
         conn.execute("ANALYZE main")
@@ -815,6 +834,8 @@ def materialize_assembly_from_companions(
     restored_tables: dict[str, int] = {}
     with sqlite3.connect(out) as conn:
         configure_bulk_database(conn)
+        if artifact == "public_non_dicom":
+            compact_research.expand_assembly(conn)
         conn.execute("ATTACH DATABASE ? AS audit", (str(audit_database),))
         audit_objects = {
             str(row[0])

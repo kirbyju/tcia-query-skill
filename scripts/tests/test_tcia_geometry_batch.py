@@ -128,6 +128,7 @@ class GeometryBatchTests(unittest.TestCase):
             conn = sqlite3.connect(db)
             conn.executescript(
                 """
+                CREATE VIEW agent_public_non_dicom_assets AS SELECT * FROM public_non_dicom_assets;
                 CREATE TABLE public_non_dicom_assets (
                   asset_id TEXT, dataset_type TEXT, short_title TEXT,
                   download_row_id INTEGER, download_id TEXT, subject_id TEXT,

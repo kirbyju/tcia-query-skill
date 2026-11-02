@@ -818,3 +818,23 @@ Use `tcia_metadata_v2_bundle_manifest.json` to verify each selected asset's
 schema, release fingerprint, compressed SHA-256, and decompressed SQLite
 SHA-256 before replacing a local copy. Per-component JSON manifests are not
 separate streamlined-release assets.
+
+## Compact research storage in schema 9
+
+Public non-DICOM schema 9 keeps the existing `agent_*` read interfaces while
+removing duplicate physical values. Query `agent_public_non_dicom_assets` for
+`source_url`: storage rows retain a primary `source_location_id` and a nullable
+`source_url_override` for source URLs without a matching location. Selection is
+deterministic when multiple locations match and does not multiply logical assets.
+
+Image metadata storage omits a field only when it exactly equals the corresponding
+asset value. An `asset_metadata_mask` preserves which keys were originally present;
+`agent_public_non_dicom_image_metadata` reconstructs those keys in `metadata_json`.
+Different metadata values, missing keys, field source IDs, counts, and provenance
+retain their meanings. This applies to file format, media kind, object role,
+spatial dimensionality, and temporal dimensionality; modality is not deduplicated.
+
+`materialize-assembly` restores the writable producer fields before restoring audit
+evidence and refreshing the next build. Release comparisons use reconstructed
+logical values, so storage changes do not waive actual content changes. Consumers
+must not rely on the physical research-table layout or serialized JSON key order.

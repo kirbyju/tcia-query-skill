@@ -13,6 +13,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
+try:
+    from tcia_compact_research import install_comparison_views
+except ModuleNotFoundError:
+    from scripts.tcia_compact_research import install_comparison_views
+
 
 @dataclass(frozen=True)
 class TableSpec:
@@ -220,6 +225,8 @@ def accepted_geometry_refreshes(
         return []
     accepted: list[dict[str, object]] = []
     with sqlite3.connect(new_path) as new, sqlite3.connect(old_path) as old:
+        install_comparison_views(new)
+        install_comparison_views(old)
         columns = [
             str(row[1])
             for row in new.execute("PRAGMA table_info(public_non_dicom_assets)")
@@ -575,7 +582,7 @@ def validate_declared_key(conn: sqlite3.Connection, spec: TableSpec) -> None:
     ).fetchone()
     if row is None:
         return
-    info = list(conn.execute(f"PRAGMA table_info({quote_identifier(spec.name)})"))
+    info = list(conn.execute(f"PRAGMA main.table_info({quote_identifier(spec.name)})"))
     columns = {str(item[1]) for item in info}
     if not set(spec.keys).issubset(columns):
         raise RuntimeError(f"declared key columns are absent from {spec.name}")
@@ -1196,6 +1203,10 @@ def compare_asset(
 ]:
     new = sqlite3.connect(new_path)
     old = sqlite3.connect(old_path) if old_path and old_path.exists() else None
+    if name == "public":
+        install_comparison_views(new)
+        if old is not None:
+            install_comparison_views(old)
     rows: list[dict[str, object]] = []
     details: list[str] = []
     warnings: list[str] = []

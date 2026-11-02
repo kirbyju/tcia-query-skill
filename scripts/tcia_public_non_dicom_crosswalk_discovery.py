@@ -183,7 +183,7 @@ def discover(public_db: Path, clinical_db: Path, snapshot_db: Path, out_dir: Pat
     groups: dict[tuple[str, str, str, str], list[sqlite3.Row]] = defaultdict(list)
     for row in public.execute(
         """
-        SELECT * FROM public_non_dicom_assets
+        SELECT * FROM agent_public_non_dicom_assets
         WHERE asset_granularity = 'file'
           AND source_system = 'tcia_aspera'
           AND participant_link_status IN ('dataset_only', 'unavailable')

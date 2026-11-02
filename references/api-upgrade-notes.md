@@ -79,3 +79,19 @@ file descriptor fields in `Asset`: `imageUrl`, `download_file_name`,
 read-only service for recognized public file records, preserve source URLs, and
 need a service code update. No new query route, payload proxy, or additional
 artifact-schema change is introduced by these descriptors.
+
+## Compact artifact storage upgrade
+
+Controlled-access component schema 3 and public non-DICOM component schema 9
+preserve the REST/MCP field contracts. Upgrade the skill producer/installer and
+Participant Explorer before selecting these component versions. Explorer accepts
+both preceding and new component versions and reads public assets through the
+agent views. No REST route or MCP tool rename is required. Direct SQL consumers
+must use `agent_public_non_dicom_assets` for source URLs and
+`agent_public_non_dicom_image_metadata` for reconstructed metadata; physical
+storage columns and JSON key order are not a presentation contract.
+
+A schema upgrade requires a full source/downstream build, not selective reuse of
+old detail components. Updating repository code or publishing a release does not
+update running services: install the validated new bundle and restart each
+service separately, then verify the installed release fingerprint.

@@ -706,3 +706,19 @@ See `references/participant-identity-methods.md` for index and staff audit contr
 ## Compact download requirements (snapshot schema 9)
 
 `agent_current_downloads` adds `software_requirement`, `requirement_status`, and `download_method`. `download_software_requirements` stores the four shared help entries once per artifact. `requirements_url` is retained alongside the existing source fields. See [download requirements](download-requirements.md) for the code meanings and shared REST/MCP plan. No wording-history table is added.
+
+## Controlled access schema 3 and public non-DICOM schema 9
+
+Controlled-access schema 3 stores raw manifest and spreadsheet JSON once in
+`manifest_rows.raw_json` and `metadata_rows.raw_json`. Resolve them through
+`controlled_files.manifest_row_id` and `metadata_row_id`; the duplicate
+`controlled_files.manifest_json` and `metadata_json` columns are removed.
+`radiology_series`, `idc_index`, `idc_ct_index`, `idc_pt_index`,
+`idc_contrast_index`, and `idc_series_links` are read-only SQL views with their
+previous column surfaces. `agent_controlled_files` retains its existing shape.
+Stable radiology IDs and Python-formatted size strings are stored as small
+projection inputs to preserve exact prior identifiers and rounding behavior.
+
+Public non-DICOM schema 9 reconstructs source URLs and redundant image metadata
+through the agent views. See `artifact-model.md`. Read-only consumers should use
+these views rather than querying storage tables for presentation or export.

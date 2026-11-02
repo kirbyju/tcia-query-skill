@@ -31,7 +31,7 @@ from pathlib import Path
 from typing import Any
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 CONTROLLED_ASSET = "controlled_access_metadata.sqlite.gz"
 CONTROLLED_MANIFEST_ASSET = "controlled_access_metadata_manifest.json"
 SKILL_ROOT = Path(__file__).resolve().parents[1]
@@ -53,6 +53,11 @@ USER_AGENT = "tcia-controlled-access-metadata/0.1"
 UID_RE = re.compile(r"^(?:[0-2])(?:\.\d+)+$")
 URL_RE = re.compile(r"https?://[^\s\"'<>]+")
 
+PROJECTION_NAMES = (
+    "radiology_series", "idc_index", "idc_ct_index", "idc_pt_index",
+    "idc_contrast_index", "idc_series_links",
+)
+
 REQUIRED_TABLES = [
     "controlled_meta",
     "controlled_downloads",
@@ -63,12 +68,6 @@ REQUIRED_TABLES = [
     "manifest_rows",
     "metadata_rows",
     "controlled_files",
-    "radiology_series",
-    "idc_index",
-    "idc_ct_index",
-    "idc_pt_index",
-    "idc_contrast_index",
-    "idc_series_links",
     "controlled_metadata_exceptions",
 ]
 REQUIRED_VIEWS = [
@@ -76,8 +75,9 @@ REQUIRED_VIEWS = [
     "agent_controlled_downloads",
     "agent_controlled_files",
     "agent_controlled_dataset_summary",
+    *PROJECTION_NAMES,
 ]
-COUNT_TABLES = [table for table in REQUIRED_TABLES if table != "controlled_meta"]
+COUNT_TABLES = [table for table in REQUIRED_TABLES if table != "controlled_meta"] + list(PROJECTION_NAMES)
 
 IDC_INDEX_COLUMNS = [
     "collection_id",
@@ -166,6 +166,145 @@ IDC_CONTRAST_COLUMNS = [
     "ContrastBolusRoute",
 ]
 
+
+CONTROLLED_PROJECTION_VIEWS = """
+CREATE VIEW IF NOT EXISTS radiology_series AS SELECT
+    radiology_id AS "radiology_id",
+    controlled_file_id AS "controlled_file_id",
+    short_title AS "short_title",
+    dataset_type AS "dataset_type",
+    download_id AS "download_id",
+    file_name AS "file_name",
+    COALESCE(NULLIF(patient_id, ''), participant_id) AS "subject_id",
+    '' AS "procedure_id",
+    study_instance_uid AS "study_id",
+    CASE WHEN COALESCE(study_instance_uid, '') <> '' THEN 'StudyInstanceUID' ELSE '' END AS "study_id_source",
+    series_instance_uid AS "series_id",
+    'SeriesInstanceUID' AS "series_id_source",
+    doi AS "source_doi",
+    COALESCE(NULLIF(modality, ''), image_modality) AS "modality",
+    body_part_examined AS "body_part_examined",
+    study_date AS "study_date",
+    series_date AS "series_date",
+    study_description AS "study_description",
+    series_description AS "series_description",
+    series_number AS "series_number",
+    manufacturer AS "manufacturer",
+    manufacturer_model_name AS "manufacturer_model_name",
+    software_versions AS "software_versions",
+    '' AS "image_type",
+    COALESCE(NULLIF(file_type, ''), study_data_type) AS "object_type",
+    '' AS "rows",
+    '' AS "columns",
+    image_count AS "number_of_slices",
+    '' AS "number_of_temporal_positions",
+    pixel_spacing_row_mm AS "pixel_spacing_row_mm",
+    pixel_spacing_col_mm AS "pixel_spacing_col_mm",
+    slice_thickness_mm AS "slice_thickness_mm",
+    '' AS "spacing_between_slices_mm",
+    '' AS "orientation_or_affine",
+    is_phantom AS "is_phantom",
+    CASE WHEN upper(COALESCE(file_type, '')) IN ('SEG','RTSTRUCT','SR') THEN 1 ELSE 0 END AS "is_derived_object",
+    quality_flag_json AS "quality_flag_json"
+FROM controlled_files WHERE COALESCE(trim(series_instance_uid), '') <> '';
+
+CREATE VIEW IF NOT EXISTS idc_index AS SELECT
+    CASE WHEN dataset_type = 'Analysis Result' THEN trim(COALESCE(source_collections,'')) ELSE short_title END AS "collection_id",
+    CASE WHEN dataset_type = 'Analysis Result' THEN short_title ELSE '' END AS "analysis_result_id",
+    COALESCE(NULLIF(patient_id, ''), participant_id) AS "PatientID",
+    series_instance_uid AS "SeriesInstanceUID",
+    study_instance_uid AS "StudyInstanceUID",
+    doi AS "source_DOI",
+    patient_age AS "PatientAge",
+    patient_sex AS "PatientSex",
+    study_date AS "StudyDate",
+    study_description AS "StudyDescription",
+    body_part_examined AS "BodyPartExamined",
+    COALESCE(NULLIF(modality, ''), image_modality) AS "Modality",
+    '' AS "SOPClassUID",
+    '' AS "sop_class_name",
+    '' AS "TransferSyntaxUID",
+    '' AS "transfer_syntax_name",
+    manufacturer AS "Manufacturer",
+    manufacturer_model_name AS "ManufacturerModelName",
+    series_date AS "SeriesDate",
+    series_description AS "SeriesDescription",
+    series_number AS "SeriesNumber",
+    image_count AS "instanceCount",
+    license_label AS "license_short_name",
+    '' AS "series_init_idc_version",
+    '' AS "series_revised_idc_version",
+    '' AS "aws_bucket",
+    '' AS "crdc_series_uuid",
+    '' AS "series_aws_url",
+    series_size_mb_text AS "series_size_MB"
+FROM controlled_files WHERE COALESCE(trim(series_instance_uid), '') <> '';
+
+CREATE VIEW IF NOT EXISTS idc_ct_index AS SELECT
+    series_instance_uid AS "SeriesInstanceUID",
+    '' AS "ImageType",
+    pixel_spacing_row_mm AS "PixelSpacing_row_mm",
+    pixel_spacing_col_mm AS "PixelSpacing_col_mm",
+    '' AS "Rows",
+    '' AS "Columns",
+    slice_thickness_mm AS "SliceThickness",
+    '' AS "KVP",
+    '' AS "ScanOptions",
+    '' AS "ConvolutionKernel",
+    '' AS "GantryDetectorTilt",
+    '' AS "XRayTubeCurrent_min",
+    '' AS "XRayTubeCurrent_max",
+    '' AS "FilterType",
+    '' AS "Exposure_min",
+    '' AS "Exposure_max",
+    '' AS "ExposureTime_min",
+    '' AS "ExposureTime_max",
+    '' AS "DataCollectionDiameter",
+    '' AS "ReconstructionDiameter",
+    '' AS "SpiralPitchFactor"
+FROM controlled_files WHERE COALESCE(trim(series_instance_uid), '') <> '' AND upper(COALESCE(NULLIF(modality, ''), image_modality)) = 'CT';
+
+CREATE VIEW IF NOT EXISTS idc_pt_index AS SELECT
+    series_instance_uid AS "SeriesInstanceUID",
+    '' AS "SeriesType",
+    '' AS "Units",
+    '' AS "DecayCorrection",
+    '' AS "CorrectedImage",
+    '' AS "RandomsCorrectionMethod",
+    '' AS "ReconstructionMethod",
+    '' AS "ActualFrameDuration",
+    '' AS "ScatterCorrectionMethod",
+    '' AS "AttenuationCorrectionMethod",
+    '' AS "RadionuclideCodeMeaning",
+    '' AS "RadionuclideTotalDose",
+    '' AS "RadiopharmaceuticalStartTime",
+    '' AS "Radiopharmaceutical",
+    pixel_spacing_row_mm AS "PixelSpacing_row_mm",
+    pixel_spacing_col_mm AS "PixelSpacing_col_mm",
+    '' AS "Rows",
+    '' AS "Columns",
+    slice_thickness_mm AS "SliceThickness",
+    image_count AS "NumberOfSlices",
+    '' AS "NumberOfTimeSlices"
+FROM controlled_files WHERE COALESCE(trim(series_instance_uid), '') <> '' AND upper(COALESCE(NULLIF(modality, ''), image_modality)) = 'PT';
+
+CREATE VIEW IF NOT EXISTS idc_contrast_index AS SELECT
+    '' AS "SeriesInstanceUID",
+    '' AS "ContrastBolusAgent",
+    '' AS "ContrastBolusIngredient",
+    '' AS "ContrastBolusRoute"
+FROM controlled_files WHERE 0;
+
+CREATE VIEW IF NOT EXISTS idc_series_links AS SELECT
+    controlled_file_id AS "controlled_file_id",
+    series_instance_uid AS "SeriesInstanceUID",
+    route_system AS "route_system",
+    short_title AS "short_title",
+    download_row_id AS "download_row_id",
+    drs_uri AS "drs_uri",
+    file_id AS "file_id"
+FROM controlled_files WHERE COALESCE(trim(series_instance_uid), '') <> '';
+"""
 
 SCHEMA_SQL = f"""
 CREATE TABLE IF NOT EXISTS controlled_meta (
@@ -378,8 +517,8 @@ CREATE TABLE IF NOT EXISTS controlled_files (
     slice_thickness_mm TEXT,
     source_manifest_url TEXT,
     source_metadata_url TEXT,
-    manifest_json TEXT,
-    metadata_json TEXT,
+    radiology_id TEXT NOT NULL,
+    series_size_mb_text TEXT NOT NULL,
     quality_flag_json TEXT,
     FOREIGN KEY (download_row_id) REFERENCES controlled_downloads(download_row_id),
     FOREIGN KEY (manifest_row_id) REFERENCES manifest_rows(manifest_row_id),
@@ -426,73 +565,7 @@ CREATE TABLE IF NOT EXISTS wordpress_search_filters (
     FOREIGN KEY (download_row_id) REFERENCES controlled_downloads(download_row_id)
 );
 
-CREATE TABLE IF NOT EXISTS radiology_series (
-    radiology_id TEXT PRIMARY KEY,
-    controlled_file_id TEXT NOT NULL,
-    short_title TEXT NOT NULL,
-    dataset_type TEXT NOT NULL,
-    download_id TEXT,
-    file_name TEXT,
-    subject_id TEXT,
-    procedure_id TEXT,
-    study_id TEXT,
-    study_id_source TEXT,
-    series_id TEXT,
-    series_id_source TEXT,
-    source_doi TEXT,
-    modality TEXT,
-    body_part_examined TEXT,
-    study_date TEXT,
-    series_date TEXT,
-    study_description TEXT,
-    series_description TEXT,
-    series_number TEXT,
-    manufacturer TEXT,
-    manufacturer_model_name TEXT,
-    software_versions TEXT,
-    image_type TEXT,
-    object_type TEXT,
-    rows TEXT,
-    columns TEXT,
-    number_of_slices TEXT,
-    number_of_temporal_positions TEXT,
-    pixel_spacing_row_mm TEXT,
-    pixel_spacing_col_mm TEXT,
-    slice_thickness_mm TEXT,
-    spacing_between_slices_mm TEXT,
-    orientation_or_affine TEXT,
-    is_phantom TEXT,
-    is_derived_object INTEGER NOT NULL DEFAULT 0,
-    quality_flag_json TEXT,
-    FOREIGN KEY (controlled_file_id) REFERENCES controlled_files(controlled_file_id)
-);
-
-CREATE TABLE IF NOT EXISTS idc_index (
-    {", ".join(f'"{column}" TEXT' for column in IDC_INDEX_COLUMNS)}
-);
-
-CREATE TABLE IF NOT EXISTS idc_ct_index (
-    {", ".join(f'"{column}" TEXT' for column in IDC_CT_COLUMNS)}
-);
-
-CREATE TABLE IF NOT EXISTS idc_pt_index (
-    {", ".join(f'"{column}" TEXT' for column in IDC_PT_COLUMNS)}
-);
-
-CREATE TABLE IF NOT EXISTS idc_contrast_index (
-    {", ".join(f'"{column}" TEXT' for column in IDC_CONTRAST_COLUMNS)}
-);
-
-CREATE TABLE IF NOT EXISTS idc_series_links (
-    controlled_file_id TEXT PRIMARY KEY,
-    SeriesInstanceUID TEXT,
-    route_system TEXT NOT NULL,
-    short_title TEXT NOT NULL,
-    download_row_id INTEGER NOT NULL,
-    drs_uri TEXT,
-    file_id TEXT,
-    FOREIGN KEY (controlled_file_id) REFERENCES controlled_files(controlled_file_id)
-);
+{CONTROLLED_PROJECTION_VIEWS}
 
 CREATE TABLE IF NOT EXISTS controlled_metadata_exceptions (
     exception_id TEXT PRIMARY KEY,
@@ -538,22 +611,6 @@ CREATE INDEX IF NOT EXISTS idx_wordpress_metadata_key
   ON wordpress_download_metadata(metadata_key);
 CREATE INDEX IF NOT EXISTS idx_wordpress_urls_role
   ON wordpress_download_urls(url_role);
-CREATE INDEX IF NOT EXISTS idx_radiology_series_series_id
-  ON radiology_series(series_id);
-CREATE INDEX IF NOT EXISTS idx_radiology_series_short_title
-  ON radiology_series(short_title);
-CREATE INDEX IF NOT EXISTS idx_radiology_series_modality
-  ON radiology_series(modality);
-CREATE INDEX IF NOT EXISTS idx_idc_index_series
-  ON idc_index(SeriesInstanceUID);
-CREATE INDEX IF NOT EXISTS idx_idc_ct_index_series
-  ON idc_ct_index(SeriesInstanceUID);
-CREATE INDEX IF NOT EXISTS idx_idc_pt_index_series
-  ON idc_pt_index(SeriesInstanceUID);
-CREATE INDEX IF NOT EXISTS idx_idc_contrast_index_series
-  ON idc_contrast_index(SeriesInstanceUID);
-CREATE INDEX IF NOT EXISTS idx_idc_links_series
-  ON idc_series_links(SeriesInstanceUID);
 
 CREATE VIEW IF NOT EXISTS controlled_dataset_summary AS
 SELECT
@@ -1829,8 +1886,7 @@ def merge_controlled_file(
         "slice_thickness_mm": clean_value((metadata or {}).get("slice_thickness_mm")) or first_value(manifest_payload, "Slice Thickness(mm)", "SliceThickness"),
         "source_manifest_url": manifest_url,
         "source_metadata_url": metadata_url,
-        "manifest_json": manifest_json,
-        "metadata_json": metadata_json,
+
         "quality_flag_json": "",
     }
 
@@ -1877,6 +1933,13 @@ def populate_controlled_files(conn: sqlite3.Connection) -> int:
 
 
 def insert_controlled_file(conn: sqlite3.Connection, row: dict[str, Any]) -> None:
+    row = dict(row)
+    row.pop("manifest_json", None)
+    row.pop("metadata_json", None)
+    row["radiology_id"] = safe_id("radiology", row["controlled_file_id"])
+    # Preserve Python rounding used by prior IDC-shaped artifacts. SQLite printf
+    # rounds halfway values differently, so store this small formatting result.
+    row["series_size_mb_text"] = mb_string(row.get("file_size_bytes"))
     columns = list(row.keys())
     conn.execute(
         f"""
@@ -1902,162 +1965,10 @@ def collection_or_analysis(row: dict[str, Any]) -> tuple[str, str]:
 
 
 def populate_normalized_indexes(conn: sqlite3.Connection) -> dict[str, int]:
-    rows = rows_as_dicts(conn, "SELECT * FROM controlled_files ORDER BY controlled_file_id")
-    for row in rows:
-        if not clean_value(row.get("series_instance_uid")):
-            continue
-        radiology = {
-            "radiology_id": safe_id("radiology", row["controlled_file_id"]),
-            "controlled_file_id": row["controlled_file_id"],
-            "short_title": row["short_title"],
-            "dataset_type": row["dataset_type"],
-            "download_id": row["download_id"],
-            "file_name": row["file_name"],
-            "subject_id": row["patient_id"] or row["participant_id"],
-            "procedure_id": "",
-            "study_id": row["study_instance_uid"],
-            "study_id_source": "StudyInstanceUID" if row["study_instance_uid"] else "",
-            "series_id": row["series_instance_uid"],
-            "series_id_source": "SeriesInstanceUID",
-            "source_doi": row["doi"],
-            "modality": row["modality"] or row["image_modality"],
-            "body_part_examined": row["body_part_examined"],
-            "study_date": row["study_date"],
-            "series_date": row["series_date"],
-            "study_description": row["study_description"],
-            "series_description": row["series_description"],
-            "series_number": row["series_number"],
-            "manufacturer": row["manufacturer"],
-            "manufacturer_model_name": row["manufacturer_model_name"],
-            "software_versions": row["software_versions"],
-            "image_type": "",
-            "object_type": row["file_type"] or row["study_data_type"],
-            "rows": "",
-            "columns": "",
-            "number_of_slices": row["image_count"],
-            "number_of_temporal_positions": "",
-            "pixel_spacing_row_mm": row["pixel_spacing_row_mm"],
-            "pixel_spacing_col_mm": row["pixel_spacing_col_mm"],
-            "slice_thickness_mm": row["slice_thickness_mm"],
-            "spacing_between_slices_mm": "",
-            "orientation_or_affine": "",
-            "is_phantom": row["is_phantom"],
-            "is_derived_object": 1 if (row["file_type"] or "").upper() in {"SEG", "RTSTRUCT", "SR"} else 0,
-            "quality_flag_json": row["quality_flag_json"],
-        }
-        conn.execute(
-            f"""
-            INSERT OR REPLACE INTO radiology_series
-            ({", ".join(radiology.keys())})
-            VALUES ({", ".join(":" + column for column in radiology)})
-            """,
-            radiology,
-        )
-
-        collection_id, analysis_result_id = collection_or_analysis(row)
-        idc_row = {
-            "collection_id": collection_id,
-            "analysis_result_id": analysis_result_id,
-            "PatientID": row["patient_id"] or row["participant_id"],
-            "SeriesInstanceUID": row["series_instance_uid"],
-            "StudyInstanceUID": row["study_instance_uid"],
-            "source_DOI": row["doi"],
-            "PatientAge": row["patient_age"],
-            "PatientSex": row["patient_sex"],
-            "StudyDate": row["study_date"],
-            "StudyDescription": row["study_description"],
-            "BodyPartExamined": row["body_part_examined"],
-            "Modality": row["modality"] or row["image_modality"],
-            "SOPClassUID": "",
-            "sop_class_name": "",
-            "TransferSyntaxUID": "",
-            "transfer_syntax_name": "",
-            "Manufacturer": row["manufacturer"],
-            "ManufacturerModelName": row["manufacturer_model_name"],
-            "SeriesDate": row["series_date"],
-            "SeriesDescription": row["series_description"],
-            "SeriesNumber": row["series_number"],
-            "instanceCount": row["image_count"],
-            "license_short_name": row["license_label"],
-            "series_init_idc_version": "",
-            "series_revised_idc_version": "",
-            "aws_bucket": "",
-            "crdc_series_uuid": "",
-            "series_aws_url": "",
-            "series_size_MB": mb_string(row["file_size_bytes"]),
-        }
-        conn.execute(
-            f"""
-            INSERT INTO idc_index
-            ({", ".join(IDC_INDEX_COLUMNS)})
-            VALUES ({", ".join(":" + column for column in IDC_INDEX_COLUMNS)})
-            """,
-            idc_row,
-        )
-        link = {
-            "controlled_file_id": row["controlled_file_id"],
-            "SeriesInstanceUID": row["series_instance_uid"],
-            "route_system": row["route_system"],
-            "short_title": row["short_title"],
-            "download_row_id": row["download_row_id"],
-            "drs_uri": row["drs_uri"],
-            "file_id": row["file_id"],
-        }
-        conn.execute(
-            """
-            INSERT OR REPLACE INTO idc_series_links
-            (controlled_file_id, SeriesInstanceUID, route_system, short_title,
-             download_row_id, drs_uri, file_id)
-            VALUES (:controlled_file_id, :SeriesInstanceUID, :route_system, :short_title,
-                    :download_row_id, :drs_uri, :file_id)
-            """,
-            link,
-        )
-        modality = (idc_row["Modality"] or "").upper()
-        if modality == "CT":
-            ct_row = {column: "" for column in IDC_CT_COLUMNS}
-            ct_row.update(
-                {
-                    "SeriesInstanceUID": row["series_instance_uid"],
-                    "PixelSpacing_row_mm": row["pixel_spacing_row_mm"],
-                    "PixelSpacing_col_mm": row["pixel_spacing_col_mm"],
-                    "SliceThickness": row["slice_thickness_mm"],
-                }
-            )
-            conn.execute(
-                f"""
-                INSERT INTO idc_ct_index
-                ({", ".join(IDC_CT_COLUMNS)})
-                VALUES ({", ".join(":" + column for column in IDC_CT_COLUMNS)})
-                """,
-                ct_row,
-            )
-        elif modality == "PT":
-            pt_row = {column: "" for column in IDC_PT_COLUMNS}
-            pt_row.update(
-                {
-                    "SeriesInstanceUID": row["series_instance_uid"],
-                    "PixelSpacing_row_mm": row["pixel_spacing_row_mm"],
-                    "PixelSpacing_col_mm": row["pixel_spacing_col_mm"],
-                    "SliceThickness": row["slice_thickness_mm"],
-                    "NumberOfSlices": row["image_count"],
-                }
-            )
-            conn.execute(
-                f"""
-                INSERT INTO idc_pt_index
-                ({", ".join(IDC_PT_COLUMNS)})
-                VALUES ({", ".join(":" + column for column in IDC_PT_COLUMNS)})
-                """,
-                pt_row,
-            )
-
-    return {
-        "radiology_series": conn.execute("SELECT COUNT(*) FROM radiology_series").fetchone()[0],
-        "idc_index": conn.execute("SELECT COUNT(*) FROM idc_index").fetchone()[0],
-        "idc_ct_index": conn.execute("SELECT COUNT(*) FROM idc_ct_index").fetchone()[0],
-        "idc_pt_index": conn.execute("SELECT COUNT(*) FROM idc_pt_index").fetchone()[0],
-    }
+    """Compatibility projections are views; their rows require no materialization."""
+    return {name: conn.execute(f'SELECT COUNT(*) FROM "{name}"').fetchone()[0]
+            for name in ("radiology_series", "idc_index", "idc_ct_index",
+                         "idc_pt_index", "idc_contrast_index", "idc_series_links")}
 
 
 def seed_exceptions(conn: sqlite3.Connection) -> int:

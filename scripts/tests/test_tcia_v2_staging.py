@@ -63,6 +63,7 @@ class V2StagingTests(unittest.TestCase):
         compact_split: bool = False,
         null_child_asset_id: bool = False,
         bundle_schema_version: int = 2,
+        public_schema_version: int = 8,
     ) -> Path:
         research, research_manifest = components["public_non_dicom_baseline"]
         research.unlink()
@@ -92,7 +93,7 @@ class V2StagingTests(unittest.TestCase):
             conn.commit()
         research_payload = json.loads(research_manifest.read_text())
         research_payload.update({
-            "schema_version": 8,
+            "schema_version": public_schema_version,
             "sqlite_sha256": staging.file_sha256(research),
             "gzip_sha256": hashlib.sha256(b"research-gzip").hexdigest(),
             "database_asset": "public_non_dicom_metadata.sqlite.gz",
@@ -233,6 +234,23 @@ class V2StagingTests(unittest.TestCase):
         bundle_path = research.parent / "baseline_bundle_manifest.json"
         bundle_path.write_text(json.dumps(bundle))
         return bundle_path
+
+    def test_schema_nine_public_baseline_retains_cross_component_checks(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            components = {name: self.create_component(root, name) for name in staging.COMPONENT_ORDER}
+            pin = self.create_legacy_public_cross_component_pair(
+                components, compact_split=True, omit_cross_component_fk=True,
+                bundle_schema_version=3, public_schema_version=9,
+            )
+            with sqlite3.connect(components["public_non_dicom_audit_baseline"][0]) as conn:
+                checked = staging.validate_component_foreign_keys(
+                    "public_non_dicom_audit_baseline", conn, components,
+                    baseline_bundle_manifest_path=pin,
+                )
+                self.assertEqual(checked[0]["matched_rows"], 1)
+                self.assertEqual(checked[0]["orphan_rows"], 0)
+                self.assertEqual(checked[0]["coherence_mismatches"], 0)
 
     def test_build_validate_and_resolve_runner_local_staging_ledger(self):
         with tempfile.TemporaryDirectory() as directory:

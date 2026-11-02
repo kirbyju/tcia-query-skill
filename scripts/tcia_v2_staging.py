@@ -40,6 +40,7 @@ CROSS_COMPONENT_FOREIGN_KEYS = {
             "parent_database_asset": "public_non_dicom_metadata.sqlite.gz",
             "parent_profile": "research_detail",
             "parent_schema_version": 8,
+            "parent_schema_versions": (8, 9),
             "parent_declared_type": "TEXT",
             "coherence_column": "short_title",
         },
@@ -264,7 +265,9 @@ def validate_component_foreign_keys(
             parent_bundle_component=parent_bundle_component,
             parent_database_asset=str(contract["parent_database_asset"]),
             parent_profile=str(contract["parent_profile"]),
-            parent_schema_version=int(contract["parent_schema_version"]),
+            parent_schema_version=tuple(contract.get(
+                "parent_schema_versions", (contract["parent_schema_version"],)
+            )),
         )
         parent_digest = file_sha256(parent_database)
         if parent_digest != str(parent_manifest.get("sqlite_sha256") or ""):
@@ -525,7 +528,7 @@ def validate_cross_component_bundle_pin(
     parent_bundle_component: str,
     parent_database_asset: str,
     parent_profile: str,
-    parent_schema_version: int,
+    parent_schema_version: int | tuple[int, ...],
 ) -> str:
     """Bind a split component pair to one self-fingerprinted bundle manifest."""
     if path is None or not path.is_file():
@@ -579,7 +582,8 @@ def validate_cross_component_bundle_pin(
             raise RuntimeError(
                 f"cross-component {role} manifest does not match pinned bundle component"
             )
-        if manifest.get("schema_version") != schema_version:
+        supported_versions = schema_version if isinstance(schema_version, tuple) else (schema_version,)
+        if manifest.get("schema_version") not in supported_versions:
             raise RuntimeError(f"cross-component {role} schema version mismatch")
         if (
             manifest.get("database_asset") != database_asset
