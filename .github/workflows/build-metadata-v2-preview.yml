@@ -60,7 +60,12 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Install pinned producer dependencies
-        run: python -m pip install --require-hashes --requirement requirements-build.lock
+        run: |
+          set -euo pipefail
+          python -m pip install --require-hashes --requirement requirements-build.lock
+          # No later step installs packages. Reclaim the hosted runner's wheel cache
+          # before downloading and expanding the multi-gigabyte SQLite baselines.
+          python -m pip cache purge
 
       - name: Download validated V2 source inputs from the triggering run
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
@@ -207,12 +212,46 @@ jobs:
             > cache/public_non_dicom_audit_baseline.sqlite
           gzip -dc dist/participant_inventory.sqlite.gz \
             > cache/participant_inventory_baseline.sqlite
+          # These are verified prior-release inputs, not outputs of this build.
+          # Their decompressed copies are now authoritative for the remaining
+          # baseline comparisons, and all three gzip paths are regenerated before
+          # bundle publication. Keep the top manifest for the staging contract.
+          rm -f \
+            dist/public_non_dicom_metadata.sqlite.gz \
+            dist/public_non_dicom_audit.sqlite.gz \
+            dist/participant_inventory.sqlite.gz
           jq '.components.public_non_dicom' \
             dist/tcia_metadata_v2_bundle_manifest.json \
             > cache/public_non_dicom_baseline_manifest.json
           jq '.components.public_non_dicom_audit' \
             dist/tcia_metadata_v2_bundle_manifest.json \
             > cache/public_non_dicom_audit_baseline_manifest.json
+
+      - name: Check runner storage before unified assembly
+        if: steps.selective.outputs.mode != 'fast'
+        run: |
+          set -euo pipefail
+          df -h "$GITHUB_WORKSPACE"
+          du -sh cache dist
+          research_bytes="$(stat -c '%s' cache/public_non_dicom_baseline.sqlite)"
+          audit_bytes="$(stat -c '%s' cache/public_non_dicom_audit_baseline.sqlite)"
+          available_kib="$(df -Pk "$GITHUB_WORKSPACE" | awk 'END {print $4}')"
+          # Assembly starts as a research copy and restores the audit payload while
+          # SQLite uses file-backed temporary storage. Require the two input sizes
+          # plus 2 GiB of working headroom so capacity failures are explicit and
+          # diagnostic instead of corrupting runner logs mid-step.
+          required_kib="$(( (research_bytes + audit_bytes + 2147483648 + 1023) / 1024 ))"
+          {
+            echo "### Runner storage before unified assembly"
+            echo "- Available: ${available_kib} KiB"
+            echo "- Required preflight: ${required_kib} KiB"
+            echo "- Research baseline: ${research_bytes} bytes"
+            echo "- Audit baseline: ${audit_bytes} bytes"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$available_kib" -lt "$required_kib" ]; then
+            echo "::error title=Insufficient runner storage::Available ${available_kib} KiB; assembly preflight requires ${required_kib} KiB."
+            exit 1
+          fi
 
       - name: Materialize the lossless unified V2 assembly and checkpoint
         if: steps.selective.outputs.mode != 'fast'

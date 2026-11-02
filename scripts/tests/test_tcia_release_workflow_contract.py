@@ -230,6 +230,56 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
             block = downstream[downstream.index(marker):]
             self.assertIn("if: steps.selective.outputs.mode != 'fast'", block[:300])
 
+    def test_full_build_reclaims_only_verified_replaceable_baseline_archives(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        install_start = workflow.index("Install pinned producer dependencies")
+        source_download = workflow.index(
+            "Download validated V2 source inputs from the triggering run"
+        )
+        install_block = workflow[install_start:source_download]
+        self.assertIn("python -m pip cache purge", install_block)
+
+        baseline_start = workflow.index(
+            "Capture and validate the unified V2 build baseline"
+        )
+        storage_start = workflow.index(
+            "Check runner storage before unified assembly"
+        )
+        materialize_start = workflow.index(
+            "Materialize the lossless unified V2 assembly and checkpoint"
+        )
+        baseline_block = workflow[baseline_start:storage_start]
+        self.assertLess(
+            baseline_block.index("validate-selection"),
+            baseline_block.index("gzip -dc dist/public_non_dicom_metadata.sqlite.gz"),
+        )
+        self.assertLess(
+            baseline_block.index("gzip -dc dist/participant_inventory.sqlite.gz"),
+            baseline_block.index("rm -f"),
+        )
+        for archive in (
+            "dist/public_non_dicom_metadata.sqlite.gz",
+            "dist/public_non_dicom_audit.sqlite.gz",
+            "dist/participant_inventory.sqlite.gz",
+        ):
+            self.assertEqual(baseline_block.count(archive), 2)
+        cleanup = baseline_block[
+            baseline_block.index("rm -f"):
+            baseline_block.index("jq '.components.public_non_dicom'")
+        ]
+        self.assertNotIn("dist/tcia_snapshot.sqlite.gz", cleanup)
+        self.assertNotIn("dist/clinical_metadata.sqlite.gz", cleanup)
+        self.assertNotIn("dist/controlled_access_metadata.sqlite.gz", cleanup)
+        self.assertNotIn("dist/tcia_correction_registry.sqlite.gz", cleanup)
+        self.assertNotIn("dist/tcia_metadata_v2_bundle_manifest.json", cleanup)
+
+        storage_block = workflow[storage_start:materialize_start]
+        self.assertIn('df -h "$GITHUB_WORKSPACE"', storage_block)
+        self.assertIn("research_bytes=", storage_block)
+        self.assertIn("audit_bytes=", storage_block)
+        self.assertIn("required_kib=", storage_block)
+        self.assertIn("Insufficient runner storage", storage_block)
+
     def test_workflow_run_uses_one_triggering_producer_sha_everywhere(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
         self.assertIn(
