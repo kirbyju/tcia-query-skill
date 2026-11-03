@@ -112,6 +112,26 @@ Unknown REST search fields are rejected. See [clinical guidance](../references/c
 Server 0.7.0 uses the existing clinical artifacts: update source and restart both
 services; no artifact rebuild is required.
 
+## Controlled-file transfer sizes
+
+Server 0.7.1 separates reported inventory sizes from exact archive payload sizes
+on MCP `get_controlled_access_files` and REST controlled-file responses:
+
+- `file_size_bytes` preserves the reported inventory value; `file_size_basis`
+  identifies `series_metadata`, `manifest_exact`, `manifest_rounded`, or `unknown`.
+- `download_size_bytes` is populated only from an explicit integer byte count in
+  the file's matching manifest row. A rounded label such as `24.39 MB` is never
+  an exact transfer-size assertion.
+- `download_size_label` retains the short manifest size label for display.
+- `checksum` and `checksum_algorithm` retain available payload-manifest hashes.
+
+DICOM series metadata can describe uncompressed content, whereas the authorized
+file is a compressed ZIP. Clients must not use that series size to validate the
+ZIP byte count. Unknown exact sizes remain null; transfer engines still validate
+response Content-Length and supplied checksums. No credentials or signed URLs
+are obtained by this projection. It uses existing manifest/metadata provenance,
+so a source update and service restart are sufficient; no bundle rebuild is needed.
+
 ## Public Contract
 
 - `search_datasets` is intentionally compact. Use `get_dataset` for narrative

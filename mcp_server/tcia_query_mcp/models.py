@@ -398,7 +398,12 @@ class ControlledFile(PublicModel):
     file_name: str | None = None
     file_type: str | None = None
     file_format: str | None = None
-    file_size_bytes: int | None = None
+    file_size_bytes: int | None = Field(default=None, description="Reported inventory size; may describe uncompressed DICOM series rather than ZIP payload bytes.")
+    file_size_basis: Literal["series_metadata", "manifest_exact", "manifest_rounded", "unknown"] = "unknown"
+    download_size_bytes: int | None = Field(default=None, ge=0, description="Exact manifest payload byte count only; null when unknown or rounded.")
+    download_size_label: str | None = Field(default=None, description="Published manifest size label for display; may be rounded.")
+    checksum: str | None = None
+    checksum_algorithm: str | None = None
     study_name: str | None = None
     study_accession: str | None = None
     participant_id: str | None = None
