@@ -675,8 +675,9 @@ def get_controlled_access_files(
 ) -> ControlledFilesResponse:
     """Query public file-grain metadata for controlled-access downloads.
 
-    This returns metadata only. It does not grant authorization and must not be used to directly
-    download controlled files.
+    file_size_bytes is reported inventory/series metadata, not necessarily ZIP payload bytes.
+    Use nullable download_size_bytes for exact payload assertions; download_size_label can be rounded.
+    This returns metadata only. It does not grant authorization or retrieve controlled files.
     """
 
     return service().get_controlled_access_files(

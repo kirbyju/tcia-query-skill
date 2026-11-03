@@ -131,3 +131,18 @@ Do not treat `idc_index` rows in this SQLite as open IDC availability. They are 
 - NCTN trials or Biobank data: use WordPress license metadata and current TCIA access statements. Biobank controlled-access face data are now available in CTDC through the relevant WordPress manifests/links and require dbGaP study `phs002192`; for other controlled datasets, do not invent CTDC routing unless WordPress identifies it. Use the controlled-access SQLite when WordPress identifies a controlled download route and file-grain public metadata are needed.
 - Public subsets of a mixed collection can be described separately from controlled/restricted subsets. For mixed datasets, use `agent_dataset_access_summary` to identify controlled download titles, licenses, IDs, and URLs before answering.
 - Web-only agents that cannot query SQLite may decompress and filter `agent_datasets.jsonl.gz` from the latest release for `resolved_access_level` values such as `controlled` and `mixed`. If the host cannot decompress gzip, use MCP; do not switch to live API lookup.
+
+## Reported size versus transfer size
+
+The controlled artifact's `file_size_bytes` can originate in DICOM series metadata
+and describe uncompressed content. It is not automatically the byte length of the
+ZIP referenced by `drs_uri`. Manifest labels such as `19.71 KB` are rounded and can
+also use a different unit base; do not turn them into exact validation assertions.
+
+MCP/REST controlled-file responses expose `file_size_basis`, `download_size_bytes`
+(exact manifest bytes only), `download_size_label`, and available manifest payload
+checksums. Retain the reported size for description and use only explicit payload
+byte counts for transfer validation. A null payload size means unknown, not zero.
+Do not disable checksum or response-length validation to accommodate a series/ZIP
+size difference. This projection uses existing artifact provenance and does not
+require authorization or retrieve controlled data.

@@ -601,6 +601,11 @@ def compact_controlled_file(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]
         "file_type": data.get("file_type"),
         "file_format": data.get("file_format"),
         "file_size_bytes": data.get("file_size_bytes"),
+        "file_size_basis": data.get("file_size_basis", "unknown"),
+        "download_size_bytes": data.get("download_size_bytes"),
+        "download_size_label": data.get("download_size_label"),
+        "checksum": data.get("checksum"),
+        "checksum_algorithm": data.get("checksum_algorithm"),
         "study_name": data.get("study_name"),
         "study_accession": data.get("study_accession"),
         "participant_id": data.get("participant_id"),
@@ -2421,8 +2426,14 @@ class TciaQueryService:
         sql += " ORDER BY route_system, participant_id, patient_id, series_instance_uid, file_name LIMIT ?"
         params.append(limit)
 
+        from .controlled_transfer import add_transfer_sizes
         with self._connect_controlled() as conn:
-            rows = [compact_controlled_file(row) for row in conn.execute(sql, params).fetchall()]
+            source_rows = [dict(row) for row in conn.execute(sql, params).fetchall()]
+            try:
+                add_transfer_sizes(conn, source_rows)
+            except (sqlite3.Error, ValueError):
+                raise ServiceUnavailableError("Controlled transfer-size provenance is unavailable or inconsistent") from None
+            rows = [compact_controlled_file(row) for row in source_rows]
         return {
             "short_title": short_title,
             "files": rows,
