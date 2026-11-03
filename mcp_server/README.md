@@ -63,7 +63,7 @@ Optional detail tools:
 - `get_clinical_facts`
 - `get_clinical_conflicts`
 
-The default public MCP surface contains these 25 supported tools. NIfTI,
+The default public MCP surface contains these 27 supported tools. NIfTI,
 pathology, and other public non-DICOM discovery uses
 `find_public_non_dicom_assets`. Set `requires_annotations=true` to select
 non-DICOM `segmentation`, `annotation`, and `annotation_snapshot` roles. This
@@ -86,6 +86,31 @@ DICOM series relationships remain an IDC/idc-index concern. Retired specialized
 NIfTI and pathology tools are not available on the MCP surface. Their retired
 standalone REST paths remain under `/v1/` only as stable `410 Gone` migration
 responses; use `/v2/public-non-dicom/assets`.
+
+## Combined participant criteria
+
+`search_participants` and `POST /v2/participants/search` accept `diagnosis`,
+`primary_site`, and `include_inferred` alongside imaging filters:
+
+```json
+{"short_titles":["CMB-LCA","NSCLC-Radiomics"],"modalities":["CT"],"diagnosis":"Carcinoma","primary_site":"Lung","include_inferred":true,"limit":25}
+```
+
+Criteria combine with AND before paging. Text is a literal case-insensitive
+substring (1–200 nonblank characters), without synonym expansion. Disease site
+is distinct from scan anatomy. Clinical filtering supports Collections; `both`
+returns Collections and an explicit Analysis Result request is invalid.
+`include_inferred=false` requires patient-level source evidence and a false
+inference flag for every selected clinical field; alone, it requests any
+patient-level clinical evidence. The default allows supported inferred labels.
+
+`clinical_query` echoes the criteria, matching mode, Collection scope and snapshot.
+Each `clinical_match` includes labels, separate inference flags, diagnosis/site
+evidence scopes and whether any patient-level clinical evidence exists.
+Missing clinical metadata returns 503. Cursors bind all three source components.
+Unknown REST search fields are rejected. See [clinical guidance](../references/clinical.md).
+Server 0.7.0 uses the existing clinical artifacts: update source and restart both
+services; no artifact rebuild is required.
 
 ## Public Contract
 

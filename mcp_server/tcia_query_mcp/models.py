@@ -165,7 +165,28 @@ class Download(PublicModel):
     metadata_artifact_kind: str | None = None
 
 
+class ParticipantClinicalMatch(PublicModel):
+    has_patient_level_clinical_evidence: bool
+    subject_id: str
+    primary_diagnosis: str | None = None
+    primary_site: str | None = None
+    primary_diagnosis_is_inferred: bool | None = None
+    primary_site_is_inferred: bool | None = None
+    diagnosis_evidence_scope: str | None = None
+    site_evidence_scope: str | None = None
+
+
+class ParticipantClinicalQuery(PublicModel):
+    diagnosis: str | None = None
+    primary_site: str | None = None
+    include_inferred: bool
+    match_mode: Literal["case_insensitive_substring"]
+    dataset_scope: Literal["Collection"]
+    metadata_snapshot: str
+
+
 class Participant(PublicModel):
+    clinical_match: ParticipantClinicalMatch | None = None
     participant_key: str
     dataset_type: str
     short_title: str
@@ -619,6 +640,7 @@ class DownloadPlanResponse(PublicModel):
 
 
 class ParticipantsResponse(PageResponse):
+    clinical_query: ParticipantClinicalQuery | None = None
     participants: list[Participant]
     identity_scope: str
     public_dicom_detail_route: str

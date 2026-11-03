@@ -274,6 +274,9 @@ def get_participant_summary(
 @guard
 def search_participants(
     query: str | None = None,
+    diagnosis: str | None = None,
+    primary_site: str | None = None,
+    include_inferred: bool = True,
     short_titles: list[str] | None = None,
     dataset_type: str = "both",
     access_levels: list[str] | None = None,
@@ -285,9 +288,18 @@ def search_participants(
     cursor: str | None = None,
     limit: int = 25,
 ) -> ParticipantsResponse:
-    """Search participants by access, Data Category, Data Type, File Format, or geometry."""
+    """Search participant imaging availability AND clinical diagnosis/primary-site text.
+
+    Clinical text uses literal case-insensitive substrings within the same Collection
+    subject. include_inferred=False requires patient-level evidence and recorded
+    selected values; default True allows inferred labels. Filters apply before
+    paging. Clinical matches retain values, inference flags and evidence scope.
+    Missing clinical metadata is an error. This tool never downloads images."""
     return service().search_participants(
         query=query,
+        diagnosis=diagnosis,
+        primary_site=primary_site,
+        include_inferred=include_inferred,
         short_titles=short_titles,
         dataset_type=dataset_type,
         access_levels=access_levels,
