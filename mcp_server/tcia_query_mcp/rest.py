@@ -10,7 +10,7 @@ from fastapi import FastAPI, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictBool
 
 from . import __version__
 from .models import (
@@ -87,7 +87,10 @@ class ParticipantSummaryRequest(BaseModel):
     dataset_type: str = "both"
 
 
-class SearchParticipantsRequest(BaseModel):
+class SearchParticipantsRequest(PublicModel):
+    diagnosis: str | None = Field(default=None, min_length=1, max_length=200)
+    primary_site: str | None = Field(default=None, min_length=1, max_length=200)
+    include_inferred: StrictBool = True
     query: str | None = None
     short_titles: list[str] | None = None
     dataset_type: str = "both"

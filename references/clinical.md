@@ -5,6 +5,30 @@ diagnoses, outcomes, treatment-response labels, collection-specific source
 tables, and sparse DICOM fallback fields. Confirm TCIA provenance and access in
 the base snapshot first.
 
+## Combined imaging and clinical search
+
+Use MCP `search_participants` or REST `POST /v2/participants/search` with
+`modalities`, `diagnosis`, and `primary_site` to select a cohort in one query.
+All supplied criteria must match before pagination. Clinical text uses literal,
+case-insensitive substring matching on resolved primary diagnosis and disease
+site; it does not expand synonyms or match scan anatomy. Clinical filters support
+Collections only; `dataset_type="both"` intersects with Collections. Joins use
+exact, case-sensitive subject IDs within a dataset, without guessed crosswalks.
+
+By default `include_inferred=true` allows supported dataset-derived labels.
+`false` requires patient or patient-inherited evidence and non-inferred values
+for each selected clinical field; unknown flags do not qualify. With no text
+criteria, `false` selects participants with any patient-level clinical evidence.
+Unselected fields can still be inferred and remain explicitly flagged.
+
+The response retains `clinical_query` (criteria, matching mode, scope and snapshot)
+and each participant's `clinical_match` (labels, field-level inference flags and
+evidence scopes). Use clinical subject/fact/conflict tools for full source detail.
+Clinical searches need the existing clinical component; unavailable metadata
+raises an error rather than implying zero matches. Cursors bind the base,
+participant and clinical generations. This source-only server update needs no
+artifact rebuild or schema migration.
+
 ## Answering participant-level questions
 
 Clinical aggregates and participant summaries in these artifacts are a derived

@@ -3197,8 +3197,12 @@ class TciaQueryService:
 
     def search_participants(self, **filters: Any) -> dict[str, Any]:
         """Search canonical dataset-scoped participants from the V2 research core."""
+        from .participant_clinical import ClinicalParticipantSearch
+        clinical = ClinicalParticipantSearch(self, filters)
         limit = coerce_limit(filters.get("limit"), default=25, maximum=500)
         cursor_filters = self._cursor_filters(filters, "participant_inventory.sqlite.gz")
+        if clinical.active:
+            cursor_filters["_clinical_components"] = clinical.identities
         offset = decode_cursor(filters.get("cursor"), cursor_filters)
         query = str(filters.get("query") or "").strip().lower()
         short_titles = [item.lower() for item in as_list(filters.get("short_titles"))]
@@ -3213,6 +3217,7 @@ class TciaQueryService:
         access_levels = [item.lower() for item in as_list(filters.get("access_levels"))]
         visible = self._visible_dataset_keys()
         with self._connect_participants() as conn:
+            clinical.attach(conn)
             if all(
                 self._object_exists(conn, name)
                 for name in ("participants", "participant_identifiers", "participant_assets")
@@ -3229,6 +3234,7 @@ class TciaQueryService:
                     geometry_statuses=geometry_statuses,
                     access_levels=access_levels,
                     visible_keys=visible,
+                    clinical=clinical,
                     limit=limit + 1,
                     offset=offset,
                 )
@@ -3236,17 +3242,19 @@ class TciaQueryService:
                     normalize_v2_row(row)
                     for row in self._participant_summary_rows(conn, keys)
                 ]
+                clinical.finish(conn, rows, visible)
                 result = page_envelope(
                     "participants", rows, limit=limit, offset=offset,
                     cursor_filters=cursor_filters,
                 )
                 result.update({
+                    "clinical_query": clinical.query,
                     "identity_scope": "Dataset-scoped; Collections and Analysis Results remain distinct.",
                     "public_dicom_detail_route": "IDC/idc-index",
                 })
                 return result
-            sql = "SELECT * FROM agent_participant_search WHERE 1 = 1"
-            params: list[Any] = []
+            sql = clinical.cte + "SELECT * FROM agent_participant_search WHERE " + clinical.predicate("agent_participant_search")
+            params: list[Any] = list(clinical.params)
             visible_sql, visible_params = self._visible_pair_sql(visible)
             sql += " AND " + visible_sql
             params.extend(visible_params)
@@ -3298,10 +3306,12 @@ class TciaQueryService:
             )
             params.extend([limit + 1, offset])
             rows = [normalize_v2_row(row) for row in conn.execute(sql, params).fetchall()]
+            clinical.finish(conn, rows, visible)
         result = page_envelope(
             "participants", rows, limit=limit, offset=offset, cursor_filters=cursor_filters
         )
         result.update({
+            "clinical_query": clinical.query,
             "identity_scope": "Dataset-scoped; Collections and Analysis Results remain distinct.",
             "public_dicom_detail_route": "IDC/idc-index",
         })
@@ -3321,6 +3331,7 @@ class TciaQueryService:
         geometry_statuses: list[str],
         access_levels: list[str],
         visible_keys: set[tuple[str, str]],
+        clinical: Any = None,
         limit: int,
         offset: int,
     ) -> list[str]:
@@ -3329,8 +3340,10 @@ class TciaQueryService:
             match_sql: str, match_params: list[Any], *, page_offset: int = offset,
             page_limit: int = limit,
         ) -> list[str]:
-            params = list(match_params)
-            sql = f"SELECT p.participant_key FROM participants p {match_sql} WHERE 1 = 1"
+            params = list(clinical.params if clinical else []) + list(match_params)
+            sql = (clinical.cte if clinical else "") + f"SELECT p.participant_key FROM participants p {match_sql} WHERE 1 = 1"
+            if clinical:
+                sql += " AND " + clinical.predicate("p")
             visible_sql, visible_params = self._visible_pair_sql(visible_keys, alias="p")
             sql += " AND " + visible_sql
             params.extend(visible_params)
