@@ -33,6 +33,20 @@ the dataset, route, role, status, byte count, and elapsed time without printing
 the source URL. A timeout, oversize response, or partial transfer is recorded as
 a source error and remains blocked by `--require-complete-sources`.
 
+The source workflow reconciles every PathDB collection label with current
+WordPress identity immediately after snapshot validation. One exact visible
+identity is accepted. One exact hidden identity is treated as intentionally
+staged: the preflight emits a warning with the WordPress record ID, DOI,
+visibility, and affected PathDB row count, and downstream public non-DICOM and
+Participant Inventory builders exclude those rows without blocking unrelated
+updates. A missing or ambiguous WordPress identity remains a hard failure. The
+JSON report is retained in both diagnostics and validated source-input
+artifacts as `pathdb_wordpress_identity_preflight.json`.
+
+This staged-hidden path is not a publication waiver. Raw source observations
+remain preserved in the snapshot, while release-facing derived artifacts accept
+PathDB rows only after WordPress makes the uniquely matched dataset visible.
+
 ### Hosted runner storage
 
 The full downstream build validates the preceding immutable release before it

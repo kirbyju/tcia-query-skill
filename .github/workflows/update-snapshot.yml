@@ -123,6 +123,27 @@ jobs:
             --db dist/tcia_snapshot.sqlite \
             --exports-dir dist
 
+      - name: Reconcile PathDB rows with WordPress publication identity
+        run: |
+          python scripts/tcia_public_non_dicom_metadata.py \
+            preflight-pathdb-identities \
+            --snapshot-db dist/tcia_snapshot.sqlite \
+            --out dist/pathdb_wordpress_identity_preflight.json \
+            --github-actions
+          {
+            echo "### PathDB and WordPress identity preflight"
+            jq -r '
+              "- Status: " + .status,
+              "- Visible accepted collections/rows: " +
+                (.counts.accepted_visible_collections|tostring) + "/" +
+                (.counts.accepted_visible_rows|tostring),
+              "- Staged hidden collections/rows excluded: " +
+                (.counts.staged_hidden_collections|tostring) + "/" +
+                (.counts.staged_hidden_rows|tostring),
+              "- Identity errors: " + (.counts.error_collections|tostring)
+            ' dist/pathdb_wordpress_identity_preflight.json
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Plan selective component release
         id: selective
         run: |
@@ -497,6 +518,7 @@ jobs:
             dist/metadata_change_report.md
             dist/metadata_change_report.json
             dist/tcia_selective_release_plan.json
+            dist/pathdb_wordpress_identity_preflight.json
             dist/tcia_correction_registry_bootstrap_evidence.json
             dist/tcia_correction_registry_validation.json
           if-no-files-found: error
@@ -518,6 +540,7 @@ jobs:
             dist/tcia_correction_registry.sqlite.gz
             dist/tcia_correction_registry_manifest.json
             dist/tcia_selective_release_plan.json
+            dist/pathdb_wordpress_identity_preflight.json
             dist/metadata_change_report.md
             dist/metadata_change_report.json
           compression-level: 0

@@ -4430,32 +4430,58 @@ def pathdb_subject_ids(
     return raw_subject_ids, resolved_subject_ids, "source_identifier"
 
 
-def pathdb_dataset_identity(
-    source: sqlite3.Connection, raw_collection: object
-) -> tuple[str, str, dict[str, str]]:
-    """Resolve a PathDB label to one current visible WordPress dataset identity."""
+def pathdb_dataset_identity_resolution(
+    source: sqlite3.Connection,
+    raw_collection: object,
+    *,
+    pathdb_row_count: int | None = None,
+) -> dict[str, Any]:
+    """Reconcile one PathDB label with current WordPress publication identity."""
     raw = str(raw_collection or "").strip()
     override = PATHDB_COLLECTION_IDENTITY_OVERRIDES.get(raw)
     candidate = str((override or {}).get("short_title") or raw)
     dataset_columns = {
         str(row[1]) for row in source.execute("PRAGMA table_info(agent_datasets)")
     }
-    hidden_clause = "AND COALESCE(hidden, 0) = 0" if "hidden" in dataset_columns else ""
+    record_id = "id" if "id" in dataset_columns else "NULL"
+    doi = "doi" if "doi" in dataset_columns else "''"
+    hidden = "COALESCE(hidden, 0)" if "hidden" in dataset_columns else "0"
     rows = source.execute(
-        "SELECT DISTINCT dataset_type, short_title FROM agent_datasets "
-        "WHERE lower(trim(short_title)) = lower(trim(?)) " + hidden_clause,
+        "SELECT DISTINCT dataset_type, short_title, "
+        f"{record_id} AS record_id, {doi} AS doi, {hidden} AS hidden "
+        "FROM agent_datasets WHERE lower(trim(short_title)) = lower(trim(?))",
         (candidate,),
     ).fetchall()
-    if len(rows) != 1:
-        raise RuntimeError(
-            "PathDB collection has no unique current visible TCIA WordPress identity: "
-            f"raw_collection={raw!r}, candidate={candidate!r}, matches={len(rows)}"
-        )
-    dataset_type = str(rows[0]["dataset_type"] or "").strip()
-    short_title = str(rows[0]["short_title"] or "").strip()
-    resolution = {
+    visible_rows = [row for row in rows if not int(row["hidden"] or 0)]
+    if len(visible_rows) == 1:
+        status = "accepted_visible"
+        selected_row = visible_rows[0]
+    elif not visible_rows and len(rows) == 1 and int(rows[0]["hidden"] or 0):
+        status = "staged_hidden"
+        selected_row = rows[0]
+    else:
+        status = "missing" if not rows else "ambiguous"
+        selected_row = None
+
+    matches = [
+        {
+            "record_id": row["record_id"],
+            "dataset_type": str(row["dataset_type"] or "").strip(),
+            "short_title": str(row["short_title"] or "").strip(),
+            "doi": str(row["doi"] or "").strip(),
+            "hidden": bool(row["hidden"]),
+            "visibility": "hidden" if row["hidden"] else "visible",
+        }
+        for row in rows
+    ]
+    resolution: dict[str, Any] = {
         "raw_pathdb_collection": raw,
-        "canonical_tcia_short_title": short_title,
+        "candidate_short_title": candidate,
+        "pathdb_row_count": pathdb_row_count,
+        "status": status,
+        "wordpress_match_count": len(rows),
+        "visible_match_count": len(visible_rows),
+        "wordpress_matches": matches,
         "identity_resolution_method": (
             "reviewed_pathdb_collection_alias" if override else "exact_wordpress_short_title"
         ),
@@ -4463,7 +4489,152 @@ def pathdb_dataset_identity(
             (override or {}).get("evidence") or "Exact current short-title match."
         ),
     }
-    return dataset_type, short_title, resolution
+    if selected_row is not None:
+        resolution.update(
+            {
+                "record_id": selected_row["record_id"],
+                "dataset_type": str(selected_row["dataset_type"] or "").strip(),
+                "canonical_tcia_short_title": str(
+                    selected_row["short_title"] or ""
+                ).strip(),
+                "doi": str(selected_row["doi"] or "").strip(),
+                "hidden": bool(selected_row["hidden"]),
+                "visibility": "hidden" if selected_row["hidden"] else "visible",
+            }
+        )
+    return resolution
+
+
+def pathdb_identity_error(resolution: dict[str, Any]) -> RuntimeError:
+    return RuntimeError(
+        "PathDB collection has no unique current visible or staged-hidden TCIA "
+        "WordPress identity: "
+        f"raw_collection={resolution['raw_pathdb_collection']!r}, "
+        f"candidate={resolution['candidate_short_title']!r}, "
+        f"status={resolution['status']!r}, "
+        f"matches={resolution['wordpress_match_count']}, "
+        f"visible_matches={resolution['visible_match_count']}"
+    )
+
+
+def pathdb_dataset_identity(
+    source: sqlite3.Connection, raw_collection: object
+) -> tuple[str, str, dict[str, Any]]:
+    """Resolve a PathDB label to one current visible WordPress dataset identity."""
+    resolution = pathdb_dataset_identity_resolution(source, raw_collection)
+    if resolution["status"] != "accepted_visible":
+        raise pathdb_identity_error(resolution)
+    asset_provenance = {
+        "raw_pathdb_collection": resolution["raw_pathdb_collection"],
+        "canonical_tcia_short_title": resolution["canonical_tcia_short_title"],
+        "identity_resolution_method": resolution["identity_resolution_method"],
+        "identity_evidence": resolution["identity_evidence"],
+    }
+    return (
+        str(resolution["dataset_type"]),
+        str(resolution["canonical_tcia_short_title"]),
+        asset_provenance,
+    )
+
+
+def preflight_pathdb_wordpress_identities(snapshot_db: Path) -> dict[str, Any]:
+    """Report PathDB labels that are accepted, staged-hidden, or invalid."""
+    with closing(connect(snapshot_db)) as source:
+        if table_exists(source, "pathdb_rows"):
+            pathdb_source = "pathdb_rows"
+        elif table_exists(source, "agent_pathdb_slides"):
+            pathdb_source = "agent_pathdb_slides"
+        else:
+            return {
+                "schema_version": 1,
+                "status": "ok",
+                "source_view": None,
+                "counts": {
+                    "pathdb_collections": 0,
+                    "pathdb_rows": 0,
+                    "accepted_visible_collections": 0,
+                    "accepted_visible_rows": 0,
+                    "staged_hidden_collections": 0,
+                    "staged_hidden_rows": 0,
+                    "error_collections": 0,
+                    "error_rows": 0,
+                },
+                "collections": [],
+            }
+        grouped = source.execute(
+            f"SELECT collection, COUNT(*) AS row_count FROM {pathdb_source} "
+            "GROUP BY collection ORDER BY lower(collection), collection"
+        ).fetchall()
+        collections = [
+            pathdb_dataset_identity_resolution(
+                source,
+                row["collection"],
+                pathdb_row_count=int(row["row_count"]),
+            )
+            for row in grouped
+        ]
+
+    counts = {
+        "pathdb_collections": len(collections),
+        "pathdb_rows": sum(int(item["pathdb_row_count"] or 0) for item in collections),
+        "accepted_visible_collections": sum(
+            item["status"] == "accepted_visible" for item in collections
+        ),
+        "accepted_visible_rows": sum(
+            int(item["pathdb_row_count"] or 0)
+            for item in collections
+            if item["status"] == "accepted_visible"
+        ),
+        "staged_hidden_collections": sum(
+            item["status"] == "staged_hidden" for item in collections
+        ),
+        "staged_hidden_rows": sum(
+            int(item["pathdb_row_count"] or 0)
+            for item in collections
+            if item["status"] == "staged_hidden"
+        ),
+        "error_collections": sum(
+            item["status"] in {"missing", "ambiguous"} for item in collections
+        ),
+        "error_rows": sum(
+            int(item["pathdb_row_count"] or 0)
+            for item in collections
+            if item["status"] in {"missing", "ambiguous"}
+        ),
+    }
+    if counts["error_collections"]:
+        status = "error"
+    elif counts["staged_hidden_collections"]:
+        status = "warning"
+    else:
+        status = "ok"
+    return {
+        "schema_version": 1,
+        "status": status,
+        "source_view": pathdb_source,
+        "counts": counts,
+        "collections": collections,
+    }
+
+
+def emit_pathdb_preflight_annotations(report: dict[str, Any]) -> None:
+    for item in report["collections"]:
+        row_count = int(item["pathdb_row_count"] or 0)
+        if item["status"] == "staged_hidden":
+            print(
+                "::warning title=Staged hidden PathDB dataset excluded::"
+                f"{item['candidate_short_title']} has {row_count} PathDB rows but "
+                f"WordPress record {item.get('record_id') or 'unknown'} "
+                f"(DOI {item.get('doi') or 'unknown'}) is hidden; these rows will "
+                "not enter public non-DICOM or participant artifacts."
+            )
+        elif item["status"] in {"missing", "ambiguous"}:
+            print(
+                "::error title=Unresolved PathDB WordPress identity::"
+                f"{item['candidate_short_title']} has {row_count} PathDB rows; "
+                f"status={item['status']}, matches={item['wordpress_match_count']}, "
+                f"visible_matches={item['visible_match_count']}."
+            )
 
 
 def ingest_pathdb(conn: sqlite3.Connection, snapshot_db: Path, include_files: bool) -> int:
@@ -4473,16 +4644,57 @@ def ingest_pathdb(conn: sqlite3.Connection, snapshot_db: Path, include_files: bo
     with closing(connect(snapshot_db)) as source:
         if not table_exists(source, "agent_pathdb_slides"):
             return 0
-        identity_cache: dict[str, tuple[str, str, dict[str, str]]] = {}
+        pathdb_row_counts = {
+            str(row["collection"] or "").strip(): int(row["row_count"])
+            for row in source.execute(
+                "SELECT collection, COUNT(*) AS row_count FROM agent_pathdb_slides "
+                "GROUP BY collection"
+            )
+        }
+        identity_cache: dict[
+            str, tuple[str, str, dict[str, Any]] | None
+        ] = {}
         for row in source.execute("SELECT * FROM agent_pathdb_slides ORDER BY collection, patient_id, slide_id"):
             raw_collection = str(row["collection"] or "").strip()
             if raw_collection not in identity_cache:
-                identity_cache[raw_collection] = pathdb_dataset_identity(
-                    source, raw_collection
+                resolution = pathdb_dataset_identity_resolution(
+                    source,
+                    raw_collection,
+                    pathdb_row_count=pathdb_row_counts.get(raw_collection, 0),
                 )
-            dataset_type, short_title, identity_resolution = identity_cache[
-                raw_collection
-            ]
+                if resolution["status"] == "staged_hidden":
+                    print(
+                        "Skipping staged hidden PathDB collection "
+                        f"{resolution['candidate_short_title']!r}: "
+                        f"record_id={resolution.get('record_id')!r}, "
+                        f"doi={resolution.get('doi')!r}, "
+                        f"pathdb_rows={resolution.get('pathdb_row_count')!r}"
+                    )
+                    identity_cache[raw_collection] = None
+                elif resolution["status"] != "accepted_visible":
+                    raise pathdb_identity_error(resolution)
+                else:
+                    asset_provenance = {
+                        "raw_pathdb_collection": resolution[
+                            "raw_pathdb_collection"
+                        ],
+                        "canonical_tcia_short_title": resolution[
+                            "canonical_tcia_short_title"
+                        ],
+                        "identity_resolution_method": resolution[
+                            "identity_resolution_method"
+                        ],
+                        "identity_evidence": resolution["identity_evidence"],
+                    }
+                    identity_cache[raw_collection] = (
+                        str(resolution["dataset_type"]),
+                        str(resolution["canonical_tcia_short_title"]),
+                        asset_provenance,
+                    )
+            identity = identity_cache[raw_collection]
+            if identity is None:
+                continue
+            dataset_type, short_title, identity_resolution = identity
             url = str(row["wsiimage_url"] or "")
             viewer_url = str(row["camicroscope_url"] or "")
             file_format = normalize_format(row["data_format"] or format_from_path(url))
@@ -8224,6 +8436,16 @@ def parser() -> argparse.ArgumentParser:
     build.add_argument("--replace", action="store_true")
     validate = sub.add_parser("validate")
     validate.add_argument("--db", default=str(DEFAULT_DB))
+    pathdb_preflight = sub.add_parser(
+        "preflight-pathdb-identities",
+        help=(
+            "Reconcile PathDB collection labels with visible or staged-hidden "
+            "WordPress dataset identities before downstream assembly."
+        ),
+    )
+    pathdb_preflight.add_argument("--snapshot-db", default=str(DEFAULT_SNAPSHOT_DB))
+    pathdb_preflight.add_argument("--out", required=True)
+    pathdb_preflight.add_argument("--github-actions", action="store_true")
     manifest = sub.add_parser("manifest")
     manifest.add_argument("--db", default=str(DEFAULT_DB))
     manifest.add_argument("--gzip")
@@ -8318,6 +8540,21 @@ def main() -> int:
         result = validate_database(Path(args.db))
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0 if result["ok"] else 1
+    if args.command == "preflight-pathdb-identities":
+        result = preflight_pathdb_wordpress_identities(Path(args.snapshot_db))
+        out = Path(args.out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
+        if args.github_actions:
+            emit_pathdb_preflight_annotations(result)
+        print(
+            json.dumps(
+                {"status": result["status"], "counts": result["counts"]},
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 1 if result["status"] == "error" else 0
     if args.command == "manifest":
         result = build_manifest(Path(args.db), Path(args.gzip) if args.gzip else None)
         Path(args.out).write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")

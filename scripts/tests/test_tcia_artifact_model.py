@@ -2424,6 +2424,143 @@ class BuilderTests(unittest.TestCase):
                     "exact_wordpress_short_title",
                 ],
             )
+            self.assertTrue(
+                all(
+                    set(json.loads(row[3]))
+                    == {
+                        "source_artifact",
+                        "source_view",
+                        "raw_pathdb_collection",
+                        "canonical_tcia_short_title",
+                        "identity_resolution_method",
+                        "identity_evidence",
+                    }
+                    for row in rows
+                )
+            )
+
+    def test_pathdb_staged_hidden_identity_warns_and_skips_only_that_dataset(self):
+        import sqlite3
+
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            snapshot = base / "snapshot.sqlite"
+            output = base / "public.sqlite"
+            conn = sqlite3.connect(snapshot)
+            conn.executescript(
+                """
+                CREATE TABLE agent_datasets (
+                  id INTEGER, dataset_type TEXT, short_title TEXT, doi TEXT,
+                  hidden INTEGER
+                );
+                CREATE TABLE agent_pathdb_slides (
+                  collection TEXT, patient_id TEXT, slide_id TEXT, camic_id TEXT,
+                  camicroscope_url TEXT, wsiimage_url TEXT, data_format TEXT,
+                  modality TEXT, protocol TEXT, magnification TEXT
+                );
+                """
+            )
+            conn.executemany(
+                "INSERT INTO agent_datasets VALUES (?,?,?,?,?)",
+                [
+                    (55258, "Collection", "FHCC PTRC-Melanoma", "10.7937/axrh-hy45", 1),
+                    (100, "Collection", "VISIBLE", "10.7937/visible", 0),
+                ],
+            )
+            conn.executemany(
+                "INSERT INTO agent_pathdb_slides VALUES (?,?,?,?,?,?,?,?,?,?)",
+                [
+                    (
+                        "FHCC PTRC-Melanoma",
+                        f"CASE-{index:03d}",
+                        f"hidden-{index:03d}.svs",
+                        str(index),
+                        "",
+                        "",
+                        "SVS",
+                        "SM",
+                        "",
+                        "",
+                    )
+                    for index in range(1, 242)
+                ]
+                + [
+                    (
+                        "VISIBLE", "C", "visible.svs", "300", "", "", "SVS",
+                        "SM", "", "",
+                    )
+                ],
+            )
+            conn.commit()
+            conn.close()
+
+            report = public.preflight_pathdb_wordpress_identities(snapshot)
+            self.assertEqual(report["status"], "warning")
+            self.assertEqual(report["counts"]["staged_hidden_collections"], 1)
+            self.assertEqual(report["counts"]["staged_hidden_rows"], 241)
+            hidden = next(
+                item
+                for item in report["collections"]
+                if item["status"] == "staged_hidden"
+            )
+            self.assertEqual(hidden["record_id"], 55258)
+            self.assertEqual(hidden["doi"], "10.7937/axrh-hy45")
+            self.assertEqual(hidden["visibility"], "hidden")
+
+            conn = public.connect(output)
+            conn.executescript(public.SCHEMA)
+            public.insert_vocab(conn)
+            self.assertEqual(public.ingest_pathdb(conn, snapshot, True), 1)
+            rows = conn.execute(
+                "SELECT short_title, asset_name FROM public_non_dicom_assets "
+                "WHERE source_system='tcia_pathdb'"
+            ).fetchall()
+            conn.close()
+            self.assertEqual([tuple(row) for row in rows], [("VISIBLE", "visible.svs")])
+
+    def test_pathdb_preflight_still_fails_missing_or_ambiguous_identity(self):
+        import sqlite3
+
+        with tempfile.TemporaryDirectory() as directory:
+            snapshot = Path(directory) / "snapshot.sqlite"
+            conn = sqlite3.connect(snapshot)
+            conn.executescript(
+                """
+                CREATE TABLE agent_datasets (
+                  id INTEGER, dataset_type TEXT, short_title TEXT, doi TEXT,
+                  hidden INTEGER
+                );
+                CREATE TABLE agent_pathdb_slides (
+                  collection TEXT, patient_id TEXT, slide_id TEXT, camic_id TEXT,
+                  camicroscope_url TEXT, wsiimage_url TEXT, data_format TEXT,
+                  modality TEXT, protocol TEXT, magnification TEXT
+                );
+                """
+            )
+            conn.executemany(
+                "INSERT INTO agent_datasets VALUES (?,?,?,?,?)",
+                [
+                    (1, "Collection", "AMBIGUOUS", "10.7937/one", 1),
+                    (2, "Analysis Result", "AMBIGUOUS", "10.7937/two", 1),
+                ],
+            )
+            conn.executemany(
+                "INSERT INTO agent_pathdb_slides VALUES (?,?,?,?,?,?,?,?,?,?)",
+                [
+                    ("MISSING", "A", "missing.svs", "1", "", "", "SVS", "SM", "", ""),
+                    ("AMBIGUOUS", "B", "ambiguous.svs", "2", "", "", "SVS", "SM", "", ""),
+                ],
+            )
+            conn.commit()
+            conn.close()
+
+            report = public.preflight_pathdb_wordpress_identities(snapshot)
+            self.assertEqual(report["status"], "error")
+            self.assertEqual(report["counts"]["error_collections"], 2)
+            self.assertEqual(
+                {item["status"] for item in report["collections"]},
+                {"missing", "ambiguous"},
+            )
 
     def test_pathdb_icdc_scientific_notation_subjects_use_reviewed_slide_ids(self):
         import sqlite3

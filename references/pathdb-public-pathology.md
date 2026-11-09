@@ -18,6 +18,12 @@ Match the CSV `collection` field to WordPress `collection_short_title` or `resul
 
 The older PathDB collection API may expose collection names as `collectionName`; prefer the CSV when the user needs detailed non-DICOM histopathology metadata.
 
+For release builds, one exact visible WordPress match admits the PathDB rows.
+One exact hidden match is a staged dataset: report its record ID, DOI,
+visibility, and row count, but exclude its PathDB rows from public non-DICOM and
+participant artifacts until WordPress visibility changes. Missing or ambiguous
+matches remain errors rather than being guessed, aliased, or silently omitted.
+
 ## PathDB Versus Aspera
 
 PathDB is the preferred route for rich slide-level metadata and browser visualization of public non-DICOM pathology data. PathDB copies may be converted or reformatted from the originally submitted files so they work properly in TCIA's browser-based pathology viewer.

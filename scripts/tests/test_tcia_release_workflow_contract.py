@@ -176,6 +176,27 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
         block = source[source.index(marker):source.index("Prepare previous clinical metadata")]
         self.assertIn("--require-complete-sources", block)
 
+    def test_pathdb_identity_preflight_runs_before_expensive_source_builds(self) -> None:
+        source = SOURCE_WORKFLOW.read_text(encoding="utf-8")
+        preflight = source.index(
+            "Reconcile PathDB rows with WordPress publication identity"
+        )
+        plan = source.index("Plan selective component release")
+        controlled = source.index("Build controlled-access metadata")
+        self.assertLess(preflight, plan)
+        self.assertLess(preflight, controlled)
+        block = source[preflight:plan]
+        self.assertIn("preflight-pathdb-identities", block)
+        self.assertIn("--github-actions", block)
+        self.assertIn("dist/pathdb_wordpress_identity_preflight.json", block)
+        diagnostic_upload = source[
+            source.index("Upload non-release semantic-gate diagnostics"):
+            source.index("Upload validated V2 source inputs")
+        ]
+        validated_upload = source[source.index("Upload validated V2 source inputs"):]
+        self.assertIn("dist/pathdb_wordpress_identity_preflight.json", diagnostic_upload)
+        self.assertIn("dist/pathdb_wordpress_identity_preflight.json", validated_upload)
+
     def test_controlled_source_build_has_bounded_runtime(self) -> None:
         source = SOURCE_WORKFLOW.read_text(encoding="utf-8")
         start = source.index("Build controlled-access metadata")
