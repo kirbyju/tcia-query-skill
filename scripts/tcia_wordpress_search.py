@@ -97,6 +97,14 @@ def main(argv: Optional[list[str]] = None) -> int:
     )
     records = records[: args.limit]
 
+    if any(record.get("hidden") for record in records):
+        print(
+            "Curator review: results include hidden WordPress records. "
+            "Hidden does not establish publication readiness or access rights; "
+            "keep these records separate from general discovery recommendations.",
+            file=sys.stderr,
+        )
+
     if args.json:
         print(json.dumps(records, indent=2, sort_keys=True))
     else:

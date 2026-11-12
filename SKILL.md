@@ -62,6 +62,13 @@ rollback selects a retained verified generation and also requires a restart.
 
 ## Query Workflow
 
+Ordinary discovery excludes hidden WordPress records. For an explicit curator
+request to inspect a hidden, staged, retired, or pre-release dataset, use the
+curator procedure in `references/maintainer-operations.md` (Curator review of hidden
+datasets). Label hidden results separately; a hidden record does not establish
+TCIA publication readiness. Do not enable hidden discovery merely because an
+ordinary search returns no match.
+
 1. Confirm the selected service or local bundle fingerprint and capabilities with `get_snapshot_info`, `/v2/bundle`, or the release manifest.
 2. Use `search_datasets` for compact discovery. Follow a candidate with `get_dataset` for narrative, current downloads, license/access details, and related Analysis Results.
 3. Use `search_datacite_dois` and `get_datacite_doi` for DOI metadata, creators, and citation output (`apa`, `vancouver`, `chicago-author-date`, `bibtex`, or `ris`).

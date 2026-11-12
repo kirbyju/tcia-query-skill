@@ -1,6 +1,8 @@
 import importlib.util
+import io
 import json
 import sqlite3
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -15,6 +17,77 @@ SPEC.loader.exec_module(SNAPSHOT)
 
 
 class SnapshotNormalizationTests(unittest.TestCase):
+    def test_wordpress_fetch_retains_hidden_records_across_pages(self):
+        visible = {"id": 1, "collection_short_title": "VISIBLE", "hide_from_browse_table": "No"}
+        hidden = {"id": 2, "collection_short_title": "HIDDEN", "hide_from_browse_table": "Yes"}
+        with mock.patch.object(SNAPSHOT, "fetch_json", side_effect=[
+            ({"results": [visible], "total_pages": 2, "include_hidden": True}, {}),
+            ({"results": [hidden], "total_pages": 2, "include_hidden": True}, {}),
+        ]) as fetch:
+            records = SNAPSHOT.fetch_wordpress_endpoint("collections")
+        self.assertEqual(records, [visible, hidden])
+        self.assertEqual([call.args[0] for call in fetch.call_args_list], [
+            f"{SNAPSHOT.BASE_WORDPRESS_URL}/collections/?per_page=100&page={page}&v=1&include_hidden=1"
+            for page in (1, 2)
+        ])
+
+    def test_wordpress_fetch_rejects_filtered_or_malformed_mode_on_any_page(self):
+        for endpoint in ("collections", "analysis-results", "collections/licenses"):
+            for page in (1, 2):
+                for mode in (False, "true", None):
+                    with self.subTest(endpoint=endpoint, page=page, mode=mode):
+                        responses = [({"results": [], "total_pages": 2, "include_hidden": True}, {})
+                                     for _ in range(2)]
+                        responses[page - 1][0]["include_hidden"] = mode
+                        with mock.patch.object(SNAPSHOT, "fetch_json", side_effect=responses):
+                            with self.assertRaisesRegex(RuntimeError, f"page {page} did not honor"):
+                                SNAPSHOT.fetch_wordpress_endpoint(endpoint)
+
+    def test_wordpress_fetch_supports_legacy_mode_and_unaffected_endpoints(self):
+        for endpoint in ("collections", "analysis-results", "collections/licenses", "downloads", "versions"):
+            with self.subTest(endpoint=endpoint):
+                with mock.patch.object(SNAPSHOT, "fetch_json", return_value=({"results": []}, {})):
+                    self.assertEqual(SNAPSHOT.fetch_wordpress_endpoint(endpoint), [])
+                self.assertEqual("include_hidden=1" in SNAPSHOT.wordpress_url(endpoint, 1),
+                                 endpoint not in {"downloads", "versions"})
+
+    def test_v25_empty_arrays_and_hidden_curator_lookup_use_real_schema(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db = Path(directory) / "snapshot.sqlite"
+            records = [
+                {"id": ident, "result_short_title": title, "hide_from_browse_table": flag,
+                 "related_collections": [], "related_analysis_results": [],
+                 "citations": [], "collection_downloads": [], "result_downloads": []}
+                for ident, title, flag in ((1, "VISIBLE", "No"), (2, "HIDDEN", "Yes"))
+            ]
+            with sqlite3.connect(db) as conn:
+                SNAPSHOT.create_schema(conn)
+                SNAPSHOT.insert_wordpress(conn, "analysis-results", records)
+                SNAPSHOT.insert_wordpress_downloads(conn, [], records, [])
+                self.assertEqual(conn.execute("SELECT COUNT(*) FROM wordpress_downloads").fetchone()[0], 0)
+                self.assertEqual(conn.execute("SELECT short_title FROM agent_datasets").fetchall(), [("VISIBLE",)])
+            self.assertEqual([r["short_title"] for r in SNAPSHOT.search_wordpress_records(path=db)], ["VISIBLE"])
+            selected = SNAPSHOT.search_wordpress_records(short_titles={"HIDDEN"}, include_hidden=True, path=db)
+            self.assertEqual(len(selected), 1)
+            self.assertTrue(selected[0]["hidden"])
+            self.assertEqual(selected[0]["hide_from_browse_table"], "Yes")
+            self.assertEqual(selected[0]["current_downloads"], [])
+
+            spec = importlib.util.spec_from_file_location("curator_search", SCRIPT.with_name("tcia_wordpress_search.py"))
+            search = importlib.util.module_from_spec(spec)
+            with mock.patch.dict(sys.modules, {"tcia_snapshot": SNAPSHOT}):
+                spec.loader.exec_module(search)
+            for include_hidden in (False, True):
+                with self.subTest(include_hidden=include_hidden):
+                    args = ["--snapshot-db", str(db), "--short-title", "HIDDEN", "--json"]
+                    if include_hidden:
+                        args.append("--include-hidden")
+                    with mock.patch("sys.stdout", new_callable=io.StringIO) as stdout, \
+                         mock.patch("sys.stderr", new_callable=io.StringIO) as stderr:
+                        self.assertEqual(search.main(args), 0)
+                    self.assertEqual(len(json.loads(stdout.getvalue())), int(include_hidden))
+                    self.assertEqual("Curator review" in stderr.getvalue(), include_hidden)
+
     @staticmethod
     def datacite_record(doi: str) -> dict:
         return {

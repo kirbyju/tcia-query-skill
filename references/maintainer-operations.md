@@ -2,6 +2,61 @@
 
 This reference is for repository and snapshot maintainers, not normal public-agent queries.
 
+## WordPress API v2.5 ingestion
+
+The snapshot builder requests `include_hidden=1` on every page of `collections`
+and `analysis-results` so raw `wordpress_records` retains hidden identities and
+their relationships. The same parameter applies to `collections/licenses` if
+queried. WordPress v2.5 otherwise omits hidden records and hidden relationship
+targets, and counts only the returned population in `total` and `total_pages`.
+The builder follows `total_pages` and rejects an explicitly false or malformed
+`include_hidden` response mode; absence of that field remains compatible with
+older servers. Public discovery views and exports continue excluding hidden
+datasets. Hidden metadata retention is not public publication approval.
+
+v2.5 fixes the Analysis Result `related_collections` accumulation defect,
+deduplicates relationship IDs, and returns `[]` for empty relationships,
+citations, and downloads. Use structured relationship IDs/objects for explicit
+dataset associations; `collections` HTML supplies source-data narrative and
+`program` lists represent program membership, not derivation. Do not use v1 or
+parse HTML merely to work around the fixed accumulation bug on a verified v2.5
+server. An unknown `posts/{slug}` now returns 404; it does not prove withdrawal
+or absence from a different source generation.
+
+## Curator review of hidden datasets
+
+Use this workflow only for an explicit request to review a hidden, staged,
+retired, or pre-release dataset. Ordinary MCP/REST discovery remains visible-only;
+a missing result does not automatically trigger a hidden-record search.
+
+Search an existing validated local snapshot by exact short title:
+
+```bash
+python3 scripts/tcia_wordpress_search.py \
+  --snapshot-db /absolute/path/to/tcia_snapshot.sqlite \
+  --short-title "DATASET_SHORT_TITLE" --include-hidden --json
+```
+
+The command retains visibility flags and warns on stderr when returning hidden
+records; stdout remains JSON. Report the snapshot generation and timestamp.
+
+If current source metadata is needed, query the appropriate WordPress
+`/api/v2/collections/` or `/api/v2/analysis-results/` endpoint with
+`include_hidden=1`. Follow `total_pages` and select the requested exact post ID
+or short title locally; do not assume slug filtering works. Check the returned
+`include_hidden` mode when present, and record `hide_from_browse_table` and the
+retrieval time. Identify this as a live source check, separate from snapshot
+evidence. Do not download a full bundle solely for this lookup.
+
+Label hidden results **Hidden — curator review only** and keep them separate
+from published recommendations. Hidden can mean staged or retired; it does not
+establish readiness or grant data access. The public `include_hidden` option is
+not authentication: confidential pre-release content must not rely on the browse
+flag for protection.
+
+Use `curate-tcia-wordpress-metadata` for metadata QC. This lookup does not change
+visibility, publish content, or authorize payload transfers.
+
 ## Build And Validate
 
 Manifest-backed clinical inheritance also supplies explicit patient-to-source
@@ -381,16 +436,6 @@ The four exact explanation batches bind the full changed-row digests and counts
 to that source report; they do not grant a standing manifest or source-health
 waiver. The source report SHA-256 is
 `892d4ab6db6fe4cbee282ec8b6019956ccad6cee32fd07d316600940c057747e`.
-
-## Raw Hidden-State Investigation
-
-The public MCP, REST, and `TciaQueryService` surfaces deliberately exclude hidden, staged, and retired WordPress records. A maintainer who must investigate raw source state may use the local snapshot/search builder CLI's explicit `--include-hidden` option in a controlled workflow:
-
-```bash
-python3 scripts/tcia_wordpress_search.py --query retired --include-hidden
-```
-
-Do not advertise this option to public clients or use its records in ordinary discovery answers. Label findings as internal/raw source state and preserve the WordPress visibility flag.
 
 ## Supporting Utilities
 

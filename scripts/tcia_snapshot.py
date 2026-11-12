@@ -360,6 +360,9 @@ def fetch_json(url: str, timeout: int = 90) -> tuple[Any, dict[str, str]]:
 
 def wordpress_url(endpoint: str, page: int) -> str:
     params = {"per_page": "100", "page": str(page), "v": "1"}
+    if endpoint in {"collections", "analysis-results", "collections/licenses"}:
+        # Retain hidden identities in raw snapshots; public views filter them out.
+        params["include_hidden"] = "1"
     return f"{BASE_WORDPRESS_URL}/{endpoint}/?{urllib.parse.urlencode(params)}"
 
 
@@ -368,14 +371,25 @@ def sort_wordpress_records(records: list[dict[str, Any]]) -> list[dict[str, Any]
 
 
 def fetch_wordpress_endpoint(endpoint: str) -> list[dict[str, Any]]:
-    payload, _ = fetch_json(wordpress_url(endpoint, 1))
-    if not isinstance(payload, dict) or "results" not in payload:
-        raise RuntimeError(f"Unexpected WordPress response for {endpoint}")
+    def fetch_page(page: int) -> dict[str, Any]:
+        payload, _ = fetch_json(wordpress_url(endpoint, page))
+        if not isinstance(payload, dict) or not isinstance(payload.get("results"), list):
+            raise RuntimeError(f"Unexpected WordPress response for {endpoint} page {page}")
+        if endpoint in {"collections", "analysis-results", "collections/licenses"}:
+            # Older servers omit the mode field. v2.5 must confirm unfiltered mode
+            # on every page so a filtered response cannot appear complete.
+            if "include_hidden" in payload and payload["include_hidden"] is not True:
+                raise RuntimeError(
+                    f"WordPress {endpoint} page {page} did not honor include_hidden=1"
+                )
+        return payload
+
+    payload = fetch_page(1)
 
     records = list(payload.get("results") or [])
     total_pages = int(payload.get("total_pages") or 1)
     for page in range(2, total_pages + 1):
-        page_payload, _ = fetch_json(wordpress_url(endpoint, page))
+        page_payload = fetch_page(page)
         records.extend(page_payload.get("results") or [])
     return sort_wordpress_records(records)
 
