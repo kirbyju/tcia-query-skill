@@ -196,7 +196,8 @@ jobs:
             tcia_metadata_v2_bundle_manifest.json \
             public_non_dicom_metadata.sqlite.gz \
             public_non_dicom_audit.sqlite.gz \
-            participant_inventory.sqlite.gz; do
+            participant_inventory.sqlite.gz \
+            participant_inventory_audit.sqlite.gz; do
             gh release download "$baseline_tag" --pattern "$asset" --dir dist --clobber
           done
           python scripts/tcia_v2_bundle.py validate-selection \
@@ -205,7 +206,8 @@ jobs:
             --source-release-json cache/baseline_release.json \
             --asset public_non_dicom_metadata.sqlite.gz \
             --asset public_non_dicom_audit.sqlite.gz \
-            --asset participant_inventory.sqlite.gz
+            --asset participant_inventory.sqlite.gz \
+            --asset participant_inventory_audit.sqlite.gz
           gzip -dc dist/public_non_dicom_metadata.sqlite.gz \
             > cache/public_non_dicom_baseline.sqlite
           gzip -dc dist/public_non_dicom_audit.sqlite.gz \
@@ -214,12 +216,12 @@ jobs:
             > cache/participant_inventory_baseline.sqlite
           # These are verified prior-release inputs, not outputs of this build.
           # Their decompressed copies are now authoritative for the remaining
-          # baseline comparisons, and all three gzip paths are regenerated before
-          # bundle publication. Keep the top manifest for the staging contract.
+          # baseline comparisons. Public artifacts are always regenerated here;
+          # the participant pair remains available for a later hash-bound reuse
+          # decision. Keep the top manifest for both staging and reuse contracts.
           rm -f \
             dist/public_non_dicom_metadata.sqlite.gz \
-            dist/public_non_dicom_audit.sqlite.gz \
-            dist/participant_inventory.sqlite.gz
+            dist/public_non_dicom_audit.sqlite.gz
           jq '.components.public_non_dicom' \
             dist/tcia_metadata_v2_bundle_manifest.json \
             > cache/public_non_dicom_baseline_manifest.json
@@ -398,13 +400,58 @@ jobs:
             --artifact public_non_dicom \
             --db cache/public_non_dicom_audit.sqlite
 
-      - name: Build Participant Inventory
+      - name: Plan participant inventory refresh
         if: steps.selective.outputs.mode != 'fast'
+        id: participant
+        run: |
+          set -euo pipefail
+          python scripts/tcia_selective_release.py plan-participant \
+            --controlled-access-manifest dist/controlled_access_metadata_manifest.json \
+            --clinical-manifest dist/clinical_metadata_manifest.json \
+            --snapshot-db cache/tcia_snapshot.sqlite \
+            --public-non-dicom-db cache/public_non_dicom_metadata.sqlite \
+            --public-non-dicom-audit-db cache/public_non_dicom_audit.sqlite \
+            --idc-db cache/idc_participant_projection.sqlite \
+            --previous-participant-db cache/participant_inventory_baseline.sqlite \
+            --previous-manifest dist/tcia_metadata_v2_bundle_manifest.json \
+            --repository-root . \
+            --current-commit "$PRODUCER_SHA" \
+            --out dist/tcia_participant_release_plan.json
+          mode="$(jq -r '.mode' dist/tcia_participant_release_plan.json)"
+          test "$mode" = "reuse" || test "$mode" = "rebuild"
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Participant inventory refresh: $mode"
+            jq -r '.reasons[] | "- Reason: " + .' dist/tcia_participant_release_plan.json
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Carry forward verified participant inventory pair
+        if: steps.selective.outputs.mode != 'fast' && steps.participant.outputs.mode == 'reuse'
+        run: |
+          set -euo pipefail
+          python scripts/tcia_v2_bundle.py validate-selection \
+            --asset-dir dist \
+            --manifest dist/tcia_metadata_v2_bundle_manifest.json \
+            --source-release-json cache/baseline_release.json \
+            --asset participant_inventory.sqlite.gz \
+            --asset participant_inventory_audit.sqlite.gz
+          python scripts/tcia_v2_bundle.py materialize-reuse-manifests \
+            --manifest dist/tcia_metadata_v2_bundle_manifest.json \
+            --out-dir dist \
+            --component participant_inventory \
+            --component participant_inventory_audit
+          cp cache/participant_inventory_baseline.sqlite cache/participant_inventory.sqlite
+          gzip -dc dist/participant_inventory_audit.sqlite.gz \
+            > cache/participant_inventory_audit.sqlite
+
+      - name: Build Participant Inventory
+        if: steps.selective.outputs.mode != 'fast' && steps.participant.outputs.mode == 'rebuild'
         run: |
           python scripts/tcia_participant_inventory.py build \
             --staging-db cache/tcia_metadata_v2_staging.sqlite \
             --public-db cache/public_non_dicom_metadata.sqlite \
             --public-audit-db cache/public_non_dicom_audit.sqlite \
+            --dependency-fingerprint "$(jq -r '.dependency_fingerprint.current' dist/tcia_participant_release_plan.json)" \
             --out cache/participant_inventory.sqlite \
             --replace
           # C-NMC 2019 final-test identities were not published. The reviewed
@@ -439,6 +486,19 @@ jobs:
             --replace
           python scripts/tcia_participant_inventory.py validate \
             --db cache/participant_inventory.sqlite
+          python scripts/tcia_v2_audit.py validate \
+            --artifact participant_inventory \
+            --db cache/participant_inventory_audit.sqlite
+
+      - name: Validate Participant Inventory pair
+        if: steps.selective.outputs.mode != 'fast'
+        run: |
+          python scripts/tcia_participant_inventory.py validate \
+            --db cache/participant_inventory.sqlite \
+            --min-collection-participants 89500 \
+            --min-collections 221 \
+            --min-analysis-result-participants 11730 \
+            --min-analysis-results 29
           python scripts/tcia_v2_audit.py validate \
             --artifact participant_inventory \
             --db cache/participant_inventory_audit.sqlite
@@ -536,6 +596,7 @@ jobs:
             cache/tcia_metadata_v2_staging.sqlite
             cache/idc_participant_projection.sqlite
             cache/idc_participant_projection_manifest.json
+            dist/tcia_participant_release_plan.json
             cache/reports/tcia_v2_compact_audit_metrics.json
             cache/reports/tcia_v2_compact_audit_reconstruction.json
             cache/reports/metadata_change_report_final.md

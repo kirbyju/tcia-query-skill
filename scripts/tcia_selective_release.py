@@ -24,6 +24,7 @@ from typing import Any, Iterable
 PLAN_SCHEMA_VERSION = 1
 CONTROLLED_PLAN_SCHEMA_VERSION = 1
 CLINICAL_PLAN_SCHEMA_VERSION = 1
+PARTICIPANT_PLAN_SCHEMA_VERSION = 1
 FAST_MODE = "fast"
 FULL_MODE = "full"
 REUSE_MODE = "reuse"
@@ -70,6 +71,29 @@ CLINICAL_PRODUCER_PATHS = {
     "scripts/tcia_clinical_metadata.py",
     "scripts/tcia_dicom_source_scope.py",
 }
+
+PARTICIPANT_PRODUCER_PATHS = {
+    "requirements-build.lock",
+    "references/clinical_only_identity_repairs_v1.json",
+    "references/reviewed-participant-issue-dispositions.json",
+    "references/reviewed_analysis_result_source_collections_v1.csv",
+    "references/reviewed_missing_participant_inventories_v1.json",
+    "references/reviewed_participant_identity_v1.json",
+    "scripts/tcia_artifact_model.py",
+    "scripts/tcia_clinical_metadata.py",
+    "scripts/tcia_clinical_only_repairs.py",
+    "scripts/tcia_missing_inventory_repairs.py",
+    "scripts/tcia_participant_groups.py",
+    "scripts/tcia_participant_inventory.py",
+    "scripts/tcia_reviewed_identity.py",
+    "scripts/tcia_v2_audit.py",
+    "scripts/tcia_v2_staging.py",
+}
+
+PARTICIPANT_MANIFEST_DEPENDENCIES = (
+    "controlled_access",
+    "clinical",
+)
 
 CONTROLLED_ACCESS_PROJECTION_COLUMNS = (
     "download_row_id", "parent_source", "dataset_type", "parent_id",
@@ -469,6 +493,265 @@ def build_clinical_plan(
     }
 
 
+def idc_participant_projection_fingerprint(path: Path) -> str:
+    """Hash IDC participant content while excluding observation timestamps."""
+    digest = hashlib.sha256()
+    with closing(sqlite3.connect(f"file:{path.resolve()}?mode=ro", uri=True)) as conn:
+        conn.row_factory = sqlite3.Row
+        if conn.execute("PRAGMA quick_check").fetchone()[0] != "ok":
+            raise RuntimeError(f"IDC participant projection quick_check failed: {path}")
+        required = {
+            "idc_participant_projection_meta",
+            "idc_dataset_participants",
+            "idc_unmatched_datasets",
+        }
+        present = {
+            str(row[0])
+            for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        }
+        missing = sorted(required - present)
+        if missing:
+            raise RuntimeError(
+                "IDC participant projection tables are missing: " + ", ".join(missing)
+            )
+        meta = {
+            str(key): str(value)
+            for key, value in conn.execute(
+                "SELECT key, value FROM idc_participant_projection_meta "
+                "WHERE key <> 'generated_at_utc' ORDER BY key"
+            )
+        }
+        digest.update((canonical_json({"meta": meta}) + "\n").encode("utf-8"))
+        for table in ("idc_dataset_participants", "idc_unmatched_datasets"):
+            quoted = '"' + table.replace('"', '""') + '"'
+            columns = conn.execute(f"PRAGMA table_info({quoted})").fetchall()
+            order_by = ", ".join(str(index) for index in range(1, len(columns) + 1))
+            digest.update(
+                (canonical_json({"table": table, "columns": [dict(row) for row in columns]}) + "\n").encode("utf-8")
+            )
+            for row in conn.execute(f"SELECT * FROM {quoted} ORDER BY {order_by}"):
+                digest.update(
+                    (canonical_json([_encoded_value(value) for value in row]) + "\n").encode(
+                        "utf-8"
+                    )
+                )
+    return digest.hexdigest()
+
+
+def filtered_sqlite_fingerprint(
+    path: Path,
+    *,
+    excluded_tables: set[str] | None = None,
+    included_tables: set[str] | None = None,
+) -> str:
+    """Hash selected SQLite schema and rows without transient build metadata."""
+    excluded = excluded_tables or set()
+    digest = hashlib.sha256()
+    with closing(sqlite3.connect(f"file:{path.resolve()}?mode=ro", uri=True)) as conn:
+        conn.row_factory = sqlite3.Row
+        if conn.execute("PRAGMA quick_check").fetchone()[0] != "ok":
+            raise RuntimeError(f"SQLite dependency quick_check failed: {path}")
+        objects = conn.execute(
+            "SELECT type, name, COALESCE(sql, '') AS sql FROM sqlite_master "
+            "WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name"
+        ).fetchall()
+        tables: list[str] = []
+        for row in objects:
+            name = str(row["name"])
+            if name in excluded:
+                continue
+            if included_tables is not None and name not in included_tables:
+                continue
+            digest.update(
+                (canonical_json({"type": row["type"], "name": name, "sql": row["sql"]}) + "\n").encode(
+                    "utf-8"
+                )
+            )
+            if row["type"] == "table":
+                tables.append(name)
+        if included_tables is not None and set(tables) != included_tables:
+            missing = sorted(included_tables - set(tables))
+            raise RuntimeError("SQLite dependency tables are missing: " + ", ".join(missing))
+        for table in tables:
+            quoted = '"' + table.replace('"', '""') + '"'
+            columns = conn.execute(f"PRAGMA table_info({quoted})").fetchall()
+            order_by = ", ".join(str(index) for index in range(1, len(columns) + 1))
+            digest.update(
+                (canonical_json({"table": table, "columns": [dict(row) for row in columns]}) + "\n").encode(
+                    "utf-8"
+                )
+            )
+            for row in conn.execute(f"SELECT * FROM {quoted} ORDER BY {order_by}"):
+                digest.update(
+                    (canonical_json([_encoded_value(value) for value in row]) + "\n").encode(
+                        "utf-8"
+                    )
+                )
+    return digest.hexdigest()
+
+
+def participant_snapshot_projection_fingerprint(path: Path) -> str:
+    """Hash only visible WordPress rows consulted by Participant Inventory."""
+    digest = hashlib.sha256()
+    with closing(sqlite3.connect(f"file:{path.resolve()}?mode=ro", uri=True)) as conn:
+        conn.row_factory = sqlite3.Row
+        if conn.execute("PRAGMA quick_check").fetchone()[0] != "ok":
+            raise RuntimeError(f"Participant snapshot quick_check failed: {path}")
+        for name in ("agent_datasets", "agent_current_downloads"):
+            quoted = '"' + name.replace('"', '""') + '"'
+            columns = conn.execute(f"PRAGMA table_info({quoted})").fetchall()
+            if not columns:
+                raise RuntimeError(f"Participant snapshot view is missing: {name}")
+            column_names = {str(row["name"]) for row in columns}
+            visible = " WHERE COALESCE(hidden, 0) = 0" if "hidden" in column_names else ""
+            order_by = ", ".join(str(index) for index in range(1, len(columns) + 1))
+            digest.update(
+                (canonical_json({"object": name, "columns": [dict(row) for row in columns]}) + "\n").encode(
+                    "utf-8"
+                )
+            )
+            for row in conn.execute(f"SELECT * FROM {quoted}{visible} ORDER BY {order_by}"):
+                digest.update(
+                    (canonical_json([_encoded_value(value) for value in row]) + "\n").encode(
+                        "utf-8"
+                    )
+                )
+    return digest.hexdigest()
+
+
+def participant_dependency_fingerprint(
+    component_manifests: dict[str, Path],
+    snapshot_db: Path,
+    public_db: Path,
+    public_audit_db: Path,
+    idc_db: Path,
+) -> tuple[str, dict[str, str]]:
+    fingerprints = {
+        "snapshot_projection": participant_snapshot_projection_fingerprint(snapshot_db),
+        "public_non_dicom_projection": filtered_sqlite_fingerprint(
+            public_db, excluded_tables={"artifact_meta"}
+        ),
+        "public_non_dicom_audit_projection": filtered_sqlite_fingerprint(
+            public_audit_db,
+            included_tables={"public_non_dicom_crosswalk_evidence"},
+        ),
+    }
+    for component in PARTICIPANT_MANIFEST_DEPENDENCIES:
+        path = component_manifests.get(component)
+        if path is None or not path.is_file():
+            raise RuntimeError(f"participant dependency manifest is unavailable: {component}")
+        fingerprint = _manifest_release_fingerprint(path)
+        if not fingerprint:
+            raise RuntimeError(f"participant dependency fingerprint is invalid: {component}")
+        fingerprints[component] = fingerprint
+    fingerprints["idc_participant_projection"] = idc_participant_projection_fingerprint(
+        idc_db
+    )
+    return (
+        hashlib.sha256(canonical_json(fingerprints).encode("utf-8")).hexdigest(),
+        fingerprints,
+    )
+
+
+def _participant_previous_dependency_fingerprint(path: Path) -> str:
+    with closing(sqlite3.connect(f"file:{path.resolve()}?mode=ro", uri=True)) as conn:
+        if conn.execute("PRAGMA quick_check").fetchone()[0] != "ok":
+            raise RuntimeError(f"Previous participant inventory quick_check failed: {path}")
+        row = conn.execute(
+            "SELECT value FROM participant_inventory_meta "
+            "WHERE key='dependency_fingerprint'"
+        ).fetchone()
+    value = str(row[0] if row else "")
+    return value if len(value) == 64 else ""
+
+
+def build_participant_plan(
+    component_manifests: dict[str, Path],
+    snapshot_db: Path,
+    public_db: Path,
+    public_audit_db: Path,
+    idc_db: Path,
+    previous_participant_db: Path | None,
+    previous_manifest: Path | None,
+    repository_root: Path,
+    current_commit: str,
+    *,
+    changed_paths: Iterable[str] | None = None,
+    force_rebuild_reasons: Iterable[str] = (),
+) -> dict[str, Any]:
+    reasons = [str(reason) for reason in force_rebuild_reasons if str(reason).strip()]
+    current_fingerprint, dependencies = participant_dependency_fingerprint(
+        component_manifests, snapshot_db, public_db, public_audit_db, idc_db
+    )
+    previous_fingerprint = ""
+    previous_commit = ""
+    previous_release_fingerprint = ""
+    manifest: dict[str, Any] = {}
+
+    if not previous_participant_db or not previous_participant_db.is_file():
+        reasons.append("verified previous participant inventory is unavailable")
+    else:
+        previous_fingerprint = _participant_previous_dependency_fingerprint(
+            previous_participant_db
+        )
+        if not previous_fingerprint:
+            reasons.append("previous participant dependency fingerprint is unavailable")
+        elif previous_fingerprint != current_fingerprint:
+            reasons.append("participant dependencies changed")
+
+    if not previous_manifest or not previous_manifest.is_file():
+        reasons.append("verified previous bundle manifest is unavailable")
+    else:
+        manifest = json.loads(previous_manifest.read_text(encoding="utf-8"))
+        previous_release_fingerprint = str(manifest.get("release_fingerprint") or "")
+        previous_commit = str((manifest.get("producer") or {}).get("commit") or "")
+        if not previous_release_fingerprint:
+            reasons.append("previous bundle manifest has no release fingerprint")
+        if len(previous_commit) != 40:
+            reasons.append("previous bundle manifest has no exact producer commit")
+        reasons.extend(
+            prior_health_reuse_errors(
+                manifest, {"participant_inventory", "participant_inventory_audit"}
+            )
+        )
+
+    paths: list[str] = []
+    producer_paths: list[str] = []
+    if len(previous_commit) == 40:
+        try:
+            paths = sorted(
+                set(changed_paths)
+                if changed_paths is not None
+                else git_changed_paths(repository_root, previous_commit, current_commit)
+            )
+        except (OSError, subprocess.CalledProcessError) as exc:
+            reasons.append(f"participant producer impact could not be established: {exc}")
+        else:
+            producer_paths = [path for path in paths if path in PARTICIPANT_PRODUCER_PATHS]
+            if producer_paths:
+                reasons.append("participant producer files changed")
+
+    mode = REBUILD_MODE if reasons else REUSE_MODE
+    return {
+        "artifact": "tcia_participant_release_plan",
+        "schema_version": PARTICIPANT_PLAN_SCHEMA_VERSION,
+        "mode": mode,
+        "eligible": mode == REUSE_MODE,
+        "current_producer_commit": current_commit,
+        "previous_producer_commit": previous_commit,
+        "previous_release_fingerprint": previous_release_fingerprint,
+        "dependency_fingerprint": {
+            "current": current_fingerprint,
+            "previous": previous_fingerprint,
+            "algorithm": "sha256-participant-dependencies-v1",
+        },
+        "dependencies": dependencies,
+        "changed_paths": paths,
+        "participant_producer_paths": producer_paths,
+        "reasons": reasons or ["participant dependencies and producer are unchanged"],
+    }
+
+
 def git_changed_paths(repository_root: Path, previous_commit: str, current_commit: str) -> list[str]:
     for commit in (previous_commit, current_commit):
         subprocess.run(
@@ -667,6 +950,25 @@ def parse_args() -> argparse.Namespace:
     clinical.add_argument("--max-prior-age-hours", type=int, default=26)
     clinical.add_argument("--out", type=Path, required=True)
 
+    participant = subparsers.add_parser("plan-participant")
+    for component in PARTICIPANT_MANIFEST_DEPENDENCIES:
+        participant.add_argument(
+            "--" + component.replace("_", "-") + "-manifest",
+            dest=component + "_manifest",
+            type=Path,
+            required=True,
+        )
+    participant.add_argument("--snapshot-db", type=Path, required=True)
+    participant.add_argument("--public-non-dicom-db", type=Path, required=True)
+    participant.add_argument("--public-non-dicom-audit-db", type=Path, required=True)
+    participant.add_argument("--idc-db", type=Path, required=True)
+    participant.add_argument("--previous-participant-db", type=Path)
+    participant.add_argument("--previous-manifest", type=Path)
+    participant.add_argument("--repository-root", type=Path, default=Path.cwd())
+    participant.add_argument("--current-commit", required=True)
+    participant.add_argument("--force-rebuild-reason", action="append", default=[])
+    participant.add_argument("--out", type=Path, required=True)
+
     verify = subparsers.add_parser("verify")
     verify.add_argument("--plan", type=Path, required=True)
     verify.add_argument("--current-db", type=Path, required=True)
@@ -710,6 +1012,26 @@ def main() -> int:
             args.current_commit,
             force_rebuild_reasons=args.force_rebuild_reason,
             max_prior_age_hours=args.max_prior_age_hours,
+        )
+        args.out.parent.mkdir(parents=True, exist_ok=True)
+        args.out.write_text(
+            json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
+    elif args.command == "plan-participant":
+        payload = build_participant_plan(
+            {
+                component: getattr(args, component + "_manifest")
+                for component in PARTICIPANT_MANIFEST_DEPENDENCIES
+            },
+            args.snapshot_db,
+            args.public_non_dicom_db,
+            args.public_non_dicom_audit_db,
+            args.idc_db,
+            args.previous_participant_db,
+            args.previous_manifest,
+            args.repository_root,
+            args.current_commit,
+            force_rebuild_reasons=args.force_rebuild_reason,
         )
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(

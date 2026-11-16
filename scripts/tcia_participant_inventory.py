@@ -2374,7 +2374,10 @@ def build_database(
     public_audit_db: Path | None = None,
     idc_db: Path = DEFAULT_IDC_DB,
     include_clinical_values: bool = False,
+    dependency_fingerprint: str = "",
 ) -> dict[str, Any]:
+    if dependency_fingerprint and not re.fullmatch(r"[0-9a-f]{64}", dependency_fingerprint):
+        raise ValueError("dependency_fingerprint must be a lowercase SHA-256 digest")
     dataset_types = load_dataset_types(snapshot_db)
     if out.exists():
         if not replace:
@@ -2484,6 +2487,8 @@ def build_database(
                 "preserved in clinical_metadata. No trial arm is inferred."
             ),
         }
+        if dependency_fingerprint:
+            metadata["dependency_fingerprint"] = dependency_fingerprint
         conn.executemany(
             "INSERT INTO participant_inventory_meta VALUES (?, ?)",
             [(key, str(value)) for key, value in metadata.items()],
@@ -3176,6 +3181,11 @@ def parser() -> argparse.ArgumentParser:
     build.add_argument("--manifest-out")
     build.add_argument("--replace", action="store_true")
     build.add_argument(
+        "--dependency-fingerprint",
+        default="",
+        help="Exact hash of the participant build dependencies for verified reuse.",
+    )
+    build.add_argument(
         "--embed-clinical-values",
         action="store_true",
         help="Embed all accepted clinical facts for compatibility; research-core builds defer them to clinical_metadata.",
@@ -3229,6 +3239,7 @@ def main() -> int:
             idc_db=idc_db,
             replace=args.replace,
             include_clinical_values=args.embed_clinical_values,
+            dependency_fingerprint=args.dependency_fingerprint,
         )
         if args.gzip_out:
             gzip_database(out, Path(args.gzip_out))

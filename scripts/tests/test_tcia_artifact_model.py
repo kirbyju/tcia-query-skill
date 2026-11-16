@@ -2080,11 +2080,19 @@ class BuilderTests(unittest.TestCase):
                 clinical_db=clinical,
                 idc_db=idc_projection,
                 replace=True,
+                dependency_fingerprint="e" * 64,
             )
             self.assertEqual(result["counts"]["exact_cross_namespace_resolutions"], 1)
             self.assertEqual(result["counts"]["casefolded_identifier_resolutions"], 1)
 
             conn = sqlite3.connect(output)
+            self.assertEqual(
+                conn.execute(
+                    "SELECT value FROM participant_inventory_meta "
+                    "WHERE key='dependency_fingerprint'"
+                ).fetchone(),
+                ("e" * 64,),
+            )
             aapm = conn.execute(
                 """
                 SELECT dataset_type, display_participant_id,

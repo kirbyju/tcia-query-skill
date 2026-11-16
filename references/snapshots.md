@@ -56,6 +56,19 @@ non-DICOM artifact, with specialized source rows and QC retained in its audit
 companion. Every published component is selected and hash-pinned by the same
 bundle manifest.
 
+After the current public non-DICOM pair is built, Participant Inventory has its
+own exact reuse decision. Its dependency fingerprint binds visible dataset and
+download projections from the current snapshot, semantic content from the
+public non-DICOM research database, and the audit
+crosswalk table; stable controlled-access and clinical component fingerprints;
+and the canonical IDC participant projection. Regenerated build bookkeeping is
+excluded. The IDC hash excludes only `generated_at_utc`; schema, all
+participant/unmatched rows, and every other metadata value remain covered. Reuse also requires unchanged
+participant producer paths and healthy prior source evidence. The research and
+audit participant databases are always carried forward together, revalidated,
+and never mixed across releases. A prior inventory without the stored dependency
+fingerprint rebuilds once to establish the contract.
+
 The imaging-subject allowlist is built from every IDC collection that maps
 unambiguously to a visible TCIA short title, including collections without an
 IDC clinical table. This permits official TCIA spreadsheets such as the ACRIN

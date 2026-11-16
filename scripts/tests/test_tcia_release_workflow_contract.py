@@ -261,6 +261,44 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
         ]
         self.assertIn("steps.clinical.outputs.mode == 'rebuild'", build)
 
+    def test_participant_refresh_reuses_inventory_and_audit_as_verified_pair(self) -> None:
+        downstream = WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn("Plan participant inventory refresh", downstream)
+        self.assertIn("plan-participant", downstream)
+        self.assertIn("dist/tcia_participant_release_plan.json", downstream)
+        plan = downstream[
+            downstream.index("Plan participant inventory refresh"):
+            downstream.index("Carry forward verified participant inventory pair")
+        ]
+        for component in ("controlled-access", "clinical"):
+            self.assertIn(f"--{component}-manifest", plan)
+        for component in ("snapshot", "public-non-dicom", "public-non-dicom-audit"):
+            self.assertIn(f"--{component}-db", plan)
+        self.assertIn('--current-commit "$PRODUCER_SHA"', plan)
+        self.assertNotIn("$GITHUB_SHA", plan)
+        reuse = downstream[
+            downstream.index("Carry forward verified participant inventory pair"):
+            downstream.index("Build Participant Inventory")
+        ]
+        self.assertIn("validate-selection", reuse)
+        self.assertIn("materialize-reuse-manifests", reuse)
+        self.assertIn("--component participant_inventory", reuse)
+        self.assertIn("--component participant_inventory_audit", reuse)
+        self.assertIn("--asset participant_inventory.sqlite.gz", reuse)
+        self.assertIn("--asset participant_inventory_audit.sqlite.gz", reuse)
+        build = downstream[
+            downstream.index("Build Participant Inventory"):
+            downstream.index("Validate Participant Inventory pair")
+        ]
+        self.assertIn("steps.participant.outputs.mode == 'rebuild'", build)
+        self.assertIn("--dependency-fingerprint", build)
+        validation = downstream[
+            downstream.index("Validate Participant Inventory pair"):
+            downstream.index("Generate exact semantic change report")
+        ]
+        self.assertIn("tcia_participant_inventory.py validate", validation)
+        self.assertIn("tcia_v2_audit.py validate", validation)
+
     def test_selective_release_is_projection_bound_and_fail_closed(self) -> None:
         source = SOURCE_WORKFLOW.read_text(encoding="utf-8")
         downstream = WORKFLOW.read_text(encoding="utf-8")
@@ -335,9 +373,10 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
         for archive in (
             "dist/public_non_dicom_metadata.sqlite.gz",
             "dist/public_non_dicom_audit.sqlite.gz",
-            "dist/participant_inventory.sqlite.gz",
         ):
             self.assertEqual(baseline_block.count(archive), 2)
+        self.assertEqual(baseline_block.count("dist/participant_inventory.sqlite.gz"), 1)
+        self.assertIn("participant_inventory_audit.sqlite.gz", baseline_block)
         cleanup = baseline_block[
             baseline_block.index("rm -f"):
             baseline_block.index("jq '.components.public_non_dicom'")
@@ -347,6 +386,8 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
         self.assertNotIn("dist/controlled_access_metadata.sqlite.gz", cleanup)
         self.assertNotIn("dist/tcia_correction_registry.sqlite.gz", cleanup)
         self.assertNotIn("dist/tcia_metadata_v2_bundle_manifest.json", cleanup)
+        self.assertNotIn("dist/participant_inventory.sqlite.gz", cleanup)
+        self.assertNotIn("dist/participant_inventory_audit.sqlite.gz", cleanup)
 
         storage_block = workflow[storage_start:materialize_start]
         self.assertIn('df -h "$GITHUB_WORKSPACE"', storage_block)

@@ -94,7 +94,233 @@ def build_controlled_snapshot(
         )
 
 
+def build_idc_projection(
+    path: Path, *, generated_at: str = "2026-11-16T12:00:00+00:00", participant: str = "P1",
+) -> None:
+    with sqlite3.connect(path) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE idc_participant_projection_meta (
+                key TEXT PRIMARY KEY, value TEXT NOT NULL
+            );
+            CREATE TABLE idc_dataset_participants (participant_id TEXT NOT NULL);
+            CREATE TABLE idc_unmatched_datasets (dataset_id TEXT NOT NULL);
+            """
+        )
+        conn.executemany(
+            "INSERT INTO idc_participant_projection_meta VALUES (?, ?)",
+            [("generated_at_utc", generated_at), ("schema_version", "1")],
+        )
+        conn.execute("INSERT INTO idc_dataset_participants VALUES (?)", (participant,))
+
+
+def participant_dependencies(root: Path) -> dict[str, Path]:
+    paths = {}
+    for index, component in enumerate(SELECTIVE.PARTICIPANT_MANIFEST_DEPENDENCIES, 1):
+        path = root / f"{component}.json"
+        write_component_manifest(path, f"{index:x}" * 64)
+        paths[component] = path
+    return paths
+
+
+def build_public_dependencies(
+    public_db: Path,
+    audit_db: Path,
+    *,
+    generated_at: str = "2026-11-16T12:00:00+00:00",
+    subject: str = "P1",
+) -> None:
+    with sqlite3.connect(public_db) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE artifact_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+            CREATE TABLE participant_projection (subject_id TEXT NOT NULL);
+            """
+        )
+        conn.execute(
+            "INSERT INTO artifact_meta VALUES ('generated_at_utc', ?)", (generated_at,)
+        )
+        conn.execute("INSERT INTO participant_projection VALUES (?)", (subject,))
+    with sqlite3.connect(audit_db) as conn:
+        conn.execute(
+            "CREATE TABLE public_non_dicom_crosswalk_evidence "
+            "(raw_subject_id TEXT NOT NULL, resolved_subject_id TEXT NOT NULL)"
+        )
+        conn.execute(
+            "INSERT INTO public_non_dicom_crosswalk_evidence VALUES (?, ?)",
+            (subject, subject),
+        )
+
+
+def build_participant_snapshot(
+    path: Path, *, visible_title: str = "Visible", hidden_title: str = "Hidden",
+) -> None:
+    with sqlite3.connect(path) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE agent_datasets (
+                source TEXT, dataset_type TEXT, short_title TEXT, title TEXT,
+                link TEXT, source_collections TEXT, species TEXT, hidden INTEGER
+            );
+            CREATE TABLE agent_current_downloads (
+                parent_source TEXT, dataset_type TEXT, short_title TEXT,
+                download_id TEXT, download_url TEXT, download_title TEXT,
+                search_url TEXT, download_metadata TEXT, description TEXT,
+                controlled_access INTEGER, hidden INTEGER
+            );
+            """
+        )
+        conn.executemany(
+            "INSERT INTO agent_datasets VALUES (?,?,?,?,?,?,?,?)",
+            [
+                ("collections", "Collection", "VISIBLE", visible_title, "", "", "Human", 0),
+                ("collections", "Collection", "HIDDEN", hidden_title, "", "", "Human", 1),
+            ],
+        )
+        conn.executemany(
+            "INSERT INTO agent_current_downloads VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            [
+                ("collections", "Collection", "VISIBLE", "1", "https://example.test/v", "", "", "", "", 0, 0),
+                ("collections", "Collection", "HIDDEN", "2", "https://example.test/h", "", "", "", "", 0, 1),
+            ],
+        )
+
+
+def build_previous_participant(path: Path, dependency_fingerprint: str = "") -> None:
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            "CREATE TABLE participant_inventory_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+        )
+        if dependency_fingerprint:
+            conn.execute(
+                "INSERT INTO participant_inventory_meta VALUES ('dependency_fingerprint', ?)",
+                (dependency_fingerprint,),
+            )
+
+
 class SelectiveReleaseTests(unittest.TestCase):
+    def test_idc_participant_fingerprint_ignores_only_observation_timestamp(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            before, after, changed = (
+                root / "before.sqlite", root / "after.sqlite", root / "changed.sqlite"
+            )
+            build_idc_projection(before, generated_at="2026-11-16T12:00:00+00:00")
+            build_idc_projection(after, generated_at="2026-11-16T13:00:00+00:00")
+            build_idc_projection(changed, participant="P2")
+            self.assertEqual(
+                SELECTIVE.idc_participant_projection_fingerprint(before),
+                SELECTIVE.idc_participant_projection_fingerprint(after),
+            )
+            self.assertNotEqual(
+                SELECTIVE.idc_participant_projection_fingerprint(before),
+                SELECTIVE.idc_participant_projection_fingerprint(changed),
+            )
+
+    def test_public_projection_fingerprint_excludes_build_metadata_not_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            before, after, changed = (
+                root / "before.sqlite", root / "after.sqlite", root / "changed.sqlite"
+            )
+            build_public_dependencies(before, root / "before-audit.sqlite")
+            build_public_dependencies(
+                after,
+                root / "after-audit.sqlite",
+                generated_at="2026-11-16T13:00:00+00:00",
+            )
+            build_public_dependencies(
+                changed, root / "changed-audit.sqlite", subject="P2"
+            )
+            fingerprint = lambda path: SELECTIVE.filtered_sqlite_fingerprint(
+                path, excluded_tables={"artifact_meta"}
+            )
+            self.assertEqual(fingerprint(before), fingerprint(after))
+            self.assertNotEqual(fingerprint(before), fingerprint(changed))
+
+    def test_participant_snapshot_projection_ignores_hidden_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            before, hidden, visible = (
+                root / "before.sqlite", root / "hidden.sqlite", root / "visible.sqlite"
+            )
+            build_participant_snapshot(before)
+            build_participant_snapshot(hidden, hidden_title="Changed hidden")
+            build_participant_snapshot(visible, visible_title="Changed visible")
+            fingerprint = SELECTIVE.participant_snapshot_projection_fingerprint
+            self.assertEqual(fingerprint(before), fingerprint(hidden))
+            self.assertNotEqual(fingerprint(before), fingerprint(visible))
+
+    def test_participant_plan_reuses_verified_pair_when_dependencies_match(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            dependencies = participant_dependencies(root)
+            snapshot = root / "snapshot.sqlite"
+            public = root / "public.sqlite"
+            audit = root / "audit.sqlite"
+            idc = root / "idc.sqlite"
+            previous = root / "participant.sqlite"
+            manifest = root / "manifest.json"
+            build_participant_snapshot(snapshot)
+            build_public_dependencies(public, audit)
+            build_idc_projection(idc)
+            fingerprint, _ = SELECTIVE.participant_dependency_fingerprint(
+                dependencies, snapshot, public, audit, idc
+            )
+            build_previous_participant(previous, fingerprint)
+            manifest.write_text(json.dumps(reusable_manifest()), encoding="utf-8")
+            plan = SELECTIVE.build_participant_plan(
+                dependencies, snapshot, public, audit, idc, previous, manifest, root,
+                "c" * 40, changed_paths=[]
+            )
+            self.assertEqual(plan["mode"], "reuse")
+            self.assertTrue(plan["eligible"])
+            self.assertEqual(plan["dependency_fingerprint"]["current"], fingerprint)
+
+    def test_participant_plan_rebuilds_for_dependency_producer_or_legacy_baseline(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            dependencies = participant_dependencies(root)
+            snapshot = root / "snapshot.sqlite"
+            public = root / "public.sqlite"
+            audit = root / "audit.sqlite"
+            idc = root / "idc.sqlite"
+            previous = root / "participant.sqlite"
+            manifest = root / "manifest.json"
+            build_participant_snapshot(snapshot)
+            build_public_dependencies(public, audit)
+            build_idc_projection(idc)
+            build_previous_participant(previous)
+            manifest.write_text(json.dumps(reusable_manifest()), encoding="utf-8")
+            legacy = SELECTIVE.build_participant_plan(
+                dependencies, snapshot, public, audit, idc, previous, manifest, root,
+                "c" * 40, changed_paths=[]
+            )
+            self.assertEqual(legacy["mode"], "rebuild")
+            self.assertIn(
+                "previous participant dependency fingerprint is unavailable",
+                legacy["reasons"],
+            )
+            fingerprint, _ = SELECTIVE.participant_dependency_fingerprint(
+                dependencies, snapshot, public, audit, idc
+            )
+            previous.unlink()
+            build_previous_participant(previous, fingerprint)
+            producer = SELECTIVE.build_participant_plan(
+                dependencies, snapshot, public, audit, idc, previous, manifest, root,
+                "c" * 40,
+                changed_paths=["references/reviewed_missing_participant_inventories_v1.json"],
+            )
+            self.assertEqual(producer["mode"], "rebuild")
+            self.assertIn("participant producer files changed", producer["reasons"])
+            write_component_manifest(dependencies["clinical"], "f" * 64)
+            changed = SELECTIVE.build_participant_plan(
+                dependencies, snapshot, public, audit, idc, previous, manifest, root,
+                "c" * 40, changed_paths=[]
+            )
+            self.assertEqual(changed["mode"], "rebuild")
+            self.assertIn("participant dependencies changed", changed["reasons"])
+
     def test_clinical_plan_reuses_recent_verified_artifact_when_dependencies_match(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
