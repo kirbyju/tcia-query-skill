@@ -382,6 +382,26 @@ CONCEPT_ALIASES = {
 }
 
 SOURCE_COLUMN_CONCEPT_OVERRIDES = {
+    # LDCT abdomen, chest, and neuro workbooks are lesion-grain tables. Do not
+    # flatten their repeated findings into participant-level diagnosis or
+    # progression fields. The IDC names are included because IDC mirrors the
+    # same workbook rows under prefixed columns.
+    ("ldctandprojectiondata", "diagnosis"): "lesion_diagnosis",
+    ("ldctandprojectiondata", "abdomendiagnosis"): "lesion_diagnosis",
+    ("ldctandprojectiondata", "chestdiagnosis"): "lesion_diagnosis",
+    ("ldctandprojectiondata", "histology"): "lesion_histology",
+    ("ldctandprojectiondata", "sourceoftruthhistology"): "lesion_histology",
+    (
+        "ldctandprojectiondata",
+        "completediagnosis",
+    ): "lesion_complete_diagnosis",
+    (
+        "ldctandprojectiondata",
+        "abdomencompletediagnosis",
+    ): "lesion_complete_diagnosis",
+    ("ldctandprojectiondata", "finaldiagnosis"): "lesion_final_diagnosis",
+    ("ldctandprojectiondata", "progression"): "lesion_progression",
+    ("ldctandprojectiondata", "sourceoftruthprogression"): "lesion_progression",
     # The ACRIN-6698 workbook calls this column simply "age", while its
     # official data dictionary defines it as age in years at enrollment.
     ("acrin6698", "age"): "age_at_enrollment_years",
@@ -631,7 +651,7 @@ SUBJECT_COLUMN_OVERRIDES = {
 OFFICIAL_SOURCE_TRANSFORM_VERSIONS = {
     "hcctaceseg": 1,
     "headneckradiomicshn1": 1,
-    "ldctandprojectiondata": 1,
+    "ldctandprojectiondata": 2,
     "tompeicmmd": 1,
     "ucsdptgbm": 1,
     "ucsdvslongitudinal": 1,
@@ -737,6 +757,17 @@ RESOLVED_COLUMNS = [
     "response",
     "screening_result",
 ]
+
+# These concepts describe individual LDCT lesions. They remain queryable in
+# long-form facts and conflicts, but they must not be collapsed into a scalar
+# participant summary even when a participant currently has only one value.
+NON_SUBJECT_SUMMARY_CONCEPTS = {
+    "lesion_complete_diagnosis",
+    "lesion_diagnosis",
+    "lesion_final_diagnosis",
+    "lesion_histology",
+    "lesion_progression",
+}
 
 # Carry stable patient attributes and outcomes across a WordPress-confirmed
 # Analysis Result -> Collection relationship after an exact PatientID match.
@@ -1360,6 +1391,45 @@ def unit_for_source_column(short_title: str, column: Any) -> str | None:
     )
 
 
+def ldct_source_row_provenance(
+    short_title: str, record: dict[Any, Any]
+) -> dict[str, str]:
+    """Describe the native lesion grain of reviewed LDCT source rows."""
+    if normalize_name(short_title) != "ldctandprojectiondata":
+        return {}
+    normalized = {
+        normalize_name(column): clean_value(value)
+        for column, value in record.items()
+    }
+    return {
+        "source_row_grain": "lesion",
+        "lesion_id": next(
+            (
+                normalized.get(column, "")
+                for column in (
+                    "lesionid",
+                    "abdomenlesionid",
+                    "chestlesionid",
+                )
+                if normalized.get(column)
+            ),
+            "",
+        ),
+        "series_uid": next(
+            (
+                normalized.get(column, "")
+                for column in (
+                    "seriesuid",
+                    "abdomenseriesuid",
+                    "chestseriesuid",
+                )
+                if normalized.get(column)
+            ),
+            "",
+        ),
+    }
+
+
 YALE_BRAIN_METS_DICTIONARY_FIELDS = {
     "patientid": "patient_id",
     "studydatetime": "study_datetime",
@@ -1646,6 +1716,7 @@ def prepare_official_table(
     """Normalize a reviewed multi-row header without altering source cells."""
     if (
         normalize_name(short_title) == "ldctandprojectiondata"
+        and hasattr(frame, "index")
         and len(frame.index) >= 2
         and any(normalize_name(value) == "case" for value in frame.iloc[0])
     ):
@@ -3678,6 +3749,9 @@ def ingest_idc_clinical(
                     row=record,
                     facts=facts,
                     has_imaging=has_imaging,
+                    fact_provenance=ldct_source_row_provenance(
+                        short_title, record
+                    ),
                 ):
                     row_count += 1
                     subject_key = (
@@ -4336,6 +4410,9 @@ def ingest_official_bytes(
                     "source_subject_column": str(subject_column),
                     "source_subject_id": source_subject_id,
                     "subject_id_mapping_method": subject_id_mapping_method,
+                    **ldct_source_row_provenance(
+                        row["short_title"], values
+                    ),
                 },
             ):
                 ingest_yale_longitudinal_observation(
@@ -7356,6 +7433,23 @@ def materialize_subjects(conn: sqlite3.Connection) -> None:
                 == "yalebrainmetslongitudinal"
                 and concept == "age_at_imaging_years"
             )
+            distinct: dict[str, dict[str, Any]] = {}
+            for fact in concept_facts:
+                distinct.setdefault(
+                    fact["value_normalized"],
+                    {
+                        "value": fact["value_resolved"],
+                        "source_value": fact["value_text"],
+                        "source_kind": fact["source_kind"],
+                        "source_id": fact["source_id"],
+                        "source_lineage": fact["source_lineage"],
+                        "priority": fact["source_priority"],
+                    },
+                )
+            if len(distinct) > 1 and not yale_longitudinal_age:
+                conflicts[concept] = list(distinct.values())
+            if concept in NON_SUBJECT_SUMMARY_CONCEPTS:
+                continue
             if yale_longitudinal_age:
                 winner = min(
                     concept_facts,
@@ -7383,21 +7477,6 @@ def materialize_subjects(conn: sqlite3.Connection) -> None:
                 "evidence_scope": winner["evidence_scope"],
                 "is_inferred": bool(winner["is_inferred"]),
             }
-            distinct: dict[str, dict[str, Any]] = {}
-            for fact in concept_facts:
-                distinct.setdefault(
-                    fact["value_normalized"],
-                    {
-                        "value": fact["value_resolved"],
-                        "source_value": fact["value_text"],
-                        "source_kind": fact["source_kind"],
-                        "source_id": fact["source_id"],
-                        "source_lineage": fact["source_lineage"],
-                        "priority": fact["source_priority"],
-                    },
-                )
-            if len(distinct) > 1 and not yale_longitudinal_age:
-                conflicts[concept] = list(distinct.values())
         source_kinds = sorted({fact["source_kind"] for fact in facts})
         source_lineages = {fact["source_lineage"] for fact in facts}
         has_imaging = max(fact["has_imaging"] for fact in facts)

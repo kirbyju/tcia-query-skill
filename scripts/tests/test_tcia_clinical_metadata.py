@@ -47,6 +47,109 @@ class ClinicalMetadataTest(unittest.TestCase):
         )
         self.assertEqual(next(frame.iterrows())[1]["Case"], "N001")
 
+    def test_ldct_lesion_facts_do_not_select_participant_level_winners(
+        self,
+    ) -> None:
+        self.assertEqual(
+            CLINICAL.concept_for_source_column(
+                "LDCT-and-Projection-data", "abdomen_diagnosis"
+            ),
+            "lesion_diagnosis",
+        )
+        self.assertEqual(
+            CLINICAL.concept_for_source_column(
+                "LDCT-and-Projection-data", "source_of_truth_histology"
+            ),
+            "lesion_histology",
+        )
+        self.assertEqual(
+            CLINICAL.concept_for_source_column(
+                "LDCT-and-Projection-data", "source_of_truth_progression"
+            ),
+            "lesion_progression",
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            conn = CLINICAL.init_db(
+                Path(directory) / "ldct-lesions.sqlite", replace=True
+            )
+            source_row = {
+                "short_title": "LDCT-and-Projection-data",
+                "download_id": "42661",
+                "download_title": "LDCT clinical package",
+                "download_url": "https://example.test/ldct.csv",
+                "date_updated": "2026-07-28",
+                "file_types": '["CSV"]',
+            }
+            data = (
+                "Case,SeriesUID,Lesion_ID,Diagnosis,Complete_Diagnosis,"
+                "Final_Diagnosis,Histology,Progression\n"
+                "L001,1.2.3,1,200,Metastasis-Colon,Confirmed metastasis,211,10\n"
+                "L001,1.2.3,2,201,Cyst,Confirmed cyst,,11\n"
+            ).encode("utf-8")
+            rows, subjects = CLINICAL.ingest_official_bytes(
+                conn,
+                source_row,
+                source_id="tcia-download:ldct:42661",
+                signature="test",
+                data=data,
+            )
+            self.assertEqual((rows, subjects), (2, 1))
+            facts = conn.execute(
+                """SELECT concept, value_text, provenance_json
+                   FROM clinical_facts ORDER BY concept, value_text"""
+            ).fetchall()
+            self.assertEqual(
+                sorted({row["concept"] for row in facts}),
+                [
+                    "lesion_complete_diagnosis",
+                    "lesion_diagnosis",
+                    "lesion_final_diagnosis",
+                    "lesion_histology",
+                    "lesion_progression",
+                ],
+            )
+            self.assertEqual(
+                {
+                    json.loads(row["provenance_json"])["lesion_id"]
+                    for row in facts
+                },
+                {"1", "2"},
+            )
+            self.assertTrue(
+                all(
+                    json.loads(row["provenance_json"])["series_uid"] == "1.2.3"
+                    for row in facts
+                )
+            )
+
+            CLINICAL.materialize_subjects(conn)
+            subject = conn.execute(
+                """SELECT primary_diagnosis, progression,
+                          resolved_values_json, conflicts_json
+                   FROM clinical_subjects"""
+            ).fetchone()
+            self.assertIsNone(subject["primary_diagnosis"])
+            self.assertIsNone(subject["progression"])
+            resolved = json.loads(subject["resolved_values_json"])
+            self.assertFalse(
+                CLINICAL.NON_SUBJECT_SUMMARY_CONCEPTS & resolved.keys()
+            )
+            conflicts = json.loads(subject["conflicts_json"])
+            self.assertEqual(
+                set(conflicts),
+                {
+                    "lesion_complete_diagnosis",
+                    "lesion_diagnosis",
+                    "lesion_final_diagnosis",
+                    "lesion_progression",
+                },
+            )
+            self.assertEqual(
+                {item["value"] for item in conflicts["lesion_diagnosis"]},
+                {"200", "201"},
+            )
+            conn.close()
+
     def test_ldct_neuro_rows_require_exact_general_commons_series_match(self) -> None:
         self.check_ldct_neuro_series_match(use_view=False)
 

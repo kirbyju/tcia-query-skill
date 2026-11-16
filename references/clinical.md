@@ -414,6 +414,15 @@ current 89 neuro rows all match; the larger 99-subject General Commons imaging
 cohort does not imply clinical values for its 47 cases absent from the open
 workbook. Raw workbook values remain in `clinical_rows.row_json`.
 
+The abdomen, chest, and neuro workbooks are lesion-grain tables. Their
+`Diagnosis`, `Complete_Diagnosis`, `Final_Diagnosis`, `Histology`, and
+`Progression` values are therefore retained as long-form `lesion_*` facts with
+the source lesion ID and Series UID in provenance. They do not populate the
+scalar participant-level `primary_diagnosis` or `progression` columns. When
+lesions for one participant have different values, the alternatives remain
+visible through the fact and conflict views instead of selecting an arbitrary
+participant-level winner.
+
 `VICTRE` is handled as a synthetic mixed cohort, not as 2,994 breast-cancer
 patients. IDC DICOM metadata supplies one image-linked row per virtual subject.
 The digital-mammography `SeriesDescription` encodes `pc` (signal absent) or
