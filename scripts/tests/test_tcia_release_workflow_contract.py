@@ -207,6 +207,33 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
         self.assertIn("--artifact-total-timeout-seconds 300", block)
         self.assertIn("--artifact-max-bytes 1073741824", block)
 
+    def test_controlled_source_refresh_has_independent_wordpress_bound_reuse(self) -> None:
+        source = SOURCE_WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn("refresh_controlled_access:", source)
+        self.assertIn("Plan controlled-access component refresh", source)
+        self.assertIn("plan-controlled", source)
+        self.assertIn("dist/tcia_controlled_access_release_plan.json", source)
+        diagnostic_upload = source[
+            source.index("Upload non-release semantic-gate diagnostics"):
+            source.index("Upload validated V2 source inputs")
+        ]
+        validated_upload = source[source.index("Upload validated V2 source inputs"):]
+        self.assertIn("dist/tcia_controlled_access_release_plan.json", diagnostic_upload)
+        self.assertIn("dist/tcia_controlled_access_release_plan.json", validated_upload)
+        reuse = source[
+            source.index("Carry forward verified controlled-access metadata for full release"):
+            source.index("Build controlled-access metadata")
+        ]
+        self.assertIn("validate-selection", reuse)
+        self.assertIn("materialize-reuse-manifests", reuse)
+        self.assertIn("--component controlled_access", reuse)
+        build = source[
+            source.index("Build controlled-access metadata"):
+            source.index("Validate controlled-access metadata")
+        ]
+        self.assertIn("steps.controlled.outputs.mode == 'rebuild'", build)
+        self.assertIn("--require-complete-sources", source)
+
     def test_selective_release_is_projection_bound_and_fail_closed(self) -> None:
         source = SOURCE_WORKFLOW.read_text(encoding="utf-8")
         downstream = WORKFLOW.read_text(encoding="utf-8")

@@ -36,7 +36,15 @@ publishes changed content through the release bundle:
 - `tcia_metadata_v2_bundle_manifest.json`
 
 The controlled-access artifact is rebuilt from the fresh base snapshot plus
-public WordPress manifest and metadata spreadsheet URLs. The clinical artifact
+public WordPress manifest and metadata spreadsheet URLs when the exact visible
+controlled-download projection changes. That projection includes dataset and
+download identity, routing URLs, update dates, license/access fields, and raw
+WordPress metadata; hidden browse-table rows are excluded. When the projection
+and controlled-access producer are unchanged, the workflow carries forward the
+prior release's hash-verified artifact, regenerates its reuse manifest, and
+still runs complete-source validation. Operators can force a refresh when a
+same-URL external manifest may have changed without a WordPress metadata
+update. The clinical artifact
 uses a hybrid refresh: unchanged direct official artifacts and same-version IDC
 clinical tables are reused, while schema or IDC version changes trigger full
 reprocessing. NIfTI and pathology research rows are unified in the public

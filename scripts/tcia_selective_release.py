@@ -22,8 +22,11 @@ from typing import Any, Iterable
 
 
 PLAN_SCHEMA_VERSION = 1
+CONTROLLED_PLAN_SCHEMA_VERSION = 1
 FAST_MODE = "fast"
 FULL_MODE = "full"
+REUSE_MODE = "reuse"
+REBUILD_MODE = "rebuild"
 
 SNAPSHOT_ONLY_TABLES = {
     "datacite_dois",
@@ -54,6 +57,24 @@ FAST_SAFE_EXACT_PATHS = {
     "scripts/tests/test_tcia_snapshot.py",
     "scripts/tests/test_tcia_v2_bundle.py",
 }
+
+CONTROLLED_ACCESS_PRODUCER_PATHS = {
+    "requirements-build.lock",
+    "scripts/tcia_controlled_access_metadata.py",
+}
+
+CONTROLLED_ACCESS_PROJECTION_COLUMNS = (
+    "download_row_id", "parent_source", "dataset_type", "parent_id",
+    "parent_slug", "short_title", "title", "doi", "source_collections",
+    "download_id", "download_slug", "download_title", "download_url",
+    "download_metadata", "search_url", "date_updated", "collection_status",
+    "description", "license_label", "license_url", "requirements_label",
+    "requirements_url", "requirements_text", "access_level",
+    "controlled_access", "noncommercial_license", "download_size",
+    "download_size_unit", "subjects", "studies", "series", "images",
+    "download_types", "data_types", "file_types", "external_resources",
+    "raw_json",
+)
 
 
 def canonical_json(value: Any) -> str:
@@ -137,11 +158,13 @@ def path_is_fast_safe(path: str) -> bool:
     return normalized.startswith(("mcp_server/", "evals/"))
 
 
-def prior_health_reuse_errors(manifest: dict[str, Any]) -> list[str]:
+def prior_health_reuse_errors(
+    manifest: dict[str, Any], components_to_check: Iterable[str] = CARRIED_COMPONENTS,
+) -> list[str]:
     components = ((manifest.get("source_health") or {}).get("components") or {})
     errors: list[str] = []
     now = dt.datetime.now(dt.timezone.utc)
-    for component in sorted(CARRIED_COMPONENTS):
+    for component in sorted(components_to_check):
         health = components.get(component)
         if not isinstance(health, dict) or health.get("status") != "healthy":
             errors.append(f"prior {component} source health is not reusable")
@@ -169,6 +192,131 @@ def prior_health_reuse_errors(manifest: dict[str, Any]) -> list[str]:
                 if age_seconds < 0 or age_seconds > max_age:
                     errors.append(f"prior verified-stale evidence expired: {name}")
     return errors
+
+
+def controlled_access_projection_fingerprint(path: Path) -> str:
+    """Hash WordPress rows that define the controlled-access build scope."""
+    uri = f"file:{path.resolve()}?mode=ro"
+    digest = hashlib.sha256()
+    with closing(sqlite3.connect(uri, uri=True)) as conn:
+        conn.row_factory = sqlite3.Row
+        quick_check = conn.execute("PRAGMA quick_check").fetchone()[0]
+        if quick_check != "ok":
+            raise RuntimeError(f"Snapshot quick_check failed for {path}: {quick_check}")
+        required = {"agent_current_downloads", "agent_datasets"}
+        present = {
+            str(row[0])
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type IN ('table','view')"
+            )
+        }
+        missing = sorted(required - present)
+        if missing:
+            raise RuntimeError(
+                "Controlled-access projection views are missing: " + ", ".join(missing)
+            )
+        select_columns = []
+        for column in CONTROLLED_ACCESS_PROJECTION_COLUMNS:
+            if column in {"doi", "source_collections"}:
+                select_columns.append(f"a.{column} AS {column}")
+            else:
+                select_columns.append(f"d.{column} AS {column}")
+        sql = f"""
+            SELECT {', '.join(select_columns)}
+            FROM agent_current_downloads d
+            LEFT JOIN agent_datasets a
+              ON a.source = d.parent_source
+             AND a.short_title = d.short_title
+            WHERE d.hidden = 0
+              AND d.controlled_access = 1
+            ORDER BY lower(d.short_title), d.download_id, d.download_row_id
+        """
+        digest.update(
+            (canonical_json({"columns": CONTROLLED_ACCESS_PROJECTION_COLUMNS}) + "\n").encode(
+                "utf-8"
+            )
+        )
+        for row in conn.execute(sql):
+            digest.update(
+                (canonical_json([_encoded_value(value) for value in row]) + "\n").encode(
+                    "utf-8"
+                )
+            )
+    return digest.hexdigest()
+
+
+def build_controlled_access_plan(
+    current_db: Path,
+    previous_db: Path | None,
+    previous_manifest: Path | None,
+    repository_root: Path,
+    current_commit: str,
+    *,
+    changed_paths: Iterable[str] | None = None,
+    force_rebuild_reasons: Iterable[str] = (),
+) -> dict[str, Any]:
+    reasons = [str(reason) for reason in force_rebuild_reasons if str(reason).strip()]
+    current_fingerprint = controlled_access_projection_fingerprint(current_db)
+    previous_fingerprint = ""
+    previous_commit = ""
+    previous_release_fingerprint = ""
+    manifest: dict[str, Any] = {}
+
+    if not previous_db or not previous_db.is_file():
+        reasons.append("verified previous snapshot is unavailable")
+    else:
+        previous_fingerprint = controlled_access_projection_fingerprint(previous_db)
+        if previous_fingerprint != current_fingerprint:
+            reasons.append("WordPress controlled-access projection changed")
+
+    if not previous_manifest or not previous_manifest.is_file():
+        reasons.append("verified previous bundle manifest is unavailable")
+    else:
+        manifest = json.loads(previous_manifest.read_text(encoding="utf-8"))
+        previous_release_fingerprint = str(manifest.get("release_fingerprint") or "")
+        previous_commit = str((manifest.get("producer") or {}).get("commit") or "")
+        if not previous_release_fingerprint:
+            reasons.append("previous bundle manifest has no release fingerprint")
+        if len(previous_commit) != 40:
+            reasons.append("previous bundle manifest has no exact producer commit")
+        reasons.extend(prior_health_reuse_errors(manifest, {"controlled_access"}))
+
+    paths: list[str] = []
+    producer_paths: list[str] = []
+    if len(previous_commit) == 40:
+        try:
+            paths = sorted(
+                set(changed_paths)
+                if changed_paths is not None
+                else git_changed_paths(repository_root, previous_commit, current_commit)
+            )
+        except (OSError, subprocess.CalledProcessError) as exc:
+            reasons.append(f"controlled-access producer impact could not be established: {exc}")
+        else:
+            producer_paths = [
+                path for path in paths if path in CONTROLLED_ACCESS_PRODUCER_PATHS
+            ]
+            if producer_paths:
+                reasons.append("controlled-access producer files changed")
+
+    mode = REBUILD_MODE if reasons else REUSE_MODE
+    return {
+        "artifact": "tcia_controlled_access_release_plan",
+        "schema_version": CONTROLLED_PLAN_SCHEMA_VERSION,
+        "mode": mode,
+        "eligible": mode == REUSE_MODE,
+        "current_producer_commit": current_commit,
+        "previous_producer_commit": previous_commit,
+        "previous_release_fingerprint": previous_release_fingerprint,
+        "wordpress_projection_fingerprint": {
+            "current": current_fingerprint,
+            "previous": previous_fingerprint,
+            "algorithm": "sha256-controlled-wordpress-projection-v1",
+        },
+        "changed_paths": paths,
+        "controlled_producer_paths": producer_paths,
+        "reasons": reasons or ["WordPress controlled-access scope and producer are unchanged"],
+    }
 
 
 def git_changed_paths(repository_root: Path, previous_commit: str, current_commit: str) -> list[str]:
@@ -349,6 +497,15 @@ def parse_args() -> argparse.Namespace:
     plan.add_argument("--force-full-reason", action="append", default=[])
     plan.add_argument("--out", type=Path, required=True)
 
+    controlled = subparsers.add_parser("plan-controlled")
+    controlled.add_argument("--current-db", type=Path, required=True)
+    controlled.add_argument("--previous-db", type=Path)
+    controlled.add_argument("--previous-manifest", type=Path)
+    controlled.add_argument("--repository-root", type=Path, default=Path.cwd())
+    controlled.add_argument("--current-commit", required=True)
+    controlled.add_argument("--force-rebuild-reason", action="append", default=[])
+    controlled.add_argument("--out", type=Path, required=True)
+
     verify = subparsers.add_parser("verify")
     verify.add_argument("--plan", type=Path, required=True)
     verify.add_argument("--current-db", type=Path, required=True)
@@ -368,6 +525,17 @@ def main() -> int:
             args.repository_root,
             args.current_commit,
             force_full_reasons=args.force_full_reason,
+        )
+        args.out.parent.mkdir(parents=True, exist_ok=True)
+        args.out.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    elif args.command == "plan-controlled":
+        payload = build_controlled_access_plan(
+            args.current_db,
+            args.previous_db,
+            args.previous_manifest,
+            args.repository_root,
+            args.current_commit,
+            force_rebuild_reasons=args.force_rebuild_reason,
         )
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")

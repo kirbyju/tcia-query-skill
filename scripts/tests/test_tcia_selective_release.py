@@ -51,7 +51,102 @@ def reusable_manifest() -> dict:
     }
 
 
+def build_controlled_snapshot(
+    path: Path, *, download_url: str = "https://example.test/manifest.tcia", hidden: int = 0,
+) -> None:
+    columns = []
+    for name in SELECTIVE.CONTROLLED_ACCESS_PROJECTION_COLUMNS:
+        if name not in {"doi", "source_collections"}:
+            columns.append(f'"{name}" TEXT')
+    columns.extend(['"hidden" INTEGER', 'PRIMARY KEY ("download_row_id")'])
+    with sqlite3.connect(path) as conn:
+        conn.execute(f"CREATE TABLE agent_current_downloads ({', '.join(columns)})")
+        conn.execute(
+            "CREATE TABLE agent_datasets (source TEXT, short_title TEXT, doi TEXT, source_collections TEXT)"
+        )
+        values = {
+            name: "" for name in SELECTIVE.CONTROLLED_ACCESS_PROJECTION_COLUMNS
+            if name not in {"doi", "source_collections"}
+        }
+        values.update(
+            download_row_id="row-1", parent_source="collections", dataset_type="Collection",
+            short_title="CONTROLLED-DEMO", download_id="42", download_url=download_url,
+            controlled_access="1", raw_json='{"download_url":"' + download_url + '"}',
+        )
+        names = list(values) + ["hidden"]
+        placeholders = ", ".join("?" for _ in names)
+        conn.execute(
+            f"INSERT INTO agent_current_downloads ({', '.join(names)}) VALUES ({placeholders})",
+            [values[name] for name in values] + [hidden],
+        )
+        conn.execute(
+            "INSERT INTO agent_datasets VALUES ('collections','CONTROLLED-DEMO','10.1/demo','[]')"
+        )
+
+
 class SelectiveReleaseTests(unittest.TestCase):
+    def test_controlled_plan_reuses_verified_artifact_when_wordpress_scope_is_unchanged(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            current, previous = root / "current.sqlite", root / "previous.sqlite"
+            manifest = root / "manifest.json"
+            build_controlled_snapshot(current)
+            build_controlled_snapshot(previous)
+            manifest.write_text(json.dumps(reusable_manifest()), encoding="utf-8")
+            plan = SELECTIVE.build_controlled_access_plan(
+                current, previous, manifest, root, "c" * 40, changed_paths=[]
+            )
+            self.assertEqual(plan["mode"], "reuse")
+            self.assertTrue(plan["eligible"])
+            self.assertEqual(
+                plan["wordpress_projection_fingerprint"]["current"],
+                plan["wordpress_projection_fingerprint"]["previous"],
+            )
+
+    def test_controlled_plan_rebuilds_for_visible_wordpress_change(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            current, previous = root / "current.sqlite", root / "previous.sqlite"
+            manifest = root / "manifest.json"
+            build_controlled_snapshot(current, download_url="https://example.test/new.tcia")
+            build_controlled_snapshot(previous)
+            manifest.write_text(json.dumps(reusable_manifest()), encoding="utf-8")
+            plan = SELECTIVE.build_controlled_access_plan(
+                current, previous, manifest, root, "c" * 40, changed_paths=[]
+            )
+            self.assertEqual(plan["mode"], "rebuild")
+            self.assertIn("WordPress controlled-access projection changed", plan["reasons"])
+
+    def test_controlled_plan_ignores_hidden_wordpress_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            current, previous = root / "current.sqlite", root / "previous.sqlite"
+            build_controlled_snapshot(current, download_url="https://example.test/new.tcia", hidden=1)
+            build_controlled_snapshot(previous, hidden=1)
+            self.assertEqual(
+                SELECTIVE.controlled_access_projection_fingerprint(current),
+                SELECTIVE.controlled_access_projection_fingerprint(previous),
+            )
+
+    def test_controlled_plan_rebuilds_for_producer_change_or_force(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            current, previous = root / "current.sqlite", root / "previous.sqlite"
+            manifest = root / "manifest.json"
+            build_controlled_snapshot(current)
+            build_controlled_snapshot(previous)
+            manifest.write_text(json.dumps(reusable_manifest()), encoding="utf-8")
+            changed = SELECTIVE.build_controlled_access_plan(
+                current, previous, manifest, root, "c" * 40,
+                changed_paths=["scripts/tcia_controlled_access_metadata.py"],
+            )
+            self.assertEqual(changed["mode"], "rebuild")
+            forced = SELECTIVE.build_controlled_access_plan(
+                current, previous, manifest, root, "c" * 40, changed_paths=[],
+                force_rebuild_reasons=["operator requested controlled-access refresh"],
+            )
+            self.assertEqual(forced["mode"], "rebuild")
+
     def test_datacite_and_publication_changes_do_not_change_downstream_fingerprint(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

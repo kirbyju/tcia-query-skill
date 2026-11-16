@@ -35,6 +35,14 @@ on:
         options:
           - "false"
           - "true"
+      refresh_controlled_access:
+        description: "Re-fetch controlled-access manifests and metadata even when WordPress scope is unchanged"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
   schedule:
     - cron: "17 2 * * *"
       timezone: "America/New_York"
@@ -227,8 +235,68 @@ jobs:
           cp dist/controlled_access_metadata.sqlite previous/controlled_access_metadata.sqlite
           cp dist/clinical_metadata.sqlite previous/clinical_metadata.sqlite
 
-      - name: Build controlled-access metadata
+      - name: Plan controlled-access component refresh
+        id: controlled
         if: steps.selective.outputs.mode != 'fast'
+        run: |
+          set -euo pipefail
+          previous_args=()
+          force_args=()
+          if [ -f previous/release_verified ]; then
+            previous_args+=(
+              --previous-db previous/tcia_snapshot.sqlite
+              --previous-manifest previous/tcia_metadata_v2_bundle_manifest.json
+            )
+          fi
+          if [ "${{ inputs.force_full_build || 'false' }}" = "true" ]; then
+            force_args+=(--force-rebuild-reason "operator requested a full build")
+          fi
+          if [ "${{ inputs.refresh_controlled_access || 'false' }}" = "true" ]; then
+            force_args+=(--force-rebuild-reason "operator requested controlled-access refresh")
+          fi
+          python scripts/tcia_selective_release.py plan-controlled \
+            --current-db dist/tcia_snapshot.sqlite \
+            --repository-root . \
+            --current-commit "$GITHUB_SHA" \
+            --out dist/tcia_controlled_access_release_plan.json \
+            "${previous_args[@]}" \
+            "${force_args[@]}"
+          mode="$(jq -r '.mode' dist/tcia_controlled_access_release_plan.json)"
+          test "$mode" = "reuse" || test "$mode" = "rebuild"
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Controlled-access component plan"
+            echo "- Mode: $mode"
+            jq -r '.reasons[] | "- Reason: " + .' dist/tcia_controlled_access_release_plan.json
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Carry forward verified controlled-access metadata for full release
+        if: steps.selective.outputs.mode != 'fast' && steps.controlled.outputs.mode == 'reuse'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="tcia-metadata-v2-latest"
+          gh release download "$tag" \
+            --pattern controlled_access_metadata.sqlite.gz \
+            --dir previous --clobber
+          python scripts/tcia_v2_bundle.py validate-selection \
+            --asset-dir previous \
+            --manifest previous/tcia_metadata_v2_bundle_manifest.json \
+            --source-release-json previous/release.json \
+            --asset controlled_access_metadata.sqlite.gz
+          python scripts/tcia_v2_bundle.py materialize-reuse-manifests \
+            --manifest previous/tcia_metadata_v2_bundle_manifest.json \
+            --out-dir previous \
+            --component controlled_access
+          cp previous/controlled_access_metadata.sqlite.gz \
+            previous/controlled_access_metadata_manifest.json dist/
+          gzip -dc dist/controlled_access_metadata.sqlite.gz \
+            > dist/controlled_access_metadata.sqlite
+          cp dist/controlled_access_metadata.sqlite previous/controlled_access_metadata.sqlite
+
+      - name: Build controlled-access metadata
+        if: steps.selective.outputs.mode != 'fast' && steps.controlled.outputs.mode == 'rebuild'
         timeout-minutes: 30
         run: |
           python scripts/tcia_controlled_access_metadata.py build \
@@ -518,6 +586,7 @@ jobs:
             dist/metadata_change_report.md
             dist/metadata_change_report.json
             dist/tcia_selective_release_plan.json
+            dist/tcia_controlled_access_release_plan.json
             dist/pathdb_wordpress_identity_preflight.json
             dist/tcia_correction_registry_bootstrap_evidence.json
             dist/tcia_correction_registry_validation.json
@@ -540,6 +609,7 @@ jobs:
             dist/tcia_correction_registry.sqlite.gz
             dist/tcia_correction_registry_manifest.json
             dist/tcia_selective_release_plan.json
+            dist/tcia_controlled_access_release_plan.json
             dist/pathdb_wordpress_identity_preflight.json
             dist/metadata_change_report.md
             dist/metadata_change_report.json
