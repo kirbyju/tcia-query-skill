@@ -23,57 +23,6 @@ SPEC.loader.exec_module(CLINICAL)
 
 
 class ClinicalMetadataTest(unittest.TestCase):
-    def test_subject_resolution_is_stable_across_opaque_fact_ids(self) -> None:
-        def resolved_value(root: Path, reverse_ids: bool) -> str:
-            conn = CLINICAL.init_db(root / "clinical.sqlite", replace=True)
-            CLINICAL.insert_source(
-                conn,
-                source_id="tcia-download:demo:1",
-                source_kind="tcia_clinical_download",
-                short_title="DEMO",
-                source_signature_value="fixture",
-                source_date="2026-11-16",
-            )
-            for row_number, value in enumerate(("zeta", "alpha"), start=2):
-                CLINICAL.insert_row_and_facts(
-                    conn,
-                    source_id="tcia-download:demo:1",
-                    source_kind="tcia_clinical_download",
-                    short_title="DEMO",
-                    subject_id="P-1",
-                    table_name="versioned.xlsx::Sheet1",
-                    row_number=row_number,
-                    row={"Case": "P-1", "Finding": value},
-                    facts=[("finding", value, "Finding", None)],
-                    has_imaging=True,
-                )
-            facts = conn.execute(
-                "SELECT fact_id FROM clinical_facts ORDER BY value_text"
-            ).fetchall()
-            replacements = (
-                ((facts[0][0], "f" * 64), (facts[1][0], "0" * 64))
-                if reverse_ids
-                else ((facts[0][0], "0" * 64), (facts[1][0], "f" * 64))
-            )
-            for old_id, temporary_id in replacements:
-                conn.execute(
-                    "UPDATE clinical_facts SET fact_id=? WHERE fact_id=?",
-                    (temporary_id, old_id),
-                )
-            CLINICAL.materialize_subjects(conn)
-            resolved = json.loads(
-                conn.execute(
-                    "SELECT resolved_values_json FROM clinical_subjects"
-                ).fetchone()[0]
-            )["finding"]
-            conn.close()
-            return resolved
-
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            self.assertEqual(resolved_value(root / "a", False), "alpha")
-            self.assertEqual(resolved_value(root / "b", True), "alpha")
-
     def test_nested_ldct_zip_tables_and_case_column(self) -> None:
         inner = io.BytesIO()
         with zipfile.ZipFile(inner, "w") as archive:

@@ -1171,6 +1171,109 @@ class MetadataChangeReportTest(unittest.TestCase):
                 {"nonsemantic_official_clinical_identity_migration"},
             )
 
+    def test_repeated_inherited_fact_migrations_pair_as_multiset(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            old = root / "old.sqlite"
+            new = root / "new.sqlite"
+            report = root / "report.json"
+            for path, prefix in ((old, "legacy"), (new, "current")):
+                with sqlite3.connect(path) as conn:
+                    conn.execute(
+                        """CREATE TABLE clinical_facts (
+                           fact_id TEXT PRIMARY KEY, source_row_id TEXT,
+                           source_kind TEXT, source_id TEXT, short_title TEXT,
+                           subject_id TEXT, concept TEXT, value_text TEXT,
+                           provenance_json TEXT)"""
+                    )
+                    conn.executemany(
+                        """INSERT INTO clinical_facts VALUES
+                           (?, ?, 'tcia_collection_subject_inheritance',
+                            'source', 'DATASET', 'P-1', 'finding', 'same', ?)""",
+                        [
+                            (
+                                f"{prefix}-fact-{index}",
+                                f"{prefix}-row-{index}",
+                                json.dumps({"source_fact_id": f"{prefix}-fact-{index}"}),
+                            )
+                            for index in range(2)
+                        ],
+                    )
+            result = subprocess.run(
+                [
+                    sys.executable, str(SCRIPT), "--clinical-new", str(new),
+                    "--clinical-old", str(old), "--json-out", str(report),
+                    "--fail-on-unexplained-high",
+                ],
+                text=True, capture_output=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = json.loads(report.read_text())
+            facts = next(
+                row for row in payload["comparisons"]
+                if row["table"] == "clinical_facts"
+            )
+            self.assertEqual(
+                (facts["added"], facts["removed"], facts["modified"]),
+                (0, 0, 0),
+            )
+            self.assertEqual(len(payload["primary_key_migrations"]), 2)
+            self.assertEqual(
+                {
+                    row["gate_status"]
+                    for row in payload["primary_key_migrations"]
+                },
+                {"nonsemantic_inherited_identity_migration"},
+            )
+
+    def test_multiset_identity_migration_count_imbalance_remains_gated(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            old = root / "old.sqlite"
+            new = root / "new.sqlite"
+            report = root / "report.json"
+            for path, prefix, count in (
+                (old, "legacy", 2),
+                (new, "current", 1),
+            ):
+                with sqlite3.connect(path) as conn:
+                    conn.execute(
+                        """CREATE TABLE clinical_facts (
+                           fact_id TEXT PRIMARY KEY, source_row_id TEXT,
+                           source_kind TEXT, source_id TEXT, short_title TEXT,
+                           subject_id TEXT, concept TEXT, value_text TEXT,
+                           provenance_json TEXT)"""
+                    )
+                    conn.executemany(
+                        """INSERT INTO clinical_facts VALUES
+                           (?, ?, 'tcia_collection_subject_inheritance',
+                            'source', 'DATASET', 'P-1', 'finding', 'same', '{}')""",
+                        [
+                            (f"{prefix}-fact-{index}", f"{prefix}-row-{index}")
+                            for index in range(count)
+                        ],
+                    )
+            result = subprocess.run(
+                [
+                    sys.executable, str(SCRIPT), "--clinical-new", str(new),
+                    "--clinical-old", str(old), "--json-out", str(report),
+                    "--fail-on-unexplained-high",
+                ],
+                text=True, capture_output=True,
+            )
+            self.assertEqual(result.returncode, 2)
+            payload = json.loads(report.read_text())
+            facts = next(
+                row for row in payload["comparisons"]
+                if row["table"] == "clinical_facts"
+            )
+            self.assertEqual(
+                (facts["added"], facts["removed"], facts["modified"]),
+                (0, 1, 0),
+            )
+            self.assertEqual(len(payload["primary_key_migrations"]), 1)
+            self.assertEqual(len(payload["unexplained_high_severity"]), 1)
+
     def test_official_clinical_fact_value_change_remains_gated(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

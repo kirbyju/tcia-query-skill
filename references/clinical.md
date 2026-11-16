@@ -159,11 +159,9 @@ nested members, or workbooks while retaining the same clinical fact payloads.
 The release change report pairs repeated equal official-download fact payloads
 as deterministic multisets, just as it does for CDA; unmatched counts or any
 changed subject, concept, value, source, unit, or other semantic field remain
-gated. Resolved subject summaries order competing equal-priority facts by their
-normalized and resolved clinical values before the opaque fact identifier, so
-a path-only re-key cannot randomly change the selected summary value. All
-source rows, fact identities, conflicts, and package provenance remain in the
-clinical artifact for audit.
+gated. Repeated equal inherited and WordPress-inferred facts use the same
+bounded identity-migration rule. All source rows, fact identities, conflicts,
+and package provenance remain in the clinical artifact for audit.
 
 The reviewed QC rules:
 
