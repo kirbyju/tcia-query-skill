@@ -154,6 +154,17 @@ identical inherited fact whose only changes are opaque source-row/fact
 identifiers is classified the same way; value, source, subject, and
 relationship changes remain gated.
 
+Official TCIA clinical packages can also rename versioned outer archives,
+nested members, or workbooks while retaining the same clinical fact payloads.
+The release change report pairs repeated equal official-download fact payloads
+as deterministic multisets, just as it does for CDA; unmatched counts or any
+changed subject, concept, value, source, unit, or other semantic field remain
+gated. Resolved subject summaries order competing equal-priority facts by their
+normalized and resolved clinical values before the opaque fact identifier, so
+a path-only re-key cannot randomly change the selected summary value. All
+source rows, fact identities, conflicts, and package provenance remain in the
+clinical artifact for audit.
+
 The reviewed QC rules:
 
 - convert the official `Crowds-Cure-2017` TCGA-style

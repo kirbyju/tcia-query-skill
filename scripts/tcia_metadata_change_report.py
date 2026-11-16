@@ -807,11 +807,17 @@ def compare_keyed_rows(
             scope == "cda"
             for _, _, scope in added_rows + removed_rows
         )
-        # Equal CDA fact payloads form a multiset. Pair them deterministically
-        # even when repeated; any count imbalance remains a real add/remove.
-        # Other tables retain the stricter one-to-one rule because identical
+        all_official_clinical = all(
+            scope == "tcia_clinical_download"
+            for _, _, scope in added_rows + removed_rows
+        )
+        # Equal CDA and official-clinical fact payloads form multisets. Pair
+        # them deterministically even when repeated; any count imbalance
+        # remains a real add/remove. Versioned archive/member names can rekey
+        # an entire official workbook without changing its clinical payload.
+        # Other sources retain the stricter one-to-one rule because identical
         # payloads may not be interchangeable there.
-        if all_cda:
+        if all_cda or all_official_clinical:
             pairs = zip(sorted(removed_rows), sorted(added_rows))
         elif len(added_rows) == len(removed_rows) == 1:
             pairs = zip(removed_rows, added_rows)

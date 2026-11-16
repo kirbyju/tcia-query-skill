@@ -1115,6 +1115,62 @@ class MetadataChangeReportTest(unittest.TestCase):
                 "nonsemantic_official_clinical_identity_migration",
             )
 
+    def test_repeated_official_clinical_fact_migrations_pair_as_multiset(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            old = root / "old.sqlite"
+            new = root / "new.sqlite"
+            report = root / "report.json"
+            for path, prefix in ((old, "legacy"), (new, "current")):
+                with sqlite3.connect(path) as conn:
+                    conn.execute(
+                        """CREATE TABLE clinical_facts (
+                           fact_id TEXT PRIMARY KEY, source_row_id TEXT,
+                           source_kind TEXT, source_id TEXT, short_title TEXT,
+                           subject_id TEXT, concept TEXT, value_text TEXT,
+                           provenance_json TEXT)"""
+                    )
+                    conn.executemany(
+                        """INSERT INTO clinical_facts VALUES
+                           (?, ?, 'tcia_clinical_download', 'source', 'DATASET',
+                            'P-1', 'finding', 'same', ?)""",
+                        [
+                            (
+                                f"{prefix}-fact-{index}",
+                                f"{prefix}-row-{index}",
+                                json.dumps({"source_row_id": f"{prefix}-row-{index}"}),
+                            )
+                            for index in range(2)
+                        ],
+                    )
+            result = subprocess.run(
+                [
+                    sys.executable, str(SCRIPT), "--clinical-new", str(new),
+                    "--clinical-old", str(old), "--json-out", str(report),
+                    "--fail-on-unexplained-high",
+                ],
+                text=True, capture_output=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = json.loads(report.read_text())
+            facts = next(
+                row for row in payload["comparisons"]
+                if row["table"] == "clinical_facts"
+            )
+            self.assertEqual(
+                (facts["added"], facts["removed"], facts["modified"]),
+                (0, 0, 0),
+            )
+            self.assertEqual(payload["semantic_changes"], [])
+            self.assertEqual(len(payload["primary_key_migrations"]), 2)
+            self.assertEqual(
+                {
+                    row["gate_status"]
+                    for row in payload["primary_key_migrations"]
+                },
+                {"nonsemantic_official_clinical_identity_migration"},
+            )
+
     def test_official_clinical_fact_value_change_remains_gated(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
