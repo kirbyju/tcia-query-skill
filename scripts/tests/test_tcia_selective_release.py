@@ -45,10 +45,20 @@ def reusable_manifest() -> dict:
             "warning_summary": {},
         }
     return {
+        "generated_at_utc": "2026-11-16T12:00:00+00:00",
         "release_fingerprint": "a" * 64,
         "producer": {"commit": "b" * 40},
+        "components": {
+            "controlled_access": {"release_fingerprint": "d" * 64},
+        },
         "source_health": {"components": components},
     }
+
+
+def write_component_manifest(path: Path, fingerprint: str = "d" * 64) -> None:
+    path.write_text(
+        json.dumps({"release_fingerprint": fingerprint}), encoding="utf-8"
+    )
 
 
 def build_controlled_snapshot(
@@ -85,6 +95,69 @@ def build_controlled_snapshot(
 
 
 class SelectiveReleaseTests(unittest.TestCase):
+    def test_clinical_plan_reuses_recent_verified_artifact_when_dependencies_match(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            current, previous = root / "current.sqlite", root / "previous.sqlite"
+            controlled, manifest = root / "controlled.json", root / "manifest.json"
+            build_snapshot(current)
+            build_snapshot(previous)
+            write_component_manifest(controlled)
+            manifest.write_text(json.dumps(reusable_manifest()), encoding="utf-8")
+            plan = SELECTIVE.build_clinical_plan(
+                current, previous, controlled, manifest, root, "c" * 40,
+                changed_paths=[],
+                now=SELECTIVE.dt.datetime(
+                    2026, 11, 16, 13, 0, tzinfo=SELECTIVE.dt.timezone.utc
+                ),
+            )
+            self.assertEqual(plan["mode"], "reuse")
+            self.assertTrue(plan["eligible"])
+
+    def test_clinical_plan_rebuilds_for_snapshot_or_controlled_change(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            current, previous = root / "current.sqlite", root / "previous.sqlite"
+            controlled, manifest = root / "controlled.json", root / "manifest.json"
+            build_snapshot(current, core_value="changed")
+            build_snapshot(previous)
+            write_component_manifest(controlled, "e" * 64)
+            manifest.write_text(json.dumps(reusable_manifest()), encoding="utf-8")
+            plan = SELECTIVE.build_clinical_plan(
+                current, previous, controlled, manifest, root, "c" * 40,
+                changed_paths=[],
+                now=SELECTIVE.dt.datetime(
+                    2026, 11, 16, 13, 0, tzinfo=SELECTIVE.dt.timezone.utc
+                ),
+            )
+            self.assertEqual(plan["mode"], "rebuild")
+            self.assertIn("clinical snapshot projection changed", plan["reasons"])
+            self.assertIn("controlled-access dependency changed", plan["reasons"])
+
+    def test_clinical_plan_rebuilds_for_stale_observation_producer_or_force(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            current, previous = root / "current.sqlite", root / "previous.sqlite"
+            controlled, manifest = root / "controlled.json", root / "manifest.json"
+            build_snapshot(current)
+            build_snapshot(previous)
+            write_component_manifest(controlled)
+            manifest.write_text(json.dumps(reusable_manifest()), encoding="utf-8")
+            plan = SELECTIVE.build_clinical_plan(
+                current, previous, controlled, manifest, root, "c" * 40,
+                changed_paths=["scripts/tcia_clinical_metadata.py"],
+                force_rebuild_reasons=["daily authoritative clinical observation"],
+                now=SELECTIVE.dt.datetime(
+                    2026, 11, 18, 0, 0, tzinfo=SELECTIVE.dt.timezone.utc
+                ),
+            )
+            self.assertEqual(plan["mode"], "rebuild")
+            self.assertIn("daily authoritative clinical observation", plan["reasons"])
+            self.assertIn("clinical producer files changed", plan["reasons"])
+            self.assertIn(
+                "previous clinical observation is older than 26 hours", plan["reasons"]
+            )
+
     def test_controlled_plan_reuses_verified_artifact_when_wordpress_scope_is_unchanged(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

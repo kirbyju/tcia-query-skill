@@ -60,7 +60,7 @@
     "references/histology_hsi_participant_links_v1.csv": "d5b63960a3c3e5078c35bc2393daabc7cb6417515daadfaf71f55e2b1b9de464",
     "references/histology_hsi_participant_links_v1.json": "53e4451fc3e71a85c9817799084c3d639824e166d8ec1500777f4a8b65af2015",
     "references/idc-public-dicom.md": "54e694a43e48007271af54355f0c808d5bbacac0dbf38066a01a9a099fdf9df3",
-    "references/maintainer-operations.md": "96b7c072018be12dda7e694d6cba16cd6dc89fd609f7b313ce3abda441a06ca9",
+    "references/maintainer-operations.md": "78d0d22667a0d4b0388659d3a1444f48913d04f07518f207a21d61aead3c8b07",
     "references/missing-participant-inventory-review-2026-10-25.md": "bd0142db99a05e7226138d1e1c07e49b30b6ce271baf7203fb5053e773a1bc67",
     "references/missing_participant_inventory_manual_qc_v1.json": "86655ced1411599b53851f4c2bbf0f0efb74eb85d12410f912cca0924b63e168",
     "references/nbia-public-dicom-fallback.md": "530de4e4e6f0cf804cf5dbdd460483aedc5b3a8f9c294736afa63ff3ee2dcdd6",
@@ -88,7 +88,7 @@
     "references/reviewed_participant_identity_v1.json": "91cf3ce74f73e95560e4efdb72ac915c83d420ae5c406caf6aeb63fa033fae65",
     "references/routing.md": "385ea0409568e2fba8957a9c397f90beee40368df852cdf4b4a64d67e7695a68",
     "references/schema.md": "f378afb5d45332181c0246e1339e4d8132a3f776f45b9a5690897e0f09d03630",
-    "references/snapshots.md": "712c9c36dac07eff7bee9e9c0300277a942e152109a61935a26c2215b1cbeee0",
+    "references/snapshots.md": "7bcc39981c8a08f181da5b32785daaa8b2b762402fa733c8d18dccd2acc09e23",
     "references/tcga_gbm_qi_radiogenomics_aim_inventory_v1.csv": "d19d81d8aad5a0d96f8f23ca41add1235accaf2d2d3f78a704118f7aae0b7892",
     "references/tcga_gbm_qi_radiogenomics_aim_inventory_v1.json": "eea045615ef1a80c44c8f561dfbaac0f5d1890f9c211372835e5329be3927686",
     "references/tcga_lgg_mask_inventory_v1.csv": "8900a732f860dedd75dca19dc3785f0b7d6262e64186e8fd7893f442ce899202",
@@ -146,7 +146,7 @@
     "scripts/tcia_publications.py": "fcd1aa1e5abd48d0f556165bbee85af7d30030ba4ece1af573c8a441b720659a",
     "scripts/tcia_release_review_queue.py": "b5d9738c52435cfc27c403e220d8fe880d795cdb8174eab145de15b1a17b4265",
     "scripts/tcia_reviewed_identity.py": "256b83a56ac4bb2a7b88bb4e084fb89f752dcfcbc5927ffb56c97a614e05e31b",
-    "scripts/tcia_selective_release.py": "7500fba2e8f059e28c2ce25a38769278cff925a63398dd0e0584f3b1e46cf33a",
+    "scripts/tcia_selective_release.py": "a5f9b688ceddf06c8128b3fd0dbf54ccc249b7566e026e1b5548508e70f75b0f",
     "scripts/tcia_skill_version.py": "0906debce4bd061f404ae473eaaf8adbaa44f89e17d4603788616beec526484b",
     "scripts/tcia_snapshot.py": "52632672792ac15bbda6dc7f85801005d87f202db9e03fe79f0f3408925d21e7",
     "scripts/tcia_v2_audit.py": "abc81147c390924a8921862260ff20acc7a246f617ecd548f9758e992130c62f",
@@ -179,9 +179,9 @@
     "scripts/tests/test_tcia_participant_groups.py": "d35d72fd5403b7c179efe699e5131dde9d65e6122b1965899a7e031239dd2c04",
     "scripts/tests/test_tcia_pathology_aspera_inventory.py": "80fb2fd90b2fbeaff8ecc40b089e86fd64a4842e3e657850c9e0a12873e9d3a7",
     "scripts/tests/test_tcia_release_review_queue.py": "b1784c4c8f04e130736c9324c2dbc4d7f6c340be646d2d9ae7a63d6c2817e53b",
-    "scripts/tests/test_tcia_release_workflow_contract.py": "ba40495e146b706835ae7d27e155e45f0bff74f19cf74b26b485c3cdec9e16c6",
+    "scripts/tests/test_tcia_release_workflow_contract.py": "29cb1c6da7c35c142f449ced334ed90e5864eaf2d699c8f5b40a5c82bc829352",
     "scripts/tests/test_tcia_reviewed_identity.py": "0f8e0ae4285645b2d316e8cbeb822d94a4dcdbc06dd4932bed6f9365a8d78a07",
-    "scripts/tests/test_tcia_selective_release.py": "92148398a591424a7c6fe0158a38d85b8888500b69725b1ebf26e0e01718b510",
+    "scripts/tests/test_tcia_selective_release.py": "b3e2312223235643b97cbaa1a27dad6fdb83f7cd6cc5c9f82400da7389d7a447",
     "scripts/tests/test_tcia_skill_version.py": "4e3deee4d08f065f67805d5fe782b1ffce22d5688be269e8a0492c3a42bb6b7f",
     "scripts/tests/test_tcia_snapshot.py": "d2ae614f2938ba58295d56f2d6f05fd0acbd3ff9577ac7ad9fa93a1cf63ef1f9",
     "scripts/tests/test_tcia_v2_audit.py": "e4348fd06f2c6bce13e6c31ce7f284b5948b900acb4a355d70d3273b3ce69e8a",
@@ -191,6 +191,6 @@
     "scripts/tests/test_tcia_v2_staging.py": "e4c33f3dfd9b6d3ced7deecf8dc3fa6aa487737d42f90fe4522e39b40889bdf4"
   },
   "schema_version": 1,
-  "skill_version": "2026.11.16.3",
-  "updated_at_utc": "2026-11-16T17:38:24.924454+00:00"
+  "skill_version": "2026.11.16.4",
+  "updated_at_utc": "2026-11-16T18:20:48.926292+00:00"
 }

@@ -234,6 +234,33 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
         self.assertIn("steps.controlled.outputs.mode == 'rebuild'", build)
         self.assertIn("--require-complete-sources", source)
 
+    def test_clinical_refresh_has_bounded_independent_reuse(self) -> None:
+        source = SOURCE_WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn("Plan clinical component refresh", source)
+        self.assertIn("plan-clinical", source)
+        self.assertIn("daily authoritative clinical observation", source)
+        self.assertIn("--current-controlled-manifest", source)
+        self.assertIn("dist/tcia_clinical_release_plan.json", source)
+        diagnostic_upload = source[
+            source.index("Upload non-release semantic-gate diagnostics"):
+            source.index("Upload validated V2 source inputs")
+        ]
+        validated_upload = source[source.index("Upload validated V2 source inputs"):]
+        self.assertIn("dist/tcia_clinical_release_plan.json", diagnostic_upload)
+        self.assertIn("dist/tcia_clinical_release_plan.json", validated_upload)
+        reuse = source[
+            source.index("Carry forward verified clinical metadata for full release"):
+            source.index("Prepare previous clinical metadata")
+        ]
+        self.assertIn("validate-selection", reuse)
+        self.assertIn("materialize-reuse-manifests", reuse)
+        self.assertIn("--component clinical", reuse)
+        build = source[
+            source.index("Build patient-level clinical metadata"):
+            source.index("Validate patient-level clinical metadata")
+        ]
+        self.assertIn("steps.clinical.outputs.mode == 'rebuild'", build)
+
     def test_selective_release_is_projection_bound_and_fail_closed(self) -> None:
         source = SOURCE_WORKFLOW.read_text(encoding="utf-8")
         downstream = WORKFLOW.read_text(encoding="utf-8")

@@ -44,10 +44,14 @@ and controlled-access producer are unchanged, the workflow carries forward the
 prior release's hash-verified artifact, regenerates its reuse manifest, and
 still runs complete-source validation. Operators can force a refresh when a
 same-URL external manifest may have changed without a WordPress metadata
-update. The clinical artifact
-uses a hybrid refresh: unchanged direct official artifacts and same-version IDC
-clinical tables are reused, while schema or IDC version changes trigger full
-reprocessing. NIfTI and pathology research rows are unified in the public
+update. On non-authoritative/manual runs, the clinical artifact is also carried
+forward only when the complete downstream snapshot projection, controlled-access
+component fingerprint, clinical producer paths, and verified source health are
+unchanged and the preceding observation is no more than 26 hours old. The daily
+scheduled run and every explicit clinical refresh still rebuild it. Rebuilt
+clinical artifacts use a hybrid refresh: unchanged direct official artifacts and
+same-version IDC clinical tables are reused, while schema or IDC version changes
+trigger full reprocessing. NIfTI and pathology research rows are unified in the public
 non-DICOM artifact, with specialized source rows and QC retained in its audit
 companion. Every published component is selected and hash-pinned by the same
 bundle manifest.

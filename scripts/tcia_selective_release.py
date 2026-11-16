@@ -23,6 +23,7 @@ from typing import Any, Iterable
 
 PLAN_SCHEMA_VERSION = 1
 CONTROLLED_PLAN_SCHEMA_VERSION = 1
+CLINICAL_PLAN_SCHEMA_VERSION = 1
 FAST_MODE = "fast"
 FULL_MODE = "full"
 REUSE_MODE = "reuse"
@@ -61,6 +62,13 @@ FAST_SAFE_EXACT_PATHS = {
 CONTROLLED_ACCESS_PRODUCER_PATHS = {
     "requirements-build.lock",
     "scripts/tcia_controlled_access_metadata.py",
+}
+
+CLINICAL_PRODUCER_PATHS = {
+    "requirements-build.lock",
+    "references/reviewed_analysis_result_participants_v1.csv",
+    "scripts/tcia_clinical_metadata.py",
+    "scripts/tcia_dicom_source_scope.py",
 }
 
 CONTROLLED_ACCESS_PROJECTION_COLUMNS = (
@@ -319,6 +327,148 @@ def build_controlled_access_plan(
     }
 
 
+def _manifest_release_fingerprint(path: Path) -> str:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    value = str(payload.get("release_fingerprint") or "")
+    return value if len(value) == 64 else ""
+
+
+def _component_release_fingerprint(manifest: dict[str, Any], component: str) -> str:
+    value = str(((manifest.get("components") or {}).get(component) or {}).get(
+        "release_fingerprint"
+    ) or "")
+    return value if len(value) == 64 else ""
+
+
+def _manifest_age_error(
+    manifest: dict[str, Any], *, max_age_hours: int, now: dt.datetime | None = None,
+) -> str:
+    try:
+        generated = dt.datetime.fromisoformat(
+            str(manifest.get("generated_at_utc") or "").replace("Z", "+00:00")
+        )
+        if generated.tzinfo is None:
+            generated = generated.replace(tzinfo=dt.timezone.utc)
+    except (TypeError, ValueError):
+        return "previous bundle manifest has no valid generation time"
+    observed = (now or dt.datetime.now(dt.timezone.utc)).astimezone(dt.timezone.utc)
+    age_seconds = (observed - generated.astimezone(dt.timezone.utc)).total_seconds()
+    if age_seconds < 0:
+        return "previous bundle manifest generation time is in the future"
+    if age_seconds > max_age_hours * 3600:
+        return f"previous clinical observation is older than {max_age_hours} hours"
+    return ""
+
+
+def build_clinical_plan(
+    current_db: Path,
+    previous_db: Path | None,
+    current_controlled_manifest: Path | None,
+    previous_manifest: Path | None,
+    repository_root: Path,
+    current_commit: str,
+    *,
+    changed_paths: Iterable[str] | None = None,
+    force_rebuild_reasons: Iterable[str] = (),
+    max_prior_age_hours: int = 26,
+    now: dt.datetime | None = None,
+) -> dict[str, Any]:
+    """Plan bounded clinical reuse between authoritative scheduled observations."""
+    reasons = [str(reason) for reason in force_rebuild_reasons if str(reason).strip()]
+    current_fingerprint = downstream_snapshot_fingerprint(current_db)
+    previous_fingerprint = ""
+    previous_commit = ""
+    previous_release_fingerprint = ""
+    current_controlled_fingerprint = ""
+    previous_controlled_fingerprint = ""
+    manifest: dict[str, Any] = {}
+
+    if not previous_db or not previous_db.is_file():
+        reasons.append("verified previous snapshot is unavailable")
+    else:
+        previous_fingerprint = downstream_snapshot_fingerprint(previous_db)
+        if previous_fingerprint != current_fingerprint:
+            reasons.append("clinical snapshot projection changed")
+
+    if not current_controlled_manifest or not current_controlled_manifest.is_file():
+        reasons.append("current controlled-access component manifest is unavailable")
+    else:
+        current_controlled_fingerprint = _manifest_release_fingerprint(
+            current_controlled_manifest
+        )
+        if not current_controlled_fingerprint:
+            reasons.append("current controlled-access component fingerprint is invalid")
+
+    if not previous_manifest or not previous_manifest.is_file():
+        reasons.append("verified previous bundle manifest is unavailable")
+    else:
+        manifest = json.loads(previous_manifest.read_text(encoding="utf-8"))
+        previous_release_fingerprint = str(manifest.get("release_fingerprint") or "")
+        previous_commit = str((manifest.get("producer") or {}).get("commit") or "")
+        previous_controlled_fingerprint = _component_release_fingerprint(
+            manifest, "controlled_access"
+        )
+        if not previous_release_fingerprint:
+            reasons.append("previous bundle manifest has no release fingerprint")
+        if len(previous_commit) != 40:
+            reasons.append("previous bundle manifest has no exact producer commit")
+        if not previous_controlled_fingerprint:
+            reasons.append("previous controlled-access component fingerprint is invalid")
+        elif (
+            current_controlled_fingerprint
+            and current_controlled_fingerprint != previous_controlled_fingerprint
+        ):
+            reasons.append("controlled-access dependency changed")
+        reasons.extend(prior_health_reuse_errors(manifest, {"clinical"}))
+        age_error = _manifest_age_error(
+            manifest, max_age_hours=max_prior_age_hours, now=now
+        )
+        if age_error:
+            reasons.append(age_error)
+
+    paths: list[str] = []
+    producer_paths: list[str] = []
+    if len(previous_commit) == 40:
+        try:
+            paths = sorted(
+                set(changed_paths)
+                if changed_paths is not None
+                else git_changed_paths(repository_root, previous_commit, current_commit)
+            )
+        except (OSError, subprocess.CalledProcessError) as exc:
+            reasons.append(f"clinical producer impact could not be established: {exc}")
+        else:
+            producer_paths = [path for path in paths if path in CLINICAL_PRODUCER_PATHS]
+            if producer_paths:
+                reasons.append("clinical producer files changed")
+
+    mode = REBUILD_MODE if reasons else REUSE_MODE
+    return {
+        "artifact": "tcia_clinical_release_plan",
+        "schema_version": CLINICAL_PLAN_SCHEMA_VERSION,
+        "mode": mode,
+        "eligible": mode == REUSE_MODE,
+        "current_producer_commit": current_commit,
+        "previous_producer_commit": previous_commit,
+        "previous_release_fingerprint": previous_release_fingerprint,
+        "max_prior_age_hours": max_prior_age_hours,
+        "snapshot_projection_fingerprint": {
+            "current": current_fingerprint,
+            "previous": previous_fingerprint,
+            "algorithm": "sha256-canonical-sqlite-v1",
+        },
+        "controlled_access_release_fingerprint": {
+            "current": current_controlled_fingerprint,
+            "previous": previous_controlled_fingerprint,
+        },
+        "changed_paths": paths,
+        "clinical_producer_paths": producer_paths,
+        "reasons": reasons or [
+            "clinical dependencies are unchanged within the bounded observation window"
+        ],
+    }
+
+
 def git_changed_paths(repository_root: Path, previous_commit: str, current_commit: str) -> list[str]:
     for commit in (previous_commit, current_commit):
         subprocess.run(
@@ -506,6 +656,17 @@ def parse_args() -> argparse.Namespace:
     controlled.add_argument("--force-rebuild-reason", action="append", default=[])
     controlled.add_argument("--out", type=Path, required=True)
 
+    clinical = subparsers.add_parser("plan-clinical")
+    clinical.add_argument("--current-db", type=Path, required=True)
+    clinical.add_argument("--previous-db", type=Path)
+    clinical.add_argument("--current-controlled-manifest", type=Path)
+    clinical.add_argument("--previous-manifest", type=Path)
+    clinical.add_argument("--repository-root", type=Path, default=Path.cwd())
+    clinical.add_argument("--current-commit", required=True)
+    clinical.add_argument("--force-rebuild-reason", action="append", default=[])
+    clinical.add_argument("--max-prior-age-hours", type=int, default=26)
+    clinical.add_argument("--out", type=Path, required=True)
+
     verify = subparsers.add_parser("verify")
     verify.add_argument("--plan", type=Path, required=True)
     verify.add_argument("--current-db", type=Path, required=True)
@@ -539,6 +700,21 @@ def main() -> int:
         )
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    elif args.command == "plan-clinical":
+        payload = build_clinical_plan(
+            args.current_db,
+            args.previous_db,
+            args.current_controlled_manifest,
+            args.previous_manifest,
+            args.repository_root,
+            args.current_commit,
+            force_rebuild_reasons=args.force_rebuild_reason,
+            max_prior_age_hours=args.max_prior_age_hours,
+        )
+        args.out.parent.mkdir(parents=True, exist_ok=True)
+        args.out.write_text(
+            json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
     else:
         payload = verify_plan(
             args.plan,

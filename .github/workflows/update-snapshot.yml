@@ -316,8 +316,79 @@ jobs:
             --db dist/controlled_access_metadata.sqlite \
             --require-complete-sources
 
-      - name: Prepare previous clinical metadata
+      - name: Plan clinical component refresh
+        id: clinical
         if: steps.selective.outputs.mode != 'fast'
+        run: |
+          set -euo pipefail
+          previous_args=()
+          force_args=()
+          if [ -f previous/release_verified ]; then
+            previous_args+=(
+              --previous-db previous/tcia_snapshot.sqlite
+              --previous-manifest previous/tcia_metadata_v2_bundle_manifest.json
+            )
+          fi
+          if [ "${{ inputs.force_full_build || 'false' }}" = "true" ]; then
+            force_args+=(--force-rebuild-reason "operator requested a full build")
+          fi
+          if [ "${{ github.event_name }}" = "schedule" ] && \
+             [ "${{ github.event.schedule }}" = "17 2 * * *" ]; then
+            force_args+=(--force-rebuild-reason "daily authoritative clinical observation")
+          fi
+          if [ "${{ inputs.refresh_all_clinical_downloads || 'false' }}" = "true" ]; then
+            force_args+=(--force-rebuild-reason "operator requested all clinical downloads")
+          fi
+          if [ "${{ inputs.refresh_idc_clinical || 'false' }}" = "true" ]; then
+            force_args+=(--force-rebuild-reason "operator requested IDC clinical refresh")
+          fi
+          if [ "${{ inputs.refresh_cda || 'false' }}" = "true" ]; then
+            force_args+=(--force-rebuild-reason "operator requested CDA refresh")
+          fi
+          python scripts/tcia_selective_release.py plan-clinical \
+            --current-db dist/tcia_snapshot.sqlite \
+            --current-controlled-manifest dist/controlled_access_metadata_manifest.json \
+            --repository-root . \
+            --current-commit "$GITHUB_SHA" \
+            --out dist/tcia_clinical_release_plan.json \
+            "${previous_args[@]}" \
+            "${force_args[@]}"
+          mode="$(jq -r '.mode' dist/tcia_clinical_release_plan.json)"
+          test "$mode" = "reuse" || test "$mode" = "rebuild"
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Clinical component plan"
+            echo "- Mode: $mode"
+            jq -r '.reasons[] | "- Reason: " + .' dist/tcia_clinical_release_plan.json
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Carry forward verified clinical metadata for full release
+        if: steps.selective.outputs.mode != 'fast' && steps.clinical.outputs.mode == 'reuse'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="tcia-metadata-v2-latest"
+          gh release download "$tag" \
+            --pattern clinical_metadata.sqlite.gz \
+            --dir previous --clobber
+          python scripts/tcia_v2_bundle.py validate-selection \
+            --asset-dir previous \
+            --manifest previous/tcia_metadata_v2_bundle_manifest.json \
+            --source-release-json previous/release.json \
+            --asset clinical_metadata.sqlite.gz
+          python scripts/tcia_v2_bundle.py materialize-reuse-manifests \
+            --manifest previous/tcia_metadata_v2_bundle_manifest.json \
+            --out-dir previous \
+            --component clinical
+          cp previous/clinical_metadata.sqlite.gz \
+            previous/clinical_metadata_manifest.json dist/
+          gzip -dc dist/clinical_metadata.sqlite.gz \
+            > dist/clinical_metadata.sqlite
+          cp dist/clinical_metadata.sqlite previous/clinical_metadata.sqlite
+
+      - name: Prepare previous clinical metadata
+        if: steps.selective.outputs.mode != 'fast' && steps.clinical.outputs.mode == 'rebuild'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -336,7 +407,7 @@ jobs:
           fi
 
       - name: Build patient-level clinical metadata
-        if: steps.selective.outputs.mode != 'fast'
+        if: steps.selective.outputs.mode != 'fast' && steps.clinical.outputs.mode == 'rebuild'
         run: |
           set -euo pipefail
           clinical_args=()
@@ -587,6 +658,7 @@ jobs:
             dist/metadata_change_report.json
             dist/tcia_selective_release_plan.json
             dist/tcia_controlled_access_release_plan.json
+            dist/tcia_clinical_release_plan.json
             dist/pathdb_wordpress_identity_preflight.json
             dist/tcia_correction_registry_bootstrap_evidence.json
             dist/tcia_correction_registry_validation.json
@@ -610,6 +682,7 @@ jobs:
             dist/tcia_correction_registry_manifest.json
             dist/tcia_selective_release_plan.json
             dist/tcia_controlled_access_release_plan.json
+            dist/tcia_clinical_release_plan.json
             dist/pathdb_wordpress_identity_preflight.json
             dist/metadata_change_report.md
             dist/metadata_change_report.json

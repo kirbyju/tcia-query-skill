@@ -208,6 +208,18 @@ permit it, or set `force_full_build=true`; any explicit clinical refresh input
 also forces the full path. This prevents unchanged WordPress/PathDB projections
 from carrying independent controlled or clinical sources forward indefinitely.
 
+When a manual run requires a full base build but the clinical dependencies are
+unchanged, `plan-clinical` may independently carry the preceding clinical
+component forward. It binds the canonical downstream snapshot projection, the
+controlled-access component release fingerprint, clinical producer paths, and
+the prior component's source health. Reuse is rejected after 26 hours. The daily
+scheduled run, `force_full_build`, and every explicit clinical refresh input
+force a clinical rebuild, so independent IDC, CDA, fixed external assets, and
+same-URL official downloads retain a bounded authoritative observation floor.
+The selected gzip is revalidated against both the prior top manifest and GitHub
+Release before decompression, and the normal clinical validation and QC export
+still run.
+
 Before starting an expensive local rebuild, exercise both CDA endpoints used by
 the clinical builder:
 
