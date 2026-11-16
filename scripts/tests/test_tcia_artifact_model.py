@@ -25,6 +25,7 @@ participants = load("tcia_participant_inventory")
 audit = load("tcia_v2_audit")
 crosswalks = load("tcia_public_non_dicom_crosswalks")
 discovery = load("tcia_public_non_dicom_crosswalk_discovery")
+snapshot_model = load("tcia_snapshot")
 
 
 class VocabularyTests(unittest.TestCase):
@@ -2447,51 +2448,69 @@ class BuilderTests(unittest.TestCase):
             snapshot = base / "snapshot.sqlite"
             output = base / "public.sqlite"
             conn = sqlite3.connect(snapshot)
-            conn.executescript(
-                """
-                CREATE TABLE agent_datasets (
-                  id INTEGER, dataset_type TEXT, short_title TEXT, doi TEXT,
-                  hidden INTEGER
-                );
-                CREATE TABLE agent_pathdb_slides (
-                  collection TEXT, patient_id TEXT, slide_id TEXT, camic_id TEXT,
-                  camicroscope_url TEXT, wsiimage_url TEXT, data_format TEXT,
-                  modality TEXT, protocol TEXT, magnification TEXT
-                );
-                """
-            )
+            snapshot_model.create_schema(conn)
             conn.executemany(
-                "INSERT INTO agent_datasets VALUES (?,?,?,?,?)",
-                [
-                    (55258, "Collection", "FHCC PTRC-Melanoma", "10.7937/axrh-hy45", 1),
-                    (100, "Collection", "VISIBLE", "10.7937/visible", 0),
-                ],
-            )
-            conn.executemany(
-                "INSERT INTO agent_pathdb_slides VALUES (?,?,?,?,?,?,?,?,?,?)",
+                """INSERT INTO wordpress_records
+                   (source, id, slug, short_title, short_title_key, doi, title,
+                    link, date_updated, hidden, normalized_json, raw_json,
+                    search_text)
+                   VALUES ('collections', ?, ?, ?, ?, ?, ?, '', '', ?, ?, '{}', ?)""",
                 [
                     (
+                        "55258",
+                        "fhcc-ptrc-melanoma",
                         "FHCC PTRC-Melanoma",
-                        f"CASE-{index:03d}",
-                        f"hidden-{index:03d}.svs",
-                        str(index),
-                        "",
-                        "",
-                        "SVS",
-                        "SM",
-                        "",
-                        "",
+                        snapshot_model.short_title_key("FHCC PTRC-Melanoma"),
+                        "10.7937/axrh-hy45",
+                        "FHCC PTRC-Melanoma",
+                        1,
+                        json.dumps({"short_title": "FHCC PTRC-Melanoma"}),
+                        "fhcc ptrc melanoma",
+                    ),
+                    (
+                        "100",
+                        "visible",
+                        "VISIBLE",
+                        snapshot_model.short_title_key("VISIBLE"),
+                        "10.7937/visible",
+                        "Visible",
+                        0,
+                        json.dumps({"short_title": "VISIBLE"}),
+                        "visible",
+                    ),
+                ],
+            )
+            snapshot_model.insert_pathdb(
+                conn,
+                [
+                    (
+                        {
+                            "collection": "FHCC PTRC-Melanoma",
+                            "patient_id": f"CASE-{index:03d}",
+                            "slide_id": f"hidden-{index:03d}.svs",
+                            "camic_id": str(index),
+                            "data_format": "SVS",
+                            "modality": "SM",
+                        }
                     )
                     for index in range(1, 242)
                 ]
                 + [
-                    (
-                        "VISIBLE", "C", "visible.svs", "300", "", "", "SVS",
-                        "SM", "", "",
-                    )
+                    {
+                        "collection": "VISIBLE",
+                        "patient_id": "C",
+                        "slide_id": "visible.svs",
+                        "camic_id": "300",
+                        "data_format": "SVS",
+                        "modality": "SM",
+                    }
                 ],
             )
             conn.commit()
+            self.assertEqual(
+                conn.execute("SELECT short_title FROM agent_datasets").fetchall(),
+                [("VISIBLE",)],
+            )
             conn.close()
 
             report = public.preflight_pathdb_wordpress_identities(snapshot)
@@ -2503,9 +2522,15 @@ class BuilderTests(unittest.TestCase):
                 for item in report["collections"]
                 if item["status"] == "staged_hidden"
             )
-            self.assertEqual(hidden["record_id"], 55258)
+            self.assertEqual(hidden["record_id"], "55258")
             self.assertEqual(hidden["doi"], "10.7937/axrh-hy45")
             self.assertEqual(hidden["visibility"], "hidden")
+            self.assertEqual(
+                hidden["publication_state"], "waiting_submitter_approval"
+            )
+            self.assertEqual(
+                hidden["publication_disposition"], "exclude_from_public_artifacts"
+            )
 
             conn = public.connect(output)
             conn.executescript(public.SCHEMA)
@@ -2515,8 +2540,27 @@ class BuilderTests(unittest.TestCase):
                 "SELECT short_title, asset_name FROM public_non_dicom_assets "
                 "WHERE source_system='tcia_pathdb'"
             ).fetchall()
+            conn.commit()
             conn.close()
             self.assertEqual([tuple(row) for row in rows], [("VISIBLE", "visible.svs")])
+
+            participant_output = base / "participants.sqlite"
+            participants.build_database(
+                participant_output,
+                snapshot_db=snapshot,
+                public_db=output,
+                controlled_db=base / "missing-controlled.sqlite",
+                clinical_db=base / "missing-clinical.sqlite",
+                idc_db=base / "missing-idc.sqlite",
+                replace=True,
+            )
+            with sqlite3.connect(participant_output) as participant_conn:
+                self.assertEqual(
+                    participant_conn.execute(
+                        "SELECT DISTINCT short_title FROM agent_participant_search"
+                    ).fetchall(),
+                    [("VISIBLE",)],
+                )
 
     def test_pathdb_preflight_still_fails_missing_or_ambiguous_identity(self):
         import sqlite3
@@ -2524,31 +2568,76 @@ class BuilderTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             snapshot = Path(directory) / "snapshot.sqlite"
             conn = sqlite3.connect(snapshot)
-            conn.executescript(
-                """
-                CREATE TABLE agent_datasets (
-                  id INTEGER, dataset_type TEXT, short_title TEXT, doi TEXT,
-                  hidden INTEGER
-                );
-                CREATE TABLE agent_pathdb_slides (
-                  collection TEXT, patient_id TEXT, slide_id TEXT, camic_id TEXT,
-                  camicroscope_url TEXT, wsiimage_url TEXT, data_format TEXT,
-                  modality TEXT, protocol TEXT, magnification TEXT
-                );
-                """
-            )
+            snapshot_model.create_schema(conn)
             conn.executemany(
-                "INSERT INTO agent_datasets VALUES (?,?,?,?,?)",
+                """INSERT INTO wordpress_records
+                   (source, id, slug, short_title, short_title_key, doi, title,
+                    link, date_updated, hidden, normalized_json, raw_json,
+                    search_text)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, '', '', 1, ?, '{}', ?)""",
                 [
-                    (1, "Collection", "AMBIGUOUS", "10.7937/one", 1),
-                    (2, "Analysis Result", "AMBIGUOUS", "10.7937/two", 1),
+                    (
+                        "collections",
+                        "1",
+                        "ambiguous-collection",
+                        "AMBIGUOUS",
+                        "ambiguous",
+                        "10.7937/one",
+                        "Ambiguous",
+                        json.dumps({"short_title": "AMBIGUOUS"}),
+                        "ambiguous",
+                    ),
+                    (
+                        "analysis-results",
+                        "2",
+                        "ambiguous-result",
+                        "AMBIGUOUS",
+                        "ambiguous",
+                        "10.7937/two",
+                        "Ambiguous",
+                        json.dumps({"short_title": "AMBIGUOUS"}),
+                        "ambiguous",
+                    ),
+                    (
+                        "collections",
+                        "3",
+                        "unreviewed-hidden",
+                        "UNREVIEWED-HIDDEN",
+                        "unreviewed-hidden",
+                        "10.7937/unreviewed",
+                        "Unreviewed Hidden",
+                        json.dumps({"short_title": "UNREVIEWED-HIDDEN"}),
+                        "unreviewed hidden",
+                    ),
                 ],
             )
-            conn.executemany(
-                "INSERT INTO agent_pathdb_slides VALUES (?,?,?,?,?,?,?,?,?,?)",
+            snapshot_model.insert_pathdb(
+                conn,
                 [
-                    ("MISSING", "A", "missing.svs", "1", "", "", "SVS", "SM", "", ""),
-                    ("AMBIGUOUS", "B", "ambiguous.svs", "2", "", "", "SVS", "SM", "", ""),
+                    {
+                        "collection": "MISSING",
+                        "patient_id": "A",
+                        "slide_id": "missing.svs",
+                        "camic_id": "1",
+                        "data_format": "SVS",
+                        "modality": "SM",
+                    },
+                    {
+                        "collection": "AMBIGUOUS",
+                        "patient_id": "B",
+                        "slide_id": "ambiguous.svs",
+                        "camic_id": "2",
+                        "data_format": "SVS",
+                        "modality": "SM",
+                    },
+                    {
+                        "collection": "UNREVIEWED-HIDDEN",
+                        "patient_id": "C",
+                        "slide_id": "unreviewed.svs",
+                        "camic_id": "3",
+                        "data_format": "SVS",
+                        "modality": "SM",
+                    },
                 ],
             )
             conn.commit()
@@ -2556,10 +2645,10 @@ class BuilderTests(unittest.TestCase):
 
             report = public.preflight_pathdb_wordpress_identities(snapshot)
             self.assertEqual(report["status"], "error")
-            self.assertEqual(report["counts"]["error_collections"], 2)
+            self.assertEqual(report["counts"]["error_collections"], 3)
             self.assertEqual(
                 {item["status"] for item in report["collections"]},
-                {"missing", "ambiguous"},
+                {"missing", "ambiguous", "hidden_unreviewed"},
             )
 
     def test_pathdb_icdc_scientific_notation_subjects_use_reviewed_slide_ids(self):

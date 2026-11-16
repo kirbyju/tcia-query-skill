@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import functools
 import gzip
 import hashlib
 import json
@@ -82,6 +83,9 @@ DEFAULT_TCGA_GBM_QI_AIM_PROVENANCE = SKILL_ROOT / "references" / "tcga_gbm_qi_ra
 DEFAULT_REVIEWED_PARTICIPANT_INVENTORY = SKILL_ROOT / "references" / "reviewed_analysis_result_participants_v1.csv"
 DEFAULT_REVIEWED_PARTICIPANT_PROVENANCE = SKILL_ROOT / "references" / "reviewed_analysis_result_participants_v1.json"
 DEFAULT_CORRECTION_ASSERTIONS = SKILL_ROOT / "references" / "correction-assertions-v1.json"
+DEFAULT_PATHDB_HIDDEN_DATASET_DISPOSITIONS = (
+    SKILL_ROOT / "references" / "pathdb_hidden_dataset_dispositions_v1.json"
+)
 DEFAULT_DB = SKILL_ROOT / "cache" / "public_non_dicom_metadata.sqlite"
 DEFAULT_MANIFEST = SKILL_ROOT / "cache" / "public_non_dicom_metadata_manifest.json"
 DEFAULT_RELEASE_TAG = "tcia-metadata-v2-latest"
@@ -4398,6 +4402,72 @@ PATHDB_REVIEWED_SUBJECT_OVERRIDES = {
 }
 
 
+@functools.lru_cache(maxsize=None)
+def load_pathdb_hidden_dataset_dispositions(
+    path: Path = DEFAULT_PATHDB_HIDDEN_DATASET_DISPOSITIONS,
+) -> dict[str, dict[str, str]]:
+    """Load reviewed non-public PathDB dataset lifecycle dispositions."""
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    datasets = payload.get("datasets")
+    if payload.get("schema_version") != 1 or not isinstance(datasets, list):
+        raise RuntimeError(f"Invalid PathDB hidden dataset disposition registry: {path}")
+    dispositions: dict[str, dict[str, str]] = {}
+    allowed_states = {"waiting_submitter_approval", "retired"}
+    for index, item in enumerate(datasets):
+        if not isinstance(item, dict):
+            raise RuntimeError(
+                f"Invalid PathDB hidden dataset disposition at index {index}: {path}"
+            )
+        normalized = {
+            name: str(item.get(name) or "").strip()
+            for name in (
+                "record_id",
+                "short_title",
+                "doi",
+                "publication_state",
+                "disposition",
+                "evidence",
+                "reviewed_at",
+            )
+        }
+        record_id = normalized["record_id"]
+        if (
+            not record_id
+            or not normalized["short_title"]
+            or not normalized["doi"]
+            or normalized["publication_state"] not in allowed_states
+            or normalized["disposition"] != "exclude_from_public_artifacts"
+            or not normalized["evidence"]
+            or not normalized["reviewed_at"]
+        ):
+            raise RuntimeError(
+                f"Incomplete PathDB hidden dataset disposition at index {index}: {path}"
+            )
+        if record_id in dispositions:
+            raise RuntimeError(
+                f"Duplicate PathDB hidden dataset disposition record ID {record_id}: {path}"
+            )
+        dispositions[record_id] = normalized
+    return dispositions
+
+
+def reviewed_pathdb_hidden_disposition(
+    row: sqlite3.Row,
+) -> dict[str, str] | None:
+    reviewed = load_pathdb_hidden_dataset_dispositions().get(
+        str(row["record_id"] or "").strip()
+    )
+    if not reviewed:
+        return None
+    if reviewed["short_title"].casefold() != str(
+        row["short_title"] or ""
+    ).strip().casefold():
+        return None
+    if reviewed["doi"].casefold() != str(row["doi"] or "").strip().casefold():
+        return None
+    return reviewed
+
+
 def pathdb_subject_ids(
     raw_collection: object, slide_id: object, patient_id: object
 ) -> tuple[list[str], list[str], str]:
@@ -4440,24 +4510,47 @@ def pathdb_dataset_identity_resolution(
     raw = str(raw_collection or "").strip()
     override = PATHDB_COLLECTION_IDENTITY_OVERRIDES.get(raw)
     candidate = str((override or {}).get("short_title") or raw)
-    dataset_columns = {
-        str(row[1]) for row in source.execute("PRAGMA table_info(agent_datasets)")
-    }
-    record_id = "id" if "id" in dataset_columns else "NULL"
-    doi = "doi" if "doi" in dataset_columns else "''"
-    hidden = "COALESCE(hidden, 0)" if "hidden" in dataset_columns else "0"
-    rows = source.execute(
-        "SELECT DISTINCT dataset_type, short_title, "
-        f"{record_id} AS record_id, {doi} AS doi, {hidden} AS hidden "
-        "FROM agent_datasets WHERE lower(trim(short_title)) = lower(trim(?))",
-        (candidate,),
-    ).fetchall()
+    if table_exists(source, "wordpress_records"):
+        # WordPress API v2.5 snapshots retain hidden records in the raw table,
+        # while agent_datasets intentionally remains the public browse view.
+        # Identity reconciliation must use the raw current records so a unique
+        # staged-hidden dataset can be quarantined without becoming public.
+        rows = source.execute(
+            "SELECT DISTINCT "
+            "CASE WHEN source = 'collections' THEN 'Collection' "
+            "WHEN source = 'analysis-results' THEN 'Analysis Result' "
+            "ELSE source END AS dataset_type, "
+            "short_title, id AS record_id, COALESCE(doi, '') AS doi, "
+            "COALESCE(hidden, 0) AS hidden "
+            "FROM wordpress_records "
+            "WHERE source IN ('collections', 'analysis-results') "
+            "AND normalized_json IS NOT NULL "
+            "AND lower(trim(short_title)) = lower(trim(?))",
+            (candidate,),
+        ).fetchall()
+    else:
+        # Preserve compatibility with focused legacy fixtures and snapshots
+        # that expose only the public agent view.
+        dataset_columns = {
+            str(row[1]) for row in source.execute("PRAGMA table_info(agent_datasets)")
+        }
+        record_id = "id" if "id" in dataset_columns else "NULL"
+        doi = "doi" if "doi" in dataset_columns else "''"
+        hidden = "COALESCE(hidden, 0)" if "hidden" in dataset_columns else "0"
+        rows = source.execute(
+            "SELECT DISTINCT dataset_type, short_title, "
+            f"{record_id} AS record_id, {doi} AS doi, {hidden} AS hidden "
+            "FROM agent_datasets WHERE lower(trim(short_title)) = lower(trim(?))",
+            (candidate,),
+        ).fetchall()
     visible_rows = [row for row in rows if not int(row["hidden"] or 0)]
+    hidden_disposition: dict[str, str] | None = None
     if len(visible_rows) == 1:
         status = "accepted_visible"
         selected_row = visible_rows[0]
     elif not visible_rows and len(rows) == 1 and int(rows[0]["hidden"] or 0):
-        status = "staged_hidden"
+        hidden_disposition = reviewed_pathdb_hidden_disposition(rows[0])
+        status = "staged_hidden" if hidden_disposition else "hidden_unreviewed"
         selected_row = rows[0]
     else:
         status = "missing" if not rows else "ambiguous"
@@ -4502,12 +4595,21 @@ def pathdb_dataset_identity_resolution(
                 "visibility": "hidden" if selected_row["hidden"] else "visible",
             }
         )
+    if hidden_disposition is not None:
+        resolution.update(
+            {
+                "publication_state": hidden_disposition["publication_state"],
+                "publication_disposition": hidden_disposition["disposition"],
+                "publication_disposition_evidence": hidden_disposition["evidence"],
+                "publication_disposition_reviewed_at": hidden_disposition["reviewed_at"],
+            }
+        )
     return resolution
 
 
 def pathdb_identity_error(resolution: dict[str, Any]) -> RuntimeError:
     return RuntimeError(
-        "PathDB collection has no unique current visible or staged-hidden TCIA "
+        "PathDB collection has no unique current visible or reviewed-hidden TCIA "
         "WordPress identity: "
         f"raw_collection={resolution['raw_pathdb_collection']!r}, "
         f"candidate={resolution['candidate_short_title']!r}, "
@@ -4594,12 +4696,13 @@ def preflight_pathdb_wordpress_identities(snapshot_db: Path) -> dict[str, Any]:
             if item["status"] == "staged_hidden"
         ),
         "error_collections": sum(
-            item["status"] in {"missing", "ambiguous"} for item in collections
+            item["status"] in {"missing", "ambiguous", "hidden_unreviewed"}
+            for item in collections
         ),
         "error_rows": sum(
             int(item["pathdb_row_count"] or 0)
             for item in collections
-            if item["status"] in {"missing", "ambiguous"}
+            if item["status"] in {"missing", "ambiguous", "hidden_unreviewed"}
         ),
     }
     if counts["error_collections"]:
@@ -4626,9 +4729,10 @@ def emit_pathdb_preflight_annotations(report: dict[str, Any]) -> None:
                 f"{item['candidate_short_title']} has {row_count} PathDB rows but "
                 f"WordPress record {item.get('record_id') or 'unknown'} "
                 f"(DOI {item.get('doi') or 'unknown'}) is hidden; these rows will "
-                "not enter public non-DICOM or participant artifacts."
+                "not enter public non-DICOM or participant artifacts. "
+                f"Reviewed lifecycle state: {item['publication_state']}."
             )
-        elif item["status"] in {"missing", "ambiguous"}:
+        elif item["status"] in {"missing", "ambiguous", "hidden_unreviewed"}:
             print(
                 "::error title=Unresolved PathDB WordPress identity::"
                 f"{item['candidate_short_title']} has {row_count} PathDB rows; "

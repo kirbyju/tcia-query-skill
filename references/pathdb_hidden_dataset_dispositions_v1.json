@@ -1,0 +1,14 @@
+{
+  "datasets": [
+    {
+      "disposition": "exclude_from_public_artifacts",
+      "doi": "10.7937/axrh-hy45",
+      "evidence": "TCIA maintainer confirmed that the dataset is waiting for final submitter approval and must remain excluded from public release artifacts without blocking unrelated updates.",
+      "publication_state": "waiting_submitter_approval",
+      "record_id": "55258",
+      "reviewed_at": "2026-11-09",
+      "short_title": "FHCC PTRC-Melanoma"
+    }
+  ],
+  "schema_version": 1
+}

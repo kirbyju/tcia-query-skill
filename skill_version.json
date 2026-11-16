@@ -60,7 +60,7 @@
     "references/histology_hsi_participant_links_v1.csv": "d5b63960a3c3e5078c35bc2393daabc7cb6417515daadfaf71f55e2b1b9de464",
     "references/histology_hsi_participant_links_v1.json": "53e4451fc3e71a85c9817799084c3d639824e166d8ec1500777f4a8b65af2015",
     "references/idc-public-dicom.md": "54e694a43e48007271af54355f0c808d5bbacac0dbf38066a01a9a099fdf9df3",
-    "references/maintainer-operations.md": "4fe2ee28686b44ee4ccf463c7766a9331ebd37f898388074f07c2aacc8bdfcd2",
+    "references/maintainer-operations.md": "96b7c072018be12dda7e694d6cba16cd6dc89fd609f7b313ce3abda441a06ca9",
     "references/missing-participant-inventory-review-2026-10-25.md": "bd0142db99a05e7226138d1e1c07e49b30b6ce271baf7203fb5053e773a1bc67",
     "references/missing_participant_inventory_manual_qc_v1.json": "86655ced1411599b53851f4c2bbf0f0efb74eb85d12410f912cca0924b63e168",
     "references/nbia-public-dicom-fallback.md": "530de4e4e6f0cf804cf5dbdd460483aedc5b3a8f9c294736afa63ff3ee2dcdd6",
@@ -69,6 +69,7 @@
     "references/pan_cancer_idc_presence_review_2026_10_28.json": "ea75038ac5c15ab5a0e9cf16906ad04cef68d16d16d2ab6db9ed1ce2eb0a50f2",
     "references/participant-identity-methods.md": "e7b55bc3800b3c37c47e1fa75f6e51f72d51337d18f3de60f39ab7ddd58d1dde",
     "references/pathdb-public-pathology.md": "8ecb36ff2dce9b385a9a88c4e7135e8b25bd5d2ac4214ee8421ac88fdadb90e6",
+    "references/pathdb_hidden_dataset_dispositions_v1.json": "0b0d82f964082300570efde55394c660d31567f71a3981b2019d9102a4ff8af6",
     "references/pathology.md": "cbc41ec436efbd011595cefa751241752032ba384fbde3f5f22f8bc3eec65b61",
     "references/public-non-dicom-crosswalk-curation-v1.json": "7226b7c5f7bd0c4970e7f21ced08fda69e6fa2cd2ee8d61c2ce62515ee81f20d",
     "references/public_non_dicom_crosswalks_v1.csv": "88c013e8c4320c760f2bbaa19e2fba8c371fd217aa1906fb0b47125562a4073e",
@@ -141,7 +142,7 @@
     "scripts/tcia_pathology_metadata.py": "91cb19a373d74bc4d8345afcbeccb37b4cede2b2b5c7d1c4c9dfac51d5328c98",
     "scripts/tcia_public_non_dicom_crosswalk_discovery.py": "ba5d560cc625e138859969e232c9f44d6f8a990308a16245232e600e56724c91",
     "scripts/tcia_public_non_dicom_crosswalks.py": "c7ddc5964ae60a6bfad4dcb6dd660224947bcad4e625b1e6d708e3eb5c37870c",
-    "scripts/tcia_public_non_dicom_metadata.py": "926e374de2d6864080bedc4f0a37ee978042cdb89f11d455303d3842e6d8013b",
+    "scripts/tcia_public_non_dicom_metadata.py": "cbb9f81d26b9660cfb8b764295a883b671f0eb317a7d106372b3b05a2ffd3089",
     "scripts/tcia_publications.py": "fcd1aa1e5abd48d0f556165bbee85af7d30030ba4ece1af573c8a441b720659a",
     "scripts/tcia_release_review_queue.py": "b5d9738c52435cfc27c403e220d8fe880d795cdb8174eab145de15b1a17b4265",
     "scripts/tcia_reviewed_identity.py": "256b83a56ac4bb2a7b88bb4e084fb89f752dcfcbc5927ffb56c97a614e05e31b",
@@ -155,7 +156,7 @@
     "scripts/tcia_v2_staging.py": "4bda31866068ff8405c12a8b4f22dc25b441f23affc1845688260c81adc1dd0d",
     "scripts/tcia_wordpress_search.py": "810f684c4a11f5c7fc0d3129b9d3626716d559f9b805b9b824f692596c4a5a44",
     "scripts/tests/test_skill_eval_contract.py": "d4884aed3eb65262dc52723dcbab624bcd71a804435c46d27a6edca7d479775c",
-    "scripts/tests/test_tcia_artifact_model.py": "bfb8a30a5234244f64c9e2d7ac8d3901a947f8922917ed00a9d5c2b36e8903e4",
+    "scripts/tests/test_tcia_artifact_model.py": "c0983dee96acc90a3ab9fc439cef91392ca0734a8af5a520d2ad66b04ee5bf07",
     "scripts/tests/test_tcia_clinical_metadata.py": "49f75240adc17b419f35be5dc6ffba5f5e7bf1302b569f7cc25c7a26e6d9c1c4",
     "scripts/tests/test_tcia_clinical_only_repairs.py": "87c94dabc0c124c5f69460fa7f7c0d34e0bd57c7c4e38ad767a7ce1822eacc55",
     "scripts/tests/test_tcia_compact_research.py": "2b00fda8f501508bf492f2113c4e3c85f06104d18849b856b0d196cad7104c2e",
@@ -190,6 +191,6 @@
     "scripts/tests/test_tcia_v2_staging.py": "e4c33f3dfd9b6d3ced7deecf8dc3fa6aa487737d42f90fe4522e39b40889bdf4"
   },
   "schema_version": 1,
-  "skill_version": "2026.11.12.1",
-  "updated_at_utc": "2026-11-12T18:22:57.883111+00:00"
+  "skill_version": "2026.11.16.1",
+  "updated_at_utc": "2026-11-16T14:27:48.644739+00:00"
 }
