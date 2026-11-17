@@ -377,8 +377,8 @@ class CorrectionIdentityTests(unittest.TestCase):
         payload = json.loads(source.read_text())
         batches = payload["aggregate_explanation_batches"]
         self.assertEqual(payload["schema_version"], 4)
-        self.assertEqual(len(batches), 89)
-        self.assertEqual(sum(batch["change_count"] for batch in batches), 1274955)
+        self.assertEqual(len(batches), 97)
+        self.assertEqual(sum(batch["change_count"] for batch in batches), 1277545)
         by_id = {batch["batch_id"]: batch for batch in batches}
         self.assertEqual(
             by_id["manifest-series-scope-clinical-facts-2026-10-21"]["change_kind_counts"],
@@ -468,7 +468,7 @@ class CorrectionIdentityTests(unittest.TestCase):
                          JOIN correction_decisions d USING(revision_id)
                         WHERE d.policy_version='semantic-aggregate-explanations-v1'"""
                 ).fetchall()
-            self.assertEqual(len(effects), 89)
+            self.assertEqual(len(effects), 97)
             self.assertTrue(all(row[1] == "added" for row in effects))
             self.assertTrue(all(row[2] and row[3] == "approved" for row in effects))
 

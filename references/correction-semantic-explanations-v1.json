@@ -1611,6 +1611,176 @@
         "no participant identity change",
         "no approval of other version transitions"
       ]
+    },
+    {
+      "batch_id": "fhcc-public-pathdb-and-ldct-v08-public-assets-2026-11-17",
+      "reviewer": "Codex, under requester-authorized FHCC and LDCT release review",
+      "approved_at": "2026-11-17T19:00:47Z",
+      "evidence_id": "github-actions:44145901497:metadata_change_report_final",
+      "evidence": "Exact baseline fingerprint 30154df3969658df8c586d94a77898aa326956816f02297b9bd4acbb3910fb71; report SHA256 f39d00f1c47ad03860c8ed524ac3c38902cd47fd6fb261735032970e6d3f1d4a; candidate public SQLite SHA256 9b32bc24bf793010229f2d74c75c1b9c3b95a219f5694f13e3837b6aa001c002. Immutable-baseline and retained-candidate databases were compared directly. The 242 additions are exactly one FHCC-PTRC-Melanoma dataset download plus 241 PathDB slide files. The sole modification is LDCT-and-Projection-data asset asset_34384a0e36bc1b42812c9f5f: its WordPress clinical package changed from 95000000 to 108700000 bytes and now resolves to LDCT-and-Projection-Data_Clinical_v08_20261109.zip; all other gated fields retain the same dataset and asset identity.",
+      "rationale": "Publish the newly visible FHCC-PTRC-Melanoma whole-slide pathology inventory at file grain and retain its dataset-level download representation. Also carry the observed LDCT clinical-package size and URL revision required by the reviewed lesion-grain source update. The FHCC dataset-level download remains unlinked rather than inheriting participant identities from its 241 child slide records.",
+      "artifact": "public_non_dicom",
+      "entity_table": "public_non_dicom_assets",
+      "change_count": 243,
+      "change_kind_counts": {
+        "added": 242,
+        "modified": 1
+      },
+      "changes_sha256": "65e06b1454fb50ecdd3835a4094c98615955f6e75dc35ba03937443a64767b49",
+      "negative_scope": [
+        "no public asset outside the exact 242 FHCC additions and one LDCT package revision",
+        "no participant identity inferred for the FHCC dataset-level download",
+        "no overwrite of PathDB file-grain identities",
+        "no approval of unrelated public non-DICOM changes"
+      ]
+    },
+    {
+      "batch_id": "fhcc-public-pathdb-asset-participants-2026-11-17",
+      "reviewer": "Codex, under requester-authorized FHCC release review",
+      "approved_at": "2026-11-17T19:00:47Z",
+      "evidence_id": "github-actions:44145901497:metadata_change_report_final",
+      "evidence": "Exact report SHA256 f39d00f1c47ad03860c8ed524ac3c38902cd47fd6fb261735032970e6d3f1d4a. All 241 additions bind the retained FHCC-PTRC-Melanoma PathDB slide assets to the exact PathDB case identifiers carried by those file records; they cover 208 distinct subjects. The dataset-level download remains outside this crosswalk and is separately reported for manual review.",
+      "rationale": "Preserve PathDB's source-supported case-to-slide relationships for the 241 newly public FHCC files without extending those links to the aggregate dataset download.",
+      "artifact": "public_non_dicom",
+      "entity_table": "public_non_dicom_asset_participants",
+      "change_count": 241,
+      "change_kind_counts": {
+        "added": 241
+      },
+      "changes_sha256": "989f80f222b92a984788f45afbd1867dff226af55606f88dd3331d791bf1696c",
+      "negative_scope": [
+        "no participant crosswalk for the dataset-level download",
+        "no case identity outside the exact PathDB file records",
+        "no cross-dataset participant equivalence",
+        "no unrelated asset-participant change"
+      ]
+    },
+    {
+      "batch_id": "fhcc-public-pathdb-image-metadata-2026-11-17",
+      "reviewer": "Codex, under requester-authorized FHCC release review",
+      "approved_at": "2026-11-17T19:00:47Z",
+      "evidence_id": "github-actions:44145901497:metadata_change_report_final",
+      "evidence": "Exact report SHA256 f39d00f1c47ad03860c8ed524ac3c38902cd47fd6fb261735032970e6d3f1d4a. The 241 additions are the agent-facing projection of the same retained FHCC PathDB whole-slide files; the review queue records their historical PathDB source title while the canonical WordPress dataset identity is FHCC-PTRC-Melanoma.",
+      "rationale": "Expose the newly public FHCC whole-slide file metadata in the agent-facing image projection while preserving source-title provenance and the canonical WordPress dataset mapping.",
+      "artifact": "public_non_dicom",
+      "entity_table": "public_non_dicom_image_metadata",
+      "change_count": 241,
+      "change_kind_counts": {
+        "added": 241
+      },
+      "changes_sha256": "9bd280342c5bf60e54b02c0f7902cab48538bc108e7b23a8d1cc5591be1f699d",
+      "negative_scope": [
+        "no image record outside the exact FHCC PathDB files",
+        "no loss of historical PathDB title provenance",
+        "no synthetic geometry or modality assertion",
+        "no unrelated image-metadata change"
+      ]
+    },
+    {
+      "batch_id": "fhcc-public-clinical-participants-2026-11-17",
+      "reviewer": "Codex, under requester-authorized FHCC release review",
+      "approved_at": "2026-11-17T19:00:47Z",
+      "evidence_id": "github-actions:44145901497:metadata_change_report_final",
+      "evidence": "Exact report SHA256 f39d00f1c47ad03860c8ed524ac3c38902cd47fd6fb261735032970e6d3f1d4a; candidate participant SQLite SHA256 03a1fe1efb8d1edceb3556232895fb1abc165e3771d0c6fb96527969a9bd3ae2. A direct baseline/candidate query shows all 208 additions are Collection FHCC-PTRC-Melanoma participants and no participant row is removed or modified.",
+      "rationale": "Add the 208 PathDB cases exposed by the newly visible FHCC-PTRC-Melanoma WordPress Collection and reviewed clinical source, retaining dataset-scoped identities.",
+      "artifact": "participant_inventory",
+      "entity_table": "participants",
+      "change_count": 208,
+      "change_kind_counts": {
+        "added": 208
+      },
+      "changes_sha256": "f95ad15fb837054a9a231b7cab36f42e45f206ebae9ba8d5d1f867a9be4c7bbd",
+      "negative_scope": [
+        "no participant outside FHCC-PTRC-Melanoma",
+        "no cross-dataset identity assertion",
+        "no participant-level diagnosis winner",
+        "no unrelated participant change"
+      ]
+    },
+    {
+      "batch_id": "fhcc-public-clinical-participant-identifiers-2026-11-17",
+      "reviewer": "Codex, under requester-authorized FHCC release review",
+      "approved_at": "2026-11-17T19:00:47Z",
+      "evidence_id": "github-actions:44145901497:metadata_change_report_final",
+      "evidence": "Exact report SHA256 f39d00f1c47ad03860c8ed524ac3c38902cd47fd6fb261735032970e6d3f1d4a. The 416 additions are exactly two source-preserving identifier records for each of the 208 newly added FHCC-PTRC-Melanoma participants; there are no removals or modifications.",
+      "rationale": "Retain the exact WordPress/PathDB identifier evidence needed to address each newly public FHCC participant without broad bare-ID matching.",
+      "artifact": "participant_inventory",
+      "entity_table": "participant_identifiers",
+      "change_count": 416,
+      "change_kind_counts": {
+        "added": 416
+      },
+      "changes_sha256": "3cfa1e4c1d485c74342c1a10ed3be8945df40868cc5caf988f4ea281949ab4a9",
+      "negative_scope": [
+        "no identifier outside the 208 FHCC participants",
+        "no global bare-ID equivalence",
+        "no identifier normalization beyond exact source evidence",
+        "no unrelated identifier change"
+      ]
+    },
+    {
+      "batch_id": "fhcc-public-clinical-participant-assets-2026-11-17",
+      "reviewer": "Codex, under requester-authorized FHCC release review",
+      "approved_at": "2026-11-17T19:00:47Z",
+      "evidence_id": "github-actions:44145901497:metadata_change_report_final",
+      "evidence": "Exact report SHA256 f39d00f1c47ad03860c8ed524ac3c38902cd47fd6fb261735032970e6d3f1d4a. The 416 additions are exactly two metadata-source associations for each of the 208 newly added FHCC-PTRC-Melanoma participants; there are no removals or modifications.",
+      "rationale": "Attach the reviewed PathDB and clinical source records to the 208 newly public FHCC participant identities while keeping the dataset-level download explicitly unlinked.",
+      "artifact": "participant_inventory",
+      "entity_table": "participant_assets",
+      "change_count": 416,
+      "change_kind_counts": {
+        "added": 416
+      },
+      "changes_sha256": "d6e12dbef3f348fce1a195d2a649f26d33f1d07ce67d0bedeb1415541e50e3e9",
+      "negative_scope": [
+        "no asset association outside the 208 FHCC participants",
+        "no aggregate-download participant inference",
+        "no image availability inferred from clinical metadata",
+        "no unrelated participant-asset change"
+      ]
+    },
+    {
+      "batch_id": "fhcc-and-wordpress-species-participant-groups-2026-11-17",
+      "reviewer": "Codex, under requester-authorized participant release review",
+      "approved_at": "2026-11-17T19:00:47Z",
+      "evidence_id": "github-actions:44145901497:metadata_change_report_final",
+      "evidence": "Exact report SHA256 f39d00f1c47ad03860c8ed524ac3c38902cd47fd6fb261735032970e6d3f1d4a. Direct immutable-baseline/candidate comparison shows 208 added groups, each containing exactly one newly added FHCC-PTRC-Melanoma participant. The 409 modified groups retain identical primary keys, membership counts, and member assignments; all change only from unclassified / Unknown or mixed species to human / Human. Their members partition exactly into 405 RSNA-ASNR-MICCAI-BraTS-2021 and four TCGA-GBM-QI-Radiogenomics participants. The prior snapshot had blank species for both visible Analysis Results; the refreshed snapshot supplies Human for both and Human for FHCC-PTRC-Melanoma.",
+      "rationale": "Materialize one group for each new dataset-scoped FHCC participant and propagate the now-explicit WordPress Human species labels to the 409 existing singleton groups whose identity membership is unchanged.",
+      "artifact": "participant_inventory",
+      "entity_table": "participant_groups",
+      "change_count": 617,
+      "change_kind_counts": {
+        "added": 208,
+        "modified": 409
+      },
+      "changes_sha256": "3c9d20e2b8b2deb74829a41dd3a2aa3b8bd2ee8ec43515d410e10984544cdd47",
+      "negative_scope": [
+        "no identity membership change for the 409 reclassified groups",
+        "no species inference beyond the three exact WordPress datasets",
+        "no cross-dataset merge or split",
+        "no unrelated participant-group change"
+      ]
+    },
+    {
+      "batch_id": "fhcc-public-clinical-participant-group-members-2026-11-17",
+      "reviewer": "Codex, under requester-authorized FHCC release review",
+      "approved_at": "2026-11-17T19:00:47Z",
+      "evidence_id": "github-actions:44145901497:metadata_change_report_final",
+      "evidence": "Exact report SHA256 f39d00f1c47ad03860c8ed524ac3c38902cd47fd6fb261735032970e6d3f1d4a. Direct baseline/candidate comparison shows all 208 additions assign exactly one newly added FHCC-PTRC-Melanoma participant to its deterministic singleton group; no existing membership is removed or modified.",
+      "rationale": "Complete the participant-group coverage invariant for the 208 new FHCC participants without asserting any cross-dataset equivalence.",
+      "artifact": "participant_inventory",
+      "entity_table": "participant_group_members",
+      "change_count": 208,
+      "change_kind_counts": {
+        "added": 208
+      },
+      "changes_sha256": "90e659a2c8691cd2e3c9802b7b4c44ee34cd10cc1b0ce1d132ea38cbb5ff7519",
+      "negative_scope": [
+        "no member outside the 208 FHCC participants",
+        "no existing membership rewrite",
+        "no cross-dataset equivalence",
+        "no unrelated group-member change"
+      ]
     }
   ],
   "explanation_batches": [
