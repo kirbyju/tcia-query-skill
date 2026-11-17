@@ -2368,6 +2368,7 @@ class BuilderTests(unittest.TestCase):
                     ),
                     ("Collection", "CPTAC-CCRCC"),
                     ("Analysis Result", "CPTAC-Glioblastoma-CODEX"),
+                    ("Collection", "FHCC-PTRC-Melanoma"),
                 ],
             )
             conn.executemany(
@@ -2384,6 +2385,10 @@ class BuilderTests(unittest.TestCase):
                     (
                         "CPTAC-Glioblastoma-CODEX", "C3N-2", "slide-3", "3", "", "",
                         "TIFF", "SM", "", "",
+                    ),
+                    (
+                        "FHCC PTRC-Melanoma", "CASE-1", "slide-4", "4", "", "",
+                        "SVS", "SM", "", "",
                     ),
                 ],
             )
@@ -2415,6 +2420,7 @@ class BuilderTests(unittest.TestCase):
                     ),
                     ("Collection", "CPTAC-CCRCC"),
                     ("Analysis Result", "CPTAC-Glioblastoma-CODEX"),
+                    ("Collection", "FHCC-PTRC-Melanoma"),
                 ],
             )
             self.assertEqual(
@@ -2423,6 +2429,7 @@ class BuilderTests(unittest.TestCase):
                     "Bone-Marrow-Cytomorphology",
                     "CPTAC-non-CCRCC",
                     "CPTAC-Glioblastoma-CODEX",
+                    "FHCC PTRC-Melanoma",
                 },
             )
             self.assertEqual(
@@ -2431,6 +2438,7 @@ class BuilderTests(unittest.TestCase):
                     "reviewed_pathdb_collection_alias",
                     "reviewed_pathdb_collection_alias",
                     "exact_wordpress_short_title",
+                    "reviewed_pathdb_collection_alias",
                 ],
             )
             self.assertTrue(
@@ -2467,12 +2475,12 @@ class BuilderTests(unittest.TestCase):
                     (
                         "55258",
                         "fhcc-ptrc-melanoma",
-                        "FHCC PTRC-Melanoma",
-                        snapshot_model.short_title_key("FHCC PTRC-Melanoma"),
+                        "FHCC-PTRC-Melanoma",
+                        snapshot_model.short_title_key("FHCC-PTRC-Melanoma"),
                         "10.7937/axrh-hy45",
-                        "FHCC PTRC-Melanoma",
+                        "FHCC-PTRC-Melanoma",
                         1,
-                        json.dumps({"short_title": "FHCC PTRC-Melanoma"}),
+                        json.dumps({"short_title": "FHCC-PTRC-Melanoma"}),
                         "fhcc ptrc melanoma",
                     ),
                     (

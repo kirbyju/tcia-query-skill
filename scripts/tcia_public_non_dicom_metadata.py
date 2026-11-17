@@ -4387,6 +4387,13 @@ PATHDB_COLLECTION_IDENTITY_OVERRIDES = {
             "kidney tumor participants represented by this PathDB collection label."
         ),
     },
+    "FHCC PTRC-Melanoma": {
+        "short_title": "FHCC-PTRC-Melanoma",
+        "evidence": (
+            "WordPress record 55258 now uses the hyphenated canonical short title; "
+            "PathDB retains the earlier spaced collection label."
+        ),
+    },
 }
 
 
