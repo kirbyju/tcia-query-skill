@@ -2456,6 +2456,60 @@ class BuilderTests(unittest.TestCase):
                 )
             )
 
+    def test_pathdb_asset_id_uses_canonical_dataset_identity(self):
+        import sqlite3
+
+        def build_for_label(base: Path, raw_collection: str) -> tuple[str, str, str]:
+            base.mkdir()
+            snapshot = base / "snapshot.sqlite"
+            output = base / "public.sqlite"
+            self.build_snapshot(snapshot)
+            conn = sqlite3.connect(snapshot)
+            conn.execute(
+                "INSERT INTO agent_datasets VALUES (?, ?)",
+                ("Collection", "FHCC-PTRC-Melanoma"),
+            )
+            conn.execute(
+                "INSERT INTO agent_pathdb_slides VALUES (?,?,?,?,?,?,?,?,?,?)",
+                (
+                    raw_collection, "CASE-1", "slide-4", "4", "", "",
+                    "SVS", "SM", "", "",
+                ),
+            )
+            conn.commit()
+            conn.close()
+            public.build_database(
+                snapshot,
+                output,
+                nifti_db=None,
+                pathology_db=None,
+                include_pathdb_files=True,
+                replace=True,
+            )
+            conn = sqlite3.connect(output)
+            asset = conn.execute(
+                "SELECT asset_id, raw_values_json FROM public_non_dicom_assets "
+                "WHERE source_system='tcia_pathdb'"
+            ).fetchone()
+            metadata_short_title = conn.execute(
+                "SELECT short_title FROM agent_public_non_dicom_image_metadata "
+                "WHERE asset_id=?",
+                (asset[0],),
+            ).fetchone()[0]
+            conn.close()
+            return asset[0], json.loads(asset[1])["raw_pathdb_collection"], metadata_short_title
+
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            legacy = build_for_label(base / "legacy", "FHCC PTRC-Melanoma")
+            canonical = build_for_label(base / "canonical", "FHCC-PTRC-Melanoma")
+
+        self.assertEqual(legacy[0], canonical[0])
+        self.assertEqual(legacy[1], "FHCC PTRC-Melanoma")
+        self.assertEqual(canonical[1], "FHCC-PTRC-Melanoma")
+        self.assertEqual(legacy[2], "FHCC-PTRC-Melanoma")
+        self.assertEqual(canonical[2], "FHCC-PTRC-Melanoma")
+
     def test_pathdb_staged_hidden_identity_warns_and_skips_only_that_dataset(self):
         import sqlite3
 

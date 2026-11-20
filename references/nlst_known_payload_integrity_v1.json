@@ -1,0 +1,103 @@
+{
+  "schema_version": 1,
+  "short_title": "NLST-New-lesion-LongCT",
+  "audited_on": "2026-11-17",
+  "source_url": "https://www.cancerimagingarchive.net/analysis-result/nlst-new-lesion-longct/",
+  "download_row_id": 51634,
+  "faspex_package_id": 1049,
+  "method": "Complete package inventory, gzip CRC/end-marker check, header-declared data length and full voxel loading. All 13 headers read; all 13 payloads were truncated.",
+  "disposition": "Known source limitation; intact submitter replacements unavailable per staff review 2026-11-18. Usage Notes disclosure planned, not verified published.",
+  "files": [
+    {
+      "package_path": "NLST-New-lesion-LongCT/NIFTI/113442/01-02-1999-NLST-LSS-49367/2-59865.nii.gz",
+      "sha256": "3a6af8f2c5da140831fa1bd20f5f5108b28a23a484b6567b36d74b6a7d397bd3",
+      "size_bytes": 26624000,
+      "expected_uncompressed_bytes": 360710496,
+      "missing_uncompressed_bytes": 251002744
+    },
+    {
+      "package_path": "NLST-New-lesion-LongCT/NIFTI/120173/01-02-1999-NLST-LSS-98854/resampled/2-57652.nii.gz",
+      "sha256": "803aef4a5f4011367a5ccb5a1e3cb0914a0cce6b097eebf0f51f082e72cc731f",
+      "size_bytes": 4423680,
+      "expected_uncompressed_bytes": 69717408,
+      "missing_uncompressed_bytes": 61894257
+    },
+    {
+      "package_path": "NLST-New-lesion-LongCT/NIFTI/120173/01-02-2000-NLST-LSS-20113/2-96406.nii.gz",
+      "sha256": "c7c438ca3e233e42f9f93c414025415259946f1837e59be0646c24f9298d8596",
+      "size_bytes": 20545536,
+      "expected_uncompressed_bytes": 88605024,
+      "missing_uncompressed_bytes": 50682494
+    },
+    {
+      "package_path": "NLST-New-lesion-LongCT/NIFTI/120173/register_Byr0_FUyr1/2-57652_2-96406.nii.gz",
+      "sha256": "b8d644cc349bdf8ab6c80e7d715ea61bf8300b6adc34763cbb87ff6ee08854cf",
+      "size_bytes": 92733440,
+      "expected_uncompressed_bytes": 147233152,
+      "missing_uncompressed_bytes": 29619872
+    },
+    {
+      "package_path": "NLST-New-lesion-LongCT/NIFTI/203322/register_Byr0_FUyr1/3-12236_3-22373.nii.gz",
+      "sha256": "19e447696e6f9701abde56228335779ff94f9b4ddd34fa0568e58e11bae9bf53",
+      "size_bytes": 31473664,
+      "expected_uncompressed_bytes": 160835900,
+      "missing_uncompressed_bytes": 118600451
+    },
+    {
+      "package_path": "NLST-New-lesion-LongCT/NIFTI/203473/01-02-2000-NLST-ACRIN-39529/resampled/4-41318.nii.gz",
+      "sha256": "e6c1aaa53290fd66ee755e86d06a6bff902469d9c769e223b7fd6bfe78a11c91",
+      "size_bytes": 22904832,
+      "expected_uncompressed_bytes": 53763544,
+      "missing_uncompressed_bytes": 17598027
+    },
+    {
+      "package_path": "NLST-New-lesion-LongCT/NIFTI/203473/register_Byr1_FUyr2/4-41318_3-95256.nii.gz",
+      "sha256": "c189c16948d8d7c80038d50b0103781d0679dd8d4eeb0edba1c5b4aa9cefcd78",
+      "size_bytes": 50266112,
+      "expected_uncompressed_bytes": 108455952,
+      "missing_uncompressed_bytes": 35799646
+    },
+    {
+      "package_path": "NLST-New-lesion-LongCT/NIFTI/208751/01-02-1999-NLST-ACRIN-80501/resampled/2-85064.nii.gz",
+      "sha256": "1135551fc849ac810bdc872764cdd2aaf2e328551ee21c5f27cd4e4a1c4072d0",
+      "size_bytes": 32473088,
+      "expected_uncompressed_bytes": 87875488,
+      "missing_uncompressed_bytes": 34059885
+    },
+    {
+      "package_path": "NLST-New-lesion-LongCT/NIFTI/208751/01-02-2000-NLST-ACRIN-83365/2-96846.nii.gz",
+      "sha256": "e9239df2ba66e61d4c09df8015a636f10a1b202c8abe32745c940e72fa1c3a4b",
+      "size_bytes": 48955392,
+      "expected_uncompressed_bytes": 99615072,
+      "missing_uncompressed_bytes": 11888241
+    },
+    {
+      "package_path": "NLST-New-lesion-LongCT/NIFTI/208751/register_Byr0_FUyr1/2-85064_2-96846.nii.gz",
+      "sha256": "ff4ab983aa86ebbe8f3aa8a8f00d9bf12da8c4b9173030c46ad9e56aa50f3faa",
+      "size_bytes": 18710528,
+      "expected_uncompressed_bytes": 164616352,
+      "missing_uncompressed_bytes": 138003883
+    },
+    {
+      "package_path": "NLST-New-lesion-LongCT/NIFTI/213018/register_Byr0_FUyr1/3-52823_3-56661.nii.gz",
+      "sha256": "ae9bd2389d84d7a35a045389f58bedc1ec1fb0fd6b43e9154ba0d9af910a390b",
+      "size_bytes": 31162368,
+      "expected_uncompressed_bytes": 165130352,
+      "missing_uncompressed_bytes": 123768159
+    },
+    {
+      "package_path": "NLST-New-lesion-LongCT/NIFTI/213171/01-02-1999-NLST-ACRIN-74387/2-57423.nii.gz",
+      "sha256": "f78227ee96c9043cc48a9a3c82b13253e5b12454c1ecadeabefbc97994107198",
+      "size_bytes": 19496960,
+      "expected_uncompressed_bytes": 244318560,
+      "missing_uncompressed_bytes": 171774456
+    },
+    {
+      "package_path": "NLST-New-lesion-LongCT/NIFTI/213171/register_Byr0_FUyr1/2-57423_2-22984.nii.gz",
+      "sha256": "be3f3867309ec25301336dde975fe1031e8bca4b025c83a7beaaeba49184d339",
+      "size_bytes": 4685824,
+      "expected_uncompressed_bytes": 161840352,
+      "missing_uncompressed_bytes": 155520422
+    }
+  ]
+}

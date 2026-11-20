@@ -190,6 +190,23 @@ published as `not_checked` and surfaced in a refresh report for a later manual
 HPC run; removed scopes are pruned. Seed corruption is a hard release failure.
 Public DICOM assessments are excluded and remain the authority of IDC/idc-index.
 
+### Known file payload failures
+
+`agent_public_non_dicom_assets.quality_flag_json.reviewed_payload_integrity`
+records reviewed file-level payload failures independently of header geometry.
+The initial evidence is the 13 exact NLST-New-lesion-LongCT paths in
+`references/nlst_known_payload_integrity_v1.json`, audited November 17, 2026.
+Keep inventory, participant links and geometry evidence; the warning recommends
+excluding affected images until full-payload validation succeeds. It is a
+known source limitation, not a pending promise of replacement.
+
+Flags identify audited SHA-256 values. Without a comparable current checksum,
+`current_bytes_match_audit` is null: the warning is historical, not a new test.
+A different current SHA-256 yields `source_changed_requires_recheck`, not a
+corruption verdict on new bytes. Rebuilds refresh this annotation idempotently;
+metadata generation never downloads or repairs image payloads. Remove or
+supersede reviewed evidence only after validating replacements explicitly.
+
 ### Non-DICOM annotations
 
 The unified artifact represents annotation-like files as ordinary logical

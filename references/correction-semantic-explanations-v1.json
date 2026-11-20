@@ -1781,6 +1781,62 @@
         "no cross-dataset equivalence",
         "no unrelated group-member change"
       ]
+    },
+    {
+      "batch_id": "fhcc-pathdb-canonical-asset-identity-2026-11-20",
+      "reviewer": "Codex, under requester approval of the expected FHCC PathDB label transition",
+      "approved_at": "2026-11-20T15:25:51Z",
+      "evidence_id": "github-actions:44571171154:metadata_change_report_final",
+      "evidence": "Exact report SHA256 c94e93085a9a2c90b1c0b64c44cec10106cbacb8f2d12a0b86bbc0bec95c44ba. All 241 removed and 241 added asset rows pair one-to-one with identical non-key content after PathDB changed only the collection label from FHCC PTRC-Melanoma to the canonical WordPress short title FHCC-PTRC-Melanoma; the PathDB row count remains 241.",
+      "rationale": "Accept this one-time primary-key migration for the 241 FHCC PathDB slide assets. The producer now keys PathDB assets with the reviewed canonical TCIA short title so future raw collection-label changes do not regenerate asset identities, while preserving the raw PathDB label in provenance.",
+      "artifact": "public_non_dicom",
+      "entity_table": "public_non_dicom_assets",
+      "change_count": 482,
+      "change_kind_counts": {"added": 241, "removed": 241},
+      "changes_sha256": "901020c08ed50dd31ce2e93e0cb4130dd047198bef5a6c382003ff2624d7da47",
+      "negative_scope": ["no slide payload change", "no participant identity change", "no raw PathDB provenance loss", "no approval of unrelated public assets"]
+    },
+    {
+      "batch_id": "fhcc-pathdb-canonical-asset-participant-rekeys-2026-11-20",
+      "reviewer": "Codex, under requester approval of the expected FHCC PathDB label transition",
+      "approved_at": "2026-11-20T15:25:51Z",
+      "evidence_id": "github-actions:44571171154:metadata_change_report_final",
+      "evidence": "Exact report SHA256 c94e93085a9a2c90b1c0b64c44cec10106cbacb8f2d12a0b86bbc0bec95c44ba. The 241 removals and 241 additions preserve the same FHCC case-to-slide relationships and differ only because the referenced slide asset keys migrated with the PathDB collection label.",
+      "rationale": "Carry the exact FHCC asset-key migration through the participant links without changing the dataset-scoped participants, participant roles, or source evidence.",
+      "artifact": "public_non_dicom",
+      "entity_table": "public_non_dicom_asset_participants",
+      "change_count": 482,
+      "change_kind_counts": {"added": 241, "removed": 241},
+      "changes_sha256": "8b0dd9258ebeb74562f4389a2c4f4ec4289121eb732c9b9e88b8aaf55cf97fce",
+      "negative_scope": ["no participant reassignment", "no cross-dataset identity assertion", "no participant-role change", "no approval of unrelated asset-participant links"]
+    },
+    {
+      "batch_id": "fhcc-pathdb-canonical-image-metadata-rekeys-2026-11-20",
+      "reviewer": "Codex, under requester approval of the expected FHCC PathDB label transition",
+      "approved_at": "2026-11-20T15:25:51Z",
+      "evidence_id": "github-actions:44571171154:metadata_change_report_final",
+      "evidence": "Exact report SHA256 c94e93085a9a2c90b1c0b64c44cec10106cbacb8f2d12a0b86bbc0bec95c44ba. Each of the 241 removed image-metadata projections pairs with one added projection whose metadata content is unchanged and whose key follows the same FHCC slide-asset migration.",
+      "rationale": "Carry the exact FHCC asset-key migration through the agent-facing image metadata while retaining modality, pathology fields, source evidence, and the raw PathDB collection label in asset provenance.",
+      "artifact": "public_non_dicom",
+      "entity_table": "public_non_dicom_image_metadata",
+      "change_count": 482,
+      "change_kind_counts": {"added": 241, "removed": 241},
+      "changes_sha256": "84e42d6079d736e04f70c7706493bc1818faeb32139f80fc4acd558bd6c8fb5d",
+      "negative_scope": ["no image metadata value change", "no geometry assertion", "no loss of raw source provenance", "no approval of unrelated image metadata"]
+    },
+    {
+      "batch_id": "exact-open-access-participant-assets-2026-11-20",
+      "reviewer": "Codex, under requester approval of the expected ExACT access transition",
+      "approved_at": "2026-11-20T15:25:51Z",
+      "evidence_id": "github-actions:44571171154:metadata_change_report_final",
+      "evidence": "Exact report SHA256 c94e93085a9a2c90b1c0b64c44cec10106cbacb8f2d12a0b86bbc0bec95c44ba. The 30 modified ExACT participant_assets rows reflect WordPress downloads 42259 and 42261 changing from controlled NIH access to open CC BY 4.0 access; DataCite v12 corroborates the embargo lift, and download 42261 now exposes the reviewed workbook URL.",
+      "rationale": "Accept the expected ExACT access-state transition for the exact 30 participant-source associations. The participant identities and source records remain unchanged; only the published access and licensing projection changes.",
+      "artifact": "participant_inventory",
+      "entity_table": "participant_assets",
+      "change_count": 30,
+      "change_kind_counts": {"modified": 30},
+      "changes_sha256": "84a26a27524feed5237eb474c161e66dc03c953501635eca4b47aea726838f22",
+      "negative_scope": ["no participant identity change", "no approval of an ExACT ID clinical crosswalk", "no unrelated access transition", "no blanket license-change approval"]
     }
   ],
   "explanation_batches": [

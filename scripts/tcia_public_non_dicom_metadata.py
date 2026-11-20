@@ -4811,7 +4811,10 @@ def ingest_pathdb(conn: sqlite3.Connection, snapshot_db: Path, include_files: bo
             file_format = normalize_format(row["data_format"] or format_from_path(url))
             if not file_format:
                 file_format = "UNKNOWN"
-            asset_id = stable_id("asset", "pathdb", row["collection"], row["slide_id"], row["camic_id"])
+            # PathDB collection labels can change independently of the reviewed TCIA
+            # dataset identity.  Bind the durable asset key to the canonical TCIA
+            # short title while retaining the raw PathDB label in provenance below.
+            asset_id = stable_id("asset", "pathdb", short_title, row["slide_id"], row["camic_id"])
             is_hancock_tma_block = (
                 row["collection"] == "HANCOCK"
                 and re.match(
@@ -4928,7 +4931,7 @@ def ingest_pathdb(conn: sqlite3.Connection, snapshot_db: Path, include_files: bo
                 confidence="high",
                 priority=100,
                 evidence={"slide_id": row["slide_id"], "camic_id": row["camic_id"]},
-                short_title=str(row["collection"]),
+                short_title=short_title,
                 assume_new=True,
             )
             if not meaningful_metadata_value(row["modality"]):
@@ -4943,7 +4946,7 @@ def ingest_pathdb(conn: sqlite3.Connection, snapshot_db: Path, include_files: bo
                     confidence="high",
                     priority=90,
                     evidence={"imaging_domain": "pathology", "media_kind": "whole_slide_image"},
-                    short_title=str(row["collection"]),
+                    short_title=short_title,
                 )
             count += 1
             if count % 10000 == 0:
@@ -7137,6 +7140,49 @@ def add_metadata_assessment_notes(conn: sqlite3.Connection, nifti_db: Path | Non
     return conn.total_changes - before
 
 
+def apply_known_payload_integrity(conn: sqlite3.Connection) -> int:
+    """Annotate exact audited paths; header geometry is not payload integrity.
+
+    Missing current hashes retain a dated historical warning with an explicit
+    unverified-current-bytes qualifier. Different hashes require rechecking,
+    rather than inheriting a known-truncation verdict for replacement bytes.
+    """
+    evidence = json.loads((SKILL_ROOT / "references" / "nlst_known_payload_integrity_v1.json").read_text())
+    reviewed = {item["package_path"]: item for item in evidence["files"]}
+    changed = 0
+    for row in conn.execute(
+        "SELECT asset_id, package_path, checksum, checksum_algorithm, quality_flag_json "
+        "FROM public_non_dicom_assets WHERE short_title=? AND asset_granularity='file'",
+        (evidence["short_title"],),
+    ).fetchall():
+        flags = json.loads(row["quality_flag_json"] or "{}")
+        old = json_dumps(flags)
+        flags.pop("reviewed_payload_integrity", None)
+        path = str(row["package_path"] or "").replace("\\", "/").lstrip("/")
+        item = reviewed.get(path)
+        if item:
+            checksum = str(row["checksum"] or "").lower()
+            algorithm = str(row["checksum_algorithm"] or "").lower().replace("-", "")
+            comparable = bool(checksum and algorithm == "sha256")
+            source_changed = comparable and checksum != item["sha256"]
+            flags["reviewed_payload_integrity"] = {
+                "status": "source_changed_requires_recheck" if source_changed else "known_truncated_at_audit",
+                "audited_on": evidence["audited_on"],
+                "audited_sha256": item["sha256"],
+                "current_bytes_match_audit": (checksum == item["sha256"]) if comparable else None,
+                "full_payload_readable_at_audit": False,
+                "missing_uncompressed_bytes_at_audit": item["missing_uncompressed_bytes"],
+                "recommended_use": "revalidate_before_use" if source_changed else "exclude_until_full_payload_validated",
+                "evidence": "references/nlst_known_payload_integrity_v1.json",
+                "note": "Header geometry does not establish a complete readable image. No current payload recheck is performed by the metadata build.",
+            }
+        new = json_dumps(flags)
+        if new != old:
+            conn.execute("UPDATE public_non_dicom_assets SET quality_flag_json=? WHERE asset_id=?", (new, row["asset_id"]))
+            changed += 1
+    return changed
+
+
 def add_review_issues(conn: sqlite3.Connection) -> None:
     rows = conn.execute(
         """
@@ -7699,6 +7745,7 @@ def build_database(
                     "SELECT COUNT(*) FROM public_non_dicom_geometry_job_coverage"
                 ).fetchone()[0]
             )
+        counts["known_payload_integrity_flag_changes"] = apply_known_payload_integrity(conn)
         generated = datetime.now(timezone.utc).isoformat()
         metadata = {
             "schema_version": SCHEMA_VERSION,
