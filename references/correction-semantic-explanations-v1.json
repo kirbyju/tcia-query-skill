@@ -1783,48 +1783,6 @@
       ]
     },
     {
-      "batch_id": "fhcc-pathdb-canonical-asset-identity-2026-11-20",
-      "reviewer": "Codex, under requester approval of the expected FHCC PathDB label transition",
-      "approved_at": "2026-11-20T15:25:51Z",
-      "evidence_id": "github-actions:44571171154:metadata_change_report_final",
-      "evidence": "Exact report SHA256 c94e93085a9a2c90b1c0b64c44cec10106cbacb8f2d12a0b86bbc0bec95c44ba. All 241 removed and 241 added asset rows pair one-to-one with identical non-key content after PathDB changed only the collection label from FHCC PTRC-Melanoma to the canonical WordPress short title FHCC-PTRC-Melanoma; the PathDB row count remains 241.",
-      "rationale": "Accept this one-time primary-key migration for the 241 FHCC PathDB slide assets. The producer now keys PathDB assets with the reviewed canonical TCIA short title so future raw collection-label changes do not regenerate asset identities, while preserving the raw PathDB label in provenance.",
-      "artifact": "public_non_dicom",
-      "entity_table": "public_non_dicom_assets",
-      "change_count": 482,
-      "change_kind_counts": {"added": 241, "removed": 241},
-      "changes_sha256": "901020c08ed50dd31ce2e93e0cb4130dd047198bef5a6c382003ff2624d7da47",
-      "negative_scope": ["no slide payload change", "no participant identity change", "no raw PathDB provenance loss", "no approval of unrelated public assets"]
-    },
-    {
-      "batch_id": "fhcc-pathdb-canonical-asset-participant-rekeys-2026-11-20",
-      "reviewer": "Codex, under requester approval of the expected FHCC PathDB label transition",
-      "approved_at": "2026-11-20T15:25:51Z",
-      "evidence_id": "github-actions:44571171154:metadata_change_report_final",
-      "evidence": "Exact report SHA256 c94e93085a9a2c90b1c0b64c44cec10106cbacb8f2d12a0b86bbc0bec95c44ba. The 241 removals and 241 additions preserve the same FHCC case-to-slide relationships and differ only because the referenced slide asset keys migrated with the PathDB collection label.",
-      "rationale": "Carry the exact FHCC asset-key migration through the participant links without changing the dataset-scoped participants, participant roles, or source evidence.",
-      "artifact": "public_non_dicom",
-      "entity_table": "public_non_dicom_asset_participants",
-      "change_count": 482,
-      "change_kind_counts": {"added": 241, "removed": 241},
-      "changes_sha256": "8b0dd9258ebeb74562f4389a2c4f4ec4289121eb732c9b9e88b8aaf55cf97fce",
-      "negative_scope": ["no participant reassignment", "no cross-dataset identity assertion", "no participant-role change", "no approval of unrelated asset-participant links"]
-    },
-    {
-      "batch_id": "fhcc-pathdb-canonical-image-metadata-rekeys-2026-11-20",
-      "reviewer": "Codex, under requester approval of the expected FHCC PathDB label transition",
-      "approved_at": "2026-11-20T15:25:51Z",
-      "evidence_id": "github-actions:44571171154:metadata_change_report_final",
-      "evidence": "Exact report SHA256 c94e93085a9a2c90b1c0b64c44cec10106cbacb8f2d12a0b86bbc0bec95c44ba. Each of the 241 removed image-metadata projections pairs with one added projection whose metadata content is unchanged and whose key follows the same FHCC slide-asset migration.",
-      "rationale": "Carry the exact FHCC asset-key migration through the agent-facing image metadata while retaining modality, pathology fields, source evidence, and the raw PathDB collection label in asset provenance.",
-      "artifact": "public_non_dicom",
-      "entity_table": "public_non_dicom_image_metadata",
-      "change_count": 482,
-      "change_kind_counts": {"added": 241, "removed": 241},
-      "changes_sha256": "84e42d6079d736e04f70c7706493bc1818faeb32139f80fc4acd558bd6c8fb5d",
-      "negative_scope": ["no image metadata value change", "no geometry assertion", "no loss of raw source provenance", "no approval of unrelated image metadata"]
-    },
-    {
       "batch_id": "exact-open-access-participant-assets-2026-11-20",
       "reviewer": "Codex, under requester approval of the expected ExACT access transition",
       "approved_at": "2026-11-20T15:25:51Z",
@@ -1837,6 +1795,48 @@
       "change_kind_counts": {"modified": 30},
       "changes_sha256": "84a26a27524feed5237eb474c161e66dc03c953501635eca4b47aea726838f22",
       "negative_scope": ["no participant identity change", "no approval of an ExACT ID clinical crosswalk", "no unrelated access transition", "no blanket license-change approval"]
+    },
+    {
+      "batch_id": "pathdb-wordpress-canonical-alias-assets-2026-11-23",
+      "reviewer": "Codex, under requester approval of all three reviewed PathDB-to-WordPress short-title aliases",
+      "approved_at": "2026-11-23T18:02:00Z",
+      "evidence_id": "github-actions:45039265724:metadata_change_report_final",
+      "evidence": "Exact report SHA256 06d6057d88da53919dd59c366372c0a9ed155918d23a22ed2f74abcf6c6c5e27. All 171,743 removed and 171,743 added PathDB asset rows are the one-time canonical-identity migrations for 171,374 Bone-Marrow-Cytomorphology slides to Bone-Marrow-Cytomorphology_MLL_Helmholtz_Fraunhofer, 128 CPTAC-non-CCRCC slides to CPTAC-CCRCC, and 241 FHCC PTRC-Melanoma slides to FHCC-PTRC-Melanoma. The report pairs every asset one-to-one with identical non-key content; the canonical titles are the current reviewed WordPress short titles and raw PathDB labels remain in provenance.",
+      "rationale": "Accept the exact one-time asset-key migration from mutable PathDB collection labels to reviewed canonical TCIA WordPress short titles for these three aliases. This aligns dataset identity without changing slide payloads or discarding raw-source provenance.",
+      "artifact": "public_non_dicom",
+      "entity_table": "public_non_dicom_assets",
+      "change_count": 343486,
+      "change_kind_counts": {"added": 171743, "removed": 171743},
+      "changes_sha256": "7d0a56722f0d2f903cdc22898839da3c2bf8c2bb55b7a5a6e0b9342105fb2837",
+      "negative_scope": ["no slide payload change", "no participant identity change", "no raw PathDB provenance loss", "no alias beyond the three reviewed mappings", "no approval of unrelated public assets"]
+    },
+    {
+      "batch_id": "pathdb-wordpress-canonical-alias-asset-participants-2026-11-23",
+      "reviewer": "Codex, under requester approval of all three reviewed PathDB-to-WordPress short-title aliases",
+      "approved_at": "2026-11-23T18:02:00Z",
+      "evidence_id": "github-actions:45039265724:metadata_change_report_final",
+      "evidence": "Exact report SHA256 06d6057d88da53919dd59c366372c0a9ed155918d23a22ed2f74abcf6c6c5e27. The 171,743 removals and 171,743 additions carry the exact reviewed Bone Marrow, CPTAC, and FHCC asset-key migrations through their dependent asset-participant links with unchanged table cardinality and no unscoped changes.",
+      "rationale": "Carry the approved canonical asset-key migrations through the existing PathDB participant associations without changing dataset-scoped participants, roles, or source evidence.",
+      "artifact": "public_non_dicom",
+      "entity_table": "public_non_dicom_asset_participants",
+      "change_count": 343486,
+      "change_kind_counts": {"added": 171743, "removed": 171743},
+      "changes_sha256": "710c499f6647c782165e9d1d9e127e25606e58b47d2135585791bc2315d69bb7",
+      "negative_scope": ["no participant reassignment", "no cross-dataset identity assertion", "no participant-role change", "no alias beyond the three reviewed mappings", "no approval of unrelated asset-participant links"]
+    },
+    {
+      "batch_id": "pathdb-wordpress-canonical-alias-image-metadata-2026-11-23",
+      "reviewer": "Codex, under requester approval of all three reviewed PathDB-to-WordPress short-title aliases",
+      "approved_at": "2026-11-23T18:02:00Z",
+      "evidence_id": "github-actions:45039265724:metadata_change_report_final",
+      "evidence": "Exact report SHA256 06d6057d88da53919dd59c366372c0a9ed155918d23a22ed2f74abcf6c6c5e27. Every one of the 171,743 removed image-metadata rows pairs one-to-one with an added row having identical non-key content; only the asset key and canonical dataset identity follow the approved Bone Marrow, CPTAC, and FHCC WordPress short titles.",
+      "rationale": "Carry the exact canonical asset-key migrations through the agent-facing image metadata while preserving modality, pathology values, source evidence, and the raw PathDB labels retained by the asset provenance.",
+      "artifact": "public_non_dicom",
+      "entity_table": "public_non_dicom_image_metadata",
+      "change_count": 343486,
+      "change_kind_counts": {"added": 171743, "removed": 171743},
+      "changes_sha256": "844823564492aa5a933492f0f1bf509d930989770e8cbd19462405d03cba224b",
+      "negative_scope": ["no image metadata value change", "no geometry assertion", "no raw-source provenance loss", "no alias beyond the three reviewed mappings", "no approval of unrelated image metadata"]
     }
   ],
   "explanation_batches": [

@@ -378,11 +378,19 @@ class CorrectionIdentityTests(unittest.TestCase):
         batches = payload["aggregate_explanation_batches"]
         self.assertEqual(payload["schema_version"], 4)
         self.assertEqual(len(batches), 101)
-        self.assertEqual(sum(batch["change_count"] for batch in batches), 1279021)
+        self.assertEqual(sum(batch["change_count"] for batch in batches), 2308033)
         by_id = {batch["batch_id"]: batch for batch in batches}
         self.assertEqual(
-            by_id["fhcc-pathdb-canonical-asset-identity-2026-11-20"]["change_kind_counts"],
-            {"added": 241, "removed": 241},
+            by_id["pathdb-wordpress-canonical-alias-assets-2026-11-23"]["change_kind_counts"],
+            {"added": 171743, "removed": 171743},
+        )
+        self.assertEqual(
+            by_id["pathdb-wordpress-canonical-alias-asset-participants-2026-11-23"]["changes_sha256"],
+            "710c499f6647c782165e9d1d9e127e25606e58b47d2135585791bc2315d69bb7",
+        )
+        self.assertEqual(
+            by_id["pathdb-wordpress-canonical-alias-image-metadata-2026-11-23"]["change_count"],
+            343486,
         )
         self.assertEqual(
             by_id["exact-open-access-participant-assets-2026-11-20"]["change_kind_counts"],
