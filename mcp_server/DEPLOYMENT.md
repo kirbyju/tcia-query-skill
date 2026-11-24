@@ -89,7 +89,7 @@ full correction registry. That profile includes `research_detail`; the compact
 correction decision-set digest, counts, and source-health status remain visible
 in the top bundle manifest without installing the registry SQLite.
 
-The MCP server advertises the 20 supported V2 tools. Do not configure standalone
+The MCP server advertises its supported tools, including `resolve_file_dois`. Do not configure standalone
 NIfTI or pathology databases for the streamlined public service; those domains
 are provided by the unified public non-DICOM detail artifact.
 

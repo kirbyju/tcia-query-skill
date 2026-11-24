@@ -95,3 +95,15 @@ A schema upgrade requires a full source/downstream build, not selective reuse of
 old detail components. Updating repository code or publishing a release does not
 update running services: install the validated new bundle and restart each
 service separately, then verify the installed release fingerprint.
+
+
+## Server 0.8.0: exact file-locator DOI resolver
+
+REST `POST /v2/files/resolve-dois` and MCP `resolve_file_dois` accept up to 200
+public metadata locators and return exact dataset DOI matches. Preserve
+`matched`/`unmatched`/`ambiguous`/`unavailable` status and the release fingerprint;
+do not pick a DOI from an ambiguity set. See the server README for request and
+response semantics. This adds indexes to the existing controlled and public
+non-DICOM SQLite artifacts, with no new artifact/profile or schema-column change.
+Old artifacts remain usable by existing endpoints; resolver kinds requiring a
+missing new index report unavailable until rebuilt artifacts are installed.

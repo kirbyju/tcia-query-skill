@@ -877,3 +877,37 @@ class ParticipantDownloadPlanResponse(PublicModel):
     providers: dict[str, ImagingProviderVersion]
     scope: ParticipantPlanScope
     complete: bool
+
+
+class FileLocator(PublicModel):
+    id: str = Field(min_length=1, max_length=80)
+    kind: Literal["drs_uri", "file_id", "series_instance_uid", "image_url"]
+    value: str = Field(min_length=1, max_length=4096)
+
+
+class FileDOIsRequest(PublicModel):
+    locators: list[FileLocator] = Field(min_length=1, max_length=200)
+
+
+class FileDOIMatch(PublicModel):
+    dataset_type: str
+    short_title: str
+    title: str | None = None
+    doi: str
+    tcia_page: str | None = None
+    source_artifact: Literal["controlled_access_metadata.sqlite", "public_non_dicom_metadata.sqlite"]
+    match_basis: Literal["drs_uri", "file_id", "series_instance_uid", "image_url"]
+
+
+class FileDOIResult(FileLocator):
+    status: Literal["matched", "unmatched", "ambiguous", "unavailable"]
+    matches: list[FileDOIMatch]
+    truncated: bool = False
+    detail: str | None = None
+
+
+class FileDOIsResponse(PublicModel):
+    results: list[FileDOIResult]
+    count: int = Field(ge=0, le=200)
+    release_fingerprint: str | None = None
+    generated_at_utc: str | None = None

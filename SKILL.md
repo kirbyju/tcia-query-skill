@@ -69,6 +69,13 @@ datasets). Label hidden results separately; a hidden record does not establish
 TCIA publication readiness. Do not enable hidden discovery merely because an
 ordinary search returns no match.
 
+For file-locator-only DOI discovery, use MCP `resolve_file_dois` or REST
+`POST /v2/files/resolve-dois` (1–200 exact DRS URIs, file IDs, controlled series
+UIDs, or public PathDB file URLs). Requires the relevant `research_detail`
+components and resolver indexes. Retain unmatched/ambiguous/unavailable status;
+never guess from filenames or fetch supplied URLs. Known DOIs need no locator
+lookup and can go directly to citation formatting.
+
 1. Confirm the selected service or local bundle fingerprint and capabilities with `get_snapshot_info`, `/v2/bundle`, or the release manifest.
 2. Use `search_datasets` for compact discovery. Follow a candidate with `get_dataset` for narrative, current downloads, license/access details, and related Analysis Results.
 3. Use `search_datacite_dois` and `get_datacite_doi` for DOI metadata, creators, and citation output (`apa`, `vancouver`, `chicago-author-date`, `bibtex`, or `ris`).

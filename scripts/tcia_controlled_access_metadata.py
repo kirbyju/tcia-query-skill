@@ -601,6 +601,8 @@ CREATE INDEX IF NOT EXISTS idx_controlled_files_route
   ON controlled_files(route_system);
 CREATE INDEX IF NOT EXISTS idx_controlled_files_short_title
   ON controlled_files(short_title);
+CREATE INDEX IF NOT EXISTS idx_controlled_files_file_id
+  ON controlled_files(file_id);
 CREATE INDEX IF NOT EXISTS idx_controlled_files_drs
   ON controlled_files(drs_uri);
 CREATE INDEX IF NOT EXISTS idx_controlled_files_series

@@ -92,6 +92,11 @@ DEFAULT_RELEASE_TAG = "tcia-metadata-v2-latest"
 DEFAULT_REPOSITORY = "kirbyju/tcia-query-skill"
 DB_ASSET = "public_non_dicom_metadata.sqlite.gz"
 MANIFEST_ASSET = "public_non_dicom_metadata_manifest.json"
+try:
+    from tcia_locator_indexes import PATHDB_URL_INDEX_SQL
+except ModuleNotFoundError:
+    from scripts.tcia_locator_indexes import PATHDB_URL_INDEX_SQL
+
 SCHEMA_VERSION = 9
 
 
@@ -548,6 +553,9 @@ CREATE TABLE public_non_dicom_dataset_metadata_notes (
     evidence_json TEXT NOT NULL DEFAULT '{}'
 );
 
+CREATE INDEX IF NOT EXISTS idx_pnd_pathdb_file_url
+  ON public_non_dicom_locations(access_url)
+  WHERE managed_system = 'tcia_pathdb' AND access_url IS NOT NULL;
 CREATE INDEX idx_pnd_assets_dataset ON public_non_dicom_assets(short_title, dataset_type);
 CREATE INDEX idx_pnd_assets_subject ON public_non_dicom_assets(short_title, subject_id);
 CREATE INDEX idx_pnd_assets_format ON public_non_dicom_assets(file_format, media_kind);
@@ -7621,6 +7629,7 @@ def build_database(
             baseline_wordpress_identities = 0
             refreshed_assets = 0
             public_dicom_assets_removed = 0
+        conn.execute(PATHDB_URL_INDEX_SQL)
         counts = {
             "baseline_wordpress_download_identities": baseline_wordpress_identities,
             "baseline_refreshable_assets_removed": refreshed_assets,

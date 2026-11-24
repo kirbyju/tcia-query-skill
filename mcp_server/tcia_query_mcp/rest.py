@@ -14,6 +14,8 @@ from pydantic import BaseModel, Field, StrictBool
 
 from . import __version__
 from .models import (
+    FileDOIsRequest,
+    FileDOIsResponse,
     AccessSummaryResponse,
     AssetsResponse,
     BundleResponse,
@@ -180,6 +182,8 @@ def create_app(service: TciaQueryService | None = None) -> FastAPI:
 
     @app.exception_handler(RequestValidationError)
     async def _validation_error_handler(_request: Request, exc: RequestValidationError):
+        if _request.url.path == f"{V2_API_PREFIX}/files/resolve-dois":
+            return _problem(422, "Invalid file locator request.", "invalid_request")
         return _problem(422, str(exc), "invalid_request")
 
     @app.exception_handler(Exception)
@@ -400,6 +404,11 @@ def create_app(service: TciaQueryService | None = None) -> FastAPI:
         return S().find_participant_link_issues(
             short_titles=short_titles, statuses=statuses, limit=limit
         )
+
+    @app.post(f"{V2_API_PREFIX}/files/resolve-dois", response_model=FileDOIsResponse,
+              responses=PROBLEM_RESPONSES)
+    def v2_resolve_file_dois(request: FileDOIsRequest) -> dict[str, Any]:
+        return S().resolve_file_dois([item.model_dump() for item in request.locators])
 
     @app.get(f"{V2_API_PREFIX}/public-non-dicom/assets", response_model=AssetsResponse)
     def v2_find_public_non_dicom_assets(

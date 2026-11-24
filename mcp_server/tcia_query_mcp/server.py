@@ -23,6 +23,8 @@ from starlette.routing import Route
 
 from . import __version__
 from .models import (
+    FileLocator,
+    FileDOIsResponse,
     AccessSummaryResponse,
     AssetsResponse,
     BundleResponse,
@@ -108,7 +110,10 @@ Recommended workflow:
 10. Use the clinical tools for patient-level resolved values, sourced facts, and
    conflicts. Subject identity is scoped by `(short_title, subject_id)`; retain
    source provenance and distinguish dataset-scope inferred values.
-11. Use `find_public_non_dicom_assets` for V2 NIfTI, pathology, and other
+11. Use `resolve_file_dois` for exact file-locator to dataset DOI matching before
+    citation formatting. It is snapshot-local, never fetches input URLs, and
+    reports ambiguous, unmatched, and unavailable mappings explicitly.
+12. Use `find_public_non_dicom_assets` for V2 NIfTI, pathology, and other
    non-DICOM detail. Retired standalone NIfTI/pathology tools cannot be enabled
    on the public MCP server.
 """
@@ -121,6 +126,7 @@ PUBLIC_V2_TOOL_NAMES = (
     "get_participant_assets",
     "get_dataset_participant_coverage",
     "find_participant_link_issues",
+    "resolve_file_dois",
     "find_public_non_dicom_assets",
     "search_datasets",
     "get_dataset",
@@ -377,6 +383,13 @@ def find_participant_link_issues(
     return service().find_participant_link_issues(
         short_titles=short_titles, statuses=statuses, limit=limit
     )
+
+
+@mcp.tool(annotations=QUERY_ANNOTATIONS, meta={"snapshot_local": True}, structured_output=True)
+@guard
+def resolve_file_dois(locators: list[FileLocator]) -> FileDOIsResponse:
+    """Resolve 1–200 exact DRS URIs, file IDs, controlled series UIDs or public PathDB file URLs to dataset DOIs. Never fetches URLs or transfers files."""
+    return service().resolve_file_dois([item.model_dump() for item in locators])
 
 
 @mcp.tool(annotations=QUERY_ANNOTATIONS, meta={"snapshot_local": True}, structured_output=True)

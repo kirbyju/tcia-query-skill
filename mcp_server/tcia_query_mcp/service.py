@@ -3794,6 +3794,10 @@ class TciaQueryService:
             self._add_issue_dispositions(conn, rows)
         return {"participant_link_issues": rows, "count": len(rows), "limit": limit}
 
+    def resolve_file_dois(self, locators: list[dict[str, Any]]) -> dict[str, Any]:
+        from .file_dois import resolve
+        return resolve(self, locators)
+
     def find_public_non_dicom_assets(self, **filters: Any) -> dict[str, Any]:
         """Query V2 public non-DICOM detail; public DICOM remains an IDC concern."""
         limit = coerce_limit(filters.get("limit"), default=50, maximum=500)

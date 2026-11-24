@@ -359,3 +359,47 @@ namespaces. Unsupported routes remain unresolved and block SDK transfers.
 The API does not accept credentials, proxy images, expose arbitrary upstream SQL,
 or infer image/segmentation relationships. `tcia_utils` sends the selected UIDs or
 file routes to the independently installed TDR engine for actual transfers.
+
+
+## Exact file-locator DOI resolution (server 0.8.0)
+
+`POST /v2/files/resolve-dois` and MCP `resolve_file_dois` share a read-only,
+snapshot-local resolver. Submit 1–200 locators with unique request IDs:
+
+```json
+{"locators":[{"id":"one","kind":"drs_uri","value":"drs://nci-crdc.datacommons.io/dg.4DFC/EXAMPLE"},{"id":"two","kind":"image_url","value":"https://pathdb.cancerimagingarchive.net/system/files/wsi/example.tif"}]}
+```
+
+Kinds are `drs_uri`, `file_id`, `series_instance_uid` (controlled inventory), and
+`image_url` (public PathDB files). Public DICOM UID discovery remains with IDC/NBIA.
+The resolver never opens a supplied locator or authenticates to a repository.
+Credential-bearing URLs and query/fragment-bearing URLs are rejected without
+including their values in error details. Do not submit signed download URLs.
+
+Each result echoes the input ID/kind/value and returns `matched`, `unmatched`,
+`ambiguous`, or `unavailable`, plus dataset matches and their DOI/provenance.
+One unique visible dataset identity is required for `matched`; ambiguous matches
+are never assigned automatically. Up to 20 matches are returned per locator,
+with `truncated=true` for larger ambiguity sets. Hidden and absent publication
+identities are excluded. HTTP/HTTPS forms of stored PathDB URLs are equivalent;
+paths and file IDs are otherwise exact. Filenames alone are not matched.
+
+The response includes the installed release fingerprint and bundle generation
+time. Missing components/indexes produce per-locator `unavailable` results,
+allowing other kinds in a mixed batch to succeed. Malformed requests return
+422 Problem Details. Changing database generations during a query returns 503.
+
+No new artifact is introduced. The existing controlled SQLite adds a file-ID
+index. The existing public non-DICOM SQLite adds a partial PathDB `access_url`
+index on `public_non_dicom_locations`; asset publication identities are joined
+through the existing asset table and base snapshot. This supports both assembly
+and compact research storage. Indexes are created during fresh and baseline
+builds and retained by the normal research projection. Servers do not mutate
+installed snapshots to create indexes at request time.
+
+Deployment requires both server 0.8.0 and rebuilt `research_detail` artifacts.
+DRS/series lookups can use existing indexes; URL/file-ID lookups explicitly report
+unavailable on old artifacts missing the new indexes. Publish the normal atomic
+bundle, install it, then deploy/restart the service through the normal process.
+The addition is index-only: no extra inventory, endpoint crawling, file content,
+clinical data, or standalone locator-mapping artifact is produced.
