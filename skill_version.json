@@ -8,7 +8,7 @@
     "evals/README.md": "d1d3a3212ee938b2dd4fc775eb21c434e1aa0335620d36a1d410a82b380f0704",
     "evals/answer-rubric.schema.json": "881379b3384e81aa4faef8f4f826e09f4d48967ec6e81a077a482156224915c0",
     "evals/prompts.csv": "7b73647621d05fa43bdc8f817ee9dd244210dd2895248d3e1d0fc160e7472d03",
-    "mcp_server/DEPLOYMENT.md": "7a9e3f4b9c347ab5149505cb91fcdba353790720c51c1e87bb3ade36d7e24139",
+    "mcp_server/DEPLOYMENT.md": "e6adf845e9846c6daaa278b845a23f599fbf21ece9aac6b0a26288744949adb6",
     "mcp_server/IMPLEMENTATION_PLAN.md": "40127cbb9e542d9b9173452175fce181878989afad4274fe7303f23b0ebca73c",
     "mcp_server/README.md": "302980cbb94051bc7edb17613cace6c09f639492050192270af76cd70ef95bdf",
     "mcp_server/__init__.py": "3531af790b6241d93749e07d49d8193c10816c02d542f7f953e43539a7decb1b",
@@ -62,7 +62,7 @@
     "references/histology_hsi_participant_links_v1.csv": "d5b63960a3c3e5078c35bc2393daabc7cb6417515daadfaf71f55e2b1b9de464",
     "references/histology_hsi_participant_links_v1.json": "53e4451fc3e71a85c9817799084c3d639824e166d8ec1500777f4a8b65af2015",
     "references/idc-public-dicom.md": "54e694a43e48007271af54355f0c808d5bbacac0dbf38066a01a9a099fdf9df3",
-    "references/maintainer-operations.md": "40e6791c6f1a1466ab51c31b964a00ce84cf66dd479b781fbed37d54d76f2d46",
+    "references/maintainer-operations.md": "d5e31135820a4fb0571bcfa3e45e65d6c910dddb2050fb14ffce895f59a6f0c9",
     "references/missing-participant-inventory-review-2026-10-25.md": "bd0142db99a05e7226138d1e1c07e49b30b6ce271baf7203fb5053e773a1bc67",
     "references/missing_participant_inventory_manual_qc_v1.json": "86655ced1411599b53851f4c2bbf0f0efb74eb85d12410f912cca0924b63e168",
     "references/nbia-public-dicom-fallback.md": "530de4e4e6f0cf804cf5dbdd460483aedc5b3a8f9c294736afa63ff3ee2dcdd6",
@@ -154,7 +154,7 @@
     "scripts/tcia_skill_version.py": "0906debce4bd061f404ae473eaaf8adbaa44f89e17d4603788616beec526484b",
     "scripts/tcia_snapshot.py": "52632672792ac15bbda6dc7f85801005d87f202db9e03fe79f0f3408925d21e7",
     "scripts/tcia_v2_audit.py": "abc81147c390924a8921862260ff20acc7a246f617ecd548f9758e992130c62f",
-    "scripts/tcia_v2_bundle.py": "b99650e188e111255939d7fcde6c94183549875cd18918d1150764951db5cf9b",
+    "scripts/tcia_v2_bundle.py": "5205c44b3a77ee165adfe2fb2011ba2a379011b4fe868b3acc77d5e5351d7034",
     "scripts/tcia_v2_checkpoint.py": "a25c2e0b7c88aa44d227fe11523bf16a822f8ac52259703fd4483b1efa375bda",
     "scripts/tcia_v2_parity.py": "0a651d86c0bce64ee82c0bb8da3e4fe848bf7738f6a305c4f65da37cbe9f7e69",
     "scripts/tcia_v2_staging.py": "4bda31866068ff8405c12a8b4f22dc25b441f23affc1845688260c81adc1dd0d",
@@ -191,12 +191,12 @@
     "scripts/tests/test_tcia_skill_version.py": "4e3deee4d08f065f67805d5fe782b1ffce22d5688be269e8a0492c3a42bb6b7f",
     "scripts/tests/test_tcia_snapshot.py": "d2ae614f2938ba58295d56f2d6f05fd0acbd3ff9577ac7ad9fa93a1cf63ef1f9",
     "scripts/tests/test_tcia_v2_audit.py": "e4348fd06f2c6bce13e6c31ce7f284b5948b900acb4a355d70d3273b3ce69e8a",
-    "scripts/tests/test_tcia_v2_bundle.py": "6d001809bc8efd497c54375b02ebfadf9d71621217ab827f6a80722808a6b3cf",
+    "scripts/tests/test_tcia_v2_bundle.py": "9531b27aaf9a986d1cf6b0e4a9b99caa391cc5f9320c05dde22b2cececd4b430",
     "scripts/tests/test_tcia_v2_checkpoint.py": "4553d2bb4688966bdc8af5cc05aac654a4687a79d8e1f2c1a9e5c64748fc7d28",
     "scripts/tests/test_tcia_v2_parity.py": "27f51ddd8bbc200eb85327cd716db37f2f7d12393bb25445ba4f5d6b6f8301ae",
     "scripts/tests/test_tcia_v2_staging.py": "e4c33f3dfd9b6d3ced7deecf8dc3fa6aa487737d42f90fe4522e39b40889bdf4"
   },
   "schema_version": 1,
-  "skill_version": "2026.11.25.1",
-  "updated_at_utc": "2026-11-25T15:43:24.395509+00:00"
+  "skill_version": "2026.11.25.2",
+  "updated_at_utc": "2026-11-25T18:21:08.142663+00:00"
 }

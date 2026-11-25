@@ -2,6 +2,7 @@ import importlib.util
 import gzip
 import io
 import json
+import os
 import sqlite3
 import shutil
 import subprocess
@@ -1107,6 +1108,176 @@ class V2BundleTests(unittest.TestCase):
             self.assertFalse(abandoned.exists())
             self.assertTrue((install_dir / "tcia_snapshot.sqlite").exists())
             self.assertTrue((install_dir / "operator-notes.txt").exists())
+
+    def test_fresh_detail_install_checks_each_database_once(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            assets, payload = self.create_installable_bundle(root)
+            with mock.patch.object(
+                BUNDLE, "_sqlite_integrity", wraps=BUNDLE._sqlite_integrity
+            ) as integrity:
+                result = self.install_from_assets(
+                    assets, payload, root / "installed", profile="research_detail"
+                )
+            databases = [
+                asset for asset in result["downloaded_assets"]
+                if asset.endswith(".sqlite.gz")
+            ]
+            self.assertEqual(len(databases), 5)
+            self.assertEqual(integrity.call_count, len(databases))
+            for asset in databases:
+                calls = [call for call in integrity.call_args_list if call.args[1] == asset]
+                self.assertEqual(len(calls), 1)
+                self.assertTrue(calls[0].args[0].parent.name.startswith(".tcia-v2-stage-"))
+            # Reinvoking install, and standalone inspect/prune, must not reuse
+            # cached evidence from the completed install invocation.
+            for operation in (
+                lambda: self.install_from_assets(
+                    assets, payload, root / "installed", profile="research_detail"
+                ),
+                lambda: BUNDLE.inspect_install(root / "installed"),
+                lambda: BUNDLE.prune_install(root / "installed", apply=True),
+            ):
+                with mock.patch.object(
+                    BUNDLE, "_sqlite_integrity", wraps=BUNDLE._sqlite_integrity
+                ) as integrity:
+                    operation()
+                self.assertEqual(integrity.call_count, len(databases))
+
+    def test_install_cleanup_still_verifies_prior_generation(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            assets, payload = self.create_installable_bundle(root)
+            install_dir = root / "installed"
+            self.install_from_assets(assets, payload, install_dir)
+            prior = BUNDLE.active_generation_dir(install_dir).resolve()
+            with mock.patch.object(
+                BUNDLE, "_sqlite_integrity", wraps=BUNDLE._sqlite_integrity
+            ) as integrity:
+                self.install_from_assets(
+                    assets, payload, install_dir, profile="research_detail"
+                )
+            prior_calls = [
+                call for call in integrity.call_args_list
+                if call.args[0].parent.resolve() == prior
+            ]
+            staged_calls = [
+                call for call in integrity.call_args_list
+                if call.args[0].parent.name.startswith(".tcia-v2-stage-")
+            ]
+            self.assertEqual(len(prior_calls), 2)
+            self.assertEqual(len(staged_calls), 5)
+            self.assertEqual(integrity.call_count, 7)
+            self.assertTrue(prior.is_dir())
+
+    def test_verification_cache_invalidates_modified_or_replaced_files(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            assets, payload = self.create_installable_bundle(root)
+            self.install_from_assets(assets, payload, root / "installed")
+            generation = BUNDLE.active_generation_dir(root / "installed")
+            cache = {}
+            BUNDLE._verify_generation(generation, _verification_cache=cache)
+            database = generation / "tcia_snapshot.sqlite"
+            original = database.read_bytes()
+            previous = database.stat()
+            # A same-size edit with restored mtime must invalidate via ctime.
+            database.write_bytes(b"X" + original[1:])
+            os.utime(database, ns=(previous.st_atime_ns, previous.st_mtime_ns))
+            with self.assertRaisesRegex(RuntimeError, "SQLite hash mismatch"):
+                BUNDLE._verify_generation(generation, _verification_cache=cache)
+            database.write_bytes(original)
+            BUNDLE._verify_generation(generation, _verification_cache=cache)
+            # Replacement with identical bytes must still get full validation.
+            replacement = root / "replacement.sqlite"
+            replacement.write_bytes(original)
+            replacement.replace(database)
+            with mock.patch.object(
+                BUNDLE, "_sqlite_integrity", wraps=BUNDLE._sqlite_integrity
+            ) as integrity:
+                BUNDLE._verify_generation(generation, _verification_cache=cache)
+            self.assertEqual(integrity.call_count, 2)
+            # Neither added files nor symlink substitutions may hit the cache.
+            extra = generation / "extra.txt"
+            extra.write_text("unexpected")
+            with self.assertRaisesRegex(RuntimeError, "file set"):
+                BUNDLE._verify_generation(generation, _verification_cache=cache)
+            extra.unlink()
+            victim = root / "outside.sqlite"
+            victim.write_bytes(original)
+            database.unlink()
+            database.symlink_to(victim)
+            with self.assertRaisesRegex(RuntimeError, "regular file"):
+                BUNDLE._verify_generation(generation, _verification_cache=cache)
+
+    def test_generation_modified_during_verification_is_not_activated(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            assets, payload = self.create_installable_bundle(root)
+            install_dir = root / "installed"
+            real_integrity = BUNDLE._sqlite_integrity
+
+            def modify_after_check(path, asset):
+                real_integrity(path, asset)
+                if asset == "tcia_snapshot.sqlite.gz":
+                    with path.open("ab") as handle:
+                        handle.write(b"changed after integrity scan")
+
+            with mock.patch.object(BUNDLE, "_sqlite_integrity", side_effect=modify_after_check):
+                with self.assertRaisesRegex(RuntimeError, "changed during verification"):
+                    self.install_from_assets(assets, payload, install_dir)
+            self.assertFalse((install_dir / BUNDLE.CURRENT_POINTER).exists())
+            self.assertFalse(any((install_dir / BUNDLE.GENERATIONS_DIRNAME).iterdir()))
+
+    def test_bad_foreign_keys_block_new_generation_and_preserve_active(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            assets, payload = self.create_installable_bundle(root)
+            install_dir = root / "installed"
+            self.install_from_assets(assets, payload, install_dir, profile="research_detail")
+            previous = BUNDLE.active_generation_dir(install_dir).resolve()
+            database = assets / BUNDLE.COMPONENTS["clinical"]["database"]
+            raw_path = root / "bad.sqlite"
+            raw_path.write_bytes(gzip.decompress(database.read_bytes()))
+            with closing(sqlite3.connect(raw_path)) as conn:
+                conn.executescript(
+                    "CREATE TABLE parent (id INTEGER PRIMARY KEY);"
+                    "CREATE TABLE child (id INTEGER REFERENCES parent(id));"
+                    "INSERT INTO child VALUES (999);"
+                )
+            raw = raw_path.read_bytes()
+            database.write_bytes(gzip.compress(raw, mtime=0))
+            manifest_path = assets / BUNDLE.COMPONENTS["clinical"]["manifest"]
+            component = json.loads(manifest_path.read_text())
+            component["sqlite_sha256"] = BUNDLE.file_sha256(raw_path)
+            component["gzip_sha256"] = BUNDLE.file_sha256(database)
+            manifest_path.write_text(json.dumps(component))
+            # Simulate a hash-consistent but invalid upstream payload. Production
+            # bundle builds reject this too; the installer must enforce its own gate.
+            with mock.patch.object(BUNDLE, "_sqlite_integrity"):
+                changed = BUNDLE.build_bundle_manifest(assets)
+            with self.assertRaisesRegex(RuntimeError, "foreign-key check failed"):
+                self.install_from_assets(assets, changed, install_dir, profile="research_detail")
+            self.assertEqual(BUNDLE.active_generation_dir(install_dir).resolve(), previous)
+            self.assertFalse(any(
+                path.name.startswith(".tcia-v2-stage-")
+                for path in (install_dir / BUNDLE.GENERATIONS_DIRNAME).iterdir()
+            ))
+            BUNDLE._verify_generation(previous)
+
+    def test_install_timings_use_stderr(self):
+        with mock.patch.object(sys, "stderr", new_callable=io.StringIO) as stderr, mock.patch.object(
+            sys, "stdout", new_callable=io.StringIO
+        ) as stdout:
+            with BUNDLE._install_step("fixture integrity"):
+                pass
+            with self.assertRaisesRegex(RuntimeError, "injected"):
+                with BUNDLE._install_step("fixture failure"):
+                    raise RuntimeError("injected")
+        self.assertIn("fixture integrity started", stderr.getvalue())
+        self.assertIn("fixture integrity completed in", stderr.getvalue())
+        self.assertIn("fixture failure failed after", stderr.getvalue())
+        self.assertEqual(stdout.getvalue(), "")
 
     def test_install_research_core_validates_and_installs_databases(self):
         with tempfile.TemporaryDirectory() as temporary:

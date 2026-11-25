@@ -12,11 +12,12 @@ import json
 import os
 import shutil
 import sqlite3
+import sys
 import tempfile
 import time
 import urllib.request
 import urllib.error
-from contextlib import closing
+from contextlib import closing, contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -739,11 +740,12 @@ def download_to_path(
         try:
             digest = hashlib.sha256()
             downloaded_bytes = 0
-            with open_url(url, timeout=timeout, retries=0) as response, part.open("wb") as handle:
-                for chunk in iter(lambda: response.read(1024 * 1024), b""):
-                    handle.write(chunk)
-                    digest.update(chunk)
-                    downloaded_bytes += len(chunk)
+            with _install_step(f"{asset}: download attempt {attempt + 1}"):
+                with open_url(url, timeout=timeout, retries=0) as response, part.open("wb") as handle:
+                    for chunk in iter(lambda: response.read(1024 * 1024), b""):
+                        handle.write(chunk)
+                        digest.update(chunk)
+                        downloaded_bytes += len(chunk)
             if downloaded_bytes != details.get("bytes"):
                 raise RuntimeError(f"Downloaded V2 asset byte-size mismatch: {asset}")
             if digest.hexdigest() != details.get("sha256"):
@@ -948,8 +950,43 @@ def _load_install_contract(directory: Path) -> tuple[dict[str, Any], dict[str, A
     return manifest, state
 
 
-def _verify_generation(directory: Path) -> tuple[dict[str, Any], dict[str, Any]]:
+# This cache exists only inside one install invocation. Nothing persisted in an
+# install receipt can authorize skipping verification in a later invocation.
+_VerificationCache = dict[tuple[Any, ...], tuple[dict[str, Any], dict[str, Any]]]
+
+
+def _generation_signature(directory: Path) -> tuple[Any, ...]:
+    """Identify exact files across an atomic directory rename, without reading payloads."""
+    root = directory.stat()
+    children = []
+    for child in sorted(directory.iterdir()):
+        path = _regular_child(directory, child.name, "installed generation file")
+        stat = path.lstat()
+        children.append((
+            child.name, stat.st_dev, stat.st_ino, stat.st_mode, stat.st_size,
+            stat.st_mtime_ns, stat.st_ctime_ns,
+        ))
+    # Renaming the directory can change its ctime; it preserves its inode and
+    # each child's identity, size, mtime and ctime.
+    return root.st_dev, root.st_ino, tuple(children)
+
+
+def _verify_generation(
+    directory: Path,
+    *,
+    _verification_cache: _VerificationCache | None = None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
     directory = _real_directory(directory, "V2 generation")
+    signature = None
+    if _verification_cache is not None:
+        signature = _generation_signature(directory)
+        if signature in _verification_cache:
+            print(
+                "V2 install: reusing this invocation's full verification "
+                f"for unchanged generation {directory.name}",
+                file=sys.stderr, flush=True,
+            )
+            return _verification_cache[signature]
     manifest, state = _load_install_contract(directory)
     manifest_assets = manifest.get("assets") or {}
     component_by_database = {
@@ -978,6 +1015,10 @@ def _verify_generation(directory: Path) -> tuple[dict[str, Any], dict[str, Any]]
             _sqlite_integrity(path, asset)
         elif file_sha256(path) != details.get("sha256"):
             raise RuntimeError(f"Installed generation asset hash mismatch: {asset}")
+    if _verification_cache is not None:
+        if signature != _generation_signature(directory):
+            raise RuntimeError(f"V2 generation changed during verification: {directory}")
+        _verification_cache[signature] = (manifest, state)
     return manifest, state
 
 
@@ -1085,6 +1126,7 @@ def inspect_install(
     install_dir: Path,
     *,
     stale_stage_hours: int = STALE_STAGE_MIN_AGE_HOURS,
+    _verification_cache: _VerificationCache | None = None,
 ) -> dict[str, Any]:
     """Report receipt-selected and stale installer-managed files without deleting."""
     directory = _real_directory(install_dir, "V2 install root")
@@ -1145,7 +1187,9 @@ def inspect_install(
                 )
                 continue
             try:
-                generation_manifest, generation_state = _verify_generation(path)
+                generation_manifest, generation_state = _verify_generation(
+                    path, _verification_cache=_verification_cache
+                )
             except (OSError, RuntimeError, json.JSONDecodeError) as exc:
                 generations.append(
                     {
@@ -1187,11 +1231,13 @@ def prune_install(
     *,
     apply: bool = False,
     stale_stage_hours: int = STALE_STAGE_MIN_AGE_HOURS,
+    _verification_cache: _VerificationCache | None = None,
 ) -> dict[str, Any]:
     """Remove only stale, receipt-unselected files owned by the V2 installer."""
     report = inspect_install(
         install_dir,
         stale_stage_hours=stale_stage_hours,
+        _verification_cache=_verification_cache,
     )
     removed = []
     if apply:
@@ -2077,11 +2123,32 @@ def _validate_download(body: bytes, details: dict[str, Any], asset: str) -> None
         raise RuntimeError(f"Downloaded V2 asset SHA-256 mismatch: {asset}")
 
 
+@contextmanager
+def _install_step(label: str):
+    """Keep diagnostic timing on stderr so stdout remains machine-readable JSON."""
+    started = time.monotonic()
+    print(f"V2 install: {label} started", file=sys.stderr, flush=True)
+    try:
+        yield
+    except BaseException:
+        print(
+            f"V2 install: {label} failed after {time.monotonic() - started:.1f}s",
+            file=sys.stderr, flush=True,
+        )
+        raise
+    print(
+        f"V2 install: {label} completed in {time.monotonic() - started:.1f}s",
+        file=sys.stderr, flush=True,
+    )
+
+
 def _sqlite_integrity(path: Path, asset: str) -> None:
     try:
         with closing(sqlite3.connect(path)) as conn:
-            result = conn.execute("PRAGMA integrity_check").fetchone()[0]
-            violations = conn.execute("PRAGMA foreign_key_check").fetchmany(20)
+            with _install_step(f"{asset}: SQLite integrity_check"):
+                result = conn.execute("PRAGMA integrity_check").fetchone()[0]
+            with _install_step(f"{asset}: SQLite foreign_key_check"):
+                violations = conn.execute("PRAGMA foreign_key_check").fetchmany(20)
     except sqlite3.Error as exc:
         raise RuntimeError(f"Cannot open installed V2 SQLite for {asset}: {exc}") from exc
     if result != "ok":
@@ -2134,15 +2201,20 @@ def install_bundle(
     identifier = generation_id(str(manifest.get("release_fingerprint")), profile)
     generation = generations / identifier
 
+    verification_cache: _VerificationCache = {}
     if generation.is_symlink():
         raise RuntimeError(f"V2 generation must not be a symlink: {generation}")
     if generation.is_dir():
-        _, state = _verify_generation(generation)
+        _, state = _verify_generation(
+            generation, _verification_cache=verification_cache
+        )
         compatibility_names = _compatibility_names(generation, state)
         _prepare_compatibility_links(install_dir, compatibility_names)
         _atomic_symlink(f"{GENERATIONS_DIRNAME}/{identifier}", install_dir / CURRENT_POINTER)
         _ensure_compatibility_links(install_dir, compatibility_names)
-        cleanup = prune_install(install_dir, apply=True)
+        cleanup = prune_install(
+            install_dir, apply=True, _verification_cache=verification_cache
+        )
         return {
             "status": "unchanged",
             "install_dir": str(install_dir),
@@ -2169,7 +2241,7 @@ def install_bundle(
             if asset in component_by_database:
                 expected_sqlite = component_payloads[asset].get("sqlite_sha256")
                 if destination.is_file() and expected_sqlite and file_sha256(destination) == expected_sqlite:
-                    _sqlite_integrity(destination, asset)
+                    # The complete stage is integrity-checked before activation.
                     _copy_or_link(destination, staged)
                     unchanged.append(asset)
                     continue
@@ -2190,9 +2262,9 @@ def install_bundle(
                     retries=retries,
                 )
                 expected_sqlite = component_payloads[asset].get("sqlite_sha256")
-                decompress_gzip_to_path(compressed, staged, expected_sqlite, asset)
+                with _install_step(f"{asset}: decompress and verify SQLite SHA-256"):
+                    decompress_gzip_to_path(compressed, staged, expected_sqlite, asset)
                 compressed.unlink()
-                _sqlite_integrity(staged, asset)
             else:
                 download_to_path(
                     release_asset_url(repository, tag, asset),
@@ -2219,15 +2291,20 @@ def install_bundle(
         (stage / INSTALL_STATE_ASSET).write_text(
             json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8"
         )
-        _verify_generation(stage)
+        # Validate every staged file once, including reused databases. Renaming
+        # this directory on the same filesystem preserves those exact files.
+        _, active_state = _verify_generation(
+            stage, _verification_cache=verification_cache
+        )
         os.replace(stage, generation)
 
-    _, active_state = _verify_generation(generation)
     compatibility_names = _compatibility_names(generation, active_state)
     _prepare_compatibility_links(install_dir, compatibility_names)
     _atomic_symlink(f"{GENERATIONS_DIRNAME}/{identifier}", install_dir / CURRENT_POINTER)
     _ensure_compatibility_links(install_dir, compatibility_names)
-    cleanup = prune_install(install_dir, apply=True)
+    cleanup = prune_install(
+        install_dir, apply=True, _verification_cache=verification_cache
+    )
     return {
         "status": "downloaded" if downloaded else "unchanged",
         "install_dir": str(install_dir),

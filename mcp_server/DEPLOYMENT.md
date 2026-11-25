@@ -209,6 +209,47 @@ refreshes. Avoid committing snapshots or copying stale local caches between
 servers; use the bundle installer so the top-level fingerprint, component
 hashes, decompressed SQLite hashes, and integrity checks are verified together.
 
+### Installer validation and progress
+
+The update optimization is part of this repository's
+`scripts/tcia_v2_bundle.py`; standalone MCP/REST deployments receive it by
+updating this checkout and using the same install command. No additional
+installer or deployment-specific copy is required.
+
+The installer writes per-asset download, decompression, SQLite integrity, and
+foreign-key check timings to stderr while preserving the JSON result on stdout.
+Each selected database receives full validation before activation. Cleanup can
+reuse that verification within the same install invocation only if the exact
+files and their identity, size, mode, modification time, and change time remain
+unchanged. Other generations and separate commands validate independently.
+There is no persistent verification bypass or SQLite cache-size override.
+
+### Combined deployment with Participant Explorer
+
+For a host running MCP, REST, and Participant Explorer together, the companion
+[tcia-cohort-builder repository](https://github.com/kirbyju/tcia-cohort-builder)
+provides a generic
+[`update_server.sh`](https://github.com/kirbyju/tcia-cohort-builder/blob/main/update_server.sh)
+and an
+[environment example](https://github.com/kirbyju/tcia-cohort-builder/blob/main/update_server.env.example).
+That updater coordinates code and dependency updates, tests, bundle reuse or
+installation, service compatibility checks, atomic activation, restarts, health
+checks, and rollback. It calls this repository's installer; the two scripts have
+different responsibilities.
+
+Keep the tracked generic updater current. Supply hostnames, paths, and service
+settings through a protected server-local environment file. If a private
+launcher is useful, have it set configuration and execute the tracked updater
+rather than maintaining a second copy of its deployment logic. Run
+`--preflight` before deployment. Use `--code-only` for a code/dependency update
+that intentionally retains the active metadata bundle.
+
+After an isolated installer experiment, preserve its logs and remove only the
+identified test installation after confirming that neither service settings nor
+the active bundle pointer reference it. Use the supported `prune` command for
+installer-managed generations; retain the active bundle and verified rollback
+rather than deleting cache directories indiscriminately.
+
 ## Repository Vs Server State
 
 Keep these in GitHub:

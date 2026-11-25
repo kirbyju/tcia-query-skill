@@ -76,6 +76,18 @@ python3 scripts/tcia_v2_bundle.py install --profile audit_support
 python3 scripts/tcia_v2_bundle.py prune
 ```
 
+The bundle installer reports download, decompression/hash, SQLite integrity, and
+foreign-key check timings to stderr; stdout remains the JSON result. A fresh
+install validates the complete staged generation before its atomic rename and
+activation. It does not repeat full SQLite integrity checks per asset or
+immediately after renaming the same files. Post-install pruning reuses full
+verification performed in the same install invocation only when the generation
+inode, exact file set, file identities, modes, sizes, and nanosecond modification
+and change times still match. Changed files and other generations receive full
+verification. This evidence stays in memory: separate install, inspect, prune,
+and rollback invocations validate independently. Full integrity and foreign-key
+checks remain enabled; no larger SQLite page-cache setting is applied.
+
 `prune` is a dry run unless `--apply` is supplied. It removes only obsolete installer-owned files recorded by receipts; it does not remove arbitrary `outputs/`, `dist/`, or maintainer build directories.
 
 Use `scripts/tcia_participant_inventory.py`, `scripts/tcia_public_non_dicom_metadata.py`, `scripts/tcia_controlled_access_metadata.py`, `scripts/tcia_clinical_metadata.py`, and `scripts/tcia_correction_registry.py` to build or audit their focused components. The authoritative bundle manifest carries component hashes, decompressed SQLite hashes, schemas, profiles, fingerprints, and provenance. The source workflow imports a prior correction registry only after validating it against both the prior top manifest and immutable GitHub release. It uses `stage-prior` to validate a supported historical schema, copy it read-only into a fresh current-schema database, and strictly validate the upgraded result before linking the prior release or ingesting current inputs. It then packages a deterministic gzip from the exact staged snapshot. The new registry does not link to the top manifest being built; only previously published immutable releases may be linked, avoiding a fingerprint cycle.
