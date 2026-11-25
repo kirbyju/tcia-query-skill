@@ -1,5 +1,24 @@
 {
-  "explanations": [],
+  "explanations": [
+    {
+      "artifact": "correction_registry",
+      "entity_table": "correction_cases",
+      "primary_key": [
+        [
+          "case_id",
+          "case_bed0cdcb1373b153279060ad"
+        ]
+      ],
+      "change_kind": "added",
+      "before_sha256": "",
+      "after_sha256": "adfd7c431629f8e2fa5fd51a0b478079da4dc435ed58dfdb07e6e39ef01c7c44",
+      "reviewer": "TCIA maintainer, based on direct submitter confirmation",
+      "approved_at": "2026-11-25T15:41:40Z",
+      "rationale": "This exact review-severity correction case records an authoritative unavailability clue for Prostate Fused-MRI-Pathology. Following a helpdesk inquiry, the submitter confirmed that the original registration transforms, landmarks, and annotation records cannot be recovered or provided. The case remains proposal-only and does not change derived values, assert that missing assets exist, alter date_updated, or approve any unrelated correction case.",
+      "evidence_id": "github-actions:45464267137:metadata_change_report",
+      "evidence": "Exact report SHA-256 c69687ff8d6e4a786859fd60bcaa73f2888fa05017c12e97dbb7d759c7b47ca9. Official WordPress record 42305 contains the November 2026 unavailability note; its rendered text is 'The original registration transforms, landmarks, and annotation records are not available.' The apparent 'T he' spacing is introduced when HTML-to-text conversion crosses an inline span boundary, not by the rendered WordPress page. The TCIA maintainer supplied the helpdesk provenance and direct submitter confirmation and approved leaving date_updated unchanged."
+    }
+  ],
   "aggregate_explanation_batches": [
     {
       "batch_id": "ldct-lesion-grain-and-fhcc-public-clinical-facts-2026-11-17",

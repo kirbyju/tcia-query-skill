@@ -49,7 +49,7 @@
     "references/correction-assertions-v1.json": "bc18f600242fcecb8e046930fad6418db294d96871ed67450eee2cb8c6b758ba",
     "references/correction-lifecycle.md": "acbb74f68822f3ece08d701a0759a967b325787f694cf5a32df41812f6a64264",
     "references/correction-registry-v1.schema.json": "c9c3b967a3c90a99f7aaf828590a87678744a110aef95b762ef72464b59f91af",
-    "references/correction-semantic-explanations-v1.json": "da81afae3d438f64f07981ee7d3854b5c726c06af28419cb4d5ca4dc41699793",
+    "references/correction-semantic-explanations-v1.json": "2b6449b3d11fa5488f17d890e61323764659c907b4e00a1ac222729aec8a9d8a",
     "references/cptac_gbm_codex_inventory_v1.csv": "650f0c09da49a17ba58f10d861a0b80519e5aeeeaf745186f542e80ea19ada4d",
     "references/cptac_gbm_codex_inventory_v1.json": "6515bf199d8e84e28d48e6bf7b2ee0bceeeee66d41e719bf31d02c6befe94c00",
     "references/datacite-doi-relationships.md": "c47670a13b47701a6a3a39962b42e2afa67c5c34c13e9aa5cc15c5f34fc5c3db",
@@ -197,6 +197,6 @@
     "scripts/tests/test_tcia_v2_staging.py": "e4c33f3dfd9b6d3ced7deecf8dc3fa6aa487737d42f90fe4522e39b40889bdf4"
   },
   "schema_version": 1,
-  "skill_version": "2026.11.24.1",
-  "updated_at_utc": "2026-11-24T20:29:18.245463+00:00"
+  "skill_version": "2026.11.25.1",
+  "updated_at_utc": "2026-11-25T15:43:24.395509+00:00"
 }
