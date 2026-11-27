@@ -135,6 +135,37 @@ class V2BundleTests(unittest.TestCase):
             second = BUNDLE.build_bundle_manifest(root)
             self.assertNotEqual(first["release_fingerprint"], second["release_fingerprint"])
 
+    def test_diagnostic_warning_inventory_is_distinct_from_source_warnings(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self.create_bundle_files(root)
+            manifest_path = root / BUNDLE.COMPONENTS["clinical"]["manifest"]
+            component = json.loads(manifest_path.read_text())
+            component["diagnostic_warning_count"] = 518
+            component["diagnostic_warning_sha256"] = "a" * 64
+            component["warning_summary"] = {
+                "clinical_build_warnings": 518,
+                "official_ingest_failures": 9,
+            }
+            manifest_path.write_text(json.dumps(component))
+
+            payload = BUNDLE.build_bundle_manifest(root)
+            health = payload["source_health"]
+            clinical = health["components"]["clinical"]
+            self.assertEqual(health["warning_count"], 0)
+            self.assertEqual(health["diagnostic_warning_count"], 518)
+            self.assertEqual(
+                health["diagnostic_warning_components"],
+                {"clinical": {"count": 518, "sha256": "a" * 64}},
+            )
+            self.assertEqual(clinical["diagnostic_warning_count"], 518)
+            self.assertEqual(BUNDLE.validate_manifest_contract(payload), [])
+            health["diagnostic_warning_count"] = 0
+            self.assertIn(
+                "bundle source_health diagnostic_warning_count is inconsistent",
+                BUNDLE.validate_manifest_contract(payload),
+            )
+
     def test_schema_two_manifest_remains_install_contract_compatible(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

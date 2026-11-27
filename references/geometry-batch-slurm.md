@@ -230,6 +230,16 @@ release workflow downloads the immutable geometry seed named by
 size and SHA-256, regenerates the current safe job plan, and compares current
 download scopes with the seed ledger.
 
+The scope fingerprint represents downloaded geometry content: dataset/download
+identity, route type, supported formats, represented-file count, and catalog
+size. The job ledger also records the number of mapped non-download metadata
+assets, but that count is not part of the content fingerprint. Reviewed study-
+or participant-grain availability can therefore be added without forcing a
+large package transfer and repeated header analysis. Retained assessments are
+remapped to current assets by exact package-path resolution during import; an
+ambiguous or missing mapping still fails the build rather than silently
+retaining unverifiable geometry.
+
 - unchanged jobs are imported into `public_non_dicom`;
 - removed jobs are pruned;
 - new or changed jobs remain explicitly `not_checked` and produce a workflow

@@ -344,6 +344,15 @@ def component_source_health(
 
     degraded = sorted(name for name, item in sources.items() if item["status"] == "degraded")
     unknown = sorted(name for name, item in sources.items() if item["status"] == "unknown")
+    diagnostic_warning_count = int(manifest.get("diagnostic_warning_count") or 0)
+    diagnostic_warning_sha256 = str(manifest.get("diagnostic_warning_sha256") or "")
+    if diagnostic_warning_count < 0:
+        raise RuntimeError(f"Diagnostic warning count is invalid: {component}")
+    if diagnostic_warning_count and not (
+        len(diagnostic_warning_sha256) == 64
+        and all(character in "0123456789abcdef" for character in diagnostic_warning_sha256)
+    ):
+        raise RuntimeError(f"Diagnostic warning digest is invalid: {component}")
     return {
         "status": "degraded" if degraded else ("unknown" if unknown else "healthy"),
         "sources": sources,
@@ -351,6 +360,8 @@ def component_source_health(
         "unknown_sources": unknown,
         "warning_count": len(warnings),
         "warnings": warnings[:50],
+        "diagnostic_warning_count": diagnostic_warning_count,
+        "diagnostic_warning_sha256": diagnostic_warning_sha256,
         "warning_summary": manifest.get("warning_summary") or {},
     }
 
@@ -405,6 +416,16 @@ def validate_carried_component_health(
     warning_count = health.get("warning_count")
     if not isinstance(warnings, list) or not isinstance(warning_count, int):
         raise RuntimeError(f"Carried warning summary is invalid: {component}")
+    diagnostic_warning_count = health.get("diagnostic_warning_count", 0)
+    diagnostic_warning_sha256 = health.get("diagnostic_warning_sha256", "")
+    if not isinstance(diagnostic_warning_count, int) or diagnostic_warning_count < 0:
+        raise RuntimeError(f"Carried diagnostic warning count is invalid: {component}")
+    if diagnostic_warning_count and not (
+        isinstance(diagnostic_warning_sha256, str)
+        and len(diagnostic_warning_sha256) == 64
+        and all(character in "0123456789abcdef" for character in diagnostic_warning_sha256)
+    ):
+        raise RuntimeError(f"Carried diagnostic warning digest is invalid: {component}")
     return json.loads(canonical_json(health))
 
 
@@ -483,6 +504,14 @@ def summarize_bundle_health(
     unwaived = sorted(set(degraded) - set(waived))
     unwaived_unknown = sorted(set(unknown) - set(waived_unknown))
     unused_waivers = sorted(set(waiver_by_source) - set(degraded) - set(unknown))
+    diagnostic_components = {
+        name: {
+            "count": details["diagnostic_warning_count"],
+            "sha256": details["diagnostic_warning_sha256"],
+        }
+        for name, details in components.items()
+        if details["diagnostic_warning_count"]
+    }
     return {
         "status": "degraded" if degraded else ("unknown" if unknown else "healthy"),
         "components": components,
@@ -495,6 +524,10 @@ def summarize_bundle_health(
         ],
         "unused_waivers": unused_waivers,
         "warning_count": sum(item["warning_count"] for item in components.values()),
+        "diagnostic_warning_count": sum(
+            item["diagnostic_warning_count"] for item in components.values()
+        ),
+        "diagnostic_warning_components": diagnostic_components,
     }
 
 
@@ -594,6 +627,41 @@ def validate_source_health_summary(health: Any, *, release_channel: str) -> list
         for name, expected in checks.items()
         if health.get(name) != expected
     ]
+    has_diagnostic_contract = (
+        "diagnostic_warning_count" in health
+        or "diagnostic_warning_components" in health
+        or any(
+            isinstance(details, dict) and "diagnostic_warning_count" in details
+            for details in components.values()
+        )
+    )
+    if has_diagnostic_contract:
+        diagnostic_components: dict[str, dict[str, Any]] = {}
+        diagnostic_warning_count = 0
+        for component, details in components.items():
+            count = details.get("diagnostic_warning_count", 0)
+            digest = details.get("diagnostic_warning_sha256", "")
+            if not isinstance(count, int) or count < 0:
+                errors.append(
+                    f"bundle source_health diagnostic warning count is invalid: {component}"
+                )
+                continue
+            if count and not (
+                isinstance(digest, str)
+                and len(digest) == 64
+                and all(character in "0123456789abcdef" for character in digest)
+            ):
+                errors.append(
+                    f"bundle source_health diagnostic warning digest is invalid: {component}"
+                )
+                continue
+            diagnostic_warning_count += count
+            if count:
+                diagnostic_components[component] = {"count": count, "sha256": digest}
+        if health.get("diagnostic_warning_count") != diagnostic_warning_count:
+            errors.append("bundle source_health diagnostic_warning_count is inconsistent")
+        if health.get("diagnostic_warning_components") != diagnostic_components:
+            errors.append("bundle source_health diagnostic_warning_components is inconsistent")
     if release_channel == "stable" and (
         expected_unwaived_degraded or expected_unwaived_unknown
     ):

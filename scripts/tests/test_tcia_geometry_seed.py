@@ -87,6 +87,58 @@ class GeometrySeedTests(unittest.TestCase):
             seed.verify_release(manifest, archive, verified, None)["validation"]["ok"]
         )
 
+    def test_job_fingerprint_ignores_mapping_only_asset_rows(self):
+        first = {
+            "dataset_type": "Collection", "short_title": "Demo", "download_id": "1",
+            "route_type": "http", "formats": "NIFTI", "asset_rows": "0",
+            "catalog_represented_file_count": "10", "catalog_size_bytes": "100",
+        }
+        enriched = {**first, "asset_rows": "1065"}
+        changed_content = {**enriched, "catalog_represented_file_count": "11"}
+
+        self.assertEqual(seed.job_fingerprint(first), seed.job_fingerprint(enriched))
+        self.assertNotEqual(
+            seed.legacy_job_fingerprint(first), seed.legacy_job_fingerprint(enriched)
+        )
+        self.assertNotEqual(
+            seed.job_fingerprint(enriched), seed.job_fingerprint(changed_content)
+        )
+
+    def test_compare_retains_legacy_seed_after_mapping_metadata_enrichment(self):
+        built = self.root / "seed.sqlite"
+        seed.build_seed(self.source, self.jobs, [], built, None, None, "test-tag", True)
+        with sqlite3.connect(built) as conn:
+            row = conn.execute("SELECT * FROM geometry_jobs").fetchone()
+            columns = [item[1] for item in conn.execute("PRAGMA table_info(geometry_jobs)")]
+            legacy = seed.legacy_job_fingerprint(dict(zip(columns, row)))
+            conn.execute(
+                "UPDATE geometry_jobs SET scope_fingerprint=? WHERE job_id='job-a'",
+                (legacy,),
+            )
+        current = {
+            "array_index": "0", "job_id": "job-a", "dataset_type": "Collection",
+            "short_title": "Demo", "download_id": "1", "route_type": "http",
+            "formats": "DICOM;NIFTI", "asset_rows": "1065",
+            "catalog_represented_file_count": "1", "catalog_size_bytes": "10",
+        }
+        self.write_jobs([current])
+        filtered = self.root / "filtered.sqlite"
+        report = seed.compare_scope(
+            built, self.jobs, filtered, self.root / "report.json", None, None, None
+        )
+
+        self.assertEqual(report["status_counts"], {"unchanged": 1})
+        self.assertFalse(report["refresh_required"])
+        with sqlite3.connect(filtered) as conn:
+            assessment_rows = conn.execute(
+                "SELECT COUNT(*) FROM geometry_assessments"
+            ).fetchone()[0]
+            job = conn.execute(
+                "SELECT asset_rows,scope_fingerprint FROM geometry_jobs WHERE job_id='job-a'"
+            ).fetchone()
+        self.assertEqual(assessment_rows, 1)
+        self.assertEqual(job, (1065, seed.job_fingerprint(current)))
+
     def test_compare_filters_changed_new_and_removed_jobs(self):
         built = self.root / "seed.sqlite"
         seed.build_seed(self.source, self.jobs, [], built, None, None, "test-tag", True)

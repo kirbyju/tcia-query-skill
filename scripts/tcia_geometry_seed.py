@@ -48,10 +48,15 @@ def json_dump(value: Any) -> str:
 
 
 def format_tokens(value: object) -> list[str]:
+    values = (
+        value
+        if isinstance(value, (list, tuple, set))
+        else str(value or "").replace(",", ";").split(";")
+    )
     return sorted(
         token for token in {
             item.strip().upper()
-            for item in str(value or "").replace(",", ";").split(";")
+            for item in values
             if item.strip()
         }
         if token in NON_DICOM_FORMATS
@@ -62,18 +67,49 @@ def scope_key(row: dict[str, Any] | sqlite3.Row) -> tuple[str, str, str]:
     return tuple(str(row[name] or "") for name in ("dataset_type", "short_title", "download_id"))
 
 
-def job_fingerprint(row: dict[str, Any] | sqlite3.Row) -> str:
+def job_fingerprint_payload(
+    row: dict[str, Any] | sqlite3.Row, *, include_asset_rows: bool = False
+) -> dict[str, Any]:
+    """Return the fields that define downloaded geometry content.
+
+    ``asset_rows`` describes the current metadata mapping surface. It can grow
+    when reviewed study- or participant-grain availability is added without a
+    package change, and geometry import already remaps retained assessments by
+    package path. Keep the count in the ledger, but not in the content identity.
+    """
+    keys = set(row.keys())
+    formats = (
+        row["formats"]
+        if "formats" in keys
+        else json.loads(str(row["formats_json"] or "[]"))
+    )
     payload = {
         "dataset_type": str(row["dataset_type"] or ""),
         "short_title": str(row["short_title"] or ""),
         "download_id": str(row["download_id"] or ""),
         "route_type": str(row["route_type"] or ""),
-        "formats": format_tokens(row["formats"]),
-        "asset_rows": int(row["asset_rows"] or 0),
+        "formats": format_tokens(formats),
         "catalog_represented_file_count": int(row["catalog_represented_file_count"] or 0),
         "catalog_size_bytes": int(row["catalog_size_bytes"] or 0),
     }
+    if include_asset_rows:
+        payload["asset_rows"] = int(row["asset_rows"] or 0)
+    return payload
+
+
+def job_fingerprint(row: dict[str, Any] | sqlite3.Row) -> str:
+    payload = job_fingerprint_payload(row)
     return hashlib.sha256(json_dump(payload).encode()).hexdigest()
+
+
+def legacy_job_fingerprint(row: dict[str, Any] | sqlite3.Row) -> str:
+    payload = job_fingerprint_payload(row, include_asset_rows=True)
+    return hashlib.sha256(json_dump(payload).encode()).hexdigest()
+
+
+def stored_job_fingerprint_is_valid(row: dict[str, Any] | sqlite3.Row) -> bool:
+    stored = str(row["scope_fingerprint"] or "")
+    return stored in {job_fingerprint(row), legacy_job_fingerprint(row)}
 
 
 def read_jobs(path: Path) -> list[dict[str, str]]:
@@ -264,6 +300,7 @@ def build_seed(
             "source_geometry_sha256": sha256_file(source_db),
             "source_jobs_sha256": sha256_file(jobs_csv),
             "scope": "public_non_dicom",
+            "scope_fingerprint_contract": "geometry-content-v2",
             "dicom_policy": "excluded_use_idc_index",
         }
         conn.executemany("INSERT INTO geometry_seed_meta VALUES (?,?)", meta.items())
@@ -340,7 +377,11 @@ def compare_scope(
                 status = "removed"
             elif seed_row is None:
                 status = "new"
-            elif current_row["job_id"] == seed_row["job_id"] and job_fingerprint(current_row) == seed_row["scope_fingerprint"]:
+            elif (
+                current_row["job_id"] == seed_row["job_id"]
+                and stored_job_fingerprint_is_valid(seed_row)
+                and job_fingerprint(current_row) == job_fingerprint(seed_row)
+            ):
                 status = "unchanged"
                 unchanged.add(str(seed_row["job_id"]))
             else:
@@ -363,6 +404,7 @@ def compare_scope(
                 ("filtered_at_utc", utc_now()),
                 ("source_seed_sha256", sha256_file(seed_db)),
                 ("scope", "public_non_dicom_current_unchanged_jobs"),
+                ("scope_fingerprint_contract", "geometry-content-v2"),
             ))
             destination.commit()
             destination.execute("VACUUM")

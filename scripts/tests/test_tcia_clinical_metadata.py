@@ -253,6 +253,13 @@ class ClinicalMetadataTest(unittest.TestCase):
                     rows_loaded,subjects_loaded)
                    VALUES ('source-1','TEST','signature','ingest_failed',0,0)"""
             )
+            CLINICAL.warning(
+                conn,
+                "missing_subject_column",
+                "No patient identifier column was found.",
+                source_id="source-1",
+                short_title="TEST",
+            )
             conn.commit()
             conn.close()
 
@@ -270,6 +277,18 @@ class ClinicalMetadataTest(unittest.TestCase):
             self.assertEqual(
                 ingest_manifest["warning_summary"]["official_fetch_failures"],
                 0,
+            )
+            self.assertEqual(ingest_manifest["diagnostic_warning_count"], 1)
+            self.assertEqual(
+                ingest_manifest["warning_summary"]["clinical_build_warning_types"],
+                {"missing_subject_column": 1},
+            )
+            self.assertRegex(
+                ingest_manifest["diagnostic_warning_sha256"], r"^[0-9a-f]{64}$"
+            )
+            self.assertEqual(
+                ingest_manifest["diagnostic_warning_sha256"],
+                ingest_manifest["warning_summary"]["clinical_build_warnings_sha256"],
             )
 
             with sqlite3.connect(db) as conn:

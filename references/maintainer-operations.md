@@ -88,6 +88,16 @@ verification. This evidence stays in memory: separate install, inspect, prune,
 and rollback invocations validate independently. Full integrity and foreign-key
 checks remain enabled; no larger SQLite page-cache setting is applied.
 
+Top-level source health distinguishes live acquisition warnings from retained
+diagnostic inventory. `warning_count` counts current source-acquisition warning
+messages that may affect freshness. `diagnostic_warning_count` counts stable
+component QC/build-warning rows, while `diagnostic_warning_components` records
+their component-scoped count and content digest. For clinical metadata the
+component manifest also publishes warning-type counts and a digest over the
+sorted warning rows. Operators can therefore tell an unchanged known inventory
+from new warning content without downloading the clinical database or treating
+all retained QC rows as degraded source health.
+
 `prune` is a dry run unless `--apply` is supplied. It removes only obsolete installer-owned files recorded by receipts; it does not remove arbitrary `outputs/`, `dist/`, or maintainer build directories.
 
 Use `scripts/tcia_participant_inventory.py`, `scripts/tcia_public_non_dicom_metadata.py`, `scripts/tcia_controlled_access_metadata.py`, `scripts/tcia_clinical_metadata.py`, and `scripts/tcia_correction_registry.py` to build or audit their focused components. The authoritative bundle manifest carries component hashes, decompressed SQLite hashes, schemas, profiles, fingerprints, and provenance. The source workflow imports a prior correction registry only after validating it against both the prior top manifest and immutable GitHub release. It uses `stage-prior` to validate a supported historical schema, copy it read-only into a fresh current-schema database, and strictly validate the upgraded result before linking the prior release or ingesting current inputs. It then packages a deterministic gzip from the exact staged snapshot. The new registry does not link to the top manifest being built; only previously published immutable releases may be linked, avoiding a fingerprint cycle.

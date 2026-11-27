@@ -8307,6 +8307,25 @@ def write_artifacts(
     build_warning_count = int(
         conn.execute("SELECT COUNT(*) FROM clinical_build_warnings").fetchone()[0]
     )
+    build_warning_type_counts = {
+        str(row[0]): int(row[1])
+        for row in conn.execute(
+            """SELECT warning_type, COUNT(*) FROM clinical_build_warnings
+               GROUP BY warning_type ORDER BY warning_type"""
+        )
+    }
+    build_warning_rows = [
+        list(row)
+        for row in conn.execute(
+            """SELECT COALESCE(source_id,''), COALESCE(short_title,''),
+                      warning_type, warning_text
+               FROM clinical_build_warnings
+               ORDER BY 1,2,3,4"""
+        )
+    ]
+    build_warning_sha256 = sha256_bytes(
+        json_dumps(build_warning_rows).encode("utf-8")
+    )
     integrity = conn.execute("PRAGMA integrity_check").fetchone()[0]
     foreign_key_rows = [
         list(row) for row in conn.execute("PRAGMA foreign_key_check").fetchmany(20)
@@ -8339,8 +8358,12 @@ def write_artifacts(
                 "status", "unknown"
             ),
         },
+        "diagnostic_warning_count": build_warning_count,
+        "diagnostic_warning_sha256": build_warning_sha256,
         "warning_summary": {
             "clinical_build_warnings": build_warning_count,
+            "clinical_build_warning_types": build_warning_type_counts,
+            "clinical_build_warnings_sha256": build_warning_sha256,
             "download_status_counts": download_status_counts,
             "official_fetch_failures": download_status_counts.get("fetch_failed", 0),
             "official_ingest_failures": download_status_counts.get("ingest_failed", 0),
